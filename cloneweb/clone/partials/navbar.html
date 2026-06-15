@@ -1,0 +1,52 @@
+<header class="navbar" id="navbar">
+    <div class="navbar__bg"></div>
+    <a href="index.html" class="navbar__logo" title="Pathé">
+        <svg class="icon icon--logo icon--logo-white"><use xlink:href="#svg-logo-white"></use></svg>
+        <svg class="icon icon--logo icon--logo-black"><use xlink:href="#svg-logo-black"></use></svg>
+    </a>
+    <nav class="navbar__nav" role="navigation">
+        <ul class="navbar__list">
+            <li class="navbar__item has-children">
+                <a href="about.html" class="navbar__link" data-nav="about">Pathé
+                    <svg class="icon icon--arrow-down"><use xlink:href="#svg-arrow-down"></use></svg>
+                </a>
+                <div class="navbar__submenu">
+                    <a href="about.html">About us</a>
+                    <a href="foundation.html">Foundation</a>
+                    <a href="contact.html">Contact</a>
+                </div>
+            </li>
+            <li class="navbar__item"><a href="newsroom.html" class="navbar__link" data-nav="newsroom">Newsroom</a></li>
+            <li class="navbar__item"><a href="cinemas.html" class="navbar__link" data-nav="cinemas">Cinemas</a></li>
+            <li class="navbar__item"><a href="films.html" class="navbar__link" data-nav="films">Films</a></li>
+            <li class="navbar__item"><a href="live.html" class="navbar__link" data-nav="live">Live</a></li>
+            <li class="navbar__item"><a href="vod.html" class="navbar__link" data-nav="vod">VOD</a></li>
+            <li class="navbar__item"><a href="sustainability.html" class="navbar__link" data-nav="sustainability">Sustainability</a></li>
+            <li class="navbar__item"><a href="join.html" class="navbar__link" data-nav="join">Join us</a></li>
+        </ul>
+        <ul class="navbar__list navbar__list--right">
+            <li class="navbar__item navbar__item--websites">
+                <a href="#" class="navbar__link navbar__link--small" data-toggle="websites">Our websites
+                    <svg class="icon icon--arrow-down"><use xlink:href="#svg-arrow-down"></use></svg>
+                </a>
+                <div class="navbar__submenu navbar__submenu--right" id="submenu-websites">
+                    <a href="#">Buy your ticket</a>
+                    <a href="#">Line-up Pathé</a>
+                    <a href="#">Pathé Live's programs</a>
+                    <a href="foundation.html">Fondation Jérôme Seydoux-Pathé</a>
+                </div>
+            </li>
+            <li class="navbar__item navbar__item--lang">
+                <ul class="navbar__langs">
+                    <li><a class="active" href="#">en</a></li>
+                    <li><a href="#">fr</a></li>
+                </ul>
+            </li>
+        </ul>
+    </nav>
+    <button class="navbar__burger" id="burger" aria-label="Open menu">
+        <span class="navbar__stroke"></span>
+        <span class="navbar__stroke"></span>
+        <span class="navbar__stroke"></span>
+    </button>
+</header>

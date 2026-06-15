@@ -1,0 +1,6 @@
+{
+  "name": "TicketBox Cinema",
+  "description": "Premium movie and live event ticketing platform featuring real-time seat reservation, dynamic ticket generators, and classic cinematic style.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

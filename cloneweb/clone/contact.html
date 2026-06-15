@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contact Pathé — Get in touch</title>
+    <meta name="description" content="Reach the right Pathé team — press, partnerships, careers, programming, customer service. Offices in Paris, Amsterdam, London and Abidjan.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@100;300;400;500;700;800;900&family=Oswald:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body class="desktop" data-page="contact">
+
+<div id="sprite-mount" hidden></div>
+<div id="navbar-mount"></div>
+
+<main id="main" role="main">
+
+    <section class="page-hero page-hero--small" style="background-image:url('assets/images/cinemas.jpg')">
+        <div class="page-hero__inner">
+            <div class="breadcrumb">
+                <a href="index.html">Home</a><span class="breadcrumb__sep">/</span><span>Contact</span>
+            </div>
+            <span class="page-hero__eyebrow">Contact us</span>
+            <h1 class="page-hero__title">Let's talk.</h1>
+            <p class="page-hero__lead">Press, partnerships, careers, programming, customer service — pick the right team and we'll get back to you within five business days.</p>
+        </div>
+    </section>
+
+    <!-- INFO CARDS -->
+    <section class="section section--tight">
+        <div class="grid-4">
+            <div class="info-card">
+                <div class="info-card__icon">
+                    <svg class="icon" viewBox="0 0 21.5 25.5" fill="currentColor"><use xlink:href="#svg-pin"></use></svg>
+                </div>
+                <h3 class="info-card__title">Paris HQ</h3>
+                <p class="info-card__text">2 rue Lamennais<br>75008 Paris<br>France</p>
+                <a href="#" class="info-card__link">See on map</a>
+            </div>
+            <div class="info-card">
+                <div class="info-card__icon">
+                    <svg class="icon" viewBox="0 0 21.5 25.5" fill="currentColor"><use xlink:href="#svg-pin"></use></svg>
+                </div>
+                <h3 class="info-card__title">Amsterdam</h3>
+                <p class="info-card__text">Pathé Netherlands<br>Leidseplein 24<br>1017 PT Amsterdam</p>
+                <a href="#" class="info-card__link">See on map</a>
+            </div>
+            <div class="info-card">
+                <div class="info-card__icon">
+                    <svg class="icon" viewBox="0 0 21.5 25.5" fill="currentColor"><use xlink:href="#svg-pin"></use></svg>
+                </div>
+                <h3 class="info-card__title">London</h3>
+                <p class="info-card__text">Pathé UK<br>14 Park Street<br>London SE1 9EQ</p>
+                <a href="#" class="info-card__link">See on map</a>
+            </div>
+            <div class="info-card">
+                <div class="info-card__icon">
+                    <svg class="icon" viewBox="0 0 21.5 25.5" fill="currentColor"><use xlink:href="#svg-pin"></use></svg>
+                </div>
+                <h3 class="info-card__title">Abidjan</h3>
+                <p class="info-card__text">Pathé Afrique<br>Boulevard de la République<br>Abidjan, Côte d'Ivoire</p>
+                <a href="#" class="info-card__link">See on map</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- FORM -->
+    <section class="section section--cream">
+        <div class="grid-2">
+            <div>
+                <span class="section__eyebrow">Write to us</span>
+                <h2 class="section__title">Send a message.</h2>
+                <p style="font-family:var(--font-body);line-height:1.6;opacity:0.75;margin:24px 0 32px;">Tell us a little about your project or question. We forward every message to the right team and aim to reply within five business days.</p>
+                <div style="display:flex;flex-direction:column;gap:16px;margin-top:32px;">
+                    <div>
+                        <strong style="font-family:var(--font-display);text-transform:uppercase;font-size:14px;letter-spacing:0.15em;color:var(--c-burgundy);">Press</strong>
+                        <p style="font-family:var(--font-body);font-size:14px;opacity:0.75;margin:4px 0 0;">press@pathe.com</p>
+                    </div>
+                    <div>
+                        <strong style="font-family:var(--font-display);text-transform:uppercase;font-size:14px;letter-spacing:0.15em;color:var(--c-burgundy);">Partnerships</strong>
+                        <p style="font-family:var(--font-body);font-size:14px;opacity:0.75;margin:4px 0 0;">partnerships@pathe.com</p>
+                    </div>
+                    <div>
+                        <strong style="font-family:var(--font-display);text-transform:uppercase;font-size:14px;letter-spacing:0.15em;color:var(--c-burgundy);">Careers</strong>
+                        <p style="font-family:var(--font-body);font-size:14px;opacity:0.75;margin:4px 0 0;">careers@pathe.com</p>
+                    </div>
+                    <div>
+                        <strong style="font-family:var(--font-display);text-transform:uppercase;font-size:14px;letter-spacing:0.15em;color:var(--c-burgundy);">Customer service</strong>
+                        <p style="font-family:var(--font-body);font-size:14px;opacity:0.75;margin:4px 0 0;">support@pathe.com</p>
+                    </div>
+                </div>
+            </div>
+            <form class="form" onsubmit="event.preventDefault();alert('Demo only — message not sent.');">
+                <div class="form__row">
+                    <div>
+                        <label class="form__label" for="f-name">Your name</label>
+                        <input class="form__input" type="text" id="f-name" required>
+                    </div>
+                    <div>
+                        <label class="form__label" for="f-email">Email address</label>
+                        <input class="form__input" type="email" id="f-email" required>
+                    </div>
+                </div>
+                <div class="form__group">
+                    <label class="form__label" for="f-subject">Subject</label>
+                    <select class="form__select" id="f-subject">
+                        <option>General enquiry</option>
+                        <option>Press &amp; media</option>
+                        <option>Partnerships</option>
+                        <option>Programmers &amp; distributors</option>
+                        <option>Careers</option>
+                        <option>Customer service</option>
+                    </select>
+                </div>
+                <div class="form__group">
+                    <label class="form__label" for="f-message">Your message</label>
+                    <textarea class="form__textarea" id="f-message" required></textarea>
+                </div>
+                <div class="form__group">
+                    <label class="form__check">
+                        <input type="checkbox" required>
+                        <span>I agree that Pathé may store this message to respond to my enquiry, in accordance with the <a href="privacy.html" style="color:var(--c-burgundy);">Privacy Policy</a>.</span>
+                    </label>
+                </div>
+                <button type="submit" class="btn">
+                    <span class="btn__inner">
+                        <span class="btn__text">Send message</span>
+                        <span class="btn__icon"><svg class="icon icon--arrow-next-bold"><use xlink:href="#svg-arrow-next-bold"></use></svg></span>
+                    </span>
+                </button>
+            </form>
+        </div>
+    </section>
+
+    <!-- MAP -->
+    <section class="section section--flush">
+        <div class="map-placeholder">
+            <span>Pathé offices around the world — Paris · Amsterdam · London · Abidjan</span>
+        </div>
+    </section>
+
+</main>
+
+<div id="footer-mount"></div>
+
+<script src="assets/js/components.js"></script>
+<script src="assets/js/main.js"></script>
+</body>
+</html>

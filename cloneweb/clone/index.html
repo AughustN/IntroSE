@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pathé — Cinema, Films, Live & Foundation</title>
+    <meta name="description" content="Pathé — since 1896, the magic of cinema. Films, cinemas, live events, VOD and the Jérôme Seydoux-Pathé Foundation.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@100;300;400;500;700;800;900&family=Oswald:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body class="desktop" data-page="home">
+
+<!-- component mount points -->
+<div id="sprite-mount" hidden></div>
+<div id="navbar-mount"></div>
+
+<main id="main" role="main">
+
+    <!-- HERO -->
+    <section class="hero" data-component="header">
+        <div class="hero__media">
+            <div class="hero__poster" style="background-image:url('assets/images/hero-poster.jpg')"></div>
+            <video class="hero__video" autoplay muted playsinline loop poster="assets/images/hero-poster.jpg">
+                <source src="assets/images/hero.mp4" type="video/mp4">
+            </video>
+        </div>
+        <a href="#cinemas" class="hero__scroll" aria-label="Scroll down">
+            <svg class="icon icon--arrow-next"><use xlink:href="#svg-arrow-next"></use></svg>
+        </a>
+    </section>
+
+    <!-- VISUAL BLOCK: CINEMAS -->
+    <section class="vb" id="cinemas" data-component="visualBlock">
+        <div class="vb__bg" style="background-image:url('assets/images/cinemas.jpg')"></div>
+        <div class="vb__overlay"></div>
+        <div class="vb__content">
+            <strong class="vb__hat">Cinemas</strong>
+            <h2 class="vb__title">Highlight<br>the dark rooms</h2>
+            <p class="vb__desc">To keep the magic of cinema alive, Pathé innovates constantly in order to bring ever more show and emotions.</p>
+            <a href="cinemas.html" class="btn btn--ghost">
+                <span class="btn__inner">
+                    <span class="btn__text">Discover</span>
+                    <span class="btn__icon"><svg class="icon icon--arrow-next-bold"><use xlink:href="#svg-arrow-next-bold"></use></svg></span>
+                </span>
+                <span class="btn__hover"></span>
+            </a>
+        </div>
+    </section>
+
+    <!-- VISUAL BLOCK: FILMS -->
+    <section class="vb" data-component="visualBlock">
+        <div class="vb__bg" style="background-image:url('assets/images/films.jpg')"></div>
+        <div class="vb__overlay" style="opacity:.2"></div>
+        <div class="vb__content">
+            <strong class="vb__hat">Films</strong>
+            <h2 class="vb__title">Emotion builders</h2>
+            <p class="vb__desc">From successful comedies to award-winning films around the world, Pathé reinvents itself with each film. With 1700 feature films in the catalogue, the story continues.</p>
+            <a href="films.html" class="btn btn--ghost">
+                <span class="btn__inner">
+                    <span class="btn__text">Discover</span>
+                    <span class="btn__icon"><svg class="icon icon--arrow-next-bold"><use xlink:href="#svg-arrow-next-bold"></use></svg></span>
+                </span>
+                <span class="btn__hover"></span>
+            </a>
+        </div>
+    </section>
+
+    <!-- VISUAL BLOCK: LIVE -->
+    <section class="vb" data-component="visualBlock">
+        <div class="vb__bg" style="background-image:url('assets/images/live.jpg')"></div>
+        <div class="vb__content">
+            <strong class="vb__hat">Live</strong>
+            <h2 class="vb__title">The show invites himself <br>to the movies</h2>
+            <p class="vb__desc">The biggest cultural and musical events make the halls vibrate.</p>
+            <a href="live.html" class="btn btn--ghost">
+                <span class="btn__inner">
+                    <span class="btn__text">Discover</span>
+                    <span class="btn__icon"><svg class="icon icon--arrow-next-bold"><use xlink:href="#svg-arrow-next-bold"></use></svg></span>
+                </span>
+                <span class="btn__hover"></span>
+            </a>
+        </div>
+    </section>
+
+    <!-- VISUAL BLOCK: FONDATION -->
+    <section class="vb" data-component="visualBlock">
+        <div class="vb__bg" style="background-image:url('assets/images/fondation.jpg')"></div>
+        <div class="vb__overlay" style="opacity:.4"></div>
+        <div class="vb__content">
+            <strong class="vb__hat">Fondation</strong>
+            <h2 class="vb__title">Fondation Jérôme <br>Seydoux-Pathé</h2>
+            <p class="vb__desc">A building of great architectural wealth and heritage houses the greatest collection of the cinematic arts. Recognised as being of public interest, Fondation Jérôme Seydoux-Pathé invites you to discover the history of cinema.</p>
+            <a href="foundation.html" class="btn btn--ghost">
+                <span class="btn__inner">
+                    <span class="btn__text">Discover</span>
+                    <span class="btn__icon"><svg class="icon icon--arrow-next-bold"><use xlink:href="#svg-arrow-next-bold"></use></svg></span>
+                </span>
+                <span class="btn__hover"></span>
+            </a>
+        </div>
+    </section>
+
+    <!-- NEWS -->
+    <section class="news" data-component="latestNews">
+        <div class="news__wrap">
+            <div class="news__top">
+                <div class="news__heading">
+                    <h2 class="news__title">NEWS</h2>
+                    <p class="news__desc">The new pages of our history</p>
+                </div>
+                <a href="newsroom.html" class="btn btn--primary">
+                    <span class="btn__inner">
+                        <span class="btn__text">See all</span>
+                        <span class="btn__icon"><svg class="icon icon--arrow-next-bold"><use xlink:href="#svg-arrow-next-bold"></use></svg></span>
+                    </span>
+                    <span class="btn__hover"></span>
+                </a>
+            </div>
+            <div class="news__grid">
+                <a href="#" class="news-card">
+                    <div class="news-card__cover"><img src="assets/images/news1.png" alt=""></div>
+                    <div class="news-card__content">
+                        <div class="news-card__gradient"></div>
+                        <div class="news-card__title-wrap">
+                            <strong class="news-card__cat">Movies</strong>
+                            <h2 class="news-card__title">ACADEMY AWARD®-WINNING BANNERS VENDÔME PICTURES AND PATHÉ, AND MERIT FRANCE, TO LAUNCH EMOTION PICTURES</h2>
+                        </div>
+                    </div>
+                    <span class="news-card__bottom">
+                        <span class="news-card__date withDot">5 May 2026</span>
+                        <span class="news-card__country">Global</span>
+                    </span>
+                </a>
+                <a href="#" class="news-card">
+                    <div class="news-card__cover"><img src="assets/images/news2.jpg" alt=""></div>
+                    <div class="news-card__content">
+                        <div class="news-card__gradient"></div>
+                        <div class="news-card__title-wrap">
+                            <strong class="news-card__cat">Cinemas</strong>
+                            <h2 class="news-card__title">Opening of a new Pathé theatre in Ivory Coast!</h2>
+                        </div>
+                    </div>
+                    <span class="news-card__bottom">
+                        <span class="news-card__date withDot">30 April 2024</span>
+                        <span class="news-card__country">Global</span>
+                    </span>
+                </a>
+                <a href="#" class="news-card">
+                    <div class="news-card__cover"><img src="assets/images/news3.jpg" alt=""></div>
+                    <div class="news-card__content">
+                        <div class="news-card__gradient"></div>
+                        <div class="news-card__title-wrap">
+                            <strong class="news-card__cat">Pathe Live</strong>
+                            <h2 class="news-card__title">LEONARDO DA VINCI, A NIGHT AT THE LOUVRE</h2>
+                        </div>
+                    </div>
+                    <span class="news-card__bottom">
+                        <span class="news-card__date">6 August 2020</span>
+                    </span>
+                </a>
+            </div>
+        </div>
+    </section>
+
+</main>
+
+<div id="footer-mount"></div>
+
+<script src="assets/js/components.js"></script>
+<script src="assets/js/main.js"></script>
+</body>
+</html>
