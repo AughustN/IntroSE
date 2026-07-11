@@ -1,0 +1,8 @@
+# Claude
+.claude/
+
+# Spec Kit local state (regenerable, machine-specific)
+src/.specify/feature.json
+src/.specify/init-options.json
+src/.specify/integration.json
+src/.specify/integrations/
