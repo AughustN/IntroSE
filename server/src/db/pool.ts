@@ -1,6 +1,11 @@
 import pg from 'pg';
 import { config } from '../config.js';
 
+// Parse BIGINT (int8, OID 20) as a JS number — all our ids and VND amounts sit well within
+// Number.MAX_SAFE_INTEGER. Without this, pg returns bigints as strings, breaking strict === owner
+// checks and numeric zod validation on ids echoed back by the client.
+pg.types.setTypeParser(20, (v) => (v === null ? null : Number.parseInt(v, 10)));
+
 // Bounded pool (≤20, SCAL-01). Neon requires TLS.
 export const pool = new pg.Pool({
   connectionString: config.databaseUrl,

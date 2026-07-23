@@ -14,8 +14,10 @@ export class HttpError extends Error {
 
 export const err = {
   badRequest: (code: AuthErrorCode | string, msg?: string) => new HttpError(400, code, msg),
+  notFound: (code: AuthErrorCode | string, msg?: string) => new HttpError(404, code, msg),
   unauthorized: (code: AuthErrorCode | string, msg?: string) => new HttpError(401, code, msg),
   forbidden: (code: AuthErrorCode | string, msg?: string) => new HttpError(403, code, msg),
   conflict: (code: AuthErrorCode | string, msg?: string) => new HttpError(409, code, msg),
+  unprocessable: (code: AuthErrorCode | string, msg?: string) => new HttpError(422, code, msg),
   tooMany: (code: AuthErrorCode | string, msg?: string) => new HttpError(429, code, msg),
 };

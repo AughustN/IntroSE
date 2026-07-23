@@ -11,6 +11,7 @@ interface Props {
   onClose: () => void;
   onLogout: () => void;
   onProfileUpdated: (user: Me) => void;
+  onManageEvents: () => void;
 }
 
 const inputClass =
@@ -21,7 +22,7 @@ const primaryBtn =
   "rounded-xl bg-burgundy px-4 py-2.5 text-sm font-black text-beige-kem transition hover:bg-burgundy/90 disabled:opacity-60";
 const msg = (e: unknown) => (e instanceof ApiClientError && e.userMessage ? e.userMessage : "Có lỗi xảy ra.");
 
-export default function AccountModal({ onClose, onLogout, onProfileUpdated }: Props) {
+export default function AccountModal({ onClose, onLogout, onProfileUpdated, onManageEvents }: Props) {
   const [me, setMe] = useState<Me | null>(null);
   const [nickname, setNickname] = useState("");
   const [phone, setPhone] = useState("");
@@ -184,7 +185,12 @@ export default function AccountModal({ onClose, onLogout, onProfileUpdated }: Pr
         <div className={sectionClass}>
           <h3 className="mb-3 font-display text-lg font-bold">Nhà tổ chức</h3>
           {isOrganizer ? (
-            <p className="text-sm text-la-co">Bạn đã là nhà tổ chức đã được duyệt.</p>
+            <div className="space-y-3">
+              <p className="text-sm text-la-co">Bạn đã là nhà tổ chức đã được duyệt.</p>
+              <button type="button" onClick={onManageEvents} className={primaryBtn}>
+                Quản lý sự kiện
+              </button>
+            </div>
           ) : orgStatus === "pending" ? (
             <p className="text-sm text-beige-kem/70">Đơn của bạn đang chờ admin duyệt.</p>
           ) : orgStatus === "suspended" ? (

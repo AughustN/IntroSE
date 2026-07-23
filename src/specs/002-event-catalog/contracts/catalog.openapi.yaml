@@ -1,0 +1,226 @@
+openapi: 3.1.0
+info:
+  title: TixHub Event Catalog API
+  version: 0.1.0
+  description: >
+    Catalog contract for feature 002. Single source of the request/response shapes; the shared
+    TypeScript types in `shared/catalog/` derive from it and are imported by both server and web
+    (Principle VI). Money is whole VND integers (D1). Public reads are open; organizer writes require an
+    approved organizer AND ownership; admin moderation requires the admin flag. Public visibility is
+    computed live: on_sale ∧ approved ∧ organizer.approved (R-1). Vietnamese user-facing text.
+
+servers:
+  - url: /api
+
+components:
+  securitySchemes:
+    accessToken: { type: http, scheme: bearer, bearerFormat: JWT }   # reused from feature 001
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties: { error: { type: string }, message: { type: string } }
+    Money: { type: integer, description: whole VND đồng (no fractional part) }
+    EventCard:
+      type: object
+      required: [id, slug, title, category, startingPrice, soldOut]
+      properties:
+        id: { type: integer }
+        slug: { type: string }
+        title: { type: string }
+        imageUrl: { type: [string, 'null'] }
+        category: { type: string }
+        city: { type: [string, 'null'], description: derived from showtime venues }
+        earliestShowtime: { type: [string, 'null'], format: date-time }
+        startingPrice: { $ref: '#/components/schemas/Money' }
+        soldOut: { type: boolean, description: derived — all upcoming showtimes sold out (D-A) }
+    EventDetail:
+      allOf:
+        - $ref: '#/components/schemas/EventCard'
+        - type: object
+          properties:
+            description: { type: string }
+            ageRestriction: { type: string, enum: [all, '13+', '16+', '18+'] }
+            lineup: { type: array, items: { type: string } }
+            genre: { type: array, items: { type: string } }
+            trailerUrl: { type: [string, 'null'] }
+            refundPolicy: { type: [string, 'null'] }
+            eventType: { type: string, enum: [general_admission, seated] }
+            venueGuide: { type: [string, 'null'] }
+            tiers: { type: array, items: { $ref: '#/components/schemas/Tier' } }
+            related: { type: array, items: { $ref: '#/components/schemas/EventCard' } }
+            seo: { type: object, description: title/description/image + JSON-LD Event data (FR-032) }
+    Tier:
+      type: object
+      required: [id, label, price]
+      properties:
+        id: { type: integer }
+        label: { type: string }
+        price: { $ref: '#/components/schemas/Money' }
+        remaining: { type: [integer, 'null'], description: GA remaining = capacity − sold − reserved }
+    Showtime:
+      type: object
+      required: [id, startsAt, venue, availability]
+      properties:
+        id: { type: integer }
+        startsAt: { type: string, format: date-time }
+        venue: { type: object, properties: { name: { type: string }, city: { type: string } } }
+        availability: { type: string, enum: [available, sold_out, unavailable] }
+    SeatMap:
+      type: object
+      description: seated → seats[]; general_admission → tiers[] with remaining
+      properties:
+        eventType: { type: string, enum: [general_admission, seated] }
+        seats:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              row: { type: string }
+              number: { type: integer }
+              tier: { type: string }
+              price: { $ref: '#/components/schemas/Money' }
+              status: { type: string, enum: [available, held, sold, blocked] }
+        tiers: { type: array, items: { $ref: '#/components/schemas/Tier' } }
+
+paths:
+  # ---------- Public (no auth) ----------
+  /events:
+    get:
+      summary: Browse/search the catalog (US1, FR-001..005)
+      security: []
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: category, in: query, schema: { type: string } }
+        - { name: city, in: query, schema: { type: string } }
+        - { name: date, in: query, schema: { type: string, format: date } }
+        - { name: minPrice, in: query, schema: { $ref: '#/components/schemas/Money' } }
+        - { name: maxPrice, in: query, schema: { $ref: '#/components/schemas/Money' } }
+        - { name: availability, in: query, schema: { type: string, enum: [available, all] } }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+      responses:
+        '200':
+          description: "Only public events (on_sale ∧ approved ∧ organizer approved). Sold-out shown, labelled, last (FR-004). Ranked title>lineup>description (FR-003)."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events: { type: array, items: { $ref: '#/components/schemas/EventCard' } }
+                  total: { type: integer }
+                  page: { type: integer }
+  /events/{slug}:
+    get:
+      summary: Event detail by stable slug (US2, FR-006..009)
+      security: []
+      parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: detail, content: { application/json: { schema: { $ref: '#/components/schemas/EventDetail' } } } }
+        '404': { description: "not found (also for drafts/pending/flagged/removed/suspended-organizer — never leaked, FR-009/SC-004)", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /events/{id}/showtimes:
+    get:
+      summary: Upcoming showtimes with availability (US2/US3, FR-007/013)
+      security: []
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        '200': { description: upcoming showtimes, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Showtime' } } } } }
+  /showtimes/{id}/seat-map:
+    get:
+      summary: Read-only seat map / tier availability (US3, FR-010..012)
+      security: []
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        '200': { description: "seat map (seated) or tier remaining (GA); guests may VIEW, selecting requires login and is a later feature", content: { application/json: { schema: { $ref: '#/components/schemas/SeatMap' } } } }
+
+  # ---------- Organizer (approved organizer + ownership) ----------
+  /organizer/events:
+    get:
+      summary: My events, all statuses (US4)
+      security: [{ accessToken: [] }]
+      responses: { '200': { description: owned events incl. draft/pending/removed with review_note } }
+    post:
+      summary: Create a draft event (US4, FR-014/016)
+      security: [{ accessToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [title, categoryCode, description, eventType], properties: { title: { type: string }, categoryCode: { type: string }, description: { type: string }, eventType: { type: string, enum: [general_admission, seated] }, ageRestriction: { type: string }, imageUrl: { type: string }, refundPolicy: { type: string } } } } }
+      responses:
+        '201': { description: "draft created, owned by caller's approved organizer; slug generated (R-4)" }
+        '403': { description: not_an_approved_organizer, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /organizer/events/{id}:
+    patch:
+      summary: Edit own event (US4, FR-015/018; material edit → re-review)
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        '200': { description: "updated; a material edit of an approved event returns it to pending_review" }
+        '403': { description: not_owner, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /organizer/events/{id}/publish:
+    post:
+      summary: Publish for review (US4, FR-017/030)
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        '200': { description: "status→on_sale, moderation→pending_review; NOT public until admin approves" }
+        '422': { description: "needs_showtime_and_tier (publish requires ≥1 upcoming showtime with a tier)", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /organizer/events/{id}/unpublish:
+    post: { summary: Unpublish → draft (US4, FR-017), security: [{ accessToken: [] }], parameters: [{ name: id, in: path, required: true, schema: { type: integer } }], responses: { '200': { description: pulled to draft } } }
+  /organizer/events/{id}/showtimes:
+    post: { summary: Add showtime (+tiers) to own event (US4/US5, FR-015/019), security: [{ accessToken: [] }], parameters: [{ name: id, in: path, required: true, schema: { type: integer } }], responses: { '201': { description: created }, '400': { description: fractional_price_refused (FR-019) } } }
+  /organizer/showtimes/{id}/seat-map:
+    post:
+      summary: Generate a seated showtime's seat map (US5, FR-022/024, R-7)
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        description: "per-section tier assignment — each venue section maps to one ticket tier; every seat inherits its section's tier (R-7)"
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sectionTiers]
+              properties:
+                sectionTiers:
+                  type: array
+                  items:
+                    type: object
+                    required: [sectionId, ticketTierId]
+                    properties: { sectionId: { type: integer }, ticketTierId: { type: integer } }
+      responses:
+        '201': { description: "one showtime_seat per physical seat, all available, tier-assigned by section" }
+        '400': { description: section_without_tier (every section must map to a tier), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: seat_map_exists (refuse regenerating over a live map), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /organizer/venues:
+    get: { summary: My venues (US5, D-F), security: [{ accessToken: [] }], responses: { '200': { description: venues owned by caller } } }
+    post: { summary: Create a venue I own (US5, FR-020), security: [{ accessToken: [] }], responses: { '201': { description: "created with created_by = caller" } } }
+  /organizer/venues/{id}:
+    patch: { summary: Edit own venue (FR-020/024), security: [{ accessToken: [] }], parameters: [{ name: id, in: path, required: true, schema: { type: integer } }], responses: { '200': { description: updated }, '403': { description: not_owner } } }
+    delete: { summary: Delete own venue (refused if part of a live seat map, FR-024), security: [{ accessToken: [] }], parameters: [{ name: id, in: path, required: true, schema: { type: integer } }], responses: { '204': { description: deleted }, '409': { description: venue_in_use } } }
+
+  # ---------- Admin moderation (admin flag) ----------
+  /admin/moderation:
+    get:
+      summary: Review queue — events awaiting review (US6, P2)
+      security: [{ accessToken: [] }]
+      responses:
+        '200': { description: pending_review events }
+        '403': { description: forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /admin/events/{id}/approve:
+    post:
+      summary: Approve — makes it public if on sale (US6, FR-025/029)
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses: { '200': { description: "moderation→approved; public on next request; audit_logs written" } }
+  /admin/events/{id}/reject:
+    post:
+      summary: Reject with a reason (US6)
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string } } } } } }
+      responses: { '200': { description: "moderation→removed + review_note; never public; organizer sees reason" } }
+  /admin/events/{id}/flag:
+    post: { summary: Flag an approved event → hidden (US6, FR-025), security: [{ accessToken: [] }], parameters: [{ name: id, in: path, required: true, schema: { type: integer } }], responses: { '200': { description: "moderation→flagged; pulled next request; audit_logs" } } }
+  /admin/events/{id}/remove:
+    post: { summary: Remove an event → hidden permanently (US6, FR-025), security: [{ accessToken: [] }], parameters: [{ name: id, in: path, required: true, schema: { type: integer } }], requestBody: { content: { application/json: { schema: { type: object, properties: { reason: { type: string } } } } } }, responses: { '200': { description: "moderation→removed; kept for organizer; audit_logs" } } }

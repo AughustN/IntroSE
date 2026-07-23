@@ -56,3 +56,45 @@ An immutable record of a security-relevant account action (login success/failure
 detected, reset requested…). Its identifier is stored hashed and its account may be unknown. Distinct
 from the **audit log**, which records privileged admin actions and always has a known actor.
 _Avoid_: audit entry, security log (for auth events); activity log.
+
+### Events & catalog
+
+**Event**:
+A happening a visitor can attend, owned by one Organizer. Carries a stable **slug**, details, ticket
+tiers, and one or more Showtimes. General-admission or seated. Public only when both on sale and
+admin-approved.
+_Avoid_: show, listing, MovieEvent (the old mock type — rename to Event).
+
+**On sale**:
+The organizer-facing lifecycle state (`status`) meaning the event is published and open. One of
+`draft → on_sale → finished / cancelled`. Being on sale is necessary but **not sufficient** for public
+visibility — it must also be approved.
+_Avoid_: live, active, published (say "on sale").
+
+**Moderation status**:
+The admin-facing state (`moderation_status`), separate from the on-sale lifecycle: `pending_review`
+(submitted, not yet visible to buyers), `approved` (visible if on sale — the single positive gate),
+`flagged` (pulled, needs re-review), `removed` (taken down, kept for the organizer). Pre-publish
+moderation: only `approved` is public.
+_Avoid_: verified, status (ambiguous with the on-sale lifecycle).
+
+**Showtime**:
+A dated instance of an Event at a Venue with a start time and inventory. An event may have several.
+_Avoid_: session (that's the auth term), screening, occurrence.
+
+**Ticket tier**:
+A price class within a Showtime (label + whole-đồng price; for general admission, a capacity with
+sold/reserved counts).
+_Avoid_: ticket type, price band, category (that's the event classification).
+
+**Venue / Seat / Showtime seat**:
+**Venue** = a reusable physical place (name, city, address) holding **Seats** (row, number, type,
+unique within the venue). A **Showtime seat** is one bookable instance of a physical seat for a seated
+Showtime, carrying a tier and a status (available / held / sold / blocked). Read-only in the catalog;
+the holds feature transitions it.
+_Avoid_: room/hall (say Venue); slot (say Showtime seat).
+
+**Sold out**:
+A derived state — an Event/Showtime is sold out because its inventory (seats or tier quantities) is
+exhausted. Never a stored flag on the event.
+_Avoid_: unavailable (broader), full.

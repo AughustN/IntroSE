@@ -9,9 +9,13 @@ import { Booking, CheckoutPayload, MovieEvent, Seat } from "./types";
 import AdminPanel from "./components/AdminPanel";
 import AuthModal from "./components/AuthModal";
 import AccountModal from "./components/AccountModal";
+import OrganizerPanel from "./components/OrganizerPanel";
+import AdminModeration from "./components/AdminModeration";
 import ResetPassword from "./components/ResetPassword";
 import type { Me } from "@/shared/auth/types";
 import { authClient } from "./services/authClient";
+import { catalogClient } from "./services/catalogClient";
+import { cardToMovie, detailToMovie } from "./services/catalogAdapter";
 import BookingHistory from "./components/BookingHistory";
 import CheckoutForm from "./components/CheckoutForm";
 import EventDetail from "./components/EventDetail";
@@ -23,7 +27,7 @@ import SeatLayout from "./components/SeatLayout";
 import TicketTicket from "./components/TicketTicket";
 import { ArrowUp } from "lucide-react";
 
-type Screen = "home" | "detail" | "seats" | "checkout" | "ticket" | "history" | "admin";
+type Screen = "home" | "detail" | "seats" | "checkout" | "ticket" | "history" | "admin" | "organizer" | "moderation";
 type ThemeMode = "dark" | "light";
 
 const BOOKINGS_CACHE_KEY = "ticketbox_bookings_cache_v2";
@@ -47,6 +51,7 @@ export default function App() {
   const [theme, setTheme] = useState<ThemeMode>(getInitialTheme);
   const [selectedMovie, setSelectedMovie] = useState<MovieEvent>(SAMPLE_MOVIES[0]);
   const [heroMovie, setHeroMovie] = useState<MovieEvent>(SAMPLE_MOVIES[0]);
+  const [events, setEvents] = useState<MovieEvent[]>([]);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
@@ -133,10 +138,25 @@ export default function App() {
       .catch(() => {});
   }, []);
 
+  // Load the real catalog (replaces the mock browse source). Maps API cards → MovieEvent.
+  useEffect(() => {
+    catalogClient
+      .listEvents({ page: 1 })
+      .then((res) => {
+        const mapped = res.events.map(cardToMovie);
+        setEvents(mapped);
+        if (mapped[0]) {
+          setHeroMovie(mapped[0]);
+          setSelectedMovie(mapped[0]);
+        }
+      })
+      .catch((err) => console.error("Failed to load catalog:", err));
+  }, []);
+
   const filteredEvents = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
 
-    return SAMPLE_MOVIES.filter((movie) => {
+    return events.filter((movie) => {
       const searchBlob = [
         movie.title,
         movie.originalTitle,
@@ -168,17 +188,17 @@ export default function App() {
         matchesAvailability
       );
     });
-  }, [activeCategory, activeCity, activeDate, availability, maxPrice, searchQuery]);
+  }, [events, activeCategory, activeCity, activeDate, availability, maxPrice, searchQuery]);
 
   const relatedEvents = useMemo(() => {
-    return SAMPLE_MOVIES.filter((event) => {
+    return events.filter((event) => {
       if (event.id === selectedMovie.id) return false;
       return (
         event.category === selectedMovie.category ||
         event.genre.some((genre) => selectedMovie.genre.includes(genre))
       );
     }).slice(0, 3);
-  }, [selectedMovie]);
+  }, [events, selectedMovie]);
 
   const goHome = () => {
     setActiveScreen("home");
@@ -239,9 +259,17 @@ export default function App() {
   };
 
   const handleStartBookingInput = (movie: MovieEvent) => {
-    setSelectedMovie(movie);
+    setSelectedMovie(movie); // optimistic (card data)
     setActiveScreen("detail");
     window.scrollTo({ top: 0, behavior: "smooth" });
+    // enrich with full detail from the API (movie.id carries the event slug)
+    catalogClient
+      .getEvent(movie.id)
+      .then(async (detail) => {
+        const showtimes = await catalogClient.getShowtimes(detail.id);
+        setSelectedMovie(detailToMovie(detail, showtimes));
+      })
+      .catch((err) => console.error("Failed to load event detail:", err));
   };
 
   const handleProceedToSeats = (date: string, time: string) => {
@@ -333,7 +361,7 @@ export default function App() {
         onHomeClick={goHome}
         onLoginClick={() => (userName ? setShowAccountModal(true) : setShowAuthModal(true))}
         onAdminClick={() => {
-          setActiveScreen("admin");
+          setActiveScreen("moderation");
           window.scrollTo({ top: 0, behavior: "smooth" });
         }}
         userName={userName}
@@ -445,6 +473,9 @@ export default function App() {
         {activeScreen === "admin" && (
           <AdminPanel events={SAMPLE_MOVIES} bookings={bookingsHistory} onBack={goHome} />
         )}
+
+        {activeScreen === "organizer" && <OrganizerPanel onBack={goHome} />}
+        {activeScreen === "moderation" && <AdminModeration onBack={goHome} />}
       </main>
 
       <footer className="border-t border-beige-kem/10 bg-xanh-pho px-4 py-12 font-mono text-xs sm:px-6 lg:px-8">
@@ -488,6 +519,11 @@ export default function App() {
           onProfileUpdated={(user) => {
             setUserName(user.nickname || user.email);
             setAvatarUrl(user.avatarUrl);
+          }}
+          onManageEvents={() => {
+            setShowAccountModal(false);
+            setActiveScreen("organizer");
+            window.scrollTo({ top: 0, behavior: "smooth" });
           }}
         />
       )}
