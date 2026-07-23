@@ -109,17 +109,17 @@
 
 ## Phase 9: User Story 7 — SEO (P3)
 
-- [ ] T031 [P] [US7] FE: server-renderable `<title>`/meta + JSON-LD `Event` block from the detail payload; slug as canonical URL (FR-032); confirm slug stable across title edits
-- [ ] T032 [P] [US7] Test: event detail exposes SEO title/description, image, and structured data fields
+- [X] T031 [P] [US7] FE: server-renderable `<title>`/meta + JSON-LD `Event` block from the detail payload; slug as canonical URL (FR-032); confirm slug stable across title edits
+- [X] T032 [P] [US7] Test: event detail exposes SEO title/description, image, and structured data fields
 
 ---
 
 ## Phase 10: Polish & Cross-Cutting
 
-- [ ] T033 Retire the mock: remove `src/data.ts` usage from the browse/detail flows; supersede `MovieEvent` with `shared/catalog` types (SC-011)
+- [X] T033 Retire the mock: remove `src/data.ts` usage from the browse/detail flows; supersede `MovieEvent` with `shared/catalog` types (SC-011)
 - [ ] T034 [P] Perf check for SC-002 in `server/tests/perf/catalog.load.js`: catalog search p95 < 1 s against a seeded DB
-- [ ] T035 Execute `quickstart.md` end-to-end for every user story
-- [ ] T036 [P] Verify `shared/catalog/types.ts` imported by both server and FE with no re-declared payloads (Principle VI); typecheck + lint clean
+- [X] T035 Execute `quickstart.md` end-to-end for every user story
+- [X] T036 [P] Verify `shared/catalog/types.ts` imported by both server and FE with no re-declared payloads (Principle VI); typecheck + lint clean
 
 ---
 

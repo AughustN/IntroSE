@@ -14,6 +14,18 @@ describe('event detail (US2)', () => {
     expect(res.body.seo.title).toBeTruthy();
   });
 
+  it('exposes SEO title/description/image + structured data fields (US7, FR-032)', async () => {
+    const { slug } = await seed.seedVisibleGaEvent({ title: 'SEO Event' });
+    const res = await request(app).get(`/api/events/${slug}`).expect(200);
+    expect(res.body.seo.title).toBeTruthy();
+    expect(res.body.seo.description).toBeTruthy();
+    expect(res.body.seo).toHaveProperty('imageUrl');
+    // structured-data inputs the FE builds JSON-LD from
+    expect(res.body.earliestShowtime).toBeTruthy(); // startDate
+    expect(res.body.city).toBeTruthy(); // location
+    expect(res.body.tiers[0].price).toBeGreaterThan(0); // offers
+  });
+
   it('404s for a draft slug — never leaks a hidden event (FR-009, SC-004)', async () => {
     const org = await seed.seedOrganizer(await seed.seedUser());
     await seed.seedEvent({ organizerId: org, status: 'draft', moderation: 'pending_review', slug: 'hidden-draft' });

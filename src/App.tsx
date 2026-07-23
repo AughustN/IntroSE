@@ -17,6 +17,7 @@ import type { Me } from "@/shared/auth/types";
 import { authClient } from "./services/authClient";
 import { catalogClient } from "./services/catalogClient";
 import { cardToMovie, detailToMovie } from "./services/catalogAdapter";
+import { applyEventSeo, clearEventSeo } from "./services/seo";
 import BookingHistory from "./components/BookingHistory";
 import CheckoutForm from "./components/CheckoutForm";
 import EventDetail from "./components/EventDetail";
@@ -205,6 +206,7 @@ export default function App() {
 
   const goHome = () => {
     setActiveScreen("home");
+    clearEventSeo();
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -272,6 +274,7 @@ export default function App() {
         const showtimes = await catalogClient.getShowtimes(detail.id);
         setSelectedMovie(detailToMovie(detail, showtimes));
         setSelectedEventId(detail.id);
+        applyEventSeo(detail, showtimes);
       })
       .catch((err) => console.error("Failed to load event detail:", err));
   };
