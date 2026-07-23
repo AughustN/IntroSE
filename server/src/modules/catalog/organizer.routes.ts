@@ -13,6 +13,8 @@ import {
   createVenue,
   deleteSeat,
   eventOwnerUserId,
+  eventShowtimesManage,
+  listSections,
   generateSeatMap,
   getApprovedOrganizerId,
   listMyEvents,
@@ -162,6 +164,24 @@ const seatsSchema = z.object({ sectionId: z.number().int(), rowLabel: z.string()
 const seatMapSchema = z.object({
   sectionTiers: z.array(z.object({ sectionId: z.number().int(), ticketTierId: z.number().int() })).min(1),
 });
+
+organizerRouter.get(
+  '/venues/:id/sections',
+  asyncH(async (req, res) => {
+    const venueId = Number(req.params.id);
+    await assertVenueOwner(req, venueId);
+    res.json(await listSections(venueId));
+  }),
+);
+
+organizerRouter.get(
+  '/events/:id/showtimes-manage',
+  asyncH(async (req, res) => {
+    const id = Number(req.params.id);
+    await assertEventOwner(req, id);
+    res.json(await eventShowtimesManage(id));
+  }),
+);
 
 organizerRouter.post(
   '/venues/:id/sections',

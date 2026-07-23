@@ -11,6 +11,7 @@ import AuthModal from "./components/AuthModal";
 import AccountModal from "./components/AccountModal";
 import OrganizerPanel from "./components/OrganizerPanel";
 import AdminModeration from "./components/AdminModeration";
+import SeatMapView from "./components/SeatMapView";
 import ResetPassword from "./components/ResetPassword";
 import type { Me } from "@/shared/auth/types";
 import { authClient } from "./services/authClient";
@@ -52,6 +53,8 @@ export default function App() {
   const [selectedMovie, setSelectedMovie] = useState<MovieEvent>(SAMPLE_MOVIES[0]);
   const [heroMovie, setHeroMovie] = useState<MovieEvent>(SAMPLE_MOVIES[0]);
   const [events, setEvents] = useState<MovieEvent[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
+  const [showSeatMap, setShowSeatMap] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
@@ -268,6 +271,7 @@ export default function App() {
       .then(async (detail) => {
         const showtimes = await catalogClient.getShowtimes(detail.id);
         setSelectedMovie(detailToMovie(detail, showtimes));
+        setSelectedEventId(detail.id);
       })
       .catch((err) => console.error("Failed to load event detail:", err));
   };
@@ -432,6 +436,17 @@ export default function App() {
           />
         )}
 
+        {activeScreen === "detail" && selectedEventId && (
+          <div className="mx-auto max-w-3xl px-4 pb-8">
+            <button
+              onClick={() => setShowSeatMap(true)}
+              className="w-full rounded-xl border border-cam-dat/30 bg-cam-dat/10 px-4 py-3 text-sm font-black text-cam-dat transition hover:bg-cam-dat/15"
+            >
+              Xem sơ đồ ghế / vé
+            </button>
+          </div>
+        )}
+
         {activeScreen === "seats" && (
           <SeatLayout
             event={selectedMovie}
@@ -528,6 +543,9 @@ export default function App() {
         />
       )}
       {resetToken && <ResetPassword token={resetToken} />}
+      {showSeatMap && selectedEventId && (
+        <SeatMapView eventId={selectedEventId} onClose={() => setShowSeatMap(false)} />
+      )}
     </div>
   );
 }

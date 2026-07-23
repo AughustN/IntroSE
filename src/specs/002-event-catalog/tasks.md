@@ -67,7 +67,7 @@
 
 - [X] T017 [P] [US3] Tests `server/tests/catalog/seatmap-read.test.ts`: upcoming showtimes only (past/cancelled excluded, FR-013); seated seat-map (row/number/tier/status); GA tier remaining (FR-010/011); guest can view, no hold path exists (FR-012)
 - [X] T018 [US3] `GET /api/events/:id/showtimes` and `GET /api/showtimes/:id/seat-map` (read-only, availability derived)
-- [ ] T019 [P] [US3] FE showtime + read-only seat-map view in `src/pages/catalog/`
+- [X] T019 [P] [US3] FE showtime + read-only seat-map view in `src/pages/catalog/`
 
 **Checkpoint**: the full public read side works; MVP (P1) demoable on seed data.
 
@@ -91,7 +91,7 @@
 - [X] T024 [P] [US5] Tests `server/tests/catalog/venues-seatmap.test.ts`: venue created with `created_by`=caller; org B can't edit A's venue (D-F); generate → one `showtime_seats` per physical seat, all available, tier by section; regenerate over live map → 409; delete seat in live map → 409 (FR-024); section without a tier → 400
 - [X] T025 [US5] `venues.routes.ts`: venue + section + seat CRUD scoped to `created_by` (requireOwner)
 - [X] T026 [US5] `catalog/seatmap.ts` + `POST /organizer/showtimes/:id/seat-map` — per-section tier mapping → `INSERT … SELECT` seats→sections→tier (R-7)
-- [ ] T027 [P] [US5] FE venue management + seat-map generator (section→tier mapping UI) in `src/pages/organizer/`
+- [X] T027 [P] [US5] FE venue management + seat-map generator (section→tier mapping UI) in `src/pages/organizer/`
 
 ---
 

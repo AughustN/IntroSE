@@ -5,6 +5,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { EVENT_CATEGORIES, MyEvent, MyVenue, organizerApi } from "../services/catalogClient";
+import SeatMapBuilder from "./SeatMapBuilder";
 
 const input =
   "h-11 w-full rounded-xl border border-beige-kem/20 bg-white/[0.035] px-4 text-sm text-beige-kem outline-none focus:border-cam-dat";
@@ -33,7 +34,9 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
   // create-event form
   const [title, setTitle] = useState("");
   const [categoryCode, setCategoryCode] = useState("music");
+  const [eventType, setEventType] = useState<"general_admission" | "seated">("general_admission");
   const [description, setDescription] = useState("");
+  const [seatMapEventId, setSeatMapEventId] = useState<number | null>(null);
 
   // create-venue form
   const [vName, setVName] = useState("");
@@ -74,7 +77,7 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
   const createEvent = (e: FormEvent) => {
     e.preventDefault();
     wrap(async () => {
-      await organizerApi.createEvent({ title, categoryCode, description, eventType: "general_admission" });
+      await organizerApi.createEvent({ title, categoryCode, description, eventType });
       setTitle("");
       setDescription("");
     }, "Đã tạo sự kiện (bản nháp).");
@@ -126,6 +129,13 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
               ))}
             </select>
           </label>
+          <label className="block">
+            <span className={label}>Loại sự kiện</span>
+            <select value={eventType} onChange={(e) => setEventType(e.target.value as "general_admission" | "seated")} className={input}>
+              <option value="general_admission" className="bg-xanh-pho">Vé tự do (GA)</option>
+              <option value="seated" className="bg-xanh-pho">Có ghế ngồi</option>
+            </select>
+          </label>
         </div>
         <label className="mt-3 block">
           <span className={label}>Mô tả</span>
@@ -162,6 +172,9 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
                 </div>
                 <div className="flex gap-2">
                   <button className={ghost} onClick={() => setOpenEvent(openEvent === ev.id ? null : ev.id)}>Thêm suất</button>
+                  {ev.eventType === "seated" && (
+                    <button className={ghost} onClick={() => setSeatMapEventId(ev.id)}>Sơ đồ ghế</button>
+                  )}
                   <button className={btn} onClick={() => wrap(() => organizerApi.publish(ev.id).then(() => {}), "Đã gửi duyệt.")}>Gửi duyệt</button>
                 </div>
               </div>
@@ -186,6 +199,10 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
         </div>
         <p className="mt-4 font-mono text-[11px] text-beige-kem/45">Sự kiện chỉ hiển thị công khai sau khi admin duyệt.</p>
       </div>
+
+      {seatMapEventId && (
+        <SeatMapBuilder eventId={seatMapEventId} onClose={() => { setSeatMapEventId(null); reload(); }} />
+      )}
     </div>
   );
 }

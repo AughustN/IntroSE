@@ -34,6 +34,7 @@ export interface MyEvent {
   moderation: string;
   reviewNote: string | null;
   imageUrl: string | null;
+  eventType: 'general_admission' | 'seated';
   category: string;
 }
 export interface MyVenue {
@@ -51,8 +52,30 @@ export interface QueueItem {
   organizer: string;
 }
 
+export interface Section {
+  id: number;
+  name: string;
+  seatCount: number;
+}
+export interface ManageShowtime {
+  id: number;
+  startsAt: string;
+  venueId: number;
+  venueName: string;
+  hasSeatMap: boolean;
+  tiers: { id: number; label: string; price: number }[];
+  sections: Section[];
+}
+
 export const organizerApi = {
   myEvents: () => authed<MyEvent[]>('/organizer/events'),
+  showtimesManage: (eventId: number) => authed<ManageShowtime[]>(`/organizer/events/${eventId}/showtimes-manage`),
+  venueSections: (venueId: number) => authed<Section[]>(`/organizer/venues/${venueId}/sections`),
+  createSection: (venueId: number, name: string) => authed<{ id: number }>(`/organizer/venues/${venueId}/sections`, { method: 'POST', body: { name } }),
+  addSeats: (venueId: number, b: { sectionId: number; rowLabel: string; count: number }) =>
+    authed<{ count: number }>(`/organizer/venues/${venueId}/seats`, { method: 'POST', body: b }),
+  generateSeatMap: (showtimeId: number, sectionTiers: { sectionId: number; ticketTierId: number }[]) =>
+    authed<{ seats: number }>(`/organizer/showtimes/${showtimeId}/seat-map`, { method: 'POST', body: { sectionTiers } }),
   createEvent: (b: { title: string; categoryCode: string; description: string; eventType: 'general_admission' | 'seated' }) =>
     authed<{ id: number; slug: string }>('/organizer/events', { method: 'POST', body: b }),
   publish: (id: number) => authed<{ ok: true }>(`/organizer/events/${id}/publish`, { method: 'POST' }),

@@ -41,7 +41,8 @@ export async function eventOwnerUserId(eventId: number, db: Db = pool): Promise<
 
 export async function listMyEvents(userId: number, db: Db = pool) {
   const { rows } = await db.query(
-    `SELECT e.id, e.slug, e.title, e.status, e.moderation_status AS moderation, e.review_note AS "reviewNote", e.image_url AS "imageUrl", ec.code AS category
+    `SELECT e.id, e.slug, e.title, e.status, e.moderation_status AS moderation, e.review_note AS "reviewNote",
+            e.image_url AS "imageUrl", e.event_type AS "eventType", ec.code AS category
        FROM events e JOIN organizers o ON o.id = e.organizer_id JOIN event_categories ec ON ec.id = e.category_id
       WHERE o.user_id = $1 ORDER BY e.created_at DESC`,
     [userId],
@@ -161,6 +162,35 @@ export async function showtimeInfo(showtimeId: number, db: Db = pool): Promise<S
     [showtimeId],
   );
   return rows[0] ?? null;
+}
+
+export async function listSections(venueId: number, db: Db = pool) {
+  return (
+    await db.query(
+      `SELECT s.id, s.name, count(se.id)::int AS "seatCount"
+         FROM sections s LEFT JOIN seats se ON se.section_id = s.id
+        WHERE s.venue_id = $1 GROUP BY s.id ORDER BY s.id`,
+      [venueId],
+    )
+  ).rows;
+}
+
+/** Everything the seat-map builder needs for an event: each showtime with its venue, tiers, and the
+ *  venue's sections + whether a seat map already exists. */
+export async function eventShowtimesManage(eventId: number, db: Db = pool) {
+  const showtimes = (
+    await db.query(
+      `SELECT s.id, s.starts_at AS "startsAt", s.venue_id AS "venueId", v.name AS "venueName",
+              EXISTS (SELECT 1 FROM showtime_seats ss WHERE ss.showtime_id = s.id) AS "hasSeatMap"
+         FROM showtimes s JOIN venues v ON v.id = s.venue_id WHERE s.event_id = $1 ORDER BY s.starts_at`,
+      [eventId],
+    )
+  ).rows as { id: number; startsAt: string; venueId: number; venueName: string; hasSeatMap: boolean; tiers?: unknown; sections?: unknown }[];
+  for (const st of showtimes) {
+    st.tiers = (await db.query(`SELECT id, label, price_amount::int AS price FROM ticket_tiers WHERE showtime_id = $1 ORDER BY price_amount`, [st.id])).rows;
+    st.sections = await listSections(st.venueId, db);
+  }
+  return showtimes;
 }
 
 export async function sectionsWithSeats(venueId: number, db: Db = pool): Promise<number[]> {
