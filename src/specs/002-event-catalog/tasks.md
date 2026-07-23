@@ -88,9 +88,9 @@
 
 **Goal**: organizer manages own venues and generates a per-section-tiered seated map. **Independent test**: venue owned by creator; generate creates one showtime_seat per seat.
 
-- [ ] T024 [P] [US5] Tests `server/tests/catalog/venues-seatmap.test.ts`: venue created with `created_by`=caller; org B can't edit A's venue (D-F); generate → one `showtime_seats` per physical seat, all available, tier by section; regenerate over live map → 409; delete seat in live map → 409 (FR-024); section without a tier → 400
-- [ ] T025 [US5] `venues.routes.ts`: venue + section + seat CRUD scoped to `created_by` (requireOwner)
-- [ ] T026 [US5] `catalog/seatmap.ts` + `POST /organizer/showtimes/:id/seat-map` — per-section tier mapping → `INSERT … SELECT` seats→sections→tier (R-7)
+- [X] T024 [P] [US5] Tests `server/tests/catalog/venues-seatmap.test.ts`: venue created with `created_by`=caller; org B can't edit A's venue (D-F); generate → one `showtime_seats` per physical seat, all available, tier by section; regenerate over live map → 409; delete seat in live map → 409 (FR-024); section without a tier → 400
+- [X] T025 [US5] `venues.routes.ts`: venue + section + seat CRUD scoped to `created_by` (requireOwner)
+- [X] T026 [US5] `catalog/seatmap.ts` + `POST /organizer/showtimes/:id/seat-map` — per-section tier mapping → `INSERT … SELECT` seats→sections→tier (R-7)
 - [ ] T027 [P] [US5] FE venue management + seat-map generator (section→tier mapping UI) in `src/pages/organizer/`
 
 ---

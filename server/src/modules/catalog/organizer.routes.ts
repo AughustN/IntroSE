@@ -5,15 +5,25 @@ import { requireAuth } from '../../middleware/requireAuth.js';
 import { requireOrganizer } from '../../middleware/authz.js';
 import { validate } from '../../middleware/validate.js';
 import {
+  addSeats,
   addShowtimeWithTiers,
   categoryExists,
   createEvent,
+  createSection,
   createVenue,
+  deleteSeat,
   eventOwnerUserId,
+  generateSeatMap,
   getApprovedOrganizerId,
   listMyEvents,
   listMyVenues,
   publishEvent,
+  sectionsWithSeats,
+  seatInLiveMap,
+  seatVenueOwnerUserId,
+  showtimeHasSeatMap,
+  showtimeInfo,
+  tiersOfShowtime,
   unpublishEvent,
   updateEvent,
   venueOwnerUserId,
@@ -27,10 +37,17 @@ const asyncH =
   (fn: (req: Request, res: Response) => Promise<void>) => (req: Request, res: Response, next: NextFunction) =>
     fn(req, res).catch(next);
 
+function assertOwn(req: Request, ownerUserId: number | null): void {
+  if (ownerUserId === null) throw err.notFound('not_found');
+  if (ownerUserId !== req.auth!.userId && !req.auth!.user.isAdmin) throw err.forbidden('not_owner', 'Bạn không sở hữu tài nguyên này.');
+}
 async function assertEventOwner(req: Request, eventId: number): Promise<void> {
   const owner = await eventOwnerUserId(eventId);
   if (owner === null) throw err.notFound('not_found', 'Không tìm thấy sự kiện.');
-  if (owner !== req.auth!.userId && !req.auth!.user.isAdmin) throw err.forbidden('not_owner', 'Bạn không sở hữu sự kiện này.');
+  assertOwn(req, owner);
+}
+async function assertVenueOwner(req: Request, venueId: number): Promise<void> {
+  assertOwn(req, await venueOwnerUserId(venueId));
 }
 
 const createEventSchema = z.object({
@@ -135,5 +152,68 @@ organizerRouter.post(
   asyncH(async (req, res) => {
     const id = await createVenue(req.auth!.userId, req.body as z.infer<typeof venueSchema>);
     res.status(201).json({ id });
+  }),
+);
+
+// ---- sections / seats / seat-map generation (US5, R-7) ----
+
+const sectionSchema = z.object({ name: z.string().trim().min(1) });
+const seatsSchema = z.object({ sectionId: z.number().int(), rowLabel: z.string().trim().min(1), count: z.number().int().min(1).max(200) });
+const seatMapSchema = z.object({
+  sectionTiers: z.array(z.object({ sectionId: z.number().int(), ticketTierId: z.number().int() })).min(1),
+});
+
+organizerRouter.post(
+  '/venues/:id/sections',
+  validate(sectionSchema),
+  asyncH(async (req, res) => {
+    const venueId = Number(req.params.id);
+    await assertVenueOwner(req, venueId);
+    res.status(201).json({ id: await createSection(venueId, (req.body as z.infer<typeof sectionSchema>).name) });
+  }),
+);
+
+organizerRouter.post(
+  '/venues/:id/seats',
+  validate(seatsSchema),
+  asyncH(async (req, res) => {
+    const venueId = Number(req.params.id);
+    await assertVenueOwner(req, venueId);
+    const b = req.body as z.infer<typeof seatsSchema>;
+    res.status(201).json({ count: await addSeats(venueId, b.sectionId, b.rowLabel, b.count) });
+  }),
+);
+
+organizerRouter.delete(
+  '/seats/:id',
+  asyncH(async (req, res) => {
+    const seatId = Number(req.params.id);
+    assertOwn(req, await seatVenueOwnerUserId(seatId));
+    if (await seatInLiveMap(seatId)) throw err.conflict('venue_in_use', 'Ghế đang thuộc một sơ đồ ghế, không thể xoá.');
+    await deleteSeat(seatId);
+    res.status(204).end();
+  }),
+);
+
+// Generate a seated showtime's seat map — one seat per physical seat, tier assigned per section (R-7).
+organizerRouter.post(
+  '/showtimes/:id/seat-map',
+  validate(seatMapSchema),
+  asyncH(async (req, res) => {
+    const showtimeId = Number(req.params.id);
+    const info = await showtimeInfo(showtimeId);
+    if (!info) throw err.notFound('not_found', 'Không tìm thấy suất chiếu.');
+    assertOwn(req, info.ownerUserId);
+    if (info.eventType !== 'seated') throw err.badRequest('validation_failed', 'Chỉ sự kiện có ghế mới tạo được sơ đồ ghế.');
+    if (await showtimeHasSeatMap(showtimeId)) throw err.conflict('seat_map_exists', 'Sơ đồ ghế đã được tạo cho suất này.');
+
+    const { sectionTiers } = req.body as z.infer<typeof seatMapSchema>;
+    const mappedSections = new Set(sectionTiers.map((m) => m.sectionId));
+    const withSeats = await sectionsWithSeats(info.venueId);
+    if (withSeats.some((s) => !mappedSections.has(s))) throw err.badRequest('section_without_tier', 'Mỗi khu vực có ghế phải được gán một hạng vé.');
+    const validTiers = new Set(await tiersOfShowtime(showtimeId));
+    if (sectionTiers.some((m) => !validTiers.has(m.ticketTierId))) throw err.badRequest('validation_failed', 'Hạng vé không thuộc suất chiếu này.');
+
+    res.status(201).json({ seats: await generateSeatMap(showtimeId, sectionTiers) });
   }),
 );
