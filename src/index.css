@@ -1,0 +1,75 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+  
+  --color-beige-kem: #E0E2CA;
+  --color-la-co: #A6A15E;
+  --color-cam-dat: #C69F89;
+  --color-burgundy: #93032E;
+  --color-xanh-pho: #071628;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+:root {
+  color-scheme: dark;
+  --color-beige-kem: #E0E2CA;
+  --color-la-co: #A6A15E;
+  --color-cam-dat: #C69F89;
+  --color-burgundy: #93032E;
+  --color-xanh-pho: #071628;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-beige-kem: #071628;
+  --color-la-co: #A6A15E;
+  --color-cam-dat: #C69F89;
+  --color-burgundy: #93032E;
+  --color-xanh-pho: #F3EFD9;
+}
+
+body {
+  background-color: var(--color-xanh-pho);
+  color: var(--color-beige-kem);
+  font-family: var(--font-sans);
+  transition: background-color 240ms ease, color 240ms ease;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--color-cam-dat);
+  outline-offset: 2px;
+}
+
+/* Elegant scrollbar to match cinema theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-xanh-pho);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-cam-dat);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-burgundy);
+}

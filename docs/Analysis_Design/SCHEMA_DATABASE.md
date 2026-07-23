@@ -260,7 +260,7 @@ CREATE TABLE users (
                                           -- refusal expressible: one address, one account, ever
   phone TEXT,                             -- normalized to one canonical form (+84…) before write,
                                           -- so 0901234567 and +84901234567 cannot become 2 accounts
-  full_name TEXT,                         -- the "nickname" in the UI and contracts
+  nickname TEXT,                          -- display handle; canonical name DB->API->UI (renamed from full_name; see CONTEXT.md, feature 001 Q4b)
   password_hash TEXT,                     -- NULL for a Google account; never both this and provider
                                           -- ='google' (D5 — the two kinds never merge)
   provider TEXT NOT NULL DEFAULT 'email'  -- always populated: it selects which refusal message the

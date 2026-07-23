@@ -1,0 +1,27 @@
+import { join } from 'node:path';
+import cookieParser from 'cookie-parser';
+import express, { type Express } from 'express';
+import { errorHandler, notFound } from './middleware/error.js';
+import { authRouter } from './modules/auth/auth.routes.js';
+
+/** Build the Express app (no listen) so tests can drive it with supertest. */
+export function createApp(): Express {
+  const app = express();
+  app.set('trust proxy', 1); // one Nginx hop (ADR 0003) → req.ip is the real client
+  app.use(express.json({ limit: '1mb' }));
+  app.use(cookieParser());
+
+  // Uploaded avatars, served as static files, never executed (ADR 0004).
+  app.use(
+    '/uploads',
+    express.static(join(process.cwd(), 'uploads'), {
+      setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff'),
+    }),
+  );
+
+  app.use('/api', authRouter);
+
+  app.use(notFound);
+  app.use(errorHandler);
+  return app;
+}

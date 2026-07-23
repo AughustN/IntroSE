@@ -1,8 +1,17 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: 1.0.0 → 1.1.0
-Bump rationale (1.1.0): Added Principle VI (Clean Codebase & Seamless FE/BE
+Version change: 1.1.0 → 2.0.0
+Bump rationale (2.0.0): Team-approved amendment (2026-07-23) — backward-incompatible
+  governance changes, so MAJOR:
+  1. Integration cap redefined two → four (added Google OAuth sign-in and Resend
+     transactional email; a fifth still needs an amendment).
+  2. Wallet refunds reintroduced into scope (refund to store-credit wallet per ticket,
+     D3); real-money settlement/payouts remain out of scope.
+  3. Seat lifecycle DATA-03 `pending_payment` state removed — wallet-only checkout is
+     one atomic local transaction with no gateway leg (D2).
+  4. Hosting moved from Vercel/Render to a single team-managed VPS (Nginx, same-origin).
+Prior (1.1.0): Added Principle VI (Clean Codebase & Seamless FE/BE
   Integration) — a new material principle → MINOR bump.
 Prior (1.0.0): Initial ratification of a concrete constitution from the template.
   First codified set of principles, constraints, and governance → MAJOR baseline 1.0.0.
@@ -51,10 +60,11 @@ listing assistant, real-time analytics, notifications/reminders/waitlist, review
 admin moderation & organizer approval, real-time seat selection & holds), Vietnamese-language
 UI, VND-only pricing, and sandbox (non-settling) payments.
 
-**Explicitly out of scope:** multi-currency / international sales, real-money settlement or
-payouts, and monetary refunds (ticket *cancellation* that frees a seat is in scope; no money
-moves). These exclusions protect the fixed 13-week academic timeline and MUST NOT be
-reintroduced without a constitution amendment.
+**Explicitly out of scope:** multi-currency / international sales, and real-money settlement or
+payouts. **Refunds to the store-credit wallet are in scope** (per ticket, once, closed-loop — no
+money leaves the platform as cash; schema decision D3). These exclusions protect the fixed 13-week
+academic timeline and MUST NOT be reintroduced without a constitution amendment. *(Amended 2026-07-23,
+v2.0.0: wallet refunds moved into scope; real-money settlement stays out.)*
 
 ## Core Principles
 
@@ -68,9 +78,10 @@ system MUST stay correct and responsive when many buyers contend for the same se
 - No two attendees may ever be sold the same seat. Concurrent purchases on one seat MUST be
   serialized so exactly one wins (DATA-02), and order-plus-ticket issuance MUST run in a
   single ACID transaction that rolls back fully on any failure (DATA-01).
-- Seat lifecycle MUST be explicit (`available` → `held` → `pending_payment` → `sold`). A
-  `pending_payment` seat is never freed early (DATA-03); `held` seats auto-release on TTL
-  (REL-02).
+- Seat lifecycle MUST be explicit (`available` → `held` → `sold`). Checkout debits the store-credit
+  wallet in one atomic local transaction, so no `pending_payment` state waits on a gateway callback
+  (D2; amended 2026-07-23 — DATA-03's `pending_payment` mandate removed); `held` seats auto-release on
+  TTL (REL-02).
 - Concurrency and performance claims are only true when **proven by load/stress tests** (k6),
   not by a clean demo. PERF/REL targets (Vision §6.1, §6.4) are the acceptance bar.
 
@@ -194,7 +205,7 @@ The stack is fixed for this project; changing a listed technology requires an am
 | Payments | VNPay sandbox | Vietnamese gateway; sandbox-only, no real settlement. TixHub never stores card data. |
 | AI | Google Gemini API (chat + `text-embedding-004`) | Powers the assistive AI features under a shared free-tier quota, with non-AI fallbacks. |
 | CI/CD | GitHub Actions | Runs type-check, lint, tests, coverage, and gitleaks on every push / PR. |
-| Hosting | Vercel (frontend), Render (backend), Neon/Supabase (Postgres) | Free tiers sufficient for demos; paid upgrade is a config change. |
+| Hosting | Single team-managed **VPS** (Nginx: TLS + static SPA + reverse proxy, same-origin at `tixhub.fit`), Neon (Postgres) | Amended 2026-07-23 (was Vercel + Render): self-hosted VPS; TLS is team-managed; scale-out / paid upgrade remains a config change. |
 
 - Language: **TypeScript** on both frontend and backend, `strict` mode mandatory.
 - Money: all monetary values stored and displayed as **VND integers** — no floating-point
@@ -206,8 +217,10 @@ The stack is fixed for this project; changing a listed technology requires an am
 **Architecture rules**
 
 - Standard client-server split: React SPA ↔ REST/JSON over HTTPS, with a Socket.IO WebSocket
-  channel dedicated to live seat status. External integrations are limited to **two**: VNPay
-  (payments) and Gemini (AI). Adding a third external dependency requires an amendment.
+  channel dedicated to live seat status. External integrations are limited to **four**: VNPay
+  (payments), Gemini (AI), Google (OAuth sign-in), and Resend (transactional email). Adding a fifth
+  external dependency requires an amendment. *(Amended 2026-07-23, v2.0.0: was two — Google and Resend
+  added for the account & authentication feature.)*
 - The request path MUST stay **stateless** so the backend can scale horizontally; session-mode
   database features that would break the transaction-pooled endpoint are avoided (SCAL-01).
 - Server-side identity is authoritative: the authenticated session identity is injected by the
@@ -247,8 +260,9 @@ The following are never acceptable in this codebase:
 - **Floating-point money.** VND integers only (STD-03).
 - **Committing secrets** or merging on a red CI (type errors, lint failures, gitleaks hits)
   (MAIN-02, SEC-11).
-- **Reintroducing out-of-scope work** (multi-currency, real settlement, refunds) without an
-  amendment.
+- **Reintroducing out-of-scope work** (multi-currency, real-money settlement or payouts) without an
+  amendment. *(Wallet refunds are in scope as of the 2026-07-23 amendment; real-money settlement is
+  not.)*
 - **Independently re-declaring FE/BE payload shapes** (contract drift) or merging dead code,
   commented-out blocks, or debug `console.log` to `main` (Principle VI).
 
@@ -287,4 +301,4 @@ under `docs/adr/` or as an amendment here. Reviewers verify compliance as part o
 mandatory review (MAIN-04). Runtime and domain guidance lives in `CONTEXT.md` (glossary) and
 `docs/adr/` (architecture decisions); this constitution governs how that work is done.
 
-**Version**: 1.1.0 | **Ratified**: 2026-07-10 | **Last Amended**: 2026-07-10
+**Version**: 2.0.0 | **Ratified**: 2026-07-10 | **Last Amended**: 2026-07-23

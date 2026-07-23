@@ -8,6 +8,22 @@
 
 **Input**: User description: "Account & authentication for TixHub. Scope = UC-01 register membership (email, phone, nickname, password; bcrypt cost 12; email+phone uniqueness; rate limit), UC-02 Google OAuth sign-in/registration (no password stored), UC-03 login by email or phone + password, UC-04 logout with session revocation, UC-05 password reset via emailed link, UC-06 manage profile (nickname, phone, avatar) and change password, UC-37 apply to become organizer (enters admin approval queue; not approved = cannot create/publish events). Roles: Attendee is the default; Admin is a flag; Organizer is derived from an approved application — no single role column."
 
+## Clarifications
+
+### Session 2026-07-23 (from plan-review grill; see plan.md, research.md, ADRs 0001–0004)
+
+- **FR-019 / US2-scenario-4 — reuse-kill scope**: reuse of a superseded credential ends every session
+  **in that credential's family** (one login/device), **not** every session for the account. Account-wide
+  kill was both broader than the evidence and a user-level DoS amplifier. Matches schema decision D7.
+- **FR-032 — reset-request throttle**: limited **per submitted identifier** (keyed on a hash of the
+  identifier + source), never per existing account, so the limit cannot enumerate registered addresses
+  (FR-028, FR-040).
+- **SC-005 — logout timing wording**: "within 1 second" → "on the very next request". The guarantee is
+  synchronous (session validity is read live per request, ADR 0001), not a wall-clock latency race.
+- **Avatar (Assumptions)**: users **upload** an image, stored on the VPS disk and served statically; the
+  URL-paste path is dropped (Google's seeded picture is the one exception). Supersedes the earlier
+  "avatar is a URL, upload out of scope" assumption (ADR 0004).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Create an account and stay signed in (Priority: P1)
@@ -67,8 +83,9 @@ signed-in state produced by User Story 1; adds nothing to how that state is esta
 3. **Given** a session that ended, **When** it is replayed later, **Then** it is refused and the
    attempt is recorded.
 4. **Given** a session credential that has already been rotated, **When** the superseded one is
-   presented, **Then** it is refused and every remaining session for that account is ended, because
-   a replayed credential means a copy is loose.
+   presented, **Then** it is refused and every remaining session **in that credential's family** (the
+   sessions descended from that one login) is ended — the account's other logins are untouched — because
+   a replayed credential means a copy of that family is loose.
 
 ---
 
@@ -302,7 +319,9 @@ is throttled while the same account still signs in successfully from a different
 - **FR-017**: System MUST end a session on request, and MUST refuse every later use of it.
 - **FR-018**: Users MUST be able to end all of their sessions at once.
 - **FR-019**: System MUST detect and refuse the reuse of a session credential that has already been
-  superseded, and MUST end that account's remaining sessions when it happens.
+  superseded, and MUST end every remaining session **in that credential's family** — the sessions
+  descended from one login — when it happens. It MUST NOT end the account's other logins: a superseded
+  credential proves a copy of *that* family is loose, not that other sessions are compromised.
 
 **Identity, roles, and access**
 
@@ -343,7 +362,10 @@ is throttled while the same account still signs in successfully from a different
   reset.
 - **FR-031**: System MUST store reset links so that reading the stored form does not let anyone use
   them.
-- **FR-032**: System MUST limit how often reset links can be requested for one account.
+- **FR-032**: System MUST limit how often reset links can be requested **per submitted identifier**,
+  keyed so the limit fires identically whether or not that identifier belongs to an account. Limiting
+  per existing account would let the throttle disclose which identifiers are registered, defeating
+  FR-028 and FR-040.
 
 **Profile**
 
@@ -448,7 +470,7 @@ is throttled while the same account still signs in successfully from a different
   ordinary load.
 - **SC-004**: A returning visitor is recognised without re-entering a password for at least 7 days
   of ordinary use.
-- **SC-005**: Signing out makes the previous session unusable within 1 second, verified by an
+- **SC-005**: Signing out makes the previous session unusable on the very next request, verified by an
   immediate replay attempt.
 - **SC-006**: The measured response times for "unknown account" and "known account, wrong password"
   are statistically indistinguishable across 100 samples, so that response time discloses nothing
@@ -534,7 +556,10 @@ and unique) and **D5** (the two account kinds never merge). What changed:
   accounts.
 - **Session lifetime** is assumed to be a short-lived working credential refreshed from a longer-lived
   one, rather than a single long-lived credential, so that revocation is possible at all.
-- **The avatar is supplied as a URL**, not an upload; file storage is out of scope.
+- **The avatar is uploaded by the user** as an image file and stored on the application's own host (the
+  VPS disk, served as a static file); arbitrary URL entry is not offered to users. The one exception is
+  the picture supplied by Google, seeded at Google sign-up. (This supersedes the earlier "avatar is a
+  URL, upload out of scope" assumption; see plan ADR 0004.)
 - **One wallet per account is created at registration** and never by a later flow.
 
 ## Dependencies
