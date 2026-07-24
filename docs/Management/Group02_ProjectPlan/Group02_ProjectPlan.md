@@ -4,7 +4,7 @@
 
 <img src="../Image/HCMUS.jpg" width="130">
 
-## TixHub — Event Ticket Sales Web Application
+## TixHub: Event Ticket Sales Web Application
 
 **Introduction to Software Engineering  — 24C11**
 
@@ -68,34 +68,36 @@ TixHub delivers **eleven core features** across three user roles Admin, Organize
 
 ##### In Scope
 
-- ***Attendee:*** Browse, search, and filter events; buy tickets; pay via VNPay sandbox; receive QR-code digital tickets; cancel a ticket to free the seat (no monetary refund); AI event recommendations (via third party AI API); submit reviews & ratings; receive notifications and join waitlists.
+- ***Attendee:*** Browse, search, and filter events; top up a **store-credit wallet** via the VNPay sandbox; buy tickets by **debiting that wallet in one atomic transaction**; receive QR-code digital tickets; cancel a ticket to free the seat and get its **refundable amount back to the wallet**; AI event recommendations (via third party AI API); submit reviews & ratings; receive notifications and join waitlists.
 - ***Organizer:*** Event creation & management; AI listing assistant (via third party AI API); phone browser door QR scanner and check-in; real time analytics dashboard.
-- ***Admin:*** Organizer approval workflow; content moderation; platform-wide analytics.
-- ***Platform wide:*** Authentication — Google OAuth sign in and own membership (email/Gmail, phone number, nickname, password); single deployment reachable via a public URL for grading.
+- ***Admin:*** Organizer approval workflow; **pre-publish event approval** and content moderation; platform-wide analytics.
+- ***Platform wide:*** Authentication — Google OAuth sign in and own membership (email, nickname, password, optional unique phone); single deployment reachable via a public URL for grading.
 
 ##### Out of Scope
 
-- Real money / production payment settlement (VNPay sandbox only).
-- Ticket refunds (the VNPay sandbox has no real settlement, so no money moves; ticket **cancellation** is in scope, but no monetary refund is issued).
+- Real money / production payment settlement and **payouts to organizers** (VNPay sandbox only; organizers are settled off-platform).
+- **Cash-out from the wallet.** The wallet is a closed loop: money enters by top-up and leaves only as tickets. Refunds go **back to the wallet**, never to a card or bank account (schema decision D3, constitution v2.0.0).
 - Multi-currency and international payment methods.
 - Native mobile applications (iOS/Android).
+- Online / streaming events — physical venues only.
 - Ongoing post-PA5 maintenance and support.
 - Third party AI API hosting or model training; no custom model.
 
 ##### Constraints
 
-- Free tier hosting only — frontend on Vercel, backend on Render, database on Neon·Supabase.
+- Hosting: a single team-managed **VPS** (`tixhub.fit`, Nginx serving the SPA and reverse-proxying the API same-origin) plus free-tier **Neon** PostgreSQL.
 - Third-party AI API free-tier quota.
 - VNPay **sandbox** only; no real funds are processed.
+- External integrations capped at **four** — VNPay, Gemini, Google OAuth, Resend (constitution v2.0.0); a fifth needs an amendment.
 - 13 week semester, 5 sprints (PA1–PA5), 5 member team.
 - The deployed application will be reachable via a public URL for evaluator grading.
 
 ##### Acceptance Criteria
 
 - All eleven features are deployed and demonstrable end to end on the public URL.
-- The core flow works: register/login &rarr; create event &rarr; buy ticket (GA + reserved) &rarr; receive QR ticket &rarr; check in at the door.
+- The core flow works: register/login &rarr; create event &rarr; admin approves it &rarr; top up wallet &rarr; buy ticket (GA + reserved) &rarr; receive QR ticket &rarr; check in at the door.
 - Concurrent seat purchases never double book a seat (verified under load test).
-- Payments are confirmed through a signed, idempotent VNPay sandbox callback.
+- Wallet top-ups are credited only through a signed, idempotent VNPay sandbox IPN; the wallet ledger explains every balance (DATA-04).
 - All four builds pass the CI quality gates (see §7) with no open P0/P1 defects.
 - Each PA deliverable is accepted by the course evaluators.
 
@@ -104,17 +106,17 @@ TixHub delivers **eleven core features** across three user roles Admin, Organize
 | Sprint | PA | Key Deliverables |
 |--------|-----|------------------|
 | Sprint 1 | PA1 | Identify problem, project proposal, team contract, and workflow principle |
-| Sprint 2 | PA2 | Project Plan, authentication module, and VNPay checkout |
-| Sprint 3 | PA3 | QR ticketing & door scanner, event discovery & search, real time analytics dashboard, fully integrated build; revised project plan |
-| Sprint 4 | PA4 | AI recommendations chatbot, AI listing assistant, notifications & waitlist |
-| Sprint 5 | PA5 | Reviews & ratings, admin moderation, complete test reports, production deployment, PA5 feature demo |
+| Sprint 2 | PA2 | Project Plan, Vision Document, SpecKit setup + project constitution, account & authentication module |
+| Sprint 3 | PA3 | Use-Case Specification, event catalog & discovery (incl. admin pre-publish approval), wallet top-up + wallet checkout, real-time seat map & holds, QR ticketing & door scanner, real time analytics dashboard, fully integrated build; revised project plan |
+| Sprint 4 | PA4 | AI recommendations chatbot, AI listing assistant, notifications & waitlist, ticket cancellation with wallet refund |
+| Sprint 5 | PA5 | Reviews & ratings, reported-content moderation, admin platform analytics, complete test reports, production deployment, PA5 feature demo |
 
 #### Assumptions
 
 - All five team members remain available and fully commited to the project.
 - VNPay sandbox remains accessible and stable throughout the project; no real money will be processed.
 - API free tier quotas are sufficient for development and demonstration purposes.
-- Free hosting tiers (Vercel, Neon/Supabase) provide adequate capacity for development, testing, and the PA5 demo.
+- The single VPS (`tixhub.fit`) plus free-tier Neon PostgreSQL provide adequate capacity for development, testing, and the PA5 demo.
 - Course evaluators can access the deployed application via a public URL for grading.
 - A shared API contract agreed in Sprint 1 remains valid unless a breaking change is unanimously approved by the team.
 - The team's personal laptops meet the minimum requirements: modern multi core CPU, ≥ 8 GB RAM, internet access.
@@ -159,7 +161,7 @@ TixHub delivers **eleven core features** across three user roles Admin, Organize
 
 - ***Nguyễn Minh Khoa:*** Backend Developer. Implements core backend modules and REST API endpoints, owns payment integration (VNPay) and AI integration (Gemini), and supports architectural decisions on the server side.
 
-- ***Nguyễn Tấn Hiệu:*** Frontend Developer and DevOps Engineer. Implements and owns the React SPA and all user facing interfaces, configures and maintains the CI/CD pipeline (GitHub Actions), manages deployments to Vercel (frontend) and backend, and monitors hosting infrastructure.
+- ***Nguyễn Tấn Hiệu:*** Frontend Developer and DevOps Engineer. Implements and owns the React SPA and all user facing interfaces, configures and maintains the CI/CD pipeline (GitHub Actions), manages deployment to the team-managed VPS (`tixhub.fit`: Nginx TLS, static SPA, reverse-proxied API) and the Neon database, and monitors hosting infrastructure.
 
 - ***Nguyễn Anh Khôi:*** Database Manager. Designs and owns the PostgreSQL schema, writes and runs all database migrations, ensures data integrity, and supports performance tuning for concurrent seat hold queries.
 
@@ -179,10 +181,10 @@ TixHub delivers **eleven core features** across three user roles Admin, Organize
 | # | Risk | Likelihood | Impact | Mitigation Strategy |
 |---|------|:----------:|:------:|---------------------|
 | 1 | **Member unavailability:** A team member becomes temporarily unavailable due to illness, academic commitments, or personal circumstances, stalling their assigned tasks. | Medium | High | Tasks are documented clearly in Jira so any member can pick them up. The team maintains a shared knowledge of all modules via code review and weekly syncs. If a member is unavailable, the PM redistributes their sprint tasks immediately and make sure that member has to compensate the work they had missed after they return. |
-| 2 | **Technology issues / free tier limits:** Hosting, database (Neon/Supabase), or API free quotas are exceeded during development, testing, or the PA5 demo, causing service interruptions. | Medium | Medium | The DevOps member (Hiệu) monitors usage dashboards throughout the semester. If the team can not find other complimentary alternative, must contact the supervisor for advice and guidance. Demo traffic is controlled and pre-staged. |
+| 2 | **Infrastructure / free tier limits:** The VPS runs out of capacity, or the Neon database or AI API free quotas are exceeded during development, testing, or the PA5 demo, causing service interruptions. TLS certificates and OS patching are now the team's own responsibility. | Medium | Medium | The DevOps member (Hiệu) monitors VPS resources and Neon usage throughout the semester, and automates certificate renewal. Scaling out is a config change (more Node workers behind Nginx, or a bigger VPS), not a rewrite. If no complimentary alternative is available, the team contacts the supervisor for advice. Demo traffic is controlled and pre-staged. |
 | 3 | **Scope creep:** Eleven features including a real time concurrent seat map across 13 weeks threatening the sprint schedule. | Medium | High | The eleven features and the explicit out of scope list are locked in the Product Backlog. The PM protects sprint commitments: non-essential polish or new ideas are deferred to later sprints or dropped if they delay PA delivery dates. |
-| 4 | **Integration risk from parallel development:** The frontend and backend are developed independently in Sprint 2 and 3 which may diverge, causing integration failures when combined in Sprint 4. | Medium | Medium | A **shared API contract** (OpenAPI/JSON spec) was agreed in Sprint 2. Integration should begin early in Sprint 4 and is carefully validated by integration tests before Sprint 4 ends. |
-| 6 | **Payment integration failures:** VNPay callbacks may be delayed, duplicated, or fail mid flow, risking tickets issued without confirmed payment, or payments collected without ticket issuance. | Low | High | The order remains in a *pending* state until a VNPay callback is received and validated. Callback handling is **idempotent**: processing the same callback twice produces the same result with no side effects. A reconciliation job runs on a timer to resolve stale pending orders. Tickets are issued only after confirmed payment. |
+| 4 | **Integration risk from parallel development:** The frontend and backend are developed independently in Sprint 2 and 3 which may diverge, causing integration failures when combined in Sprint 4. | Medium | Medium | A **single shared contract** — request/response shapes declared once as TypeScript types in `shared/` and imported by both sides, plus an OpenAPI file per feature — was agreed in Sprint 2 and is mandated by constitution Principle VI, so a breaking change fails at compile time rather than in the browser. Frontend and backend now live in one monorepo and are integrated per feature as it ships, not in a late big-bang phase. |
+| 6 | **Payment integration failures:** VNPay top-up IPNs may be delayed, duplicated, or fail mid flow, risking a wallet credited twice or money paid but not credited. | Low | High | Wallet-only checkout (schema decision D2) keeps the gateway out of the seat and ticket lifecycle entirely — a failed top-up costs a seat at worst, never a ticket issued without payment. IPN handling is **idempotent** (guarded on `status='initiated'` plus a unique reference), so a replay credits nothing. A `querydr` reconciliation sweep settles top-ups still `initiated` after ~15 minutes; until then the attendee sees *Pending*, never lost money. |
 
 ---
 
@@ -190,7 +192,7 @@ TixHub delivers **eleven core features** across three user roles Admin, Organize
 
 > *Conducted by Nguyễn Minh Khoa.*
 
-This project follows the **Scrum** process model, organized into five sprints that correspond to the five PA deliverables (PA1–PA5). Each sprint lasts 2–3 weeks. **Sprint 2 is the current sprint** (PA2), and detailed tasks with assigned performers, reviewers, and due dates are provided below. For Sprints 3–5, planned tasks are listed; detailed assignments will be finalized when each sprint begins.
+This project follows the **Scrum** process model, organized into five sprints that correspond to the five PA deliverables (PA1–PA5). Each sprint lasts 2–3 weeks. **Sprint 3 is the current sprint** (PA3); Sprint 2 is closed. Detailed tasks with assigned performers, reviewers, and due dates are provided for Sprints 2 and 3. For Sprints 4–5, planned tasks are listed; detailed assignments will be finalized when each sprint begins.
 
 > **Task convention:** each task is performed by two member and reviewed by another. All project related activities like coding, report writing, testing, and self-training is counted as valid tasks.
 
@@ -221,13 +223,15 @@ This project follows the **Scrum** process model, organized into five sprints th
 
 #### Sprint 3: Tickets & Data 
 
-**Focus:** QR ticketing & door scanner, event discovery & search, real-time analytics, front-end / back-end full integration and VNPay sandbox, and revised project plan.
+**Focus:** event catalog & discovery, wallet top-up and wallet checkout, real-time seat map & holds, QR ticketing & door scanner, real-time analytics, front-end / back-end full integration, and revised project plan.
 
 | # | Task | Performer | Reviewer | Due Date |
 |---|------|-----------|----------|----------|
+| 0 | Implement event catalog & discovery: public browse/detail/showtimes/seat-map read side, organizer event CRUD, admin **pre-publish approval** queue (**done**, feature `002-event-catalog`) | Lương Hưng Phát, Nguyễn Anh Khôi | Nguyễn Thành Đạt | July 24, 2026 |
 | 1 | Implement SeatHold TTL mechanism and auto-release job on the backend | Nguyễn Anh Khôi, Nguyễn Minh Khoa | Lương Hưng Phát | July 16, 2026 |
-| 2 | Generate unique QR code digital tickets upon confirmed payment | Nguyễn Minh Khoa, Nguyễn Anh Khôi | Lương Hưng Phát | July 18, 2026 |
-| 3 | Implement public event browse page with keyword, category, date, location, and price filters | Nguyễn Tấn Hiệu, Nguyễn Anh Khôi | Nguyễn Thành Đạt | July 18, 2026 |
+| 1b | Implement wallet: VNPay sandbox **top-up** (signed IPN, idempotent, `querydr` reconciliation) and **wallet checkout** (single ACID transaction: order, debit, ledger row, seats → sold, tickets) | Nguyễn Minh Khoa, Nguyễn Anh Khôi | Lương Hưng Phát | July 20, 2026 |
+| 2 | Generate unique QR code digital tickets inside the committed wallet-purchase transaction | Nguyễn Minh Khoa, Nguyễn Anh Khôi | Lương Hưng Phát | July 18, 2026 |
+| 3 | Implement public event browse page with keyword, category, date, location, price, and availability filters | Nguyễn Tấn Hiệu, Nguyễn Anh Khôi | Nguyễn Thành Đạt | July 18, 2026 |
 | 4 | Build organizer door scanner UI (phone browser); implement check in validation API | Nguyễn Tấn Hiệu, Nguyễn Minh Khoa | Lương Hưng Phát | July 20, 2026 |
 | 5 | Implement real time seat map | Nguyễn Tấn Hiệu, Lương Hưng Phát | Nguyễn Minh Khoa | July 21, 2026 |
 | 6 | Build real time analytics dashboard: live charts (Recharts) for sales, revenue, remaining inventory, and check-ins | Nguyễn Tấn Hiệu, Lương Hưng Phát | Nguyễn Thành Đạt | July 22, 2026 |
@@ -247,7 +251,7 @@ This project follows the **Scrum** process model, organized into five sprints th
 - Integrate browsing history and past ticket data into the LLM prompt context
 - Implement AI Event Listing Assistant for organizers (API, organizer facing): auto-generate description, suggest titles, tags, and pricing
 - Build notification system: in web and email alerts for booking confirmation, event reminders (1 week / 1 day before), and cancellations
-- Implement ticket cancellation: attendee cancels a ticket, the seat is freed and returned to inventory (no monetary refund, VNPay sandbox only), and the waitlist is notified
+- Implement ticket cancellation with **wallet refund**: self-cancel up to T-24h voids the ticket, returns the seat to inventory, credits the ticket's stored `refundable_amount` back to the buyer's wallet (service fee kept), and notifies the waitlist; event cancellation refunds 100% including the fee
 - Implement waitlist feature: join waitlist for sold out events; auto notify and offer tickets when seats are released
 - Implement AI response caching and rate limiting to stay within Gemini free-tier quotas
 - Write unit and integration tests for all Sprint 4 features
@@ -262,7 +266,7 @@ This project follows the **Scrum** process model, organized into five sprints th
 **Planned tasks:**
 - Implement reviews and ratings: attendees rate events (1–5 stars) and leave written reviews after attending
 - Display aggregated ratings on organizer profiles and event pages
-- Implement admin moderation tools: approve / suspend organizers, review reported events, remove policy-violating content
+- Implement the remaining admin moderation tools: approve / suspend organizers, review reported events and reviews, remove policy-violating content (pre-publish event approval shipped in Sprint 3)
 - Implement admin platform wide analytics view
 - Conduct system testing and user acceptance testing across all three roles
 - Conduct performance testing on real time seat map and analytics under concurrent load
@@ -283,8 +287,8 @@ The table below summarizes the sprint timeline and key milestones. The sprint bo
 | Sprint | PA | Dates | Key Milestone | Status |
 |--------|----|-------|---------------|--------|
 | Sprint 1 — Planning | PA1 | May 25 – Jun 7, 2026 | Problem identified; project proposal, team contract, workflow pipeline, and repository initialized | Done |
-| Sprint 2 — Core | PA2 | Jun 9 – Jul 12, 2026 | Project plan, vision document, SpecKit; landing page with authentication & role-based access | In Progress |
-| Sprint 3 — Tickets & Data | PA3 | Jul 16 – Jul 28, 2026 | QR tickets, door scanner, event discovery & search, real-time seat map & analytics, full integration; PA3 report | Planned |
+| Sprint 2 — Core | PA2 | Jun 9 – Jul 12, 2026 | Project plan, vision document, SpecKit + constitution; landing page with authentication & role-based access | Done |
+| Sprint 3 — Tickets & Data | PA3 | Jul 16 – Jul 28, 2026 | Use-case specification, event catalog & discovery with admin approval, wallet top-up & checkout, QR tickets, door scanner, real-time seat map & analytics, full integration; PA3 report | In Progress |
 | Sprint 4 — AI & Engagement | PA4 | Jul 29 – Aug 11, 2026 | AI recommendations chatbot, AI listing assistant, notifications, waitlist | Planned |
 | Sprint 5 — Validation & Release | PA5 | Aug 12 – Aug 25, 2026 | Reviews & ratings, admin moderation, system testing, production deployment, PA5 demo | Planned |
 
@@ -314,9 +318,9 @@ TixHub will produce **four builds** across Sprints 2–5. Sprint 1 produces no d
 | Build | Sprint | Target Date | Scope | Purpose |
 |-------|--------|-------------|-------|---------|
 | **Build 1:** Internal Alpha | Sprint 2 | Jul 12, 2026 | Authentication (login / register / RBAC) | First deployable build; validates the core user flow from registration through ticket purchase. Tested manually by the team. |
-| **Build 2:** Integration Build | Sprint 3 | Jul 28, 2026 | All Sprint 2 features + QR ticketing, door scanner, event discovery & search, real-time seat map, live analytics dashboard | First fully integrated frontend ↔ backend build. Integration tests executed against this build. Regression-tested to confirm Sprint 2 features remain stable. |
-| **Build 3:** Feature-Complete Beta | Sprint 4 | Aug 11, 2026 | All previous features + AI recommendations, AI listing assistant, notifications & waitlist | Beta build covering all eleven feature areas. Performance-tested under concurrent load (seat map & analytics). Remaining defects from prior builds resolved. |
-| **Build 4:** Release / Demo Build | Sprint 5 | Aug 25, 2026 | All eleven features complete + reviews & ratings, admin moderation, admin analytics | Final production build deployed on Vercel / Render / Neon. Full system test and UAT completed against this build. Used for the PA5 demo covering all project features. |
+| **Build 2:** Integration Build | Sprint 3 | Jul 28, 2026 | All Sprint 2 features + event catalog & discovery with admin approval, wallet top-up & wallet checkout, QR ticketing, door scanner, real-time seat map, live analytics dashboard | First fully integrated frontend ↔ backend build. Integration tests executed against this build. Regression-tested to confirm Sprint 2 features remain stable. |
+| **Build 3:** Feature-Complete Beta | Sprint 4 | Aug 11, 2026 | All previous features + AI recommendations, AI listing assistant, notifications & waitlist, ticket cancellation with wallet refund | Beta build covering all eleven feature areas. Performance-tested under concurrent load (seat map & analytics). Remaining defects from prior builds resolved. |
+| **Build 4:** Release / Demo Build | Sprint 5 | Aug 25, 2026 | All eleven features complete + reviews & ratings, reported-content moderation, admin analytics | Final production build deployed on the VPS (`tixhub.fit`) with Neon PostgreSQL. Full system test and UAT completed against this build. Used for the PA5 demo covering all project features. |
 
 #### Build Quality Gates
 

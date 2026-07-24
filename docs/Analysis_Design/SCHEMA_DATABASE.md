@@ -1,7 +1,18 @@
 # Backend and SQL Handoff for TixHub Frontend MVP
 
-This frontend currently uses mock data in `src/data.ts` and browser `localStorage`.
-Backend can replace the mock layer without changing the main user flow.
+This document is the reference data model for the whole product. The frontend originally used mock
+data in `src/data.ts` and browser `localStorage`; the backend replaces that mock layer without
+changing the main user flow.
+
+> **Build status (2026-07-24).** Two features are implemented on branch `BE` and their tables are
+> live migrations, so those sections are now *descriptions of shipped code*, not proposals:
+> `server/src/db/migrations/0001_auth.sql` (users, wallets, refresh_tokens, **password_resets**,
+> auth_events, organizers) and `0002_catalog.sql` (event_categories, venues **+ `created_by`**,
+> sections, seats, events, showtimes, ticket_tiers, showtime_seats, audit_logs). Everything else
+> below — reservations, orders, payment_transactions, tickets, wallet_transactions, ratings,
+> comments, waitlists, notifications, reports, saved_events, event_views — is still the agreed
+> design awaiting its feature. Where a shipped table differs from the draft, the SQL below has been
+> corrected to match the migration.
 
 > **Domain note:** TixHub is a **general event-ticketing** marketplace (concerts, workshops,
 > theatre, community/club events) — not a cinema. The frontend `MovieEvent` type is a
@@ -13,7 +24,7 @@ Backend can replace the mock layer without changing the main user flow.
 
 - Auth: email/password or Google, session refresh with revocation. Email mandatory, phone optional but unique and usable to sign in; no email verification (D4). The two account kinds never merge (D5). (Admin is a flag; Organizer is derived from an approved application — no single role column.)
 - Events: general-admission and seated events (concerts, workshops, theatre, community/club events) with searchable metadata. **Physical only** — no online events in MVP.
-- Venues: theatre, concert hall, community/workshop space, seat maps, city/location guidance.
+- Venues: theatre, concert hall, community/workshop space, seat maps, city/location guidance. **Owned by the organizer that created them** (`created_by`, decision D-F of feature 002) — only the owner or an admin edits one, and only the owner's events use it.
 - Showtimes: date/time inventory per event and venue (single-session and multi-session events).
 - Reservations: temporary seat hold with expiration. **Login required to hold a seat** (no anonymous holds).
 - Wallet: per-attendee store-credit balance + append-only ledger. **Closed loop** — money in via VNPay top-up, out only as tickets, no cash-out (D2).
@@ -22,7 +33,7 @@ Backend can replace the mock layer without changing the main user flow.
 - Tickets: QR/barcode generation, one-time check-in, resend email, per-ticket `refundable_amount` snapshot.
 - Refunds: to the wallet, per ticket, once only. Self-cancel until T-24h (fee kept); event cancellation 100% (D3).
 - Social proof: one **Rating** (1–5 stars) per attendee per event feeds the aggregate; unlimited **Comments** per attendee.
-- Admin: event CRUD, showtime CRUD, seat map CRUD, event cancellation, voucher, reports, moderation, audit log. **Read-only on wallets** — no admin path creates or removes balance.
+- Admin: **pre-publish event approval** (an event reaches buyers only at `on_sale` **and** `moderation_status='approved'` **and** an approved organizer), event CRUD, showtime CRUD, seat map CRUD, event cancellation, voucher, reports, moderation, audit log. **Read-only on wallets** — no admin path creates or removes balance.
 - SEO: public event pages with slug, metadata, JSON-LD schema.
 
 ## Design Decisions
@@ -166,6 +177,10 @@ because a token already issued cannot be edited.
 - `GET /api/showtimes/:id/seat-map`
   - Returns rows, seats, seat type, tier price, availability. **Viewable by guests; selecting a seat requires login.**
 
+*(All four public routes above are implemented. Every one applies the visibility predicate — on sale
+∧ approved ∧ organizer approved — so a draft, a `pending_review`, a flagged/removed event, or a
+suspended organizer's event is a 404 even when its id or slug is guessed.)*
+
 ### Auth
 
 - `POST /api/auth/register`
@@ -191,7 +206,9 @@ because a token already issued cannot be edited.
 - `POST /api/auth/password/forgot` · `POST /api/auth/password/reset`
   - Identical response whether or not the address is registered. Refused outright for a Google
     account: setting a password there would be a back-door link (D5).
-- `GET /api/me` · `PATCH /api/me` (nickname, phone, avatar) · `POST /api/me/password`
+- `GET /api/me` · `PATCH /api/me` (nickname, phone) · `POST /api/me/avatar` (multipart image upload —
+  magic-byte check, re-encoded with sharp, SVG refused; stored on the VPS disk) · `POST /api/me/password`
+- `POST /api/organizers/apply` · `GET /api/organizers/me` · `GET /api/organizers/dashboard`
 
 ### Booking (login required)
 
@@ -228,24 +245,43 @@ because a token already issued cannot be edited.
   - Poll status after the browser returns (`initiated` | `success` | `failed`) — the return URL itself never changes state.
 - `POST /api/payments/webhook`
   - VNPay IPN; must be idempotent. **Sole trigger for crediting a wallet.** Touches no seats, no orders, no tickets.
+
+### Engagement (login required)
+
 - `POST /api/reports`
   - Body: `targetType` (`event`|`comment`), `targetId`, `reason`. Feeds moderation queue.
 - `POST /api/waitlists`
   - Join waitlist for a sold-out `showtimeId` (+ optional `ticketTierId`).
 
-### Admin / Organizer
+### Organizer (`/api/organizer`, requires an approved organizer)
 
-- `GET/POST/PATCH/DELETE /api/admin/events`
-- `POST /api/admin/events/:id/cancel` — void all tickets, release seats, mark orders `cancelled`, email + notify every buyer.
-- `GET/POST/PATCH/DELETE /api/admin/showtimes`
-- `GET/POST/PATCH/DELETE /api/admin/venues`
-- `GET/POST/PATCH/DELETE /api/admin/seat-maps`
-- `GET /api/admin/orders`
-- `GET/POST/PATCH/DELETE /api/admin/vouchers`
-- `POST /api/admin/checkins` — idempotent QR check-in.
-- `GET /api/admin/reports` / `PATCH /api/admin/reports/:id` — moderation queue.
-- `GET /api/admin/reports/revenue`
-- `POST /api/admin/organizers/:id/approve` / `POST /api/admin/organizers/:id/suspend` — writes an audit log row.
+Own-resource only: every handler scopes to the calling organizer on the server, so another
+organizer's event, venue, or seat is a refusal, not a filter the client can drop.
+
+- `GET /api/organizer/events` · `POST /api/organizer/events` · `PATCH /api/organizer/events/:id`
+- `POST /api/organizer/events/:id/publish` — **submits for admin review** (`pending_review`); it does
+  not make the event public · `POST /api/organizer/events/:id/unpublish`
+- `GET /api/organizer/events/:id/showtimes` · `POST /api/organizer/events/:id/showtimes` ·
+  `POST /api/organizer/events/:id/showtimes-manage`
+- `GET /api/organizer/venues` · `POST /api/organizer/venues`
+- `GET /api/organizer/venues/:id/sections` · `POST /api/organizer/venues/:id/sections` ·
+  `POST /api/organizer/venues/:id/seats` · `DELETE /api/organizer/seats/:id` (refused when the seat is
+  part of a live seat map)
+- `POST /api/organizer/showtimes/:id/seat-map` — generate the bookable map: exactly one
+  `showtime_seats` row per physical seat, per-section tier assignment.
+- *Planned:* `POST /api/organizer/events/:id/cancel` (void tickets, refund 100% to wallets, release
+  seats), `POST /api/organizer/checkins` (idempotent QR check-in), attendee list + export, announcements.
+
+### Admin (`/api/admin`, requires the admin flag)
+
+- `GET /api/admin/moderation` — the review queue.
+- `POST /api/admin/events/:id/approve` — the single positive gate that makes an event public.
+- `POST /api/admin/events/:id/reject` · `POST /api/admin/events/:id/flag` ·
+  `POST /api/admin/events/:id/remove` — each takes a reason and writes an `audit_logs` row (SEC-09).
+- *Planned:* `POST /api/admin/organizers/:id/approve` / `:id/suspend` (audit-logged),
+  `GET /api/admin/orders`, `GET/POST/PATCH/DELETE /api/admin/vouchers`,
+  `GET /api/admin/reports` / `PATCH /api/admin/reports/:id`, `GET /api/admin/reports/revenue`,
+  category & homepage management, system settings.
 
 ## SQL Schema Draft
 
@@ -319,9 +355,12 @@ CREATE TABLE refresh_tokens (
   id BIGSERIAL PRIMARY KEY,
   user_id BIGINT NOT NULL REFERENCES users(id),
   family_id UUID NOT NULL,               -- shared by every token descended from one login
+  family_started_at TIMESTAMPTZ NOT NULL DEFAULT now(),  -- drives the 30-day absolute session cap
   token_hash TEXT UNIQUE NOT NULL,       -- hash only: a leaked database must not yield usable tokens
   parent_id BIGINT REFERENCES refresh_tokens(id),   -- the token this one replaced
-  expires_at TIMESTAMPTZ NOT NULL,
+  idempotency_key TEXT,                  -- honest-retry grace: a resent refresh is not reuse.
+                                         -- Never travels in the cookie.
+  expires_at TIMESTAMPTZ NOT NULL,       -- 7-day sliding window inside the 30-day family cap
   revoked_at TIMESTAMPTZ,                -- non-NULL ⇒ rotated, logged out, or killed with its family
   revoked_reason TEXT CHECK (revoked_reason IN (
     'rotated', 'logout', 'logout_all', 'reuse_detected',
@@ -332,12 +371,31 @@ CREATE TABLE refresh_tokens (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- A token rotates into at most one child, so a family can never fork; also makes the
+-- child of a presented token a deterministic lookup during reuse detection.
+CREATE UNIQUE INDEX uq_refresh_parent ON refresh_tokens(parent_id) WHERE parent_id IS NOT NULL;
 -- "log out everywhere", and "kill every session on suspension / password change".
 CREATE INDEX idx_refresh_user_live ON refresh_tokens(user_id) WHERE revoked_at IS NULL;
 -- Reuse detection kills the family in one statement.
 CREATE INDEX idx_refresh_family ON refresh_tokens(family_id);
 -- Cleanup sweep: rows that are both expired and revoked carry no information worth keeping.
 CREATE INDEX idx_refresh_expired ON refresh_tokens(expires_at) WHERE revoked_at IS NOT NULL;
+
+-- ---------- PASSWORD RESETS ----------
+-- The single-use, time-limited permission to set a new password on one account. Stored hashed, so
+-- reading the table yields nothing usable; `consumed_at` is set in the same statement that spends
+-- the token, which is what makes "single-use" hold against a double-click.
+-- Refused outright for a Google account: granting one would be the link D5 forbids.
+CREATE TABLE password_resets (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL REFERENCES users(id),
+  token_hash TEXT UNIQUE NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,        -- 30 minutes
+  consumed_at TIMESTAMPTZ,                -- non-NULL ⇒ spent
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_password_resets_user ON password_resets(user_id, created_at DESC);
 
 -- ---------- AUTH EVENTS ----------
 -- Authentication history. Deliberately NOT audit_logs: that table is the admin trail (SEC-09) and
@@ -399,8 +457,13 @@ CREATE INDEX idx_organizers_status ON organizers(status);
 CREATE INDEX idx_organizers_user_history ON organizers(user_id, applied_at DESC);
 
 -- ---------- VENUES ----------
+-- Owned by the organizer that created it (D-F): only that organizer or an admin edits or deletes
+-- it, and only that organizer's events may use it. There is deliberately NO
+-- UNIQUE(normalized_name, city): per-organizer ownership means the same physical place may be
+-- entered by several organizers, and a global uniqueness rule would make the second one fail.
 CREATE TABLE venues (
   id BIGSERIAL PRIMARY KEY,
+  created_by BIGINT NOT NULL REFERENCES users(id),   -- owner (D-F)
   name TEXT NOT NULL,
   city TEXT NOT NULL,
   raw_address TEXT NOT NULL,
@@ -408,9 +471,10 @@ CREATE TABLE venues (
   map_url TEXT,
   guide TEXT,
   normalized_name TEXT GENERATED ALWAYS AS (lower(regexp_replace(name, '\s+', ' ', 'g'))) STORED,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (normalized_name, city)
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE INDEX idx_venues_created_by ON venues(created_by);
 
 -- ---------- SECTIONS ----------
 CREATE TABLE sections (
@@ -456,10 +520,9 @@ CREATE TABLE events (
   duration_minutes INT,
   genre TEXT[] NOT NULL DEFAULT '{}',
   lineup TEXT[] NOT NULL DEFAULT '{}',        -- performers / speakers / artists
-  rating NUMERIC(3,1),                        -- aggregate; fed only by ratings table
-  review_count INT NOT NULL DEFAULT 0,        -- count of ratings
+  -- rating NUMERIC(3,1) and review_count INT are added by the reviews & ratings feature, which
+  -- owns the `ratings` table that feeds them. They are NOT in migration 0002.
   image_url TEXT,
-  local_image_path TEXT,
   trailer_url TEXT,
   refund_policy TEXT,
   is_featured BOOLEAN NOT NULL DEFAULT false,
@@ -472,6 +535,10 @@ CREATE TABLE events (
 
   moderation_status TEXT NOT NULL DEFAULT 'pending_review'
     CHECK (moderation_status IN ('pending_review', 'approved', 'flagged', 'removed')),
+    -- Pre-publish moderation: publishing submits for review; only 'approved' is ever public.
+    -- Public ⟺ status='on_sale' AND moderation_status='approved' AND the owning organizer is
+    -- currently 'approved' — computed live per request, never cached onto the row.
+  review_note TEXT,                           -- admin's reject / flag / remove reason
 
   seo_title TEXT,
   seo_description TEXT,
@@ -792,7 +859,7 @@ Two-layer locking, matching the schema (`showtime_seats` + `reservations`/`reser
 - `reservations` + `reservation_items` is the checkout-session layer: created when the user proceeds to checkout, referencing the already-held `showtime_seats` rows.
 - Before inserting `reservation_items`, verify no active reservation or paid order owns the same `showtime_id + seat_id` (`SELECT ... FOR UPDATE` on `showtime_seats`).
 - Add a unique partial index or transactional lock around active holds.
-- Expire both `showtime_seats.hold_expires_at` and `reservations.expires_at` via a scheduled job every minute; release the seat back to `available` on expiry.
+- Expire both `showtime_seats.hold_expires_at` and `reservations.expires_at` via a scheduled job every minute; release the seat back to `available` on expiry. The TTL is **7 minutes, configurable** (Vision REL-02) and is the only timer on a seat — there is no payment window (D2, DATA-03).
 - `POST /api/orders` converts the reservation only if it is still `active` — re-check under the lock, inside the same transaction as the wallet debit.
 - Rate-limit holds per user to prevent hold-spam. (No anonymous holds — a hold always has a `hold_owner_id`.)
 - **A pending top-up never freezes a hold.** If a top-up could extend or pause the TTL, anyone could lock a whole seat map for free by starting a top-up and never finishing it. The hold expires normally; only the seat is lost, never the money (D2).
@@ -839,7 +906,7 @@ COMMIT;
 
 **Operational notes**
 
-- VNPay **cannot reach `localhost`** — the IPN is server-to-server. Deploy the backend (Render) or tunnel (`ngrok` / `cloudflared`). Add a dev-only simulated-IPN endpoint, guarded by `NODE_ENV !== 'production'`, so the team can work on wallet logic without a tunnel.
+- VNPay **cannot reach `localhost`** — the IPN is server-to-server. Point it at the deployed backend on the VPS (`tixhub.fit`, behind Nginx) or tunnel (`ngrok` / `cloudflared`). Add a dev-only simulated-IPN endpoint, guarded by `NODE_ENV !== 'production'`, so the team can work on wallet logic without a tunnel.
 - Reconciliation sweep: for `status='initiated'` rows older than ~15 min, call VNPay `querydr` and settle. Until then the attendee sees **Pending**, not lost money.
 
 **Invariants** (assert these in CI — they are the point of the ledger)

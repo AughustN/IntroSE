@@ -113,7 +113,7 @@ Live events have taken off in Vietnam, and so has the need for a dependable way 
 | **For** | Event organizers, attendees, and the platform operator in Vietnam. |
 | **Who** | Need a secure way to list and find events, sell and buy tickets, and keep the marketplace free of fraud including organizers currently running things through social media posts and bank transfers. |
 | **The product name** | TixHub |
-| **That** | Is a ticket selling web app: guided event creation, checkout through VNPay, a unique QR ticket per buyer that organizers scan at the door from their phone browser, a live seat map for reserved events, search and filters, sales analytics dashboard, notifications and waitlists, reviews and ratings, and admin approval of organizers before they can sell. |
+| **That** | Is a ticket selling web app: guided event creation, wallet checkout funded by VNPay sandbox top-ups, a unique QR ticket per buyer that organizers scan at the door from their phone browser, a live seat map for reserved events, search and filters, sales analytics dashboard, notifications and waitlists, reviews and ratings, and admin approval of organizers before they can sell. |
 | **Unlike** | Manual ticket sales over social media and bank transfers, or established platforms like Ticketbox and CTicket, which are to our knowledge, don't offer any comparable AI assisted tools. |
 | **Our product** | Uses third party AI for two things: suggesting events to attendees based on what they've browsed and bought, and helping organizers draft a title, description, tags, and a reasonable price. Admin approval and moderation keep the marketplace honest, and the academic build runs entirely on free tier infrastructure, with a documented upgrade path to paid tiers if the platform were ever scaled. |
 
@@ -199,7 +199,7 @@ xychart-beta
     bar [73, 54, 17, 13]
 ```
 
-**Notable wishlist ideas** (open text): ticket **refunds/cancellation**, **group orders with split payment and per-person ticket transfer**, **quick / random seat assignment**, and **anti-scalping** measures. **Ticket cancellation is in scope** (freeing the seat, no monetary refund); **refunds are out of scope** because payments are sandbox-only with no real settlement. Group features are on the roadmap; the rest are recorded as future enhancements.
+**Notable wishlist ideas** (open text): ticket **refunds/cancellation**, **group orders with split payment and per-person ticket transfer**, **quick / random seat assignment**, and **anti-scalping** measures. **Ticket cancellation and refunds to the store-credit wallet are in scope** (constitution v2.0.0): cancelling frees the seat and returns the ticket's amount to the buyer's wallet. **Real-money refunds and payouts stay out of scope** because payments are sandbox-only with no real settlement. Group features are on the roadmap; the rest are recorded as future enhancements.
 
 #### 3.2 Stakeholder Summary
 
@@ -211,11 +211,11 @@ Stakeholders are parties with an interest in TixHub who are not necessarily dire
 | **Survey respondents / prospective users** | Market proxy | Medium | The 52 people whose needs ground the requirements; an indirect voice. They shape priorities through the survey but do not approve work.|
 | **VNPay (payment provider)** | Dependency | Medium | External sandbox gateway that processes payments; TixHub depends on its callback contract and never stores card data. |
 | **Google Gemini (AI provider)** | Dependency | Low | External API powering the two AI features under a shared free-tier quota; AI degrades to non AI fallbacks if it is unavailable, so its influence on the core flow is low. |
-| **Hosting providers (Vercel, Render, Neon/Supabase)** | Dependency | Medium | Free tier infrastructure on which availability and performance ceilings depend; a config change moves to a paid tier without a rewrite (Section 4.3). |
+| **Hosting (single VPS `tixhub.fit` + Neon Postgres)** | Dependency | Medium | Self-managed VPS (Nginx: TLS + static SPA + reverse-proxy, same-origin) with Neon for Postgres; TLS and OS patching are the team's responsibility; scale-out is a config change, not a rewrite (Section 4.3). |
 
 #### 3.3 User Summary
 
-TixHub serves **three user roles** on one marketplace. A single person may hold more than one role (an admin or organizer can also buy as an attendee). A **guest** (not signed in) is treated as the logged-out state of the Attendee role: guests can browse, search, filter, and view event details, and are prompted to register only when they start checkout — important because ~48% of surveyed users are first-time buyers who arrive without an account. Registration and sign-in support **Google OAuth** or a TixHub membership account (email, phone number, nickname, and password).
+TixHub serves **three user roles** on one marketplace. A single person may hold more than one role (an admin or organizer can also buy as an attendee). A **guest** (not signed in) is treated as the logged-out state of the Attendee role: guests can browse, search, filter, and view event details, and are prompted to register only when they start checkout — important because ~48% of surveyed users are first-time buyers who arrive without an account. Registration and sign-in support **Google OAuth** or a TixHub membership account (email, nickname, and password; a phone number is optional but, when supplied, is unique and usable to sign in). The two account kinds are never linked or merged (schema decisions D4, D5).
 
 | Role | Description | Responsibilities |
 |---|---|---|
@@ -230,7 +230,7 @@ The table traces each major user need to its evidence and to the feature(s) that
 | ID | User need | Evidence | Problem  | Addressed by |
 |---|---|---|---|---|
 | **UN-01** | A platform that stays up under demand | Site crash/overload = #1 pain (27%); reliability = #2 buying factor (21%) | Popular on sales crash or lag, costing users the ticket | Section 6 REL/PERF and scalability targets + concurrency safe seat holds |
-| **UN-02** | Trustworthy, secure payment | Trust/scam fear (12%); security is a top factor (21%) | Bank transfer selling invites fraud; no buyer protection | Feature 2 (VNPay checkout), Feature 10 (organizer approval), Section 6 Security |
+| **UN-02** | Trustworthy, secure payment | Trust/scam fear (12%); security is a top factor (21%) | Bank transfer selling invites fraud; no buyer protection | Feature 2 (wallet checkout, VNPay top-up), Feature 10 (organizer approval), Section 6 Security |
 | **UN-03** | Easy seat / area selection | 81% rate interactive seat map important; "easy seat selection" a top factor (17%) | Manual selling has no live seat view; double-booking risk | Feature 1 (seat map design) + Feature 11 (real-time seat selection & holds) |
 | **UN-04** | Find the right event easily | 71% want filtering | Keyword search buries smaller events under popular ones | Feature 4 (discovery, search & filters), Feature 5 (AI recommendations) |
 | **UN-05** | Confidence before buying (social proof) | Rating system = most wanted feature (83%) | No reputation signal for new organizers | Feature 9 (reviews & ratings) |
@@ -264,10 +264,12 @@ flowchart TB
             API[REST API]
             WS[Socket.IO<br/>real-time channel]
         end
-        DB[(PostgreSQL<br/>events, tickets, seat holds)]
+        DB[(PostgreSQL<br/>events, tickets, wallets, seat holds)]
     end
     VN[[VNPay Sandbox]]
     GM[[Google Gemini API]]
+    GO[[Google OAuth]]
+    RS[[Resend email]]
 
     AT -->|HTTPS| FE
     OR -->|HTTPS| FE
@@ -276,15 +278,17 @@ flowchart TB
     FE <-->|WebSocket: live seat status| WS
     API -->|SQL| DB
     WS -->|seat hold / release| DB
-    API -->|redirect + signed callback| VN
+    API -->|wallet top-up: redirect + signed IPN| VN
     API -->|AI prompt / completion| GM
+    API -->|verify ID token| GO
+    API -->|password-reset mail| RS
 ```
 
-TixHub integrates with two external systems only: the **VNPay** sandbox for payment (TixHub never sees card data) and **Gemini** for the two AI features, which fall back to non AI behaviour when unavailable. The concurrency, persistence, and scaling guarantees behind these flows are specified in Section 6 (Non-Functional Requirements).
+TixHub integrates with **four** external systems: the **VNPay** sandbox — which funds **wallet top-ups only** (TixHub never sees card data), **Gemini** for the two AI features (with non-AI fallbacks), **Google** for OAuth sign-in, and **Resend** for transactional email (password-reset links). The cap was raised from two to four by a constitution amendment (v2.0.0). The concurrency, persistence, and scaling guarantees behind these flows are specified in Section 6 (Non-Functional Requirements).
 
 #### 4.2 Summary of Capabilities
 
-TixHub gives each role an end to end path. **Organizers** create and publish polished event pages, set ticket types and capacity, design seat maps for reserved events, scan QR tickets at the door, and watch sales and check ins on a live dashboard. **Attendees** discover events by keyword, category, date, location, and price, pick seats on a real time map with temporary holds (so two buyers are never sold the same seat), pay securely through VNPay and instantly receive a unique QR ticket, then get reminders, waitlists, and a place to leave reviews. **Admins** keep the marketplace trustworthy through organizer approval and content moderation. Cutting across all three, **AI assistance** offers attendees personalised recommendations and gives organizers a listing co author.
+TixHub gives each role an end to end path. **Organizers** create and publish polished event pages, set ticket types and capacity, design seat maps for reserved events, scan QR tickets at the door, and watch sales and check ins on a live dashboard. **Attendees** discover events by keyword, category, date, location, and price, pick seats on a real time map with temporary holds (so two buyers are never sold the same seat), **pay from a store-credit wallet** (topped up via VNPay) in one atomic transaction and instantly receive a unique QR ticket, then get reminders, waitlists, and a place to leave reviews. **Admins** keep the marketplace trustworthy through organizer approval and content moderation. Cutting across all three, **AI assistance** offers attendees personalised recommendations and gives organizers a listing co author.
 
 The detail behind each of these capabilities, including the user need it serves (UN-xx) is in Section 5 (Product Features); this paragraph is the high level map, not a separate feature list.
 
@@ -294,16 +298,16 @@ Each item is tagged as an **Assumption** (something we take to be true) or a **D
 
 | # | Type | Assumption / Dependency | Likelihood × Impact | Impact if it changes |
 |---|---|---|---|---|
-| 1 | Dependency | VNPay's sandbox callback contract stays stable and reachable. | Low × High | Payment confirmation and ticket issuance break (mitigated by idempotent callbacks (REL-03) and timeout-based release of unpaid orders (DATA-03)). |
+| 1 | Dependency | VNPay's sandbox callback contract stays stable and reachable. | Low × High | Only **wallet top-ups** break — checkout is wallet-only and atomic, so a seat never waits on a gateway callback (schema D2). Mitigated by idempotent top-up IPNs (REL-03). |
 | 2 | Dependency | Google Gemini's free tier quota remains usable (~10 req/min, ~100–250/day, shared). | Medium × Low | AI features degrade gracefully to non AI fallbacks, so the core flow is unaffected (Section 6 SCAL-03). |
-| 3 | Assumption | Free tier hosting (Vercel, Render, Neon/Supabase) provides enough capacity for demos. | Medium × Medium | Performance/availability ceilings apply; a paid tier is a config change, not a rewrite. |
+| 3 | Assumption | A single self-managed VPS (`tixhub.fit`, Nginx same-origin) + Neon Postgres provides enough capacity for demos. | Medium × Medium | Performance/availability ceilings apply; scaling out (more Node workers behind Nginx, or a bigger VPS) is a config change, not a rewrite. |
 | 4 | Assumption | Users access TixHub on a modern browser; organizers' phones have a working camera for QR scanning. | Low × Medium | QR check-in needs a camera in a mobile browser (PLAT-03), served over HTTPS (SEC-01); if the camera is unavailable, staff fall back to manual code entry (Feature 3). |
 | 5 | Assumption | Scope stays at VND-only, Vietnam only, sandbox payments. | Low × Low | Out of scope items (multi-currency, real settlement) remain excluded to protect the 13-week timeline (team-controlled). |
 | 6 | Assumption | Concurrency and uptime (UN-01) are validated by **load/stress testing** simulated concurrent buyers contending for the same seats. | n/a × High | If load tests are not run, the seat-hold concurrency guarantee and the Section 6 REL/PERF targets stay unproven; demo success alone would not evidence UN-01. |
 
 #### 4.4 Cost and Licensing
 
-TixHub is an **academic project built at near zero direct monetary cost**. Every runtime service runs on a free tier, all labour is contributed in kind by the team members, and all hardware is members' own equipment. The only direct cost is a **custom domain at about $3/year (~75,000 VND)**. The domain points to the same free tier hosting (Vercel, Render, Neon/Supabase) via DNS, so it does not change the architecture or the free tier ceilings. There is a documented upgrade path to paid tiers should the platform ever be scaled beyond the academic build. No licensing revenue or commercial distribution is in scope.
+TixHub is an **academic project built at near zero direct monetary cost**. Runtime runs on a single low-cost self-managed **VPS** (`tixhub.fit`) plus a free-tier **Neon** Postgres; all labour is contributed in kind by the team, and all other hardware is members' own equipment. Direct costs are the **domain (~$3/year, ~75,000 VND)** and the small VPS. The domain points to the VPS (Nginx serving the SPA and reverse-proxying the API, same-origin) via DNS. There is a documented upgrade path (bigger VPS / more workers) should the platform ever be scaled beyond the academic build. No licensing revenue or commercial distribution is in scope.
 
 ---
 
@@ -315,8 +319,8 @@ TixHub delivers **eleven core features** across the three roles. Each is summari
 
 | # | Feature | Priority | Description | Serves (UN) |
 |---|---|---|---|---|
-| 1 | **Event Creation & Management** | Must | Guided form for title, description, cover image, date/time, location (physical or online), category, and type (General Admission or Seated). Seated events include a seat-map designer. | UN-09 (sell & manage), UN-03 (seat-map design) |
-| 2 | **Secure Checkout & Payments** | Must | Checkout through the VNPay sandbox; on success the attendee instantly receives confirmation and a digital ticket. | UN-02 (secure payment), UN-06 (fast checkout) |
+| 1 | **Event Creation & Management** | Must | Guided form for title, description, cover image, showtimes, venue (**physical venues only** in this build), category, and type (General Admission or Seated). Seated events include a seat-map designer. Publishing submits the event for admin review; it reaches buyers only once approved (Feature 10). | UN-09 (sell & manage), UN-03 (seat-map design) |
+| 2 | **Secure Checkout & Wallet** | Must | Checkout is **wallet-only**: the attendee tops up a store-credit wallet via the VNPay sandbox, then buying a ticket debits the wallet and issues the ticket in one atomic transaction (no gateway leg on the order). VNPay's signed IPN is the sole trigger for crediting a top-up. | UN-02 (secure payment), UN-06 (fast checkout) |
 | 3 | **QR-Code Tickets + Door Scanner** | Must | Every ticket carries a unique QR code; organizers scan it from a phone browser to check attendees in and block duplicates. If the camera is denied or unavailable, staff fall back to manual code entry. | UN-10 (trustworthy check-in) |
 | 4 | **Event Discovery, Search & Filters** | Must | Public browse page filtering by keyword, category, date, location, and price. | UN-04 (find the right event) |
 | 5 | **AI Personalized Recommendations** *(AI #1)* | Could | A Gemini chatbot that suggests events from a user's tickets, saved events, and browsing history, answering natural-language questions. | UN-04 (long-tail discovery), UN-08 (optional smart help) |
@@ -324,12 +328,12 @@ TixHub delivers **eleven core features** across the three roles. Each is summari
 | 7 | **Real Time Analytics Dashboard** | Should | Live charts of sales, revenue, tickets remaining, and check-ins; per-organizer, with a platform-wide admin view. | UN-11 (see sales live) |
 | 8 | **Notifications, Reminders & Waitlist** | Should | Automated email/in-app alerts for confirmations, reminders (1 week / 1 day before), changes, and a waitlist for sold-out events. | UN-07 (timely reminders) |
 | 9 | **Reviews, Ratings & Social Proof** | Should | Attendees rate events (1–5 stars) and review after attending; ratings appear on the organizer's profile and future events. | UN-05 (confidence before buying) |
-| 10 | **Admin Moderation & Organizer Approval** | Must | Admin tools to approve organizers before they can sell, review reported events, and take down policy-violating content. | UN-02 (marketplace trust & safety) |
+| 10 | **Admin Moderation & Organizer Approval** | Must | Admin tools to approve organizers before they can sell, **approve each event before it is visible to buyers (pre-publish moderation)**, review reported events, and take down policy-violating content. | UN-02 (marketplace trust & safety) |
 | 11 | **Real-Time Seat Selection & Holds** | Must | Buyers of seated events pick seats on a live map; a chosen seat is held temporarily and released on timeout, with concurrency-safe holds so two buyers are never sold the same seat. This is TixHub's core differentiator (§4.1). | UN-03 (easy seat selection), UN-01 (stays up under load) |
 
 **On the AI features:** both are **assistive, not autonomous** output is always editable, the user stays in control, and any recommendation or generated field can be overridden before going live. 
 
-**Out of scope** (to protect the 13-week timeline): multi currency / international sales (VND-only, Vietnam-only), real money settlement (VNPay sandbox only, no real payouts), and **ticket refunds** (the VNPay sandbox has no real settlement, so no money moves and no refund arises). **Ticket cancellation is in scope**, an attendee can cancel a ticket and free the seat, but no monetary refund is issued.
+**Out of scope** (to protect the 13-week timeline): multi currency / international sales (VND-only, Vietnam-only) and **real-money settlement / payouts** (VNPay sandbox only). **Refunds to the store-credit wallet are in scope** (constitution v2.0.0): cancelling a ticket frees the seat and returns its amount to the buyer's wallet — closed-loop, per ticket, once, no money leaves the platform as cash (schema decision D3, UC-16). Real cash refunds/payouts remain out of scope.
 
 ---
 
@@ -364,7 +368,7 @@ The targets fall into three rationale buckets, stated explicitly:
 | PERF-04 | Event discovery / search & filter response time for a catalog of up to 500 events, **while under the 25 VU normal load** (concurrent search + browsing + seat hold traffic). Searched columns (name, date, category) are indexed so the target holds as the catalog grows. | < 1 second at the 95th percentile | k6, search queries inside the 25-VU mix |
 | PERF-05 | AI feature response time per individual call, **excluding time spent waiting on the shared rate limit / serving from cache**. AI features are **non blocking** and never sit on the critical purchase path: during the call the UI shows a loading state and stays interactive. | < 5 seconds (target); ~8 s hard timeout &rarr; SCAL-03 fallback | k6 + manual UX check |
 | PERF-06 | Sustained concurrent users on a single event's live seat map. **Acceptance:** at the 60-VU peak load over a **5-minute** test, the system still meets **PERF-03 (seat update < 1 s)** and **PERF-02 (API < 500 ms p95)**, with **zero dropped WebSocket connections** and a **0% error rate**. | ≥ 60 concurrent users (validated) | k6 WebSocket, 60 VUs, 5 min sustained |
-| PERF-07 | **Resource budget.** The backend operates within the free tier plan (Render: 512 MB RAM, 0.1 shared CPU). Memory stays **< ~450 MB** under the 60     VU peak test. | Memory < ~450 MB at peak load | k6 + Render dashboard |
+| PERF-07 | **Resource budget.** The backend operates within the small VPS's envelope (≈ 1 GB RAM shared with Nginx). The Node process stays **< ~450 MB** under the 60-VU peak test. | Memory < ~450 MB at peak load | k6 + VPS process metrics (`systemd` / `htop`) |
 
 #### 6.2 Security
 
@@ -372,9 +376,9 @@ The targets fall into three rationale buckets, stated explicitly:
 
 Three threads run through the requirements below:
 
-- **Protecting accounts and data at rest and in transit:** Encryption everywhere (SEC-01), strong password hashing (SEC-02), and short lived authenticated sessions (SEC-03) keep credentials and personal data safe.
+- **Protecting accounts and data at rest and in transit:** Encryption everywhere (SEC-01), strong password hashing (SEC-02), and stored, revocable sessions that can be withdrawn on the next request (SEC-03) keep credentials and personal data safe.
 - **Controlling who can do what:** Role based access enforced on the server, not just hidden in the UI (SEC-04), with every privileged admin action recorded for accountability (SEC-09).
-- **Securing the money path:** Card data never touches TixHub (SEC-05), and payment is confirmed only through VNPay's signed server to server callback (SEC-06), so a forged or replayed callback cannot grant tickets without payment.
+- **Securing the money path:** Card data never touches TixHub (SEC-05); a wallet is credited only through VNPay's signed server to server IPN (SEC-06), so a forged or replayed callback cannot create balance; and the ledger keeps every balance explainable and impossible to conjure (DATA-04).
 
 **Verification tooling:** Each requirement below states how it is checked. Two free tools back the automated checks: **OWASP ZAP** (covers injection, XSS, and missing security headers, directly supporting STD-01) and **gitleaks** (scans the repository for accidentally committed secrets, run in the GitHub Actions CI pipeline, MAIN-02). The rest are covered by unit/integration tests.
 
@@ -382,15 +386,15 @@ Three threads run through the requirements below:
 |---|---|---|
 | SEC-01 | All client server communication must use HTTPS/TLS. No data is transmitted over plain HTTP. | Browser certificate check + ZAP scan |
 | SEC-02 | For TixHub membership accounts, user passwords must be hashed with a salted algorithm (**bcrypt, cost factor 12**). Plaintext passwords are never stored or logged. Google OAuth sign-in delegates credential handling to the provider, so no password is stored for OAuth accounts. | Unit test asserts stored hash format + cost factor |
-| SEC-03 | A suspended or banned account loses access within one access token lifetime when its refresh is refused. Revocation is therefore **effective within ~15 minutes, not instantaneous**.|  Refresh on a suspended account refused |
+| SEC-03 | Sessions are **stored and revocable** (schema decision D7): account status and session liveness are read from the database on **every** request, never captured into the access token. Suspension, logout, logout-everywhere, password change, and reset therefore bite **on the very next request**, not when the access token expires. | Suspend/logout an account, then replay the same session on the next request and assert refusal |
 | SEC-04 | Role based access control (Admin, Organizer, Attendee) must be enforced on **every API endpoint**, not only in the UI. | Integration test: each role hits each endpoint, asserts 403 where forbidden (role × endpoint matrix) |
 | SEC-05 | TixHub never stores payment card or bank account data **no card/bank fields exist in the database schema**. All sensitive payment data is handled exclusively by the VNPay sandbox gateway. | Schema inspection asserts no card/bank columns |
-| SEC-06 | Payment state changes **only via VNPay's server to server callback**, never the browser return URL (display only). A callback is accepted only if its signature **and** the amount/order reference validate; otherwise no order or ticket is marked paid. | Unit tests with forged, replayed, and late arriving callbacks |
+| SEC-06 | VNPay funds **wallet top-ups only** (schema decision D2). A wallet is credited **only via VNPay's server to server IPN**, never the browser return URL (display only). An IPN is accepted only if its signature **and** the amount/top-up reference validate; otherwise no balance moves. Orders have no gateway leg at all: checkout debits the wallet locally (DATA-01), so no ticket ever waits on a callback. | Unit tests with forged, replayed, and late arriving IPNs |
 | SEC-07 | Every API input is **validated against a strict schema** and rejected on wrong type/length/format before processing. Database access uses **parameterized queries only** (no raw string concatenation), blocking SQL injection. User-supplied content is **output encoded**, never rendered as raw HTML, blocking XSS. | OWASP ZAP active scan + code review |
 | SEC-08 | Gemini AI endpoints are rate limited **per authenticated user** to ≤ 10 requests/hour. This is the per user fairness layer; it sits on top of the platform wide quota guard (SCAL-03), which enforces the actual shared free tier ceiling. | Test fires 11 calls, asserts the 11th is blocked |
 | SEC-09 | Every privileged admin action (organizer approval/suspension, event removal) writes an **immutable audit record** (acting admin ID, action type, target entity ID, timestamp, before/after values). Records cannot be updated or deleted; read access is Admin only; retained for the project lifetime. | Integration test asserts an audit row per admin action; DB grants block UPDATE/DELETE |
-| SEC-10 | Login, registration, and password reset endpoints are **rate limited per IP and per account** (≤ 5 failed attempts &rarr; temporary lockout / exponential backoff), protecting against brute force and credential stuffing (OWASP A07). | Test fires 6 bad logins, asserts the 6th is blocked |
-| SEC-11 | All secrets (JWT signing key, VNPay `vnp_HashSecret`, DB credentials, Gemini API key) are stored in **environment variables / the host secret store** (Render, Vercel), never hard-coded or committed. `.env` is git-ignored; a `.env.example` with placeholders is committed instead. Secrets are rotatable without code changes. | gitleaks repository scan in CI |
+| SEC-10 | Login, registration, and password-reset endpoints are **throttled per source (IP)** and answered with a **progressive per-identifier delay** as failures accumulate — applied equally to unknown identifiers, and **never an account lockout** (a lockout is a DoS anyone can aim at a known email, and it leaks which accounts exist). A correct password is always accepted (schema decision D6). Responses are indistinguishable whether or not the account exists. | Test: 50 failures on one identifier then the correct password succeeds; a source over the rate is throttled while the owner signs in from another source |
+| SEC-11 | All secrets (JWT signing key, `AUTH_EVENT_HASH_KEY`, VNPay `vnp_HashSecret`, DB credentials, Gemini + Google + Resend keys) are stored in **environment variables on the VPS host**, never hard-coded or committed. `.env` is git-ignored; a `.env.example` with placeholders is committed instead. Secrets are rotatable without code changes. | gitleaks repository scan in CI |
 
 #### 6.3 Platform & Compatibility
 
@@ -406,9 +410,9 @@ Three threads run through the requirements below:
 
 | ID | Requirement | Verification |
 |---|---|---|
-| REL-01 | **≥ 99% uptime during pre warmed demo windows** (excluding maintenance). Render's free tier spins down when idle, so a keep alive pinger (UptimeRobot, ~10 min) runs through each demo to remove cold starts. Outside demos, availability is best effort (cold start up to ~60 s accepted). | UptimeRobot log over the demo window |
-| REL-02 | A seat hold is **auto released after a 7 minute (configurable) TTL**, even if the client disconnects. This TTL applies to the **pre checkout holding phase only**; once an order enters payment the seat is managed by the `pending_payment` state (DATA-03), not this TTL. Applies **only** to `held` seats; a `pending_payment` seat (DATA-03) is resolved by the callback or by its 15-min payment-window timeout, not this TTL. | Timer test: hold + disconnect, assert release |
-| REL-03 | Payment callback processing is **idempotent**, the same VNPay callback received twice must not duplicate orders or tickets. | Unit test replays a callback, asserts no duplicate |
+| REL-01 | **≥ 99% uptime during demo windows** (excluding maintenance). The VPS runs a persistent Node process behind Nginx, so there is **no serverless cold-start**. Outside demos, availability is best-effort on the single instance. | UptimeRobot / health-check log over the demo window |
+| REL-02 | A seat hold is **auto released after a 7 minute (configurable) TTL**, even if the client disconnects. This is the **only** timer on a seat: checkout is a single local wallet transaction (D2), so there is no payment window and no `pending_payment` state for a seat to wait in (DATA-03). A pending top-up **never** freezes or extends a hold. | Timer test: hold + disconnect, assert release |
+| REL-03 | Top-up IPN processing is **idempotent**: the same VNPay IPN received twice must credit the wallet exactly once and write exactly one ledger row. | Unit test replays an IPN, asserts no duplicate credit |
 
 #### 6.5 Scalability
 
@@ -416,7 +420,7 @@ Three threads run through the requirements below:
 
 | ID | Requirement | Verification |
 |---|---|---|
-| SCAL-01 | Database access uses a **bounded pool of ≤ 20 connections** well within provider ceilings (Neon 104/10,000 pooled; Supabase 60/200). High concurrency tests use the transaction mode pooled endpoint; session scoped features are avoided so the seat locking guarantee (DATA-02) stays valid. | Assert connections stay ≤ 20 under the 60-VU peak test |
+| SCAL-01 | Database access uses a **bounded pool of ≤ 20 connections**, well within the Neon ceiling (104 direct / 10,000 pooled). High concurrency tests use the transaction mode pooled endpoint; session scoped features are avoided so the seat locking guarantee (DATA-02) stays valid. | Assert connections stay ≤ 20 under the 60-VU peak test |
 | SCAL-02 | AI responses are **cached** to conserve the quota: recommendations per user, listing-assistant outputs per prompt, each with a TTL. | Repeat an identical AI request, assert a cache hit |
 | SCAL-03 | A **platform wide quota guard** tracks total API calls against the shared limit. At the threshold, AI endpoints **degrade gracefully**, last cached result or a non AI fallback. | Force the threshold, assert fallback served (not an error) |
 
@@ -426,7 +430,7 @@ Three threads run through the requirements below:
 
 | ID | Requirement | Verification |
 |---|---|---|
-| USE-01 | The general admission purchase flow is completable in **≤ 5 user interactions on TixHub's own UI** counted from browsing an event to the hand-off to VNPay, and again from the post-payment return to receiving the QR ticket. | Manual click-count walkthrough of the flow |
+| USE-01 | With a sufficient wallet balance, the general admission purchase flow is completable in **≤ 5 user interactions**, counted from browsing an event to holding the QR ticket — there is no external hand-off on this path (D2). A wallet top-up, when one is needed, is a separate flow of **≤ 3 interactions** up to the VNPay hand-off. | Manual click-count walkthrough of both flows |
 | USE-02 | Text and interactive elements meet **WCAG 2.1 Level AA contrast** (≥ 4.5:1 normal text, ≥ 3:1 large text). | Manual UI review |
 | USE-03 | All primary user facing text is in **Vietnamese** for this submission. | Manual UI review |
 
@@ -443,13 +447,14 @@ Three threads run through the requirements below:
 
 #### 6.8 Data Integrity & Consistency
 
-**Basis:** The seat map can lag, but the database makes the final call. That gives three rules: financial steps commit all or nothing (DATA-01), a database lock stops two buyers winning the same seat (DATA-02), and an explicit seat lifecycle stops a hold expiring mid-payment from selling a seat twice (DATA-03).
+**Basis:** The seat map can lag, but the database makes the final call. That gives four rules: financial steps commit all or nothing (DATA-01), a database lock stops two buyers winning the same seat (DATA-02), an explicit seat lifecycle keeps the gateway out of the seat's life entirely (DATA-03), and an append-only ledger keeps the wallet honest (DATA-04).
 
 | ID | Requirement | Verification |
 |---|---|---|
-| DATA-01 | Creating an order and issuing tickets run in a **single ACID transaction**. A failure at any step rolls back everything. | Inject a mid operation failure, assert no partial state |
-| DATA-02 | **Two attendees can never be sold the same seat**: concurrent purchase attempts on one seat are serialized so exactly one succeeds and the rest are rejected. | Parallel buyers on one seat, assert exactly one wins |
-| DATA-03 | **No seat is ever sold to more than one buyer, and a seat inside the payment window is never released early.** A seat that has entered `pending_payment` (on VNPay hand-off) is locked against other buyers and is **not** freed by the hold TTL (REL-02); it stays reserved for its full **15-min** `vnp_ExpireDate` window and is resolved only by a validated IPN (→ `sold`, SEC-06) or by release after that timeout expires (→ `available`) — never before, so a seat is never freed while the buyer may still be paying. A late `success` IPN arriving after the seat is released does **not** issue a ticket; since payments are sandbox-only (no real settlement), no refund arises. | Concurrency + timeout tests: assert no double-sell and no early release |
+| DATA-01 | Creating an order, debiting the wallet, writing the ledger row, flipping the seats, and issuing tickets run in a **single ACID transaction**. A failure at any step rolls back everything. | Inject a mid operation failure, assert no partial state |
+| DATA-02 | **Two attendees can never be sold the same seat**: concurrent purchase attempts on one seat are serialized so exactly one succeeds and the rest are rejected. The same row lock serialises concurrent debits on one wallet. | Parallel buyers on one seat, assert exactly one wins |
+| DATA-03 | **The seat lifecycle is `available → held → sold` — there is no payment-pending state.** Because checkout debits the store-credit wallet in one local transaction (D2), no seat ever waits on a gateway callback: a `held` seat is freed only by its TTL (REL-02) or by the holder releasing it, and it becomes `sold` only inside the committed purchase transaction. A pending or late top-up affects **no** seat, so the late-callback problem does not arise. *(Amended: the earlier `pending_payment` state and 15-minute payment window were removed by constitution v2.0.0.)* | Concurrency + timeout tests: assert no double-sell and no early release |
+| DATA-04 | **The wallet ledger is append-only and fully explains every balance.** Per wallet, `SUM(wallet_transactions.amount) = wallets.balance_amount`; platform-wide, `SUM(topup) − SUM(purchase) + SUM(refund) = SUM(all balances)`, and every `topup` row joins 1:1 to a successful gateway transaction. A balance can never go negative (DB `CHECK`); the top-up ceiling is enforced at top-up time only, so a refund is never blocked by it; a ticket is refundable **at most once**, enforced by a unique index; no code path — admin included — can create money. | CI asserts both invariants; tests for negative balance, double refund, and refund past the ceiling |
 
 #### 6.9 Standards & Compliance
 

@@ -82,7 +82,7 @@ Group 02 · SoE
 
 &nbsp;&nbsp;&nbsp;&nbsp;7.1 &nbsp; [UC-32 View platform-wide analytics](#uc-32-view-platform-wide-analytics)
 &nbsp;&nbsp;&nbsp;&nbsp;7.2 &nbsp; [UC-33 Approve / suspend organizer](#uc-33-approve--suspend-organizer)
-&nbsp;&nbsp;&nbsp;&nbsp;7.3 &nbsp; [UC-34 Moderate / remove reported event](#uc-34-moderate--remove-reported-event)
+&nbsp;&nbsp;&nbsp;&nbsp;7.3 &nbsp; [UC-34 Review and moderate events](#uc-34-review-and-moderate-events)
 &nbsp;&nbsp;&nbsp;&nbsp;7.4 &nbsp; [UC-35 Manage categories & homepage](#uc-35-manage-categories--homepage)
 &nbsp;&nbsp;&nbsp;&nbsp;7.5 &nbsp; [UC-36 Configure system settings](#uc-36-configure-system-settings)
 
@@ -96,7 +96,7 @@ Group 02 · SoE
 |---|---|
 | **Use-case ID** | UC-01 |
 | **Actor(s)** | Guest (primary) |
-| **Description** | Guest creates a TixHub membership account with email, phone number, nickname, and password. |
+| **Description** | Guest creates a TixHub membership account with email, nickname, and password; a phone number is optional but, when supplied, is unique and usable to sign in. |
 
 **Preconditions**
 - Guest is not signed in.
@@ -104,24 +104,26 @@ Group 02 · SoE
 
 **Basic flow**
 1. Guest opens the registration page.
-2. Guest enters email, phone number, nickname, and password (and password confirmation).
-3. System validates every field against the schema (type, length, format) `[SEC-07]`.
-4. System checks the email and phone are not already registered.
+2. Guest enters email, nickname, and password (with confirmation), and optionally a phone number.
+3. System validates every field against the schema (type, length, format) `[SEC-07]`; the email is lowercased and trimmed and the phone normalised to one canonical form before any uniqueness check.
+4. System checks the email — and the phone, if one was supplied — are not already registered.
 5. System hashes the password with bcrypt (cost factor 12) `[SEC-02]`.
-6. System creates the account with the Attendee role and stores it.
-7. System signs the guest in (or sends a verification step) and shows a success confirmation.
+6. In one transaction the system creates the account (Attendee capability, `provider='email'`) **and its zero-balance wallet**, so no later flow has to cope with a walletless account.
+7. System signs the guest in immediately and shows a success confirmation. **There is no email-verification step** and nothing is gated on proving the address (schema decision D4).
 
 **Alternative flows**
 - **A1 — Invalid field format:** at step 3 a field fails validation; system highlights the field with an inline error and stays on the form.
 - **A2 — Email/phone already registered:** at step 4 the identifier exists; system shows "account already exists" and offers a link to log in (UC-03).
 - **A3 — Password mismatch:** password and confirmation differ; system shows a mismatch error.
 - **A4 — Weak password:** password fails strength rules; system shows the requirement and rejects.
-- **A5 — Registration rate limit hit:** too many attempts from one IP; system applies temporary lockout / backoff `[SEC-10]`.
+- **A5 — Registration rate limit hit:** too many attempts from one source; the system throttles that source `[SEC-10]`. It never locks an account — there is no lockout state anywhere (schema decision D6).
 - **A6 — Guest chooses Google instead:** guest clicks "Sign in with Google"; flow switches to UC-02.
+- **A7 — Email belongs to a Google account:** registration is refused with an instruction to use the Google button. The two account kinds are **never** linked or merged (D5).
+- **A8 — Simultaneous registration on one identifier:** two requests race; the database's uniqueness constraint decides, so exactly one account is created and the other is refused.
 
 **Postconditions**
-- **Success:** a new Attendee account exists with a salted password hash; guest is authenticated.
-- **Failure:** no account is created. The form keeps valid input and shows the error.
+- **Success:** a new Attendee account and its wallet exist, with a salted password hash; guest is authenticated.
+- **Failure:** no account and no wallet are created. The form keeps valid input and shows the error.
 
 **Special requirements**
 - Plaintext passwords are never stored or logged `[SEC-02]`.
@@ -149,15 +151,15 @@ Group 02 · SoE
 2. System redirects to the Google OAuth consent screen `«include» Google OAuth`.
 3. Guest authenticates with Google and grants consent.
 4. Google redirects back with an authorization result.
-5. System validates the result and reads the verified email/profile.
-6. System finds the matching account, or creates a new Attendee account if none exists (no password stored) `[SEC-02]`.
+5. System verifies the credential **with Google** before trusting any claim in it, then reads the verified profile.
+6. System looks the account up by Google's **stable subject id** — never by the email address, so a change of address at Google does not orphan the account — or creates a new Attendee account and its wallet if none exists (no password stored) `[SEC-02]`.
 7. System establishes an authenticated session and lands the user on their home page.
 
 **Alternative flows**
 - **A1 — Guest cancels consent:** guest denies at step 3; Google returns an error; system returns to login with "sign-in cancelled".
 - **A2 — Google returns an error / is unreachable:** system shows "Google sign-in unavailable, try again or use email".
-- **A3 — Email already registered as membership account:** system links or asks the user to log in with the password instead (per account-linking policy).
-- **A4 — Suspended account:** the matched account is suspended; system refuses sign-in and shows the suspension notice `[SEC-03]`.
+- **A3 — Email already registered as a membership account:** the sign-in is **refused** with an instruction to sign in with the password instead. The system **never** links or merges the two (schema decision D5): with no verified address, auto-linking would let anyone register a password account on a stranger's email and inherit it the moment the real owner used Google.
+- **A4 — Suspended account:** the matched account is suspended; system refuses sign-in and shows the suspension notice. The check runs only **after** Google has confirmed the identity, so it cannot be used to probe which accounts exist `[SEC-03]`.
 
 **Postconditions**
 - **Success:** the user is authenticated via Google; a session exists; no password is stored for this account.
@@ -187,26 +189,26 @@ Group 02 · SoE
 1. Guest opens the login page.
 2. Guest enters identifier (email or phone) and password.
 3. System validates the input format `[SEC-07]`.
-4. System looks up the account and verifies the password against the stored bcrypt hash `[SEC-02]`.
-5. System issues an access token and refresh token and establishes the session.
+4. System matches the submitted value as an email if it looks like one and as a phone number otherwise (never across both kinds), then verifies the password against the stored bcrypt hash `[SEC-02]`.
+5. System issues a short-lived access token and a stored, rotating refresh token (one family per login) and establishes the session `[SEC-03]`.
 6. System redirects the user to the home page for their role (Attendee / Organizer / Admin).
 
 **Alternative flows**
-- **A1 — Wrong credentials:** verification fails; system shows a generic "invalid email or password" (no account enumeration).
-- **A2 — Account not found:** treated as A1 (same generic message).
-- **A3 — Too many failed attempts:** ≥ 5 failures per IP/account triggers temporary lockout / exponential backoff `[SEC-10]`.
-- **A4 — Suspended / banned account:** login refused with a suspension notice `[SEC-03]`.
-- **A5 — User has no password (OAuth-only account):** system prompts to use Google sign-in (UC-02).
+- **A1 — Wrong credentials:** verification fails; system shows a generic "invalid email or password" (no account enumeration), in time indistinguishable from A2.
+- **A2 — Account not found:** treated as A1 — same message, same response time.
+- **A3 — Repeated failures:** the **source** is throttled once its rate is exceeded, and the response to a repeatedly-failing **identifier** is delayed progressively — applied identically to identifiers that match no account. **A correct password is always accepted; there is no lockout state** (schema decision D6) `[SEC-10]`.
+- **A4 — Suspended / banned account:** login refused with a suspension notice, checked only **after** the password verifies `[SEC-03]`.
+- **A5 — User has no password (Google account):** system says this account uses Google sign-in (UC-02).
 - **A6 — User forgot password:** user clicks "forgot password" → UC-05.
 
 **Postconditions**
-- **Success:** the user is authenticated; access and refresh tokens are issued.
-- **Failure:** no session; the failed-attempt counter is incremented.
+- **Success:** the user is authenticated; an access token and a refresh-token family are issued.
+- **Failure:** no session; a `login_failure` auth event is recorded against a **hashed** form of the attempted identifier (which may match no account). No counter is kept on the account — there is nothing to lock.
 
 **Special requirements**
-- Rate limiting per IP and per account `[SEC-10]`; HTTPS `[SEC-01]`.
+- Per-source throttle plus a progressive per-identifier delay, never an account lockout `[SEC-10]`; HTTPS `[SEC-01]`.
 
-**Prototype.** Screens: *Login form*, *Invalid-credentials state*, *Lockout notice*.
+**Prototype.** Screens: *Login form*, *Invalid-credentials state*, *Throttled-source notice*.
 `![UC-03 prototype](../prototypes/uc-03-login.png)`
 
 ---
@@ -223,15 +225,17 @@ Group 02 · SoE
 - User is signed in.
 
 **Basic flow**
-1. User selects "Log out".
-2. System invalidates the refresh token and clears the session.
+1. User selects "Log out" (or "Log out everywhere").
+2. System revokes the refresh token — the whole family for this login, or every family on the account for "log out everywhere" — and clears the session cookie.
 3. System redirects to the public landing page.
 
 **Alternative flows**
 - **A1 — Session already expired:** system clears any client state and redirects to landing without error.
+- **A2 — Replayed after logout:** the revoked credential is refused on the **very next request**, because session liveness is read from the database per request, not carried inside the token `[SEC-03]`.
+- **A3 — A superseded credential is presented:** treated as theft evidence — the whole family descended from that one login is revoked (`reuse_detected`). The account's other logins are untouched.
 
 **Postconditions**
-- The refresh token is revoked; the user is signed out.
+- The refresh token (or family) is revoked with a recorded reason; the user is signed out on the next request.
 
 **Special requirements.** None beyond standard session handling.
 
@@ -264,7 +268,9 @@ Group 02 · SoE
 - **A1 — Email not registered:** step 3 still shows the neutral message; no email is sent.
 - **A2 — Expired / used / invalid token:** at step 5 system rejects and offers to request a new link.
 - **A3 — Weak / mismatched new password:** system shows the rule and stays on the form.
-- **A4 — Reset requested too often:** rate limit applies `[SEC-10]`.
+- **A4 — Reset requested too often:** the limit applies **per submitted identifier** (keyed on a hash of the identifier plus the source), never per existing account — a limit that could only fire on a real account would itself disclose which addresses are registered `[SEC-10]`.
+- **A5 — The address belongs to a Google account:** the user still sees the neutral message, but no reset link is issued. Setting a password there would be a back-door link between the two account kinds (schema decision D5).
+- **A6 — The account is suspended:** the response is identical to every other case; no link is issued and no new session can be obtained by this route.
 
 **Postconditions**
 - **Success:** password hash updated; old sessions invalidated.
@@ -292,17 +298,20 @@ Group 02 · SoE
 **Basic flow**
 1. User opens the account/profile page.
 2. System shows current profile fields.
-3. User edits one or more fields (nickname, phone, avatar) and/or requests a password change.
-4. System validates the input `[SEC-07]`.
+3. User edits one or more fields (nickname, phone, avatar) and/or requests a password change. The avatar is **uploaded as an image file** and stored on the application's own host; arbitrary URL entry is not offered (the one exception is the picture Google supplies at sign-up).
+4. System validates the input `[SEC-07]`, accepting **only** the fields this update may change and ignoring anything else in the submission — an admin flag or a wallet balance sent here changes nothing.
 5. For a password change, system re-authenticates (asks current password) and hashes the new one `[SEC-02]`.
 6. System saves the changes and confirms.
 
 **Alternative flows**
 - **A1 — Invalid input:** field-level errors; no save.
-- **A2 — Phone already in use by another account:** system rejects that field.
+- **A2 — Phone already in use by another account:** system rejects that field — the same uniqueness rule as registration, so a sign-in identifier cannot be taken over after the fact.
 - **A3 — Current password wrong (on password change):** system rejects the password change; other edits still saveable.
-- **A4 — OAuth-only account:** password-change section is hidden/disabled.
+- **A4 — Google account:** password-change section is hidden/disabled.
 - **A5 — User cancels:** edits discarded, original values retained.
+- **A6 — Password changed successfully:** **every other** session on the account ends on its next request; the device that made the change stays signed in. People change a password because they suspect someone else has access `[SEC-03]`.
+- **A7 — Uploaded file is not a real image:** the upload is refused on its actual content (magic bytes), not its extension; SVG is refused outright.
+- **A8 — Email change:** not offered. Changing the address that identifies an account needs its own ownership-proof flow and is deferred.
 
 **Postconditions**
 - **Success:** profile / password updated.
@@ -326,7 +335,7 @@ Group 02 · SoE
 
 **Preconditions**
 - User is signed in as an Attendee.
-- User is not already an approved or pending Organizer.
+- The account has no *live* application — one that is `pending`, `approved`, or `suspended`. A `rejected` application does not block a new one.
 
 **Basic flow**
 1. Attendee opens "Become an organizer".
@@ -339,15 +348,17 @@ Group 02 · SoE
 - **A1 — Validation error:** field-level errors; application not submitted.
 - **A2 — Application already pending:** system shows the pending status instead of a new form.
 - **A3 — Already an approved organizer:** system routes the user to their organizer dashboard.
-- **A4 — Previously rejected/suspended:** system shows the reason and, if allowed, permits re-application after the policy cooldown.
-- **A5 — Attendee cancels:** no application created.
+- **A4 — Previously rejected:** re-application is **allowed** with no cooldown. Rejection is usually a fixable mistake (a missing description, a wrong display name), and a permanent bar would make an admin's mis-click irreversible. The system shows the recorded reason, creates a new `pending` application, and **keeps the rejected one as history** — that history is the evidence the next decision rests on.
+- **A5 — Previously suspended:** re-application is **refused**. A new application must never be a way out of a suspension.
+- **A6 — Attendee cancels:** no application created.
 
 **Postconditions**
-- **Success:** a `pending` organizer application exists and awaits admin review (UC-33).
+- **Success:** a `pending` organizer application exists and awaits admin review (UC-33); every superseded application is retained.
 - **Failure:** no application created.
 
 **Special requirements**
 - RBAC: role elevation only via admin approval `[SEC-04]`, `[UN-02]`; personal/verification data collected only as needed `[STD-02]`.
+- Organizer capability is **derived per request** from the current application status — there is no organizer role column — so an approval or suspension takes effect on the very next request `[SEC-03]`.
 
 **Prototype.** Screens: *Become-an-organizer intro*, *Application form*, *Validation error*, *Application-submitted / pending status*.
 `![UC-37 prototype](../prototypes/uc-37-apply-organizer.png)`
@@ -362,14 +373,14 @@ Group 02 · SoE
 |---|---|
 | **Use-case ID** | UC-07 |
 | **Actor(s)** | Guest (primary); Attendee (inherited) |
-| **Description** | Any visitor browses the public catalog of published events on the homepage / listing page. |
+| **Description** | Any visitor browses the public catalog on the homepage / listing page. An event is public only when it is **on sale**, **admin-approved**, and owned by a **currently approved organizer** — all three evaluated live on every request. |
 
 **Preconditions**
-- At least one event is published (otherwise an empty state is shown).
+- At least one event meets the visibility predicate (otherwise an empty state is shown).
 
 **Basic flow**
 1. Visitor opens the homepage / events listing.
-2. System loads published events (paginated) with cover image, title, date, location, price-from.
+2. System loads publicly-visible events (paginated) with cover image, title, earliest upcoming showtime, city, and price-from. Drafts, events awaiting review, flagged, removed, cancelled, and suspended-organizer events are never included.
 3. Visitor scrolls / paginates through the catalog.
 4. Visitor selects an event to view details → UC-09.
 
@@ -395,13 +406,13 @@ Group 02 · SoE
 |---|---|
 | **Use-case ID** | UC-08 |
 | **Actor(s)** | Guest (primary); Attendee (inherited) |
-| **Description** | Visitor narrows the catalog by keyword, category, date, location, and price. |
+| **Description** | Visitor narrows the catalog by keyword, category, date, city, price, and availability. |
 
 **Preconditions**
 - The events listing is reachable.
 
 **Basic flow**
-1. Visitor enters a keyword and/or selects filters (category, date range, location, price range).
+1. Visitor enters a keyword and/or selects filters (category, date range, city, price range, availability). Active filters combine conjunctively; a keyword matches title, lineup, and description, ranked title > lineup > description with the soonest showtime breaking ties.
 2. System validates and applies the filters against the indexed catalog `[PERF-04]`.
 3. System returns the matching published events, paginated.
 4. Visitor refines filters or opens a result → UC-09.
@@ -410,6 +421,7 @@ Group 02 · SoE
 - **A1 — No matches:** system shows a "no results" state and suggests clearing filters.
 - **A2 — Invalid filter combination (e.g. end date before start):** system corrects or flags the range.
 - **A3 — Visitor clears all filters:** system returns to the full catalog (UC-07).
+- **A5 — Sold-out events in the result set:** they are **still listed**, labelled "Hết vé" and sorted after events with availability; the availability filter hides them. Sold-out is derived from the showtimes, never stored on the event.
 - **A4 — Large catalog:** results stay < 1 s p95 up to 500 events under normal load `[PERF-04]`.
 
 **Postconditions**
@@ -432,16 +444,16 @@ Group 02 · SoE
 | **Description** | Visitor opens a single event to see full details: description, date/time, location, ticket types, prices, seat availability, organizer info, and ratings. |
 
 **Preconditions**
-- The event exists and is published.
+- The event is publicly visible: on sale, admin-approved, and owned by a currently approved organizer.
 
 **Basic flow**
-1. Visitor selects an event.
-2. System loads the event details, ticket types, remaining availability, organizer profile, and aggregated rating `[UC-18]`.
+1. Visitor selects an event, reached by its **stable slug** (unchanged by later title edits).
+2. System loads the event details, ticket tiers with VND prices, upcoming showtimes and their availability, venue guide, refund policy, related events, organizer profile, and aggregated rating `[UC-18]`.
 3. Visitor reviews the information.
 4. Visitor proceeds to buy (→ UC-11 for seated, or UC-12 for GA) or joins the waitlist (→ UC-17).
 
 **Alternative flows**
-- **A1 — Event not found / unpublished / removed:** system shows a "not available" page.
+- **A1 — Event not found, still awaiting review, flagged, removed, or its organizer suspended:** system shows the same "not available" page in every case, so guessing a slug or id discloses nothing about what exists.
 - **A2 — Tier sold out:** the buy action for that tier is replaced by "Join waitlist" (UC-17); other tiers stay purchasable. The event reads as sold out only when every tier is.
 - **A3 — Event cancelled by organizer:** system shows a cancelled banner; purchase disabled.
 - **A4 — Guest starts checkout:** system prompts registration/login before checkout `[UC-01/UC-03]`.
@@ -541,23 +553,26 @@ Group 02 · SoE
 | **Description** | For a reserved-seating event, the attendee picks seats on a live seat map; a chosen seat is held temporarily so no two buyers get the same seat. TixHub's core differentiator. |
 
 **Preconditions**
-- Attendee is signed in.
-- The event is published, Seated type, and has available seats.
+- The event is publicly visible, Seated type, and has available seats.
+- **Viewing the map is open to guests** (Feature 002 FR-012). **Placing a hold requires a signed-in
+  account**: a hold records its owner (`hold_owner_id`) and there are no anonymous holds, so the first
+  click that would hold a seat prompts sign-in (UC-01/UC-03) and resumes afterwards.
 
 **Basic flow**
 1. Attendee opens the seat map for a seated event.
 2. System loads the live seat map over WebSocket, showing available / held / sold seats `[PERF-03]`.
 3. Attendee clicks one or more available seats.
-4. System places a concurrency-safe hold on each selected seat (DB lock) and broadcasts the new status to all viewers `[DATA-02]`, starting the hold TTL (5 min, configurable) `[REL-02]`.
+4. System places a concurrency-safe hold on each selected seat (DB lock) and broadcasts the new status to all viewers `[DATA-02]`, starting the hold TTL (**7 min, configurable**) `[REL-02]`.
 5. System reflects the held seats in the attendee's selection and shows the running total.
 6. Attendee confirms the selection and proceeds to checkout → UC-12.
 
 **Alternative flows**
 - **A1 — Seat taken concurrently:** the clicked seat was just held/sold by another buyer; system rejects the click, updates the map live, and asks the attendee to pick another `[DATA-02]`.
-- **A2 — Hold TTL expires before checkout:** the 5-min TTL lapses (or client disconnects); system releases the seat and notifies the attendee to reselect `[REL-02]`.
+- **A2 — Hold TTL expires before checkout:** the 7-min TTL lapses (or client disconnects); system releases the seat and notifies the attendee to reselect. This is the **only** timer on a seat — there is no payment window `[REL-02]`, `[DATA-03]`.
 - **A3 — Attendee deselects a seat:** system releases that hold and broadcasts availability.
 - **A4 — WebSocket disconnect / reconnect:** system re-syncs the map on reconnect; server-side holds persist per TTL.
 - **A5 — Attendee abandons:** holds auto-release on TTL even without action `[REL-02]`.
+- **A6 — Guest clicks a seat:** the system prompts registration/login (UC-01/UC-03) and, once signed in, places the hold and continues. No hold exists while the visitor is a guest, so nothing is reserved in the meantime and the seat may be taken by someone else first `[SEC-04]`.
 
 **Postconditions**
 - **Success:** selected seats are in `held` state for this attendee; checkout can begin.
@@ -853,7 +868,7 @@ Group 02 · SoE
 1. Attendee opens an event with a sold-out tier (UC-09) and selects "Join waitlist" on that tier.
 2. System checks the tier's waitlist; it holds fewer than 10 entries, so the system asks the attendee to confirm joining.
 3. Attendee confirms; system records the entry with its join time and shows the attendee their position.
-4. Inventory later frees for that tier (UC-16 self-cancel, hold-TTL expiry `[REL-02]`, or payment-window timeout `[DATA-03]`).
+4. Inventory later frees for that tier from one of **two** sources only: a self-cancel (UC-16, possible until T-24h) or hold-TTL expiry `[REL-02]`. There is no payment-window timeout — wallet purchases are atomic and no seat waits on a callback `[DATA-03]` — so waitlist notifications go quiet in the final 24 hours.
 5. System notifies the earliest-joined waiters (the first 5 if the list holds more than 5, otherwise everyone on it) with a `waitlist_open` notification `[UC-19]`.
 6. Notified attendees follow the notification and buy on a first-come basis (UC-11 seated / UC-12 GA). No seat or quantity is held for any of them.
 
@@ -1008,16 +1023,18 @@ Group 02 · SoE
 4. System validates all fields `[SEC-07]`.
 5. If type = Seated, organizer designs the seat map → UC-21 `«extend»`.
 6. Organizer sets ticket types & capacity → UC-26.
-7. System saves the event as a draft.
+7. System saves the event as a draft owned by this organizer, with a **stable slug** derived once from the title (unique across events, unchanged by later title edits). Publishing it for review is UC-24.
 
 **Alternative flows**
 - **A1 — Validation error:** field-level errors; draft not saved until fixed.
 - **A2 — Not yet approved organizer:** creation blocked with an "awaiting approval" notice `[UC-33]`.
 - **A3 — Organizer saves and exits:** event stays as a draft for later editing (UC-23).
 - **A4 — Image upload fails:** system flags it; other fields retained.
+- **A5 — Another organizer's event or venue:** every management action is scoped to the owning organizer on the server, so acting on someone else's is refused, not merely hidden `[SEC-04]`.
+- **A6 — Duplicate title:** allowed; the two events receive distinct slugs.
 
 **Postconditions**
-- **Success:** a draft event exists (unpublished).
+- **Success:** a draft event exists (not public, not yet submitted for review).
 - **Failure:** no event created.
 
 **Special requirements**
@@ -1040,18 +1057,20 @@ Group 02 · SoE
 - Organizer is creating/editing a Seated event (UC-20/UC-23).
 
 **Basic flow**
-1. Organizer opens the seat-map designer.
-2. Organizer defines sections, rows, and seats (and optional pricing tiers per section).
-3. System validates the layout (no duplicate seat IDs, non-zero capacity).
-4. Organizer saves the seat map, which binds to the event's capacity.
+1. Organizer opens the seat-map designer for one of **their own** venues — a venue belongs to the organizer that created it and is used only in that organizer's events.
+2. Organizer defines the venue's sections and its seats (row label, number, seat type); each seat is unique within the venue by row and number.
+3. System validates the layout (no duplicate seats, non-zero capacity).
+4. Organizer generates the **showtime's** seat map, assigning each section a price tier: exactly one bookable seat per physical seat, each starting `available` and carrying its tier's price.
 
 **Alternative flows**
 - **A1 — Invalid layout (duplicate/overlapping seats):** system flags and blocks save.
 - **A2 — Organizer edits an existing map with sold seats:** system restricts changes that would affect already-sold seats.
 - **A3 — Organizer cancels:** map reverts to last saved.
+- **A4 — Deleting a seat that is part of a live seat map:** refused, to protect inventory integrity.
+- **A5 — Another organizer's venue:** refused; venues are not shared, so the same physical place may legitimately be entered by more than one organizer.
 
 **Postconditions**
-- **Success:** a valid seat map is bound to the event.
+- **Success:** a valid seat map exists for the showtime, one bookable seat per physical seat.
 - **Failure:** map unchanged.
 
 **Special requirements**
@@ -1140,30 +1159,35 @@ Group 02 · SoE
 |---|---|
 | **Use-case ID** | UC-24 |
 | **Actor(s)** | Organizer (primary) |
-| **Description** | Organizer publishes a draft event so it appears in the public catalog and tickets go on sale. |
+| **Description** | Organizer publishes a draft event, which **submits it for admin review**. Under pre-publish moderation the event reaches buyers only once an admin approves it (UC-34). |
 
 **Preconditions**
 - Organizer owns a complete draft event and is approved `[UC-33]`.
 
 **Basic flow**
 1. Organizer opens a draft and selects "Publish".
-2. System checks required fields (details, ticket types/capacity, seat map for Seated) are complete.
-3. System publishes the event; it becomes publicly visible (UC-07/UC-09) and on sale.
-4. System confirms publication.
+2. System checks required fields are complete: details, at least one **upcoming** showtime with at least one ticket tier, and a seat map for a Seated event.
+3. System sets the event on sale and its moderation state to `pending_review`. **It is not yet visible to buyers.**
+4. System confirms submission and tells the organizer it is awaiting review.
+5. An admin approves it (UC-34); from the very next request it appears in the public catalog (UC-07/UC-09).
 
 **Alternative flows**
 - **A1 — Incomplete event:** system lists missing items and blocks publishing.
 - **A2 — Organizer not approved / suspended:** publishing blocked `[UC-33]`, `[SEC-03]`.
-- **A3 — Event later removed by admin moderation:** UC-34 can unpublish it.
+- **A3 — Admin rejects the submission:** the event never becomes public; the organizer sees the rejection and its reason and may correct and resubmit (UC-34).
+- **A4 — Event later flagged or removed by admin moderation:** UC-34 pulls it from the catalog on the next request; it stays visible to its organizer with the reason.
+- **A5 — Organizer unpublishes:** the event disappears from the public catalog and is retained as a draft.
+- **A6 — Material edit after approval:** changing title, description, pricing, or showtimes returns the event to `pending_review` and pulls it from the catalog until re-approved — otherwise moderation could be bypassed by approving an empty shell and then editing it (UC-23).
 
 **Postconditions**
-- **Success:** the event is public and on sale.
+- **Success:** the event is on sale and awaiting review; it becomes public only on admin approval.
 - **Failure:** event stays a draft.
 
 **Special requirements**
 - Only approved organizers can publish `[SEC-04]`, `[UN-02]`.
+- Public visibility requires **all three**: on sale, `moderation_status='approved'`, and a currently approved owning organizer — evaluated live, never cached onto the event.
 
-**Prototype.** Screens: *Draft with Publish button*, *Missing-fields checklist*, *Published confirmation*.
+**Prototype.** Screens: *Draft with Publish button*, *Missing-fields checklist*, *Submitted-for-review confirmation*, *Approved / public confirmation*.
 `![UC-24 prototype](../prototypes/uc-24-publish.png)`
 
 ---
@@ -1475,7 +1499,7 @@ Group 02 · SoE
 **Alternative flows**
 - **A1 — Admin rejects an application:** status set to rejected; audit + notification written.
 - **A2 — Suspending an organizer with live events:** system also handles their events (hidden/flagged) and informs affected attendees.
-- **A3 — Suspended account access:** the organizer loses access within one token lifetime (~15 min) `[SEC-03]`.
+- **A3 — Suspended account access:** organizer capability is recomputed from the stored application status on every request, so a suspension bites on the **very next request** — no waiting for a token to expire `[SEC-03]`.
 - **A4 — Admin cancels the action:** no change, no audit entry.
 
 **Postconditions**
@@ -1490,23 +1514,23 @@ Group 02 · SoE
 
 ---
 
-## UC-34 Moderate / remove reported event
+## UC-34 Review and moderate events
 
 | Field | Value |
 |---|---|
 | **Use-case ID** | UC-34 |
 | **Actor(s)** | Admin (primary) |
-| **Description** | Admin reviews reported events (or reviews) and takes down policy-violating content. Writes an immutable audit record. |
+| **Description** | Admin works one queue with two kinds of item: events **awaiting pre-publish review** — approving one is the gate that makes it visible to buyers, rejecting one keeps it off the catalog — and already-approved events or reviews that have been **reported** and may need to be flagged or removed. Every decision writes an immutable audit record. |
 
 **Preconditions**
 - Admin is signed in.
-- There is a reported event / content item (filed via UC-39).
+- There is an event awaiting review (submitted via UC-24) or a reported event / content item (filed via UC-39).
 
 **Basic flow**
 1. Admin opens the moderation queue.
-2. Admin reviews a reported event (or review).
-3. Admin decides: keep, warn, or remove.
-4. On removal, system unpublishes/removes the content and stops any sales.
+2. Admin opens an item: an event awaiting review, or a reported event/review.
+3. Admin decides — for a submission: **approve** or **reject with a reason**; for reported content: keep, **flag**, or **remove with a reason**.
+4. On approval the event becomes publicly visible on the very next request (provided it is on sale and its organizer is approved). On flag or removal it is pulled from the public catalog on the very next request and sales stop.
 5. System writes an immutable audit record `«include» audit log` `[SEC-09]`.
 6. System notifies the affected organizer/attendees (UC-19).
 
@@ -1515,9 +1539,11 @@ Group 02 · SoE
 - **A2 — Removing an event with sold tickets:** the event-cancellation path runs (UC-25): tickets voided, every buyer refunded **100% to their wallet**, seats released, holders notified. Future showtimes only; started ones are skipped.
 - **A3 — Removing a review (UC-18):** the review is taken down and the aggregate recalculated.
 - **A4 — Admin cancels:** no change.
+- **A5 — Rejected or removed event, seen by its owner:** it stays visible to the owning organizer and to admins, showing its moderation state and the reason. A rejected submission can be corrected and resubmitted (UC-24).
+- **A6 — Non-admin attempts a moderation action:** refused on the server `[SEC-04]`.
 
 **Postconditions**
-- **Success:** content actioned; audit written; affected users notified.
+- **Success:** the event is approved (and now public) or rejected / flagged / removed; audit written; affected users notified.
 - **Failure:** no change.
 
 **Special requirements**
