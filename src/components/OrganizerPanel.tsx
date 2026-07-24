@@ -43,12 +43,19 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
   const [vCity, setVCity] = useState("Hà Nội");
   const [vAddr, setVAddr] = useState("");
 
-  // add-showtime (inline per event)
+  // add-showtime (inline per event). A showtime carries 1–4 ticket tiers (server caps at 4).
   const [openEvent, setOpenEvent] = useState<number | null>(null);
   const [stVenue, setStVenue] = useState<number | "">("");
   const [stDate, setStDate] = useState("");
-  const [stLabel, setStLabel] = useState("Thường");
-  const [stPrice, setStPrice] = useState("100000");
+  const [stTiers, setStTiers] = useState<{ label: string; price: string }[]>([{ label: "Thường", price: "100000" }]);
+
+  const MAX_TIERS = 4;
+  const setTierField = (index: number, field: "label" | "price", value: string) =>
+    setStTiers((rows) => rows.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
+  const addTierRow = () =>
+    setStTiers((rows) => (rows.length >= MAX_TIERS ? rows : [...rows, { label: "", price: "" }]));
+  const removeTierRow = (index: number) =>
+    setStTiers((rows) => (rows.length <= 1 ? rows : rows.filter((_, i) => i !== index)));
 
   const reload = async () => {
     try {
@@ -95,13 +102,23 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
       setErr("Chọn địa điểm và ngày giờ.");
       return;
     }
+    const tiers = stTiers.map((t) => ({ label: t.label.trim(), price: Number(t.price) }));
+    if (tiers.some((t) => !t.label || !Number.isFinite(t.price) || t.price < 0)) {
+      setErr("Mỗi hạng vé cần tên và giá hợp lệ.");
+      return;
+    }
+    if (tiers.length > MAX_TIERS) {
+      setErr(`Mỗi suất chỉ có tối đa ${MAX_TIERS} hạng vé.`);
+      return;
+    }
     wrap(async () => {
       await organizerApi.addShowtime(eventId, {
         venueId: Number(stVenue),
         startsAt: new Date(stDate).toISOString(),
-        tiers: [{ label: stLabel, price: Number(stPrice) }],
+        tiers,
       });
       setOpenEvent(null);
+      setStTiers([{ label: "Thường", price: "100000" }]);
     }, "Đã thêm suất chiếu + hạng vé.");
   };
 
@@ -179,19 +196,58 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
                 </div>
               </div>
               {openEvent === ev.id && (
-                <div className="mt-3 grid gap-2 border-t border-beige-kem/10 pt-3 sm:grid-cols-4">
-                  <select value={stVenue} onChange={(e) => setStVenue(Number(e.target.value) || "")} className={input}>
-                    <option value="" className="bg-xanh-pho">Chọn địa điểm</option>
-                    {venues.map((v) => (
-                      <option key={v.id} value={v.id} className="bg-xanh-pho">{v.name}</option>
-                    ))}
-                  </select>
-                  <input type="datetime-local" value={stDate} onChange={(e) => setStDate(e.target.value)} className={input} />
-                  <input value={stLabel} onChange={(e) => setStLabel(e.target.value)} placeholder="Hạng vé" className={input} />
-                  <div className="flex gap-2">
-                    <input value={stPrice} onChange={(e) => setStPrice(e.target.value)} placeholder="Giá (đ)" className={input} />
-                    <button className={btn} onClick={() => addShowtime(ev.id)}>Thêm</button>
+                <div className="mt-3 space-y-3 border-t border-beige-kem/10 pt-3">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <select value={stVenue} onChange={(e) => setStVenue(Number(e.target.value) || "")} className={input}>
+                      <option value="" className="bg-xanh-pho">Chọn địa điểm</option>
+                      {venues.map((v) => (
+                        <option key={v.id} value={v.id} className="bg-xanh-pho">{v.name}</option>
+                      ))}
+                    </select>
+                    <input type="datetime-local" value={stDate} onChange={(e) => setStDate(e.target.value)} className={input} />
                   </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className={label}>Hạng vé ({stTiers.length}/{MAX_TIERS})</span>
+                      <button
+                        type="button"
+                        onClick={addTierRow}
+                        disabled={stTiers.length >= MAX_TIERS}
+                        className={`${ghost} disabled:opacity-40`}
+                      >
+                        + Thêm hạng
+                      </button>
+                    </div>
+                    {stTiers.map((tier, i) => (
+                      <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-2">
+                        <input
+                          value={tier.label}
+                          onChange={(e) => setTierField(i, "label", e.target.value)}
+                          placeholder="Tên hạng (VIP, Thường…)"
+                          className={input}
+                        />
+                        <input
+                          value={tier.price}
+                          onChange={(e) => setTierField(i, "price", e.target.value)}
+                          inputMode="numeric"
+                          placeholder="Giá (đ)"
+                          className={input}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeTierRow(i)}
+                          disabled={stTiers.length <= 1}
+                          aria-label="Xóa hạng vé"
+                          className={`${ghost} disabled:opacity-40`}
+                        >
+                          Xóa
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button className={btn} onClick={() => addShowtime(ev.id)}>Thêm suất</button>
                 </div>
               )}
             </div>

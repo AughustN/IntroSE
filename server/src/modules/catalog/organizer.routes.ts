@@ -76,7 +76,12 @@ const venueSchema = z.object({
 const showtimeSchema = z.object({
   venueId: z.number().int(),
   startsAt: z.string().datetime(),
-  tiers: z.array(z.object({ label: z.string().trim().min(1), price: z.number().int().nonnegative(), totalQuantity: z.number().int().positive().optional().nullable() })).min(1),
+  // A showtime carries at most 4 ticket tiers — the catalog UI lays them out in an even 1–4 column
+  // row, and more than four stops being scannable for a buyer.
+  tiers: z
+    .array(z.object({ label: z.string().trim().min(1), price: z.number().int().nonnegative(), totalQuantity: z.number().int().positive().optional().nullable() }))
+    .min(1)
+    .max(4, 'Mỗi suất chỉ có tối đa 4 hạng vé.'),
 });
 
 // ---- events ----

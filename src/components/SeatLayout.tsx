@@ -21,7 +21,8 @@ export default function SeatLayout({
   onBack,
   onProceedToCheckout,
 }: SeatLayoutProps) {
-  const HOLD_SECONDS = 5 * 60;
+  // Matches the 7-minute hold TTL the backend will enforce (Vision REL-02).
+  const HOLD_SECONDS = 7 * 60;
   const [seats, setSeats] = useState<Seat[]>([]);
   const [selectedSeatIds, setSelectedSeatIds] = useState<string[]>([]);
   const [holdSeconds, setHoldSeconds] = useState(HOLD_SECONDS);
@@ -125,16 +126,21 @@ export default function SeatLayout({
           onClick={onBack}
           className="flex items-center gap-2 text-sm text-la-co hover:text-beige-kem transition font-mono"
         >
-          QUAY LẠI SUẤT CHIẾU
+          QUAY LẠI CHI TIẾT SỰ KIỆN
         </button>
 
         <div className="flex items-center gap-2 sm:gap-4 font-mono text-xs text-beige-kem/40">
-          <span className="opacity-60">01. CHỌN SUẤT CHIẾU</span>
+          <span className="opacity-60">01. CHỌN SUẤT</span>
           <span className="h-[1px] w-6 bg-beige-kem/20" />
           <span className="text-burgundy font-semibold">02. CHỌN GHẾ</span>
           <span className="h-[1px] w-6 bg-beige-kem/20" />
           <span>03. THANH TOÁN VÀ NHẬN VÉ</span>
         </div>
+      </div>
+
+      <div className="rounded-xl border border-cam-dat/30 bg-cam-dat/5 px-4 py-3 font-mono text-[11px] leading-5 text-cam-dat">
+        Sơ đồ dưới đây là bản mô phỏng ở frontend, chưa phải ghế thật của suất này. Sơ đồ thật (chỉ
+        xem) đang hiển thị ở trang chi tiết sự kiện; tính năng giữ ghế thật sẽ thay thế màn hình này.
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
@@ -144,7 +150,7 @@ export default function SeatLayout({
           
           {/* Cinema Screen simulation */}
           <div className="relative w-full max-w-lg mb-12 text-center">
-            <h4 className="text-[10px] font-mono tracking-widest text-cam-dat uppercase mb-2">MÀN HÌNH CHÍNH</h4>
+            <h4 className="text-[10px] font-mono tracking-widest text-cam-dat uppercase mb-2">SÂN KHẤU</h4>
             
             {/* Curved cinema screen visual overlay */}
             <div className="relative h-4 bg-gradient-to-t from-beige-kem/40 to-transparent border-t-2 border-beige-kem/75 rounded-[100%] filter blur-[1px]" />
@@ -255,16 +261,12 @@ export default function SeatLayout({
             </div>
           </div>
 
-          <div className="mt-6 text-center text-[11px] font-mono text-la-co bg-la-co/5 px-4 py-2 border border-la-co/20 rounded-lg max-w-lg">
-            Khuyên dùng: Ghế đôi có khung viền <span className="underline font-semibold text-[#A6A15E]">Xanh Lá Cọ Nhật (#A6A15E)</span> thích hợp cho các cặp đôi rạp phim văn hóa!
-          </div>
-
         </div>
 
         {/* Right column: Dynamic Sidebar calculations (4 cols) */}
         <div className="lg:col-span-4 bg-xanh-pho/30 border border-beige-kem/10 rounded-2xl p-6 space-y-6">
           <div className="space-y-1">
-            <h3 className="font-display font-bold text-lg text-beige-kem">Thông Tin Suất Chiếu</h3>
+            <h3 className="font-display font-bold text-lg text-beige-kem">Thông tin suất</h3>
             <p className="text-xs text-la-co font-mono uppercase tracking-wider">{event.genre.join(" | ")}</p>
           </div>
 
@@ -288,11 +290,11 @@ export default function SeatLayout({
               <span className="font-bold text-beige-kem shrink-0 max-w-[180px] text-right truncate">{event.title}</span>
             </div>
             <div className="flex justify-between font-mono">
-              <span className="text-beige-kem/60">Suất chiếu:</span>
+              <span className="text-beige-kem/60">Suất:</span>
               <span className="font-bold text-beige-kem text-right">{selectedTime} • {selectedDate}</span>
             </div>
             <div className="flex justify-between font-mono">
-              <span className="text-beige-kem/60">Rạp chiếu:</span>
+              <span className="text-beige-kem/60">Địa điểm:</span>
               <span className="font-bold text-beige-kem text-right max-w-[200px] truncate" title={event.location}>
                 {event.location.split("-")[1] || "Sảnh Pasteur"}
               </span>
@@ -305,7 +307,7 @@ export default function SeatLayout({
             
             {selectedSeatsList.length === 0 ? (
               <div className="py-6 text-center text-xs text-beige-kem/40 border border-dashed border-beige-kem/15 rounded-lg">
-                Vui lòng chọn ghế trên sơ đồ rạp
+                Vui lòng chọn ghế trên sơ đồ
               </div>
             ) : (
               <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
@@ -314,7 +316,7 @@ export default function SeatLayout({
                     <div className="flex items-center gap-1.5">
                       <span className={`w-2.5 h-2.5 rounded-full ${seat.type === "double" ? "bg-la-co" : "bg-beige-kem/50"}`} />
                       <span className="font-bold text-beige-kem">GHẾ {seat.id}</span>
-                      <span className="text-[10px] text-cam-dat uppercase font-light">({seat.type === "double" ? "Đôi Sweet" : "Đơn Standard"})</span>
+                      <span className="text-[10px] text-cam-dat uppercase font-light">({seat.type === "double" ? "Đôi" : "Đơn"})</span>
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -342,7 +344,7 @@ export default function SeatLayout({
               </span>
             </div>
             <p className="text-[10px] text-right font-mono text-cam-dat tracking-wide">
-              Đã bao gồm thuế giá trị gia tăng & phụ thu cinema
+              Đã bao gồm thuế giá trị gia tăng và phụ thu
             </p>
           </div>
 

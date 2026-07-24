@@ -5,6 +5,11 @@
 
 export interface MovieEvent {
   id: string;
+  /**
+   * Which inventory model this event sells. Seated events pick seats from a map; general-admission
+   * events pick a quantity per tier and never see a seat map — they have no seats in the database.
+   */
+  eventType: "general_admission" | "seated";
   category: "movie" | "music" | "theatre" | "concert";
   title: string;
   originalTitle?: string;
@@ -45,6 +50,8 @@ export interface TicketTier {
   price: number;
   description: string;
   badge?: string;
+  /** General admission only: capacity − sold − reserved. `null` for seated or uncapped tiers. */
+  remaining?: number | null;
 }
 
 export interface PromoVoucher {

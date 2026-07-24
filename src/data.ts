@@ -10,6 +10,7 @@ const LOCAL_TRAILER_URL = "/cloneweb/clone/assets/images/hero.mp4";
 export const SAMPLE_MOVIES: MovieEvent[] = [
   {
     id: "lmt-7",
+    eventType: "general_admission",
     category: "movie",
     title: "Lật Mặt 7: Một Điều Ước",
     originalTitle: "Face Off 7: One Wish",
@@ -49,6 +50,7 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
   },
   {
     id: "mat-biec",
+    eventType: "general_admission",
     category: "theatre",
     title: "Mắt Biếc - Live Theatre Show",
     originalTitle: "Dreamy Eyes - Musical Event",
@@ -88,6 +90,7 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
   },
   {
     id: "indie-concert",
+    eventType: "general_admission",
     category: "music",
     title: "Đêm Nhạc Indie: Những Thành Phố Mơ Màng",
     originalTitle: "Vietnamese Indie Dreamers 2026",
@@ -127,6 +130,7 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
   },
   {
     id: "ts-tribute",
+    eventType: "general_admission",
     category: "movie",
     title: "Taylor Swift: The Eras Tour Concert Film",
     originalTitle: "Taylor Swift: The Eras Tour (Extended)",
@@ -166,6 +170,7 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
   },
   {
     id: "chuyen-ma-gan-nha",
+    eventType: "general_admission",
     category: "movie",
     title: "Chuyện Ma Gần Nhà",
     originalTitle: "Vietnamese Urban Horror Tales",

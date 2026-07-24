@@ -22,6 +22,9 @@ const AGE: Record<string, MovieEvent['ageRating']> = { all: 'P', '13+': 'T13', '
 export function cardToMovie(c: EventCard): MovieEvent {
   return {
     id: c.slug,
+    // A card carries no event type; detail supplies the real one. GA is the safe default: it is the
+    // only branch that renders without seat data.
+    eventType: 'general_admission',
     category: toCategory(c.category),
     title: c.title,
     tags: [],
@@ -61,6 +64,7 @@ export function detailToMovie(d: EventDetail, showtimes: Showtime[]): MovieEvent
   const venue = showtimes[0]?.venue;
   return {
     ...base,
+    eventType: d.eventType,
     ageRating: AGE[d.ageRestriction] ?? 'P',
     genre: d.genre,
     cast: d.lineup,
@@ -77,6 +81,7 @@ export function detailToMovie(d: EventDetail, showtimes: Showtime[]): MovieEvent
       label: t.label,
       price: t.price,
       description: '',
+      remaining: t.remaining,
     })),
   };
 }

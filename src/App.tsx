@@ -11,16 +11,16 @@ import AuthModal from "./components/AuthModal";
 import AccountModal from "./components/AccountModal";
 import OrganizerPanel from "./components/OrganizerPanel";
 import AdminModeration from "./components/AdminModeration";
-import SeatMapView from "./components/SeatMapView";
 import ResetPassword from "./components/ResetPassword";
 import type { Me } from "@/shared/auth/types";
+import type { Showtime } from "@/shared/catalog/types";
 import { authClient } from "./services/authClient";
 import { catalogClient } from "./services/catalogClient";
 import { cardToMovie, detailToMovie } from "./services/catalogAdapter";
 import { applyEventSeo, clearEventSeo } from "./services/seo";
 import BookingHistory from "./components/BookingHistory";
 import CheckoutForm from "./components/CheckoutForm";
-import EventDetail from "./components/EventDetail";
+import EventDetail, { TierSelection } from "./components/EventDetail";
 import EventFilters from "./components/EventFilters";
 import EventGrid from "./components/EventGrid";
 import Header from "./components/Header";
@@ -54,8 +54,7 @@ export default function App() {
   const [selectedMovie, setSelectedMovie] = useState<MovieEvent>(SAMPLE_MOVIES[0]);
   const [heroMovie, setHeroMovie] = useState<MovieEvent>(SAMPLE_MOVIES[0]);
   const [events, setEvents] = useState<MovieEvent[]>([]);
-  const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
-  const [showSeatMap, setShowSeatMap] = useState(false);
+  const [showtimes, setShowtimes] = useState<Showtime[]>([]);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
@@ -75,6 +74,13 @@ export default function App() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [userName, setUserName] = useState("");
+  const [isSignedIn, setIsSignedIn] = useState(false);
+  /**
+   * What the visitor was trying to do when we stopped them to sign in. Browsing, picking a showtime
+   * and choosing seats are all open to guests; only the step that creates an order needs an
+   * identity, so the click is parked here and replayed once they are in.
+   */
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   // Password-reset deep link (/reset-password?token=…). No router in this app, so read
@@ -131,6 +137,7 @@ export default function App() {
       .then((user) => {
         const name = user ? user.nickname || user.email : "";
         setUserName(name);
+        setIsSignedIn(Boolean(user));
         setAvatarUrl(user?.avatarUrl ?? null);
         try {
           if (name) localStorage.setItem(USER_CACHE_KEY, name);
@@ -265,32 +272,73 @@ export default function App() {
 
   const handleStartBookingInput = (movie: MovieEvent) => {
     setSelectedMovie(movie); // optimistic (card data)
+    setShowtimes([]);
     setActiveScreen("detail");
     window.scrollTo({ top: 0, behavior: "smooth" });
     // enrich with full detail from the API (movie.id carries the event slug)
     catalogClient
       .getEvent(movie.id)
       .then(async (detail) => {
-        const showtimes = await catalogClient.getShowtimes(detail.id);
-        setSelectedMovie(detailToMovie(detail, showtimes));
-        setSelectedEventId(detail.id);
-        applyEventSeo(detail, showtimes);
+        const loaded = await catalogClient.getShowtimes(detail.id);
+        setSelectedMovie(detailToMovie(detail, loaded));
+        setShowtimes(loaded);
+        applyEventSeo(detail, loaded);
       })
       .catch((err) => console.error("Failed to load event detail:", err));
   };
 
+  // Picking a seat places a hold, and a hold needs an owner — no anonymous holds (schema note,
+  // UC-11). So seat selection is the sign-in gate for a seated event; after signing in the visitor
+  // lands on the seat picker, not back on the event page.
   const handleProceedToSeats = (date: string, time: string) => {
-    setBookingDate(date);
-    setBookingTime(time);
-    setActiveScreen("seats");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    runSignedIn(() => {
+      setBookingDate(date);
+      setBookingTime(time);
+      setActiveScreen("seats");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
   };
 
+  /**
+   * General admission has no seat map to walk through — a chosen quantity per tier is the whole
+   * selection, so checkout is the next screen. Each ticket becomes one line item; the seat shape is
+   * what the (cinema-derived) checkout and ticket screens still render.
+   */
+  const handleProceedToQuantityCheckout = (
+    selection: TierSelection[],
+    date: string,
+    time: string,
+  ) => {
+    const items: Seat[] = selection.flatMap((line) =>
+      Array.from({ length: line.quantity }, (_, index) => ({
+        id: `${line.label} ${index + 1}`,
+        row: line.label,
+        number: index + 1,
+        type: "single" as const,
+        price: line.price,
+        isBooked: false,
+      })),
+    );
+
+    runSignedIn(() => {
+      setBookingDate(date);
+      setBookingTime(time);
+      setBookingSeats(items);
+      setBookingTotalPrice(items.reduce((sum, item) => sum + item.price, 0));
+      setActiveScreen("checkout");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  };
+
+  // Checkout is where an order starts existing, so it is the first step that needs an account.
+  // Guests get this far — browse, showtime, seats — and are asked to sign in only here.
   const handleProceedToCheckout = (selectedSeats: Seat[], totalPrice: number) => {
-    setBookingSeats(selectedSeats);
-    setBookingTotalPrice(totalPrice);
-    setActiveScreen("checkout");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    runSignedIn(() => {
+      setBookingSeats(selectedSeats);
+      setBookingTotalPrice(totalPrice);
+      setActiveScreen("checkout");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
   };
 
   const handleConfirmPurchase = (payload: CheckoutPayload) => {
@@ -335,6 +383,7 @@ export default function App() {
   const handleLogin = (user: Me) => {
     const name = user.nickname || user.email;
     setUserName(name);
+    setIsSignedIn(true);
     setAvatarUrl(user.avatarUrl);
     setShowAuthModal(false);
     try {
@@ -342,6 +391,26 @@ export default function App() {
     } catch (err) {
       console.error("Failed to save user:", err);
     }
+
+    // Resume whatever the sign-in interrupted, so signing in is not a dead end.
+    const resume = pendingAction;
+    setPendingAction(null);
+    resume?.();
+  };
+
+  const dismissAuthModal = () => {
+    setShowAuthModal(false);
+    setPendingAction(null);
+  };
+
+  /** Run `action` now when signed in; otherwise ask for a sign-in first and run it afterwards. */
+  const runSignedIn = (action: () => void) => {
+    if (isSignedIn) {
+      action();
+      return;
+    }
+    setPendingAction(() => action);
+    setShowAuthModal(true);
   };
 
   const handleLogout = async () => {
@@ -351,6 +420,7 @@ export default function App() {
       console.error("Logout failed:", err);
     }
     setUserName("");
+    setIsSignedIn(false);
     setAvatarUrl(null);
     try {
       localStorage.removeItem(USER_CACHE_KEY);
@@ -430,24 +500,16 @@ export default function App() {
         {activeScreen === "detail" && (
           <EventDetail
             event={selectedMovie}
+            showtimes={showtimes}
+            isSignedIn={isSignedIn}
             relatedEvents={relatedEvents}
             wishlistedIds={wishlistedIds}
             onBack={goHome}
             onToggleWishlist={handleToggleWishlist}
             onBookRelated={handleStartBookingInput}
             onProceedToSeatSelection={handleProceedToSeats}
+            onProceedToQuantityCheckout={handleProceedToQuantityCheckout}
           />
-        )}
-
-        {activeScreen === "detail" && selectedEventId && (
-          <div className="mx-auto max-w-3xl px-4 pb-8">
-            <button
-              onClick={() => setShowSeatMap(true)}
-              className="w-full rounded-xl border border-cam-dat/30 bg-cam-dat/10 px-4 py-3 text-sm font-black text-cam-dat transition hover:bg-cam-dat/15"
-            >
-              Xem sơ đồ ghế / vé
-            </button>
-          </div>
         )}
 
         {activeScreen === "seats" && (
@@ -525,7 +587,7 @@ export default function App() {
       </button>
 
       {showAuthModal && (
-        <AuthModal onClose={() => setShowAuthModal(false)} onLogin={handleLogin} />
+        <AuthModal onClose={dismissAuthModal} onLogin={handleLogin} />
       )}
       {showAccountModal && userName && (
         <AccountModal
@@ -546,9 +608,6 @@ export default function App() {
         />
       )}
       {resetToken && <ResetPassword token={resetToken} />}
-      {showSeatMap && selectedEventId && (
-        <SeatMapView eventId={selectedEventId} onClose={() => setShowSeatMap(false)} />
-      )}
     </div>
   );
 }

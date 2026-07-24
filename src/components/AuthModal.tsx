@@ -33,6 +33,12 @@ const inputClass =
 const labelText = "mb-1.5 block font-mono text-xs text-beige-kem/70";
 
 export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
+  // Google Identity Services captures its callback once at initialize() time, so a plain closure
+  // would freeze the first render's onLogin (and the pending post-login action it closes over).
+  // Route the Google callback through a ref that always holds the latest onLogin.
+  const onLoginRef = useRef(onLogin);
+  onLoginRef.current = onLogin;
+
   const [mode, setMode] = useState<Mode>("login");
   const [identifier, setIdentifier] = useState("");
   const [email, setEmail] = useState("");
@@ -97,7 +103,7 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
         callback: async (r) => {
           try {
             const user = await authClient.loginWithGoogle(r.credential);
-            onLogin(user);
+            onLoginRef.current(user);
           } catch (e) {
             fail(e);
           }

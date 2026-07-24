@@ -4,10 +4,8 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import type { SeatMap, Showtime } from "@/shared/catalog/types";
+import type { SeatMap } from "@/shared/catalog/types";
 import { catalogClient } from "../services/catalogClient";
-
-const ghost = "rounded-xl border border-beige-kem/15 px-3 py-2 text-xs font-bold text-beige-kem/80 transition hover:border-cam-dat";
 
 const seatColor: Record<string, string> = {
   available: "border-la-co/60 text-la-co",
@@ -16,29 +14,30 @@ const seatColor: Record<string, string> = {
   blocked: "border-beige-kem/15 text-beige-kem/30",
 };
 
-export default function SeatMapView({ eventId, onClose }: { eventId: number; onClose: () => void }) {
-  const [showtimes, setShowtimes] = useState<Showtime[]>([]);
-  const [showtimeId, setShowtimeId] = useState<number | null>(null);
+/**
+ * Read-only seat availability for one showtime, straight from the catalog API.
+ *
+ * Seated events only: a general-admission showtime has no seats, and its remaining quantity is
+ * shown on the ticket-tier cards instead. Selecting or holding a seat is the seat-holds feature —
+ * this panel never mutates anything.
+ */
+export default function SeatMapView({ showtimeId }: { showtimeId: number }) {
   const [map, setMap] = useState<SeatMap | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    catalogClient
-      .getShowtimes(eventId)
-      .then((st) => {
-        setShowtimes(st);
-        if (st[0]) setShowtimeId(st[0].id);
-      })
-      .catch((e) => setErr((e as Error).message));
-  }, [eventId]);
-
-  useEffect(() => {
-    if (showtimeId === null) return;
+    let stale = false;
     setMap(null);
-    catalogClient.getSeatMap(showtimeId).then(setMap).catch((e) => setErr((e as Error).message));
+    setErr(null);
+    catalogClient
+      .getSeatMap(showtimeId)
+      .then((res) => !stale && setMap(res))
+      .catch((e) => !stale && setErr((e as Error).message));
+    return () => {
+      stale = true;
+    };
   }, [showtimeId]);
 
-  // group seated seats by row
   const rows = useMemo(() => {
     if (map?.eventType !== "seated" || !map.seats) return [];
     const byRow = new Map<string, typeof map.seats>();
@@ -47,75 +46,48 @@ export default function SeatMapView({ eventId, onClose }: { eventId: number; onC
       list.push(s);
       byRow.set(s.row, list);
     }
-    return [...byRow.entries()].map(([row, seats]) => ({ row, seats: seats.sort((a, b) => a.number - b.number) }));
+    return [...byRow.entries()].map(([row, seats]) => ({
+      row,
+      seats: seats.sort((a, b) => a.number - b.number),
+    }));
   }, [map]);
 
+  if (err) {
+    return (
+      <div className="rounded-xl border border-burgundy/40 bg-burgundy/10 p-3 text-xs text-beige-kem">
+        {err}
+      </div>
+    );
+  }
+
+  if (!map) return <p className="text-sm text-beige-kem/60">Đang tải sơ đồ ghế…</p>;
+  if (map.eventType !== "seated") return null;
+
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-xanh-pho/95 backdrop-blur-sm">
-      <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8 text-beige-kem">
-        <div className="flex items-center justify-between">
-          <h2 className="font-display text-2xl font-black">Sơ đồ ghế / vé</h2>
-          <button onClick={onClose} className={ghost}>Đóng</button>
-        </div>
-        {err && <div className="rounded-xl border border-burgundy/40 bg-burgundy/10 p-3 text-xs">{err}</div>}
-
-        {showtimes.length > 1 && (
-          <select
-            value={showtimeId ?? ""}
-            onChange={(e) => setShowtimeId(Number(e.target.value))}
-            className="h-11 w-full rounded-xl border border-beige-kem/20 bg-white/[0.035] px-4 text-sm text-beige-kem outline-none focus:border-cam-dat"
-          >
-            {showtimes.map((s) => (
-              <option key={s.id} value={s.id} className="bg-xanh-pho">
-                {new Date(s.startsAt).toLocaleString("vi-VN")} · {s.venue.name}
-              </option>
-            ))}
-          </select>
-        )}
-
-        {!map && !err && <p className="text-sm text-beige-kem/60">Đang tải…</p>}
-
-        {map?.eventType === "seated" && (
-          <div className="rounded-2xl border border-beige-kem/10 bg-white/[0.02] p-5">
-            <div className="mb-4 rounded-lg bg-white/[0.04] py-1 text-center font-mono text-[10px] uppercase tracking-widest text-beige-kem/50">Sân khấu</div>
-            <div className="space-y-2">
-              {rows.map(({ row, seats }) => (
-                <div key={row} className="flex items-center justify-center gap-1.5">
-                  <span className="w-6 text-right font-mono text-[10px] text-beige-kem/40">{row}</span>
-                  {seats.map((s) => (
-                    <span
-                      key={s.id}
-                      title={`${s.row}${s.number} · ${s.tier} · ${s.price.toLocaleString("vi-VN")}đ · ${s.status}`}
-                      className={`grid h-7 w-7 place-items-center rounded-md border text-[10px] font-bold ${seatColor[s.status] ?? ""}`}
-                    >
-                      {s.number}
-                    </span>
-                  ))}
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 flex flex-wrap gap-4 font-mono text-[10px] text-beige-kem/50">
-              <span className="text-la-co">■ Còn trống</span>
-              <span className="text-cam-dat">■ Đang giữ</span>
-              <span className="text-beige-kem/30">■ Đã bán</span>
-            </div>
-          </div>
-        )}
-
-        {map?.eventType === "general_admission" && (
-          <div className="space-y-2">
-            {map.tiers?.map((t) => (
-              <div key={t.id} className="flex items-center justify-between rounded-xl border border-beige-kem/10 bg-white/[0.02] p-4">
-                <span className="font-bold">{t.label}</span>
-                <span className="font-mono text-sm">
-                  {t.price.toLocaleString("vi-VN")}đ · {t.remaining === null ? "còn vé" : t.remaining > 0 ? `còn ${t.remaining}` : "Hết vé"}
-                </span>
-              </div>
+    <div className="rounded-2xl border border-beige-kem/10 bg-white/[0.02] p-5">
+      <div className="mb-4 rounded-lg bg-white/[0.04] py-1 text-center font-mono text-[10px] uppercase tracking-widest text-beige-kem/50">
+        Sân khấu
+      </div>
+      <div className="space-y-2 overflow-x-auto">
+        {rows.map(({ row, seats }) => (
+          <div key={row} className="flex items-center justify-center gap-1.5">
+            <span className="w-6 shrink-0 text-right font-mono text-[10px] text-beige-kem/40">{row}</span>
+            {seats.map((s) => (
+              <span
+                key={s.id}
+                title={`${s.row}${s.number} · ${s.tier} · ${s.price.toLocaleString("vi-VN")}đ · ${s.status}`}
+                className={`grid h-7 w-7 shrink-0 place-items-center rounded-md border text-[10px] font-bold ${seatColor[s.status] ?? ""}`}
+              >
+                {s.number}
+              </span>
             ))}
           </div>
-        )}
-
-        <p className="font-mono text-[11px] text-beige-kem/45">Đăng nhập để chọn ghế và đặt vé (sắp có).</p>
+        ))}
+      </div>
+      <div className="mt-4 flex flex-wrap gap-4 font-mono text-[10px] text-beige-kem/50">
+        <span className="text-la-co">■ Còn trống</span>
+        <span className="text-cam-dat">■ Đang giữ</span>
+        <span className="text-beige-kem/30">■ Đã bán</span>
       </div>
     </div>
   );
