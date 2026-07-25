@@ -3,9 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Showtime } from "@/shared/catalog/types";
 import { MovieEvent } from "../types";
+import { formatHoldClock } from "../services/holdSession";
+import { watchShowtime } from "../services/seatSocket";
 import SeatMapView from "./SeatMapView";
 
 export interface TierSelection {
@@ -27,9 +29,25 @@ interface EventDetailProps {
   onToggleWishlist: (eventId: string) => void;
   onBookRelated: (event: MovieEvent) => void;
   /** Seated events: hand off to the seat picker. */
-  onProceedToSeatSelection: (date: string, time: string) => void;
+  onProceedToSeatSelection: (showtimeId: number | null, date: string, time: string) => void;
   /** General admission: no seat map exists, so quantities go straight to checkout. */
-  onProceedToQuantityCheckout: (selection: TierSelection[], date: string, time: string) => void;
+  onProceedToQuantityCheckout: (
+    selection: TierSelection[],
+    showtimeId: number | null,
+    date: string,
+    time: string,
+  ) => void;
+  /**
+   * The hold already placed for this event, if any. Stepping back here from checkout must show the
+   * same showtime and the same quantities — the flow keeps its selection until the buyer leaves it.
+   */
+  restoreHold?: {
+    selectedDate: string;
+    selectedTime: string;
+    quantities: Record<string, number>;
+  } | null;
+  /** Milliseconds left on that hold, so step 01 shows the same clock as steps 02 and 03. */
+  holdRemainingMs?: number;
 }
 
 const statusLabels = {
@@ -67,6 +85,8 @@ export default function EventDetail({
   onBookRelated,
   onProceedToSeatSelection,
   onProceedToQuantityCheckout,
+  restoreHold = null,
+  holdRemainingMs = 0,
 }: EventDetailProps) {
   const isSeated = event.eventType === "seated";
 
@@ -110,18 +130,52 @@ export default function EventDetail({
 
   const [selectedSlotKey, setSelectedSlotKey] = useState<string>("");
   const [quantities, setQuantities] = useState<Record<string, number>>({});
+  /** The held showtime is restored once; after that the buyer's own clicks win. */
+  const restoredKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
+    const held =
+      restoreHold &&
+      slots.find((s) => s.date === restoreHold.selectedDate && s.time === restoreHold.selectedTime);
+
+    if (held && restoredKeyRef.current !== held.key) {
+      restoredKeyRef.current = held.key;
+      setSelectedSlotKey(held.key);
+      setQuantities(restoreHold!.quantities);
+      return;
+    }
+
+    if (selectedSlotKey) return;
     const firstOpen = slots.find((s) => !s.soldOut) ?? slots[0];
     setSelectedSlotKey(firstOpen?.key ?? "");
-  }, [slots]);
+  }, [slots, restoreHold, selectedSlotKey]);
 
   useEffect(() => {
+    // Switching event or showtime starts a new selection — unless this is the slot we just
+    // restored from the live hold.
+    if (restoredKeyRef.current === selectedSlotKey) return;
     setQuantities({});
   }, [event.id, selectedSlotKey]);
 
   const selectedSlot = slots.find((s) => s.key === selectedSlotKey) ?? null;
   const eventUnavailable = event.status === "sold_out" || event.status === "cancelled";
+
+  /**
+   * Live tier availability for the selected showtime (US3): when anyone reserves or releases a
+   * general-admission quantity, "Còn N vé" follows within about a second. Advisory only — the server
+   * still refuses an over-reservation regardless of what this shows (FR-023).
+   */
+  const [liveRemaining, setLiveRemaining] = useState<Record<string, number | null>>({});
+
+  useEffect(() => {
+    setLiveRemaining({});
+    const showtimeId = selectedSlot?.showtimeId;
+    if (isSeated || !showtimeId) return;
+    return watchShowtime(showtimeId, (update) => {
+      if (!update.tier) return;
+      setLiveRemaining((current) => ({ ...current, [String(update.tier!.ticketTierId)]: update.tier!.remaining }));
+    });
+  }, [isSeated, selectedSlot?.showtimeId]);
 
   const selection = useMemo<TierSelection[]>(
     () =>
@@ -147,10 +201,14 @@ export default function EventDetail({
 
   const isWishlisted = wishlistedIds.includes(event.id);
 
-  const tierCap = (tier: MovieEvent["ticketTiers"][number]) =>
-    tier.remaining === null || tier.remaining === undefined
-      ? MAX_PER_TIER
-      : Math.min(tier.remaining, MAX_PER_TIER);
+  /** What a tier has left right now: the live number if the channel has sent one, else the fetched one. */
+  const remainingOf = (tier: MovieEvent["ticketTiers"][number]): number | null | undefined =>
+    tier.id in liveRemaining ? liveRemaining[tier.id] : tier.remaining;
+
+  const tierCap = (tier: MovieEvent["ticketTiers"][number]) => {
+    const remaining = remainingOf(tier);
+    return remaining === null || remaining === undefined ? MAX_PER_TIER : Math.min(remaining, MAX_PER_TIER);
+  };
 
   const adjustQuantity = (tierId: string, delta: number, cap: number) => {
     setQuantities((current) => {
@@ -161,8 +219,9 @@ export default function EventDetail({
 
   const handlePrimaryAction = () => {
     if (!selectedSlot) return;
-    if (isSeated) onProceedToSeatSelection(selectedSlot.date, selectedSlot.time);
-    else onProceedToQuantityCheckout(selection, selectedSlot.date, selectedSlot.time);
+    // The showtime id is what the hold API locks against — carry it, not just the display strings.
+    if (isSeated) onProceedToSeatSelection(selectedSlot.showtimeId, selectedSlot.date, selectedSlot.time);
+    else onProceedToQuantityCheckout(selection, selectedSlot.showtimeId, selectedSlot.date, selectedSlot.time);
   };
 
   const primaryLabel = eventUnavailable
@@ -189,12 +248,20 @@ export default function EventDetail({
           Quay lại danh sách
         </button>
 
-        <div className="flex flex-wrap items-center gap-2 font-mono text-xs text-beige-kem/45">
+        <div className="flex flex-wrap items-center gap-3 font-mono text-xs text-beige-kem/45">
           <span className="font-semibold text-burgundy">01 Chọn suất</span>
           <span className="h-px w-6 bg-beige-kem/20" />
           <span>02 {isSeated ? "Chọn ghế" : "Chọn số lượng vé"}</span>
           <span className="h-px w-6 bg-beige-kem/20" />
           <span>03 Thanh toán</span>
+
+          {/* A hold placed further along the flow is still running while the buyer looks back here. */}
+          {restoreHold && holdRemainingMs > 0 && (
+            <span className="inline-flex items-center gap-2 rounded-lg border border-cam-dat/30 bg-cam-dat/5 px-2.5 py-1 text-cam-dat">
+              Đang giữ chỗ
+              <b className="text-sm font-black text-beige-kem">{formatHoldClock(holdRemainingMs)}</b>
+            </span>
+          )}
         </div>
       </div>
 
@@ -372,11 +439,11 @@ export default function EventDetail({
                           <p className="mt-2 text-xs leading-5 text-beige-kem/62">{tier.description}</p>
                         )}
                         <p className="mt-2 font-mono text-[11px] text-beige-kem/55">
-                          {tier.remaining === null || tier.remaining === undefined
+                          {remainingOf(tier) === null || remainingOf(tier) === undefined
                             ? "Còn vé"
                             : soldOut
                               ? "Hết vé"
-                              : `Còn ${tier.remaining} vé`}
+                              : `Còn ${remainingOf(tier)} vé`}
                         </p>
                         <div className="mt-3 flex items-center justify-between gap-2 border-t border-beige-kem/10 pt-3">
                           <button

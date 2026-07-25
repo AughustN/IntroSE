@@ -137,7 +137,7 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
             <p className="mt-2 text-sm leading-6 text-beige-kem/65">
               {mode === "login"
                 ? "Đăng nhập bằng email hoặc số điện thoại để quản lý vé, wishlist và đơn hàng."
-                : "Tạo tài khoản TicketBox với email, biệt danh và mật khẩu."}
+                : "Tạo tài khoản TixHub với email, biệt danh và mật khẩu."}
             </p>
           </div>
           <button

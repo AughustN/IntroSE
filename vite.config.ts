@@ -21,6 +21,18 @@ export default defineConfig({
         target: 'http://127.0.0.1:4000',
         changeOrigin: true,
       },
+      // Live seat channel (feature 003). Same origin in production behind Nginx; in dev the
+      // websocket needs its own proxy entry or socket.io hits the Vite server instead.
+      '/socket.io': {
+        target: 'http://127.0.0.1:4000',
+        changeOrigin: true,
+        ws: true,
+      },
+      // Uploaded avatars are stored on the API host and referenced by a relative path.
+      '/uploads': {
+        target: 'http://127.0.0.1:4000',
+        changeOrigin: true,
+      },
     },
   },
 });

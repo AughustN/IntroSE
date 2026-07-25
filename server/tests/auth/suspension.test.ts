@@ -1,7 +1,8 @@
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { pool } from '../../src/db/pool.js';
 import { app } from '../helpers/app.js';
+import { mailer } from '../../src/modules/auth/mailer.js';
 
 const creds = { email: 'ha@example.com', password: 'secret123', passwordConfirm: 'secret123', nickname: 'Hà' };
 
@@ -43,6 +44,16 @@ describe('account suspension (FR-051..053)', () => {
   it('a reset request for a suspended account returns the same uniform response (FR-053)', async () => {
     const reg = await request(app).post('/api/auth/register').send(creds).expect(201);
     await suspend(reg.body.user.id);
+    const send = vi.spyOn(mailer, 'sendPasswordReset').mockResolvedValue();
+
     await request(app).post('/api/auth/password/forgot').send({ email: creds.email }).expect(200);
+
+    // Identical reply is not enough: no link may be minted or mailed, or a reset would be a way
+    // back into a suspended account (UC-05 A6).
+    expect(send).not.toHaveBeenCalled();
+    const { rows } = await pool.query(`SELECT 1 FROM password_resets WHERE user_id = $1`, [reg.body.user.id]);
+    expect(rows).toHaveLength(0);
   });
 });
+
+afterEach(() => vi.restoreAllMocks());

@@ -37,8 +37,8 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
     times: ["09:30", "12:15", "15:00", "18:20", "20:45", "23:15"],
     dates: ["Hôm nay", "Ngày mai", "11/06", "12/06", "13/06"],
     city: "TP.HCM",
-    location: "TicketBox Cinema - Chi nhánh Pasteur Quận 1",
-    venueName: "TicketBox Pasteur",
+    location: "TixHub Cinema - Chi nhánh Pasteur Quận 1",
+    venueName: "TixHub Pasteur",
     venueMapUrl: "https://maps.google.com/?q=Pasteur+Quan+1",
     venueGuide: "Gửi xe tại hầm trung tâm, vào cổng A và quét QR tại line ưu tiên trước giờ chiếu 15 phút.",
     refundPolicy: "Đổi vé trước giờ chiếu 24 giờ. Không hoàn vé sau khi QR đã được quét.",
@@ -64,7 +64,7 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
     releaseDate: "2026-06-15",
     rating: 9.5,
     reviewCount: 932,
-    description: "Lần đầu tiên tác phẩm văn học kinh điển của nhà văn Nguyễn Nhật Ánh được hiện thực hóa trên sân khấu kịch nghệ TicketBox, lồng ghép nhạc phẩm đình đám của Phan Mạnh Quỳnh. Những rạo rực, hoài niệm tuổi học sinh và rừng sim đầy mơ mộng.",
+    description: "Lần đầu tiên tác phẩm văn học kinh điển của nhà văn Nguyễn Nhật Ánh được hiện thực hóa trên sân khấu kịch nghệ TixHub, lồng ghép nhạc phẩm đình đám của Phan Mạnh Quỳnh. Những rạo rực, hoài niệm tuổi học sinh và rừng sim đầy mơ mộng.",
     price: 120000,
     doublePrice: 260000,
     ticketTiers: [
@@ -157,8 +157,8 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
     times: ["10:00", "13:30", "16:45", "19:00", "21:30"],
     dates: ["Hôm nay", "Ngày mai", "11/06", "12/06"],
     city: "Hà Nội",
-    location: "TicketBox Cinema - Chi nhánh Hai Bà Trưng Hà Nội",
-    venueName: "TicketBox Hai Bà Trưng",
+    location: "TixHub Cinema - Chi nhánh Hai Bà Trưng Hà Nội",
+    venueName: "TixHub Hai Bà Trưng",
     venueMapUrl: "https://maps.google.com/?q=Hai+Ba+Trung+Ha+Noi",
     venueGuide: "Vào cửa qua sảnh B2. Suất Sing-Along nhận vòng tay tại quầy chăm sóc khách hàng.",
     refundPolicy: "Đổi suất trước 12 giờ nếu chưa dùng mã QR.",
@@ -197,8 +197,8 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
     times: ["18:30", "20:45", "22:50", "00:15"],
     dates: ["Hôm nay", "Ngày mai", "11/06"],
     city: "TP.HCM",
-    location: "TicketBox Cinema - Chi nhánh Pasteur Quận 1",
-    venueName: "TicketBox Pasteur",
+    location: "TixHub Cinema - Chi nhánh Pasteur Quận 1",
+    venueName: "TixHub Pasteur",
     venueMapUrl: "https://maps.google.com/?q=Pasteur+Quan+1",
     venueGuide: "Khán giả T18 cần xuất trình giấy tờ tùy thân khi soát vé.",
     refundPolicy: "Vé T18 không hỗ trợ đổi người nhận sau khi thanh toán.",
@@ -210,7 +210,7 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
   }
 ];
 
-export const TICKETBOX_CATEGORIES = [
+export const TIXHUB_CATEGORIES = [
   { id: "all", label: "Tất cả" },
   { id: "movie", label: "Phim Chiếu Rạp" },
   { id: "music", label: "Âm Nhạc & Concert" },

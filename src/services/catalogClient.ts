@@ -1,6 +1,6 @@
 // Public catalog data layer (no auth) + authed organizer/admin calls. Same-origin; /api proxied in dev.
 import type { EventDetail, EventListResponse, SeatMap, Showtime } from '@/shared/catalog/types';
-import { getAccessToken } from './authClient';
+import { withAuthRetry } from './authClient';
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`/api${path}`, { headers: { Accept: 'application/json' } });
@@ -9,15 +9,18 @@ async function get<T>(path: string): Promise<T> {
 }
 
 async function authed<T>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
-  const token = getAccessToken();
-  const headers: Record<string, string> = { Accept: 'application/json' };
-  if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`/api${path}`, {
-    method: opts.method ?? 'GET',
-    headers,
-    credentials: 'include',
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+  // Refresh once on a 401 (same reason as holdsClient): an organizer or admin panel left open past
+  // the access token's lifetime must not report itself as signed out.
+  const res = await withAuthRetry((token) => {
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return fetch(`/api${path}`, {
+      method: opts.method ?? 'GET',
+      headers,
+      credentials: 'include',
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    });
   });
   if (!res.ok) {
     const e = (await res.json().catch(() => ({}))) as { error?: string; message?: string };

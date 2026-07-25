@@ -6,6 +6,7 @@ import { authRouter } from './modules/auth/auth.routes.js';
 import { catalogPublicRouter } from './modules/catalog/catalog.public.routes.js';
 import { organizerRouter } from './modules/catalog/organizer.routes.js';
 import { moderationRouter } from './modules/catalog/moderation.routes.js';
+import { reservationsRouter } from './modules/holds/reservations.routes.js';
 
 /** Build the Express app (no listen) so tests can drive it with supertest. */
 export function createApp(): Express {
@@ -24,6 +25,7 @@ export function createApp(): Express {
 
   app.use('/api', authRouter);
   app.use('/api', catalogPublicRouter);
+  app.use('/api', reservationsRouter);
   app.use('/api/organizer', organizerRouter);
   app.use('/api/admin', moderationRouter);
 

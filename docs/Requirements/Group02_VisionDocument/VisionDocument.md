@@ -275,9 +275,10 @@ flowchart TB
     OR -->|HTTPS| FE
     AD -->|HTTPS| FE
     FE -->|REST / JSON over HTTPS| API
-    FE <-->|WebSocket: live seat status| WS
+    FE <-->|WebSocket: live seat status broadcast| WS
+    FE -->|hold / release seat: REST| API
     API -->|SQL| DB
-    WS -->|seat hold / release| DB
+    API -->|broadcast seat change| WS
     API -->|wallet top-up: redirect + signed IPN| VN
     API -->|AI prompt / completion| GM
     API -->|verify ID token| GO
@@ -298,7 +299,7 @@ Each item is tagged as an **Assumption** (something we take to be true) or a **D
 
 | # | Type | Assumption / Dependency | Likelihood × Impact | Impact if it changes |
 |---|---|---|---|---|
-| 1 | Dependency | VNPay's sandbox callback contract stays stable and reachable. | Low × High | Only **wallet top-ups** break — checkout is wallet-only and atomic, so a seat never waits on a gateway callback (schema D2). Mitigated by idempotent top-up IPNs (REL-03). |
+| 1 | Dependency | VNPay's sandbox callback contract stays stable and reachable. | Low × High | Only **wallet top-ups** break — checkout is wallet-only and atomic, so a seat never waits on a gateway callback (schema D2); a slow gateway costs at most the held seats after the one bounded grace (REL-02), never the money. Mitigated by idempotent top-up IPNs (REL-03). |
 | 2 | Dependency | Google Gemini's free tier quota remains usable (~10 req/min, ~100–250/day, shared). | Medium × Low | AI features degrade gracefully to non AI fallbacks, so the core flow is unaffected (Section 6 SCAL-03). |
 | 3 | Assumption | A single self-managed VPS (`tixhub.fit`, Nginx same-origin) + Neon Postgres provides enough capacity for demos. | Medium × Medium | Performance/availability ceilings apply; scaling out (more Node workers behind Nginx, or a bigger VPS) is a config change, not a rewrite. |
 | 4 | Assumption | Users access TixHub on a modern browser; organizers' phones have a working camera for QR scanning. | Low × Medium | QR check-in needs a camera in a mobile browser (PLAT-03), served over HTTPS (SEC-01); if the camera is unavailable, staff fall back to manual code entry (Feature 3). |
@@ -329,7 +330,7 @@ TixHub delivers **eleven core features** across the three roles. Each is summari
 | 8 | **Notifications, Reminders & Waitlist** | Should | Automated email/in-app alerts for confirmations, reminders (1 week / 1 day before), changes, and a waitlist for sold-out events. | UN-07 (timely reminders) |
 | 9 | **Reviews, Ratings & Social Proof** | Should | Attendees rate events (1–5 stars) and review after attending; ratings appear on the organizer's profile and future events. | UN-05 (confidence before buying) |
 | 10 | **Admin Moderation & Organizer Approval** | Must | Admin tools to approve organizers before they can sell, **approve each event before it is visible to buyers (pre-publish moderation)**, review reported events, and take down policy-violating content. | UN-02 (marketplace trust & safety) |
-| 11 | **Real-Time Seat Selection & Holds** | Must | Buyers of seated events pick seats on a live map; a chosen seat is held temporarily and released on timeout, with concurrency-safe holds so two buyers are never sold the same seat. This is TixHub's core differentiator (§4.1). | UN-03 (easy seat selection), UN-01 (stays up under load) |
+| 11 | **Real-Time Seat Selection & Holds** | Must | Buyers of seated events pick seats on a live map and each click holds that seat immediately; general-admission buyers hold a **quantity** in a tier the same way. A hold is concurrency-safe (two buyers are never sold the same seat, DATA-02), auto-released on timeout (REL-02), broadcast to every viewer within ~1 s, and capped per buyer (default **8 tickets**, one active selection per showtime) so no one can lock a map. This is TixHub's core differentiator (§4.1). | UN-03 (easy seat selection), UN-01 (stays up under load) |
 
 **On the AI features:** both are **assistive, not autonomous** output is always editable, the user stays in control, and any recommendation or generated field can be overridden before going live. 
 
@@ -411,7 +412,7 @@ Three threads run through the requirements below:
 | ID | Requirement | Verification |
 |---|---|---|
 | REL-01 | **≥ 99% uptime during demo windows** (excluding maintenance). The VPS runs a persistent Node process behind Nginx, so there is **no serverless cold-start**. Outside demos, availability is best-effort on the single instance. | UptimeRobot / health-check log over the demo window |
-| REL-02 | A seat hold is **auto released after a 7 minute (configurable) TTL**, even if the client disconnects. This is the **only** timer on a seat: checkout is a single local wallet transaction (D2), so there is no payment window and no `pending_payment` state for a seat to wait in (DATA-03). A pending top-up **never** freezes or extends a hold. | Timer test: hold + disconnect, assert release |
+| REL-02 | A seat hold is **auto released after a 7 minute (configurable) TTL**, even if the client disconnects. The window runs from the reservation's first hold, **one clock for every seat in it**, and adding or removing a seat never extends it. This is the **only** timer on a seat: checkout is a single local wallet transaction (D2), so there is no payment window and no `pending_payment` state for a seat to wait in (DATA-03). A pending top-up **never freezes** a hold; its single exception is a **one-time bounded grace** — starting a wallet top-up for the held seats extends the window **once** by a configurable +7 min, never past an absolute ceiling of **14 min** from creation (schema D2 amendment, UC-40). Past the ceiling the seats release normally and the money stays in the wallet. | Timer test: hold + disconnect, assert release; grace test: assert the second top-up extends nothing and the window never exceeds 14 min |
 | REL-03 | Top-up IPN processing is **idempotent**: the same VNPay IPN received twice must credit the wallet exactly once and write exactly one ledger row. | Unit test replays an IPN, asserts no duplicate credit |
 
 #### 6.5 Scalability
@@ -452,8 +453,8 @@ Three threads run through the requirements below:
 | ID | Requirement | Verification |
 |---|---|---|
 | DATA-01 | Creating an order, debiting the wallet, writing the ledger row, flipping the seats, and issuing tickets run in a **single ACID transaction**. A failure at any step rolls back everything. | Inject a mid operation failure, assert no partial state |
-| DATA-02 | **Two attendees can never be sold the same seat**: concurrent purchase attempts on one seat are serialized so exactly one succeeds and the rest are rejected. The same row lock serialises concurrent debits on one wallet. | Parallel buyers on one seat, assert exactly one wins |
-| DATA-03 | **The seat lifecycle is `available → held → sold` — there is no payment-pending state.** Because checkout debits the store-credit wallet in one local transaction (D2), no seat ever waits on a gateway callback: a `held` seat is freed only by its TTL (REL-02) or by the holder releasing it, and it becomes `sold` only inside the committed purchase transaction. A pending or late top-up affects **no** seat, so the late-callback problem does not arise. *(Amended: the earlier `pending_payment` state and 15-minute payment window were removed by constitution v2.0.0.)* | Concurrency + timeout tests: assert no double-sell and no early release |
+| DATA-02 | **Two attendees can never be sold the same seat**: concurrent **hold** attempts (and the purchase that follows) on one seat are serialized at the database so exactly one succeeds and the rest are rejected — the guarantee starts at the hold, not at payment. The same rule keeps a general-admission tier from being oversold (`reserved + sold ≤ capacity`), and the same row lock serialises concurrent debits on one wallet. | Parallel buyers on one seat, assert exactly one wins; concurrent GA reservations, assert no oversell |
+| DATA-03 | **The seat lifecycle is `available → held → sold` — there is no payment-pending state.** Because checkout debits the store-credit wallet in one local transaction (D2), no seat ever waits on a gateway callback: a `held` seat is freed only by its TTL (REL-02) or by the holder releasing it, and it becomes `sold` only inside the committed purchase transaction. A gateway can never release a seat; the most a top-up can do is the one bounded grace on the TTL (REL-02), so the late-callback problem does not arise. *(Amended: the earlier `pending_payment` state and 15-minute payment window were removed by constitution v2.0.0.)* | Concurrency + timeout tests: assert no double-sell and no early release |
 | DATA-04 | **The wallet ledger is append-only and fully explains every balance.** Per wallet, `SUM(wallet_transactions.amount) = wallets.balance_amount`; platform-wide, `SUM(topup) − SUM(purchase) + SUM(refund) = SUM(all balances)`, and every `topup` row joins 1:1 to a successful gateway transaction. A balance can never go negative (DB `CHECK`); the top-up ceiling is enforced at top-up time only, so a refund is never blocked by it; a ticket is refundable **at most once**, enforced by a unique index; no code path — admin included — can create money. | CI asserts both invariants; tests for negative balance, double refund, and refund past the ceiling |
 
 #### 6.9 Standards & Compliance

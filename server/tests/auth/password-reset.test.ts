@@ -30,6 +30,17 @@ describe('password reset (US4)', () => {
     expect(links).toHaveLength(1); // only the registered address produced a mail
   });
 
+  it('a mail-provider failure still returns the uniform 200 (FR-028)', async () => {
+    await request(app).post('/api/auth/register').send(creds).expect(201);
+    vi.spyOn(mailer, 'sendPasswordReset').mockRejectedValue(new Error('resend 403: domain not verified'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    // A 500 here would fire only for registered addresses — the reply must match the unknown-address case.
+    const known = await request(app).post('/api/auth/password/forgot').send({ email: creds.email }).expect(200);
+    const unknown = await request(app).post('/api/auth/password/forgot').send({ email: 'nobody@example.com' }).expect(200);
+    expect(known.body).toEqual(unknown.body);
+  });
+
   it('reset replaces the password, revokes sessions, and is single-use (FR-029/030)', async () => {
     await request(app).post('/api/auth/register').send(creds).expect(201);
     const links = captureResetLink();

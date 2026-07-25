@@ -42,3 +42,23 @@ export const REFRESH_GRACE_MS = 60 * 1000; // idempotency-keyed grace cap (R-12)
 export const REFRESH_COOKIE = 'tix_refresh';
 export const JWT_ISS = 'tixhub.fit';
 export const JWT_AUD = 'tixhub.fit';
+
+// ---- Seat holds (feature 003). Settings an admin can adjust (UC-36), never hard-coded. ----
+const ms = (name: string, fallback: number): number => {
+  const v = Number(process.env[name]);
+  return Number.isFinite(v) && v > 0 ? v : fallback;
+};
+
+/** Hold window from the reservation's first hold (Vision REL-02, FR-006). */
+export const HOLD_TTL_MS = ms('HOLD_TTL_MS', 7 * 60 * 1000);
+/** One-time grace granted when a wallet top-up carries the reservation (FR-010, schema D2 amendment). */
+export const HOLD_GRACE_MS = ms('HOLD_GRACE_MS', 7 * 60 * 1000);
+/** Absolute ceiling measured from `reservations.created_at` — the window can never exceed it. */
+export const HOLD_ABSOLUTE_MS = ms('HOLD_ABSOLUTE_MS', 14 * 60 * 1000);
+/** Tickets one attendee may hold at once for one showtime: seats (seated) or quantity (GA) (FR-016). */
+export const SEAT_CAP = ms('SEAT_CAP', 8);
+/** How often the release sweep runs. Expiry is exact; the sweep is what acts on it (REL-02). */
+export const HOLD_SWEEP_INTERVAL_MS = ms('HOLD_SWEEP_INTERVAL_MS', 60 * 1000);
+/** Hold/release requests allowed per user per window — anti hold-spam (FR-017). */
+export const HOLD_RATE_LIMIT = ms('HOLD_RATE_LIMIT', 30);
+export const HOLD_RATE_WINDOW_MS = ms('HOLD_RATE_WINDOW_MS', 10 * 1000);

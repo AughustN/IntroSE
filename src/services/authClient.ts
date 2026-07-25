@@ -82,11 +82,20 @@ function doRefresh(): Promise<boolean> {
 
 /** Authenticated request that transparently refreshes once on a 401. */
 async function authed<T>(path: string, opts: Options = {}): Promise<T> {
-  let res = await raw(path, { ...opts, auth: true });
-  if (res.status === 401 && (await doRefresh())) {
-    res = await raw(path, { ...opts, auth: true });
-  }
-  return parse<T>(res);
+  return parse<T>(await withAuthRetry(() => raw(path, { ...opts, auth: true })));
+}
+
+/**
+ * Same refresh-once-on-401 behaviour, exposed for the other data layers (catalog, holds).
+ *
+ * The access token is short-lived and in memory, so any screen a user can sit on for a while — the
+ * seat map above all — will eventually send a stale one. Without this, that reads to the user as
+ * "please sign in" while their refresh cookie is still perfectly valid.
+ */
+export async function withAuthRetry(send: (token: string | null) => Promise<Response>): Promise<Response> {
+  let res = await send(accessToken);
+  if (res.status === 401 && (await doRefresh())) res = await send(accessToken);
+  return res;
 }
 
 // ---- public API (mirrors contracts/auth.openapi.yaml) ----

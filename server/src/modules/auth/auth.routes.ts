@@ -432,20 +432,28 @@ authRouter.post(
     if (!perId || !perIp) throw err.tooMany('rate_limited', 'Bạn đã yêu cầu quá nhiều lần, hãy thử lại sau.');
 
     const user = await findByEmail(email);
-    if (user && user.provider === 'email') {
+    // Google accounts get no link (FR-053, D5); suspended ones get none either — a reset must not
+    // be a way back in (UC-05 A6). Both cases fall through to the same response as an unknown address.
+    if (user && user.provider === 'email' && user.status === 'active') {
       const token = randomToken();
       await pool.query(
         `INSERT INTO password_resets (user_id, token_hash, expires_at)
          VALUES ($1, $2, now() + ($3::int * interval '1 millisecond'))`,
         [user.id, hashToken(token), RESET_TTL_MS],
       );
-      await mailer.sendPasswordReset(email, `${config.appUrl}/reset-password?token=${token}`);
       await recordAuthEvent({
         event: 'password_reset_requested',
         userId: user.id,
         identifierHash: hashIdentifier(email),
         sourceIp: req.ip,
       });
+      try {
+        await mailer.sendPasswordReset(email, `${config.appUrl}/reset-password?token=${token}`);
+      } catch (e) {
+        // A mail-provider failure must never change the reply: a 500 here would only ever fire for
+        // a registered address, turning the uniform response (FR-028) into an enumeration oracle.
+        console.error('[mailer] password reset send failed:', e);
+      }
     }
     // Uniform response whether or not the address is registered (FR-028).
     res.status(200).json({ ok: true, message: 'Nếu email tồn tại, chúng tôi đã gửi liên kết đặt lại mật khẩu.' });

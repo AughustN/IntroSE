@@ -19,6 +19,13 @@ Group 02 · SoE
 > **Scope:** Specifies all 41 use cases in the project and its use case diagrams. Requirement IDs in brackets (e.g. `SEC-10`, `REL-02`, `DATA-03`) trace to the Vision Document, Section 6.
 >
 > **Prototype:** Each use case ends with a **Prototype** block listing the screens in its flows plus a screenshot placeholder. The team generates the UI images in Google Stitch and pastes them under the matching use case before submission.
+>
+> **Implementation trace (2026-07-24).** Use cases are delivered by the SpecKit features under
+> `src/specs/`: **`001-account-auth`** (UC-01 to UC-06, UC-37) — *built*; **`002-event-catalog`**
+> (UC-07 to UC-09, UC-20, UC-21, UC-23, UC-24, UC-26, UC-34) — *built*; **`003-seat-holds`**
+> (UC-11, and the hold invariants UC-12 and UC-40 rely on) — *specified, in build*. Each feature's
+> spec is authoritative for the detail of its flows; where this document and a shipped feature spec
+> disagree, the feature spec wins and this document is amended.
 
 ---
 
@@ -550,36 +557,40 @@ Group 02 · SoE
 |---|---|
 | **Use-case ID** | UC-11 |
 | **Actor(s)** | Attendee (primary) |
-| **Description** | For a reserved-seating event, the attendee picks seats on a live seat map; a chosen seat is held temporarily so no two buyers get the same seat. TixHub's core differentiator. |
+| **Description** | For a reserved-seating event, the attendee picks seats on a live seat map and **each click holds that seat immediately** (hold-on-select); a held seat is theirs for a short window so no two buyers get the same seat. For a general-admission showtime the same machinery holds a **quantity** in a tier instead of specific seats. TixHub's core differentiator. |
 
 **Preconditions**
-- The event is publicly visible, Seated type, and has available seats.
+- The event is publicly visible, on sale, and has available seats (or, for GA, remaining stock).
 - **Viewing the map is open to guests** (Feature 002 FR-012). **Placing a hold requires a signed-in
   account**: a hold records its owner (`hold_owner_id`) and there are no anonymous holds, so the first
   click that would hold a seat prompts sign-in (UC-01/UC-03) and resumes afterwards.
 
 **Basic flow**
 1. Attendee opens the seat map for a seated event.
-2. System loads the live seat map over WebSocket, showing available / held / sold seats `[PERF-03]`.
+2. System loads the authoritative seat map (REST) and subscribes to the showtime's live channel, showing available / held / sold seats `[PERF-03]`.
 3. Attendee clicks one or more available seats.
-4. System places a concurrency-safe hold on each selected seat (DB lock) and broadcasts the new status to all viewers `[DATA-02]`, starting the hold TTL (**7 min, configurable**) `[REL-02]`.
-5. System reflects the held seats in the attendee's selection and shows the running total.
-6. Attendee confirms the selection and proceeds to checkout → UC-12.
+4. System places a concurrency-safe hold on each selected seat (DB row lock) and broadcasts the new status to all viewers `[DATA-02]`. The **first** hold creates the attendee's reservation for that showtime and starts the hold TTL (**7 min, configurable**) `[REL-02]`; every later seat joins that **same** reservation and shares its one clock — adding a seat never extends the window.
+5. System reflects the held seats in the attendee's selection and shows the running total in VND integers `[STD-03]` and the remaining time.
+6. Attendee confirms the selection and proceeds to checkout with that reservation → UC-12.
 
 **Alternative flows**
 - **A1 — Seat taken concurrently:** the clicked seat was just held/sold by another buyer; system rejects the click, updates the map live, and asks the attendee to pick another `[DATA-02]`.
-- **A2 — Hold TTL expires before checkout:** the 7-min TTL lapses (or client disconnects); system releases the seat and notifies the attendee to reselect. This is the **only** timer on a seat — there is no payment window `[REL-02]`, `[DATA-03]`.
-- **A3 — Attendee deselects a seat:** system releases that hold and broadcasts availability.
-- **A4 — WebSocket disconnect / reconnect:** system re-syncs the map on reconnect; server-side holds persist per TTL.
+- **A2 — Hold TTL expires before checkout:** the 7-min window lapses (or the client disconnects); a sweep releases **every** seat in the reservation together, marks it expired, and notifies the attendee to reselect — within about a minute of expiry and without the client being connected. This is the **only** timer on a seat — there is no payment window `[REL-02]`, `[DATA-03]`.
+- **A3 — Attendee deselects a seat:** system releases that hold and broadcasts availability; the rest of the reservation is untouched. Cancelling the whole selection releases every seat at once.
+- **A4 — WebSocket disconnect / reconnect:** system re-syncs the full map on reconnect and shows the attendee their own still-valid holds; server-side holds persist per TTL. Live updates are advisory — the database is the source of truth, so a stale click is still correctly refused `[DATA-02]`.
 - **A5 — Attendee abandons:** holds auto-release on TTL even without action `[REL-02]`.
 - **A6 — Guest clicks a seat:** the system prompts registration/login (UC-01/UC-03) and, once signed in, places the hold and continues. No hold exists while the visitor is a guest, so nothing is reserved in the meantime and the seat may be taken by someone else first `[SEC-04]`.
+- **A7 — Per-buyer cap reached:** the attendee already holds the maximum tickets for this showtime (**default 8, configurable** — UC-36); the extra seat is refused with the reason and their existing holds are untouched. The cap counts all their active holds server-side, so a second tab cannot exceed it.
+- **A8 — General admission (no seat map):** the attendee picks a **quantity** in a tier instead of seats; the system holds that quantity, the tier's remaining drops for all viewers, and it is restored on release or expiry. More than the remaining stock is refused, and concurrent reservations are serialized so a tier is never oversold `[DATA-02]`.
+- **A9 — Re-clicking a seat the attendee already holds:** treated as an idempotent success — no duplicate hold, no error.
+- **A10 — Showtime withdrawn while holding** (organizer cancels, admin removes the event, or the showtime starts): new holds are refused and the existing ones release on the next sweep; the attendee is told the showtime is no longer on sale.
 
 **Postconditions**
-- **Success:** selected seats are in `held` state for this attendee; checkout can begin.
-- **Failure / timeout:** seats return to `available`.
+- **Success:** the selected seats (or GA quantity) are `held` for this attendee inside **one active reservation** for that showtime; checkout can begin.
+- **Failure / timeout:** seats return to `available` (GA quantity returns to the tier's remaining).
 
 **Special requirements**
-- Seat update round-trip < 1 s p95 `[PERF-03]`; ≥ 60 concurrent users on one map `[PERF-06]`; holds are DB-serialized `[DATA-02]`.
+- Seat update round-trip < 1 s p95 `[PERF-03]`; ≥ 60 concurrent users on one map `[PERF-06]`; holds are DB-serialized `[DATA-02]`; at most **one active reservation per (attendee, showtime)**; hold/release requests are rate-limited per attendee to resist hold-spam `[SEC-04]`; all actions authorized server-side against the signed-in identity — the client never asserts who it is `[SEC-04]`.
 
 **Prototype.** Screens: *Seat map (available/held/sold)*, *Seat-taken conflict toast*, *Hold-expired notice*, *Selection summary*.
 `![UC-11 prototype](../prototypes/uc-11-seatmap.png)`
@@ -608,7 +619,7 @@ Group 02 · SoE
 
 **Alternative flows**
 - **A1 — Guest at checkout:** system prompts registration/login (UC-01/UC-03), then resumes.
-- **A2 — Insufficient balance:** system rejects with the exact shortfall and offers to top up `«extend» UC-40`. Nothing is created, and the seat hold keeps its ordinary TTL. It is **not** frozen or extended, since that would let anyone lock a seat map for free `[DATA-03]`.
+- **A2 — Insufficient balance:** system rejects with the exact shortfall and offers to top up `«extend» UC-40`. Nothing is created. The hold is **never frozen**; it keeps its ordinary TTL, except that *starting* the top-up spends the **one-time grace** (+7 min once, ceiling 14 min from the reservation's creation — UC-40 step 4). A second top-up extends nothing, so no one can lock a seat map for free `[REL-02]`, `[DATA-03]`.
 - **A3 — Hold expired before confirming:** system informs the attendee and returns to seat selection (UC-11) / availability check. No money moved.
 - **A4 — GA tier sold out during review:** the tier's remaining quantity reached zero while the attendee reviewed; system rejects the order and offers that tier's waitlist (UC-17).
 - **A5 — Attendee cancels checkout:** no order is created; holds release on TTL.
@@ -642,7 +653,7 @@ Group 02 · SoE
 1. Attendee opens Top up (from the wallet page, or from the shortfall prompt in UC-12 A2 — in which case the amount is pre-filled with the shortfall).
 2. Attendee picks a preset (100k / 200k / 500k / 1M) or enters a custom amount.
 3. System validates `5,000 ≤ amount ≤ 10,000,000` **and** that the resulting balance would not exceed the 20,000,000₫ ceiling. This check runs **before** any hand-off: rejecting after payment would strand money that cannot be returned `[DATA-04]`.
-4. System records the top-up as `initiated` with a unique reference (carrying the originating `reservationId`, if any) and hands off to payment `«include» UC-13`.
+4. System records the top-up as `initiated` with a unique reference (carrying the originating `reservationId`, if any) and hands off to payment `«include» UC-13`. When a `reservationId` is carried, the system also extends that hold **once** by the configurable grace (default +7 min), never past the absolute ceiling of **14 min** from the reservation's creation `[REL-02]`.
 5. On the validated IPN, the system credits the wallet and appends a `topup` row to the ledger.
 6. System returns the attendee to where they started: the checkout they left, or the wallet page.
 
@@ -652,12 +663,13 @@ Group 02 · SoE
 - **A3 — Attendee abandons on the VNPay page:** the top-up stays `initiated`; no balance moves; it appears as *Pending* in the wallet history, never as lost money.
 - **A4 — Payment fails:** top-up marked `failed`; balance unchanged; attendee may retry.
 - **A5 — IPN never arrives:** the reconciliation sweep queries VNPay (`querydr`) for `initiated` records older than ~15 minutes and settles them `[REL-03]`.
-- **A6 — Returning to an expired hold:** the seats were released while the attendee was paying. System says so plainly and returns them to seat selection. **The money is safely in the wallet**; only the seat was lost.
+- **A6 — Returning to an expired hold:** the one-time grace from step 4 usually carries the hold across the VNPay detour, but it is bounded — if the grace was already spent, or the 14-min ceiling passed, the seats were released while the attendee was paying. System says so plainly and returns them to seat selection. **The money is safely in the wallet**; only the seat was lost `[REL-02]`.
 - **A7 — Duplicate/replayed IPN:** credits nothing `[REL-03]`, `[SEC-06]`.
+- **A8 — Second top-up during the same hold:** the window is **not** extended again; the reservation still expires at its ceiling. A top-up started after the ceiling revives nothing.
 
 **Postconditions**
 - **Success:** balance increased by exactly the paid amount; one `topup` ledger row joins 1:1 to a successful gateway transaction `[DATA-04]`.
-- **Failure:** balance unchanged; the record is `initiated` or `failed`; no seat and no order is affected.
+- **Failure:** balance unchanged; the record is `initiated` or `failed`; no order is affected, and no seat beyond the single bounded grace applied at step 4.
 
 **Special requirements**
 - Credit only via signed server-to-server IPN, never the return URL `[SEC-06]`; idempotent `[REL-03]`; no card data stored `[SEC-05]`; non-negativity enforced by a schema constraint, the balance ceiling enforced at top-up time only, so a refund is never blocked by it `[DATA-04]`; VND integers `[STD-03]`; ≤ 3 interactions to hand-off `[USE-01]`.
@@ -1594,14 +1606,14 @@ Group 02 · SoE
 |---|---|
 | **Use-case ID** | UC-36 |
 | **Actor(s)** | Admin (primary) |
-| **Description** | Admin configures platform-level settings (e.g. seat-hold TTL, wallet top-up limits, notification defaults, AI toggles) within allowed bounds. |
+| **Description** | Admin configures platform-level settings (e.g. seat-hold TTL and its one-time top-up grace, per-buyer hold cap, wallet top-up limits, notification defaults, AI toggles) within allowed bounds. |
 
 **Preconditions**
 - Admin is signed in.
 
 **Basic flow**
 1. Admin opens system settings.
-2. Admin adjusts configurable values (seat-hold TTL `[REL-02]`, wallet top-up minimum/maximum and balance ceiling `[DATA-04]`, reminder defaults, AI on/off).
+2. Admin adjusts configurable values (seat-hold TTL — default 7 min — plus its one-time top-up grace and 14-min absolute ceiling `[REL-02]`, the per-buyer hold cap — default 8 tickets per showtime (UC-11 A7), wallet top-up minimum/maximum and balance ceiling `[DATA-04]`, reminder defaults, AI on/off).
 3. System validates each value against allowed bounds.
 4. System saves and applies the settings.
 

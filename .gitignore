@@ -11,6 +11,9 @@ src/.specify/feature.json
 src/.specify/init-options.json
 src/.specify/integration.json
 src/.specify/integrations/
+# Assembled submission bundle (a copy of the repo — regenerable)
+PA3-Group02/
+
 node_modules/
 dist/
 build/

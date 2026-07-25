@@ -3,123 +3,165 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { SeatMap, SeatMapSeat, SeatStatus } from "@/shared/catalog/types";
 import { MovieEvent, Seat } from "../types";
+import { catalogClient } from "../services/catalogClient";
+import { formatHoldClock } from "../services/holdSession";
+import { watchShowtime } from "../services/seatSocket";
 
 interface SeatLayoutProps {
   event: MovieEvent;
+  showtimeId: number | null;
   selectedDate: string;
   selectedTime: string;
+  /**
+   * The seats currently held, owned by `App` so they outlive this screen. Stepping forward to
+   * checkout and back must return the same selection — holding state here is what lost it.
+   */
+  heldSeats: Seat[];
+  /** Milliseconds left on the hold, counted from the server's absolute expiry. */
+  remainingMs: number;
+  /** Placing/releasing the hold is a server round trip, so clicks are disabled while one is open. */
+  busy: boolean;
+  onToggleSeat: (seat: Seat) => void;
   onBack: () => void;
-  onProceedToCheckout: (selectedSeats: Seat[], totalPrice: number) => void;
+  onProceedToCheckout: () => void;
 }
 
 export default function SeatLayout({
   event,
+  showtimeId,
   selectedDate,
   selectedTime,
+  heldSeats,
+  remainingMs,
+  busy,
+  onToggleSeat,
   onBack,
   onProceedToCheckout,
 }: SeatLayoutProps) {
-  // Matches the 7-minute hold TTL the backend will enforce (Vision REL-02).
-  const HOLD_SECONDS = 7 * 60;
-  const [seats, setSeats] = useState<Seat[]>([]);
-  const [selectedSeatIds, setSelectedSeatIds] = useState<string[]>([]);
-  const [holdSeconds, setHoldSeconds] = useState(HOLD_SECONDS);
+  const [seats, setSeats] = useState<SeatMapSeat[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Initialize a mock seat layout for the cinema
+  const heldByMe = useMemo(
+    () => new Set(heldSeats.map((seat) => seat.showtimeSeatId).filter((id): id is number => id !== undefined)),
+    [heldSeats],
+  );
+
+  // The authoritative map, read from the database (002's read endpoint). The socket only patches it.
+  const loadMap = useCallback(async () => {
+    if (showtimeId === null) return;
+    try {
+      const map: SeatMap = await catalogClient.getSeatMap(showtimeId);
+      setSeats(map.seats ?? []);
+      setLoadError(null);
+    } catch {
+      setLoadError("Không tải được sơ đồ ghế. Vui lòng thử lại.");
+    } finally {
+      setLoading(false);
+    }
+  }, [showtimeId]);
+
   useEffect(() => {
-    const rows = ["A", "B", "C", "D", "E", "F", "G", "H"];
-    const seatsPerRow = 12;
-    const initialSeats: Seat[] = [];
+    setLoading(true);
+    void loadMap();
+  }, [loadMap]);
 
-    // Simple deterministic random generator for booked seats based on date/time
-    const stringSeed = `${event.id}-${selectedDate}-${selectedTime}`;
-    let seedCount = 0;
-    const pseudoRandom = () => {
-      let hash = 0;
-      for (let i = 0; i < stringSeed.length; i++) {
-        hash = stringSeed.charCodeAt(i) + ((hash << 5) - hash);
-      }
-      const x = Math.sin(hash + seedCount++) * 10000;
-      return x - Math.floor(x);
-    };
-
-    rows.forEach((row) => {
-      // G and H are sweetbox double seats! Others are standard single seats.
-      const isDoubleRow = row === "G" || row === "H";
-      
-      for (let col = 1; col <= (isDoubleRow ? 6 : seatsPerRow); col++) {
-        const id = `${row}${col}`;
-        const isBooked = pseudoRandom() < 0.35; // ~35% seats are booked
-        
-        initialSeats.push({
-          id,
-          row,
-          number: col,
-          type: isDoubleRow ? "double" : "single",
-          price: isDoubleRow ? event.doublePrice : event.price,
-          isBooked,
-        });
-      }
+  // Live updates from everyone else's holds and from the expiry sweep (FR-021). Advisory: a missed
+  // one only leaves a stale pixel — the server still refuses a stale click (FR-023).
+  useEffect(() => {
+    if (showtimeId === null) return;
+    const stop = watchShowtime(showtimeId, (update) => {
+      if (!update.seats?.length) return;
+      setSeats((current) =>
+        current.map((seat) => {
+          const changed = update.seats!.find((s) => s.showtimeSeatId === seat.id);
+          return changed ? { ...seat, status: changed.status } : seat;
+        }),
+      );
     });
+    // Re-read the whole map on reconnect rather than trusting a patch stream we may have missed.
+    const onOnline = () => void loadMap();
+    window.addEventListener("online", onOnline);
+    return () => {
+      stop();
+      window.removeEventListener("online", onOnline);
+    };
+  }, [showtimeId, loadMap]);
 
-    setSeats(initialSeats);
-    setSelectedSeatIds([]);
-    setHoldSeconds(HOLD_SECONDS);
-  }, [event, selectedDate, selectedTime]);
-
+  // When the buyer's own hold ends (countdown ran out, or they cancelled), re-read the map. The
+  // seats are free on the server the instant the window passes, but the release broadcast only
+  // arrives with the sweep up to a minute later — without this, their own lapsed seats would sit
+  // greyed out and unclickable in the meantime.
+  const heldCount = heldSeats.length;
+  const previousHeldCount = useRef(heldCount);
   useEffect(() => {
-    if (selectedSeatIds.length === 0) {
-      setHoldSeconds(HOLD_SECONDS);
-      return;
+    if (previousHeldCount.current > 0 && heldCount === 0) void loadMap();
+    previousHeldCount.current = heldCount;
+  }, [heldCount, loadMap]);
+
+  const rows = useMemo(() => {
+    const grouped = new Map<string, SeatMapSeat[]>();
+    for (const seat of seats) {
+      const list = grouped.get(seat.row) ?? [];
+      list.push(seat);
+      grouped.set(seat.row, list);
     }
+    return [...grouped.entries()].map(([row, rowSeats]) => ({
+      row,
+      seats: [...rowSeats].sort((a, b) => a.number - b.number),
+    }));
+  }, [seats]);
 
-    if (holdSeconds <= 0) {
-      setSelectedSeatIds([]);
-      setHoldSeconds(HOLD_SECONDS);
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      setHoldSeconds((current) => current - 1);
-    }, 1000);
-
-    return () => window.clearTimeout(timer);
-  }, [HOLD_SECONDS, holdSeconds, selectedSeatIds.length]);
-
-  const toggleSeatSelection = (seatId: string) => {
-    const seat = seats.find((s) => s.id === seatId);
-    if (!seat || seat.isBooked) return;
-
-    if (selectedSeatIds.includes(seatId)) {
-      setSelectedSeatIds(selectedSeatIds.filter((id) => id !== seatId));
-    } else {
-      setSelectedSeatIds([...selectedSeatIds, seatId]);
-    }
+  const toggleSeatSelection = (seat: SeatMapSeat) => {
+    const mine = heldByMe.has(seat.id);
+    if (!mine && seat.status !== "available") return; // taken by someone else, or sold/blocked
+    onToggleSeat({
+      id: `${seat.row}${seat.number}`,
+      row: seat.row,
+      number: seat.number,
+      type: "single",
+      price: seat.price,
+      isBooked: false,
+      showtimeSeatId: seat.id,
+    });
   };
 
-  const getSelectedSeatsData = (): Seat[] => {
-    return seats.filter((seat) => selectedSeatIds.includes(seat.id));
+  const formatPrice = (price: number) =>
+    new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(price);
+
+  const selectedSeatsList = heldSeats;
+  const totalPrice = selectedSeatsList.reduce((sum, seat) => sum + seat.price, 0);
+  const holdTimeLabel = formatHoldClock(remainingMs);
+  const tierPrices = [...new Set(seats.map((s) => s.price))].sort((a, b) => a - b);
+
+  const seatClasses = (seat: SeatMapSeat, mine: boolean): string => {
+    const base =
+      "w-8 h-8 rounded-md border font-mono text-[10px] font-bold transition-all relative flex items-center justify-center select-none ";
+    if (mine) return `${base} cursor-pointer bg-burgundy border-burgundy text-beige-kem shadow-inner`;
+    if (seat.status === "sold" || seat.status === "blocked")
+      return `${base} cursor-not-allowed bg-stone-800 border-stone-800 text-stone-600`;
+    if (seat.status === "held")
+      return `${base} cursor-not-allowed bg-stone-700/60 border-stone-700 text-stone-400`;
+    return `${base} cursor-pointer bg-transparent border-beige-kem/25 text-beige-kem/80 hover:border-cam-dat hover:text-white`;
   };
 
-  const getPriceSum = (): number => {
-    return getSelectedSeatsData().reduce((sum, s) => sum + s.price, 0);
+  const statusTitle = (seat: SeatMapSeat, mine: boolean): string => {
+    const price = formatPrice(seat.price);
+    if (mine) return `Ghế ${seat.row}${seat.number} — bạn đang giữ (${price})`;
+    const label: Record<SeatStatus, string> = {
+      available: "còn trống",
+      held: "người khác đang giữ",
+      sold: "đã bán",
+      blocked: "không mở bán",
+    };
+    return `Ghế ${seat.row}${seat.number} — ${label[seat.status]} (${price})`;
   };
-
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat("vi-VN", {
-      style: "currency",
-      currency: "VND",
-    }).format(price);
-  };
-
-  const selectedSeatsList = getSelectedSeatsData();
-  const holdTimeLabel = `${String(Math.floor(holdSeconds / 60)).padStart(2, "0")}:${String(holdSeconds % 60).padStart(2, "0")}`;
 
   return (
     <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto space-y-8">
-      
       {/* Header and indicator step */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-beige-kem/10 pb-4">
         <button
@@ -138,132 +180,81 @@ export default function SeatLayout({
         </div>
       </div>
 
-      <div className="rounded-xl border border-cam-dat/30 bg-cam-dat/5 px-4 py-3 font-mono text-[11px] leading-5 text-cam-dat">
-        Sơ đồ dưới đây là bản mô phỏng ở frontend, chưa phải ghế thật của suất này. Sơ đồ thật (chỉ
-        xem) đang hiển thị ở trang chi tiết sự kiện; tính năng giữ ghế thật sẽ thay thế màn hình này.
-      </div>
+      {loadError && (
+        <div className="rounded-xl border border-burgundy/40 bg-burgundy/10 px-4 py-3 font-mono text-[11px] leading-5 text-beige-kem">
+          {loadError}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        
-        {/* Left column: Cinema auditorium seat selector (8 cols) */}
+        {/* Left column: the real seat map for this showtime */}
         <div className="lg:col-span-8 bg-xanh-pho/50 border border-beige-kem/10 rounded-2xl p-6 sm:p-10 flex flex-col items-center">
-          
-          {/* Cinema Screen simulation */}
           <div className="relative w-full max-w-lg mb-12 text-center">
             <h4 className="text-[10px] font-mono tracking-widest text-cam-dat uppercase mb-2">SÂN KHẤU</h4>
-            
-            {/* Curved cinema screen visual overlay */}
             <div className="relative h-4 bg-gradient-to-t from-beige-kem/40 to-transparent border-t-2 border-beige-kem/75 rounded-[100%] filter blur-[1px]" />
             <div className="absolute inset-x-0 -bottom-8 h-20 bg-gradient-to-b from-beige-kem/10 to-transparent pointer-events-none" />
           </div>
 
-          {/* Interactive Seat Layout Grid */}
           <div className="w-full overflow-x-auto pb-4 no-scrollbar">
-            <div className="min-w-[500px] flex flex-col gap-3 items-center">
-              
-              {seats.reduce((acc: any[], seat) => {
-                const lastRow = acc[acc.length - 1];
-                if (lastRow && lastRow[0].row === seat.row) {
-                  lastRow.push(seat);
-                } else {
-                  acc.push([seat]);
-                }
-                return acc;
-              }, []).map((rowSeats, rowIndex) => {
-                const rowLabel = rowSeats[0].row;
-                const isDoubleRow = rowLabel === "G" || rowLabel === "H";
-                
-                return (
-                  <div key={rowLabel} className="flex items-center gap-4">
-                    {/* Row Label (Left) */}
-                    <span className="w-5 text-center font-mono font-bold text-xs text-cam-dat">
-                      {rowLabel}
-                    </span>
+            {loading ? (
+              <p className="py-10 text-center font-mono text-xs text-beige-kem/50">Đang tải sơ đồ ghế…</p>
+            ) : rows.length === 0 ? (
+              <p className="py-10 text-center font-mono text-xs text-beige-kem/50">
+                Suất diễn này chưa có sơ đồ ghế.
+              </p>
+            ) : (
+              <div className="min-w-[500px] flex flex-col gap-3 items-center">
+                {rows.map(({ row, seats: rowSeats }) => (
+                  <div key={row} className="flex items-center gap-4">
+                    <span className="w-5 text-center font-mono font-bold text-xs text-cam-dat">{row}</span>
 
-                    {/* Row Seats list */}
                     <div className="flex items-center gap-2">
-                      {rowSeats.map((seat: Seat) => {
-                        const isSelected = selectedSeatIds.includes(seat.id);
-                        
-                        // Seat type details
-                        let buttonClasses = "font-mono text-[10px] font-bold transition-all relative flex items-center justify-center cursor-pointer select-none ";
-                        
-                        if (seat.type === "double") {
-                          // Double seat styles
-                          buttonClasses += "w-14 h-8 rounded-lg border-2 ";
-                          if (seat.isBooked) {
-                            buttonClasses += "bg-stone-800 border-stone-800 text-stone-600 cursor-not-allowed";
-                          } else if (isSelected) {
-                            buttonClasses += "bg-burgundy border-burgundy text-beige-kem ring-2 ring-burgundy/40 shadow-inner";
-                          } else {
-                            // Empty double seat status color uses Xanh Lá Cọ Nhật (#A6A15E) as requested
-                            buttonClasses += "bg-transparent border-[#A6A15E] text-la-co hover:bg-la-co/10";
-                          }
-                        } else {
-                          // Standard single seat styles
-                          buttonClasses += "w-8 h-8 rounded-md border ";
-                          if (seat.isBooked) {
-                            buttonClasses += "bg-stone-800 border-stone-800 text-stone-600 cursor-not-allowed";
-                          } else if (isSelected) {
-                            buttonClasses += "bg-burgundy border-burgundy text-beige-kem shadow-inner";
-                          } else {
-                            buttonClasses += "bg-transparent border-beige-kem/25 text-beige-kem/80 hover:border-cam-dat hover:text-white";
-                          }
-                        }
-
+                      {rowSeats.map((seat) => {
+                        const mine = heldByMe.has(seat.id);
                         return (
                           <button
                             key={seat.id}
                             id={`seat-${seat.id}`}
-                            disabled={seat.isBooked}
-                            onClick={() => toggleSeatSelection(seat.id)}
-                            className={buttonClasses}
-                            title={`${seat.type === "double" ? "Ghế đôi" : "Ghế đơn"} ${seat.id} (${formatPrice(seat.price)})`}
+                            disabled={busy || (!mine && seat.status !== "available")}
+                            onClick={() => toggleSeatSelection(seat)}
+                            className={seatClasses(seat, mine)}
+                            title={statusTitle(seat, mine)}
                           >
-                            <span className="z-10">{seat.id}</span>
+                            <span className="z-10">{seat.number}</span>
                           </button>
                         );
                       })}
                     </div>
 
-                    {/* Row Label (Right) */}
-                    <span className="w-5 text-center font-mono font-bold text-xs text-cam-dat">
-                      {rowLabel}
-                    </span>
+                    <span className="w-5 text-center font-mono font-bold text-xs text-cam-dat">{row}</span>
                   </div>
-                );
-              })}
-
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* Seat Layout Legend Section */}
+          {/* Legend */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8 pt-6 border-t border-beige-kem/10 w-full max-w-lg font-mono text-xs text-beige-kem/70">
             <div className="flex items-center gap-2">
               <span className="w-5 h-5 bg-transparent border border-beige-kem/25 rounded" />
-              <span>Ghế Đơn ({formatPrice(event.price)})</span>
+              <span>Còn trống{tierPrices.length ? ` (${tierPrices.map(formatPrice).join(" / ")})` : ""}</span>
             </div>
-            
-            <div className="flex items-center gap-2">
-              {/* Double seat status empty color must be Xanh Lá Cọ Nhật (#A6A15E) */}
-              <span className="w-10 h-5 bg-transparent border-2 border-[#A6A15E] rounded" />
-              <span>Ghế Đôi ({formatPrice(event.doublePrice)})</span>
-            </div>
-
             <div className="flex items-center gap-2">
               <span className="w-5 h-5 bg-burgundy rounded" />
-              <span>Đóng Burgundy (Đang Chọn)</span>
+              <span>Bạn đang giữ</span>
             </div>
-
+            <div className="flex items-center gap-2">
+              <span className="w-5 h-5 bg-stone-700/60 border border-stone-700 rounded" />
+              <span>Người khác giữ</span>
+            </div>
             <div className="flex items-center gap-2">
               <span className="w-5 h-5 bg-stone-800 border border-stone-800 rounded" />
-              <span>Đã Bán / Hết Vé</span>
+              <span>Đã bán / Không bán</span>
             </div>
           </div>
-
         </div>
 
-        {/* Right column: Dynamic Sidebar calculations (4 cols) */}
+        {/* Right column: the live selection */}
         <div className="lg:col-span-4 bg-xanh-pho/30 border border-beige-kem/10 rounded-2xl p-6 space-y-6">
           <div className="space-y-1">
             <h3 className="font-display font-bold text-lg text-beige-kem">Thông tin suất</h3>
@@ -272,15 +263,15 @@ export default function SeatLayout({
 
           <div className="rounded-xl border border-cam-dat/25 bg-cam-dat/5 p-4 font-mono text-xs text-beige-kem/75">
             <div className="flex items-center justify-between gap-3">
-              <span className="inline-flex items-center font-bold text-cam-dat">
-                Giữ ghế tạm thời
-              </span>
+              <span className="inline-flex items-center font-bold text-cam-dat">Giữ ghế tạm thời</span>
               <span className="text-base font-black text-beige-kem">
                 {selectedSeatsList.length ? holdTimeLabel : "--:--"}
               </span>
             </div>
             <p className="mt-2 leading-5">
-              Frontend đang mô phỏng khóa ghế trong vài phút. Backend sau này cần tạo reservation thật để chống đặt trùng khi nhiều người cùng mua.
+              Ghế được giữ ngay khi bạn bấm chọn, và chỉ mình bạn giữ. Đồng hồ chạy từ ghế đầu tiên và
+              giữ nguyên trong suốt quy trình (chọn suất → chọn ghế → thanh toán); thêm hoặc bớt ghế
+              không cộng thêm thời gian. Hết giờ, ghế tự trả lại cho người khác.
             </p>
           </div>
 
@@ -291,20 +282,22 @@ export default function SeatLayout({
             </div>
             <div className="flex justify-between font-mono">
               <span className="text-beige-kem/60">Suất:</span>
-              <span className="font-bold text-beige-kem text-right">{selectedTime} • {selectedDate}</span>
+              <span className="font-bold text-beige-kem text-right">
+                {selectedTime} • {selectedDate}
+              </span>
             </div>
             <div className="flex justify-between font-mono">
               <span className="text-beige-kem/60">Địa điểm:</span>
               <span className="font-bold text-beige-kem text-right max-w-[200px] truncate" title={event.location}>
-                {event.location.split("-")[1] || "Sảnh Pasteur"}
+                {event.venueName || event.location}
               </span>
             </div>
           </div>
 
-          {/* Selected Seat list details */}
+          {/* Selected seat list */}
           <div className="space-y-3 pt-4 border-t border-beige-kem/10">
             <h4 className="font-display text-sm font-semibold text-beige-kem">Ghế ngồi đã chọn:</h4>
-            
+
             {selectedSeatsList.length === 0 ? (
               <div className="py-6 text-center text-xs text-beige-kem/40 border border-dashed border-beige-kem/15 rounded-lg">
                 Vui lòng chọn ghế trên sơ đồ
@@ -312,19 +305,22 @@ export default function SeatLayout({
             ) : (
               <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
                 {selectedSeatsList.map((seat) => (
-                  <div key={seat.id} className="flex justify-between items-center bg-xanh-pho/60 px-3 py-2 border border-beige-kem/5 rounded-lg text-xs font-mono">
+                  <div
+                    key={seat.showtimeSeatId ?? seat.id}
+                    className="flex justify-between items-center bg-xanh-pho/60 px-3 py-2 border border-beige-kem/5 rounded-lg text-xs font-mono"
+                  >
                     <div className="flex items-center gap-1.5">
-                      <span className={`w-2.5 h-2.5 rounded-full ${seat.type === "double" ? "bg-la-co" : "bg-beige-kem/50"}`} />
+                      <span className="w-2.5 h-2.5 rounded-full bg-beige-kem/50" />
                       <span className="font-bold text-beige-kem">GHẾ {seat.id}</span>
-                      <span className="text-[10px] text-cam-dat uppercase font-light">({seat.type === "double" ? "Đôi" : "Đơn"})</span>
                     </div>
 
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-beige-kem">{formatPrice(seat.price)}</span>
                       <button
-                        onClick={() => toggleSeatSelection(seat.id)}
-                        className="font-mono text-[10px] uppercase text-stone-500 transition hover:text-burgundy cursor-pointer"
-                        title="Xóa ghế này"
+                        onClick={() => onToggleSeat(seat)}
+                        disabled={busy}
+                        className="font-mono text-[10px] uppercase text-stone-500 transition hover:text-burgundy disabled:opacity-40 cursor-pointer"
+                        title="Bỏ giữ ghế này"
                       >
                         Xóa
                       </button>
@@ -335,13 +331,10 @@ export default function SeatLayout({
             )}
           </div>
 
-          {/* Real-time total pricing block */}
           <div className="pt-4 border-t border-beige-kem/10 flex flex-col gap-1.5">
             <div className="flex justify-between items-baseline font-mono">
               <span className="text-xs text-beige-kem/60 uppercase">Tổng tiền phải trả:</span>
-              <span className="text-2xl font-black text-burgundy font-display">
-                {formatPrice(getPriceSum())}
-              </span>
+              <span className="text-2xl font-black text-burgundy font-display">{formatPrice(totalPrice)}</span>
             </div>
             <p className="text-[10px] text-right font-mono text-cam-dat tracking-wide">
               Đã bao gồm thuế giá trị gia tăng và phụ thu
@@ -349,14 +342,13 @@ export default function SeatLayout({
           </div>
 
           <button
-            onClick={() => onProceedToCheckout(selectedSeatsList, getPriceSum())}
-            disabled={selectedSeatsList.length === 0 || holdSeconds <= 0}
+            onClick={onProceedToCheckout}
+            disabled={selectedSeatsList.length === 0 || remainingMs <= 0 || busy}
             className="w-full py-3.5 bg-burgundy hover:bg-burgundy/90 disabled:bg-beige-kem/10 disabled:text-beige-kem/35 text-beige-kem hover:text-white font-bold rounded-xl transition shadow-lg hover:shadow-burgundy/30 cursor-pointer text-center text-sm"
           >
             TIẾP TỤC: ĐIỀN THÔNG TIN THÀNH VIÊN
           </button>
         </div>
-
       </div>
     </div>
   );

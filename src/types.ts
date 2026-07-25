@@ -69,6 +69,37 @@ export interface Seat {
   type: "single" | "double";
   price: number;
   isBooked: boolean;
+  /** The real `showtime_seats` row this stands for — what the hold API locks. Absent for GA lines. */
+  showtimeSeatId?: number;
+}
+
+/**
+ * One in-progress booking flow: which showtime is being bought, what is currently held, and the
+ * instant the hold lapses. It is owned by `App` and survives every move inside the flow (chọn suất →
+ * chọn ghế → thanh toán), so stepping back from checkout returns the same selection and the same
+ * countdown — never a fresh one.
+ *
+ * Shape mirrors the reservation feature 003 will own server-side: one reservation per showtime, one
+ * absolute `expiresAt` governing the whole selection, no extension when a seat is added or removed
+ * (FR-006). `expiresAt` is an absolute instant precisely so the countdown is display-only and a
+ * remount cannot restart it. Until 003 lands this lives in the browser only.
+ */
+export interface HoldSession {
+  /** The server-side reservation this mirrors. The database, not this object, owns the hold. */
+  reservationId: number;
+  showtimeId: number;
+  eventId: string;
+  eventTitle: string;
+  /** Seated holds specific seats; general admission holds a quantity per tier. */
+  mode: "seated" | "ga";
+  selectedDate: string;
+  selectedTime: string;
+  /** Held seats (seated) or one entry per general-admission ticket. */
+  seats: Seat[];
+  /** General admission only: quantity per tier id, so the tier steppers can be restored. */
+  quantities?: Record<string, number>;
+  /** Epoch ms. Absolute — the countdown renders from it, never the other way round. */
+  expiresAt: number;
 }
 
 export interface Booking {

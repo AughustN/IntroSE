@@ -58,7 +58,7 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
           <div className="space-y-1">
             <span className="text-[9px] font-mono tracking-widest text-cam-dat uppercase font-bold">CINEMA VINTAGE STUB</span>
             <div className="flex items-baseline gap-1.5">
-              <h3 className="font-display font-black text-xl tracking-tighter">TICKETBOX</h3>
+              <h3 className="font-display font-black text-xl tracking-tighter">TIXHUB</h3>
               <span className="text-[9px] font-mono bg-[#E0E2CA] text-burgundy px-1 py-0.2 rounded font-black">STUB</span>
             </div>
           </div>

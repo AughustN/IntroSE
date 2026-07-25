@@ -68,7 +68,7 @@ TixHub delivers **eleven core features** across three user roles Admin, Organize
 
 ##### In Scope
 
-- ***Attendee:*** Browse, search, and filter events; top up a **store-credit wallet** via the VNPay sandbox; buy tickets by **debiting that wallet in one atomic transaction**; receive QR-code digital tickets; cancel a ticket to free the seat and get its **refundable amount back to the wallet**; AI event recommendations (via third party AI API); submit reviews & ratings; receive notifications and join waitlists.
+- ***Attendee:*** Browse, search, and filter events; hold seats on a live map — or a quantity for general admission — for a **7-minute configurable window, max 8 tickets per showtime**, sign-in required; top up a **store-credit wallet** via the VNPay sandbox; buy tickets by **debiting that wallet in one atomic transaction**; receive QR-code digital tickets; cancel a ticket to free the seat and get its **refundable amount back to the wallet**; AI event recommendations (via third party AI API); submit reviews & ratings; receive notifications and join waitlists.
 - ***Organizer:*** Event creation & management; AI listing assistant (via third party AI API); phone browser door QR scanner and check-in; real time analytics dashboard.
 - ***Admin:*** Organizer approval workflow; **pre-publish event approval** and content moderation; platform-wide analytics.
 - ***Platform wide:*** Authentication — Google OAuth sign in and own membership (email, nickname, password, optional unique phone); single deployment reachable via a public URL for grading.
@@ -89,6 +89,7 @@ TixHub delivers **eleven core features** across three user roles Admin, Organize
 - Third-party AI API free-tier quota.
 - VNPay **sandbox** only; no real funds are processed.
 - External integrations capped at **four** — VNPay, Gemini, Google OAuth, Resend (constitution v2.0.0); a fifth needs an amendment.
+- Real-time seat updates run over **Socket.IO** on the same Node process and origin (constitution technology stack) — no message broker, no second service; the database stays the source of truth and socket updates are advisory.
 - 13 week semester, 5 sprints (PA1–PA5), 5 member team.
 - The deployed application will be reachable via a public URL for evaluator grading.
 
@@ -96,7 +97,8 @@ TixHub delivers **eleven core features** across three user roles Admin, Organize
 
 - All eleven features are deployed and demonstrable end to end on the public URL.
 - The core flow works: register/login &rarr; create event &rarr; admin approves it &rarr; top up wallet &rarr; buy ticket (GA + reserved) &rarr; receive QR ticket &rarr; check in at the door.
-- Concurrent seat purchases never double book a seat (verified under load test).
+- Concurrent seat **holds** and purchases never double book a seat, and no general-admission tier is oversold (verified under load test; ≥ 60 concurrent viewers on one map, seat update < 1 s p95).
+- A hold left alone is auto-released within ~1 minute of its 7-minute window, even with the client disconnected; the only extension is the one-time top-up grace (+7 min, ceiling 14 min).
 - Wallet top-ups are credited only through a signed, idempotent VNPay sandbox IPN; the wallet ledger explains every balance (DATA-04).
 - All four builds pass the CI quality gates (see §7) with no open P0/P1 defects.
 - Each PA deliverable is accepted by the course evaluators.
@@ -106,8 +108,8 @@ TixHub delivers **eleven core features** across three user roles Admin, Organize
 | Sprint | PA | Key Deliverables |
 |--------|-----|------------------|
 | Sprint 1 | PA1 | Identify problem, project proposal, team contract, and workflow principle |
-| Sprint 2 | PA2 | Project Plan, Vision Document, SpecKit setup + project constitution, account & authentication module |
-| Sprint 3 | PA3 | Use-Case Specification, event catalog & discovery (incl. admin pre-publish approval), wallet top-up + wallet checkout, real-time seat map & holds, QR ticketing & door scanner, real time analytics dashboard, fully integrated build; revised project plan |
+| Sprint 2 | PA2 | Project Plan, Vision Document, SpecKit setup + project constitution, account & authentication module (feature `001-account-auth`) |
+| Sprint 3 | PA3 | Use-Case Specification, event catalog & discovery incl. admin pre-publish approval (`002-event-catalog`), real-time seat map & holds (`003-seat-holds`), wallet top-up + wallet checkout, QR ticketing & door scanner, real time analytics dashboard, fully integrated build; revised project plan |
 | Sprint 4 | PA4 | AI recommendations chatbot, AI listing assistant, notifications & waitlist, ticket cancellation with wallet refund |
 | Sprint 5 | PA5 | Reviews & ratings, reported-content moderation, admin platform analytics, complete test reports, production deployment, PA5 feature demo |
 
@@ -194,6 +196,12 @@ TixHub delivers **eleven core features** across three user roles Admin, Organize
 
 This project follows the **Scrum** process model, organized into five sprints that correspond to the five PA deliverables (PA1–PA5). Each sprint lasts 2–3 weeks. **Sprint 3 is the current sprint** (PA3); Sprint 2 is closed. Detailed tasks with assigned performers, reviewers, and due dates are provided for Sprints 2 and 3. For Sprints 4–5, planned tasks are listed; detailed assignments will be finalized when each sprint begins.
 
+> **Delivery method.** Each feature is specified with **SpecKit** before it is coded — spec → plan →
+> tasks → implement — and lives under `src/specs/<id>-<name>/`. Status as of **July 24, 2026**:
+> `001-account-auth` **done** (38 tests), `002-event-catalog` **done** (19 tests),
+> `003-seat-holds` **specified and planned, build in progress**. The seat-hold tasks below were
+> re-dated accordingly; the slip is inside Sprint 3 and does not move the PA3 date.
+
 > **Task convention:** each task is performed by two member and reviewed by another. All project related activities like coding, report writing, testing, and self-training is counted as valid tasks.
 
 ---
@@ -227,13 +235,13 @@ This project follows the **Scrum** process model, organized into five sprints th
 
 | # | Task | Performer | Reviewer | Due Date |
 |---|------|-----------|----------|----------|
-| 0 | Implement event catalog & discovery: public browse/detail/showtimes/seat-map read side, organizer event CRUD, admin **pre-publish approval** queue (**done**, feature `002-event-catalog`) | Lương Hưng Phát, Nguyễn Anh Khôi | Nguyễn Thành Đạt | July 24, 2026 |
-| 1 | Implement SeatHold TTL mechanism and auto-release job on the backend | Nguyễn Anh Khôi, Nguyễn Minh Khoa | Lương Hưng Phát | July 16, 2026 |
+| 0 | Implement event catalog & discovery: public browse/detail/showtimes/**read-only** seat-map, organizer event CRUD, admin **pre-publish approval** queue (**done**, feature `002-event-catalog`, 19 integration tests) | Lương Hưng Phát, Nguyễn Anh Khôi | Nguyễn Thành Đạt | July 24, 2026 |
+| 1 | Implement seat holds & reservations backend (feature `003-seat-holds`, migration `0003_holds.sql`): concurrency-safe hold on click (`SELECT … FOR UPDATE`), `reservations` + `reservation_items`, one active reservation per (user, showtime), 8-ticket cap, GA quantity holds, 7-min TTL sweeper with auto-release on disconnect, one-time top-up grace (**spec + plan done Jul 24; build in progress**) | Nguyễn Anh Khôi, Nguyễn Minh Khoa | Lương Hưng Phát | July 26, 2026 *(revised from Jul 16)* |
 | 1b | Implement wallet: VNPay sandbox **top-up** (signed IPN, idempotent, `querydr` reconciliation) and **wallet checkout** (single ACID transaction: order, debit, ledger row, seats → sold, tickets) | Nguyễn Minh Khoa, Nguyễn Anh Khôi | Lương Hưng Phát | July 20, 2026 |
 | 2 | Generate unique QR code digital tickets inside the committed wallet-purchase transaction | Nguyễn Minh Khoa, Nguyễn Anh Khôi | Lương Hưng Phát | July 18, 2026 |
 | 3 | Implement public event browse page with keyword, category, date, location, price, and availability filters | Nguyễn Tấn Hiệu, Nguyễn Anh Khôi | Nguyễn Thành Đạt | July 18, 2026 |
 | 4 | Build organizer door scanner UI (phone browser); implement check in validation API | Nguyễn Tấn Hiệu, Nguyễn Minh Khoa | Lương Hưng Phát | July 20, 2026 |
-| 5 | Implement real time seat map | Nguyễn Tấn Hiệu, Lương Hưng Phát | Nguyễn Minh Khoa | July 21, 2026 |
+| 5 | Implement the real-time seat map front end (feature `003-seat-holds`): Socket.IO channel per showtime, hold-on-click with countdown, live availability for other viewers, resync on reconnect — replaces the read-only map from task 0 | Nguyễn Tấn Hiệu, Lương Hưng Phát | Nguyễn Minh Khoa | July 26, 2026 *(revised from Jul 21)* |
 | 6 | Build real time analytics dashboard: live charts (Recharts) for sales, revenue, remaining inventory, and check-ins | Nguyễn Tấn Hiệu, Lương Hưng Phát | Nguyễn Thành Đạt | July 22, 2026 |
 | 7 | Complete frontend &harr; backend integration; resolve any API contract drift | Nguyễn Thành Đạt, Nguyễn Tấn Hiệu | Lương Hưng Phát | July 25, 2026 |
 | 8 | Run integration tests across all Sprint 2 and Sprint 3 features | Nguyễn Thành Đạt, Nguyễn Minh Khoa | Lương Hưng Phát | July 26, 2026 |

@@ -13,6 +13,11 @@ changing the main user flow.
 > comments, waitlists, notifications, reports, saved_events, event_views — is still the agreed
 > design awaiting its feature. Where a shipped table differs from the draft, the SQL below has been
 > corrected to match the migration.
+>
+> **Specified, not yet migrated:** feature `003-seat-holds` (`0003_holds.sql`) owns `reservations`
+> and `reservation_items` and the `available → held → available` transitions on `showtime_seats` /
+> `ticket_tiers.reserved_quantity`. The reservations SQL and the [Seat Concurrency
+> Requirement](#seat-concurrency-requirement) below match that specification.
 
 > **Domain note:** TixHub is a **general event-ticketing** marketplace (concerts, workshops,
 > theatre, community/club events) — not a cinema. The frontend `MovieEvent` type is a
@@ -26,7 +31,7 @@ changing the main user flow.
 - Events: general-admission and seated events (concerts, workshops, theatre, community/club events) with searchable metadata. **Physical only** — no online events in MVP.
 - Venues: theatre, concert hall, community/workshop space, seat maps, city/location guidance. **Owned by the organizer that created them** (`created_by`, decision D-F of feature 002) — only the owner or an admin edits one, and only the owner's events use it.
 - Showtimes: date/time inventory per event and venue (single-session and multi-session events).
-- Reservations: temporary seat hold with expiration. **Login required to hold a seat** (no anonymous holds).
+- Reservations: temporary seat hold with expiration, created on the **first seat click** (hold-on-select), **at most one active reservation per (user, showtime)**, capped at **8 tickets** (configurable). **Login required to hold a seat** (no anonymous holds). Seated holds lock `showtime_seats`; general admission holds a **quantity** via `ticket_tiers.reserved_quantity`.
 - Wallet: per-attendee store-credit balance + append-only ledger. **Closed loop** — money in via VNPay top-up, out only as tickets, no cash-out (D2).
 - Orders: checkout **paid from the wallet**, service fee, promo discount. An order is created `paid` in one transaction; there is no gateway leg.
 - Payments: VNPay sandbox integration for **top-ups only** (single gateway for MVP). The signed IPN is the **sole** trigger for crediting a wallet, and it touches no inventory.
@@ -62,14 +67,25 @@ one local transaction. A closed loop: in via top-up, out only as tickets, **no c
   path then has to reason about gateway state.
 - Wallet purchase is a single ACID transaction — order, debit, ledger row, seat flip, ticket
   issuance commit or none do. No partial sale exists.
-- Top-up failure costs a seat at worst, never money: a pending top-up **never** freezes or extends a
-  hold, otherwise anyone locks a seat map for free by starting a top-up and walking away.
+- Top-up failure costs a seat at worst, never money: a pending top-up **never freezes** a hold, and
+  may extend it only **once, by a bounded grace** (see below), otherwise anyone locks a seat map for
+  free by starting a top-up and walking away.
 - One gateway integration, one signed-IPN code path, one idempotency key — testable without a seat map.
 
+*Amendment (2026-07-24, feature `003-seat-holds` FR-010).* The original rule — "a pending top-up
+never freezes **or extends** a hold" — is refined to a **one-time bounded grace**: starting a wallet
+top-up that carries a `reservationId` (UC-40) extends that reservation's window **exactly once** by a
+configurable grace (default +7 min), never past an **absolute ceiling** of 14 minutes from
+`reservations.created_at`. A second top-up does not extend it again. The absolute rule was unfair to a
+genuine buyer stuck on a slow VNPay page; a freeze is exploitable because the server cannot observe
+the user leaving the gateway. One bounded grace threads both: the attacker gains at most
+`seat cap (8) × one grace`. Enforced by `reservations.extended_once` plus the ceiling check.
+
 *Consequences:* `orders.payment_status` is born `paid` (`pending`/`failed` vestigial);
-`payment_transactions` references `wallet_id`, not `order_id`; there is no payment-window timeout;
-`wallet_transactions` has no `adjustment` type, so no code path — admin included — can create money;
-organizers hold no wallet and are settled off-platform.
+`payment_transactions` references `wallet_id`, not `order_id`; there is no payment-window timeout —
+the hold TTL (+ its one grace) is the only clock on a seat; `wallet_transactions` has no `adjustment`
+type, so no code path — admin included — can create money; organizers hold no wallet and are settled
+off-platform.
 
 ### D3 — Refunds go to the wallet, per ticket, once, with a T-24h self-cancel cutoff
 
@@ -213,12 +229,18 @@ suspended organizer's event is a 404 even when its id or slug is guessed.)*
 ### Booking (login required)
 
 - `POST /api/reservations`
-  - Body: `showtimeId`, `seatIds`
-  - Creates a temporary hold owned by the logged-in user, returns `reservationId`, `expiresAt`.
+  - Body: `showtimeId` + either `seatIds` (seated) or `ticketTierId` + `quantity` (GA).
+  - Hold-on-select: creates the caller's single active reservation for that showtime and starts the
+    7-minute window, or joins the existing one. Returns `reservationId`, `expiresAt`, items, total.
+  - `409 seat_taken` · `422 cap_exceeded` (over the 8 cap) / `insufficient_stock` /
+    `showtime_unavailable` / `invalid_selection` · `429 rate_limited` · `401` for a guest.
+  - Re-holding a seat the caller already holds returns `200` (idempotent), not an error.
 - `PATCH /api/reservations/:id`
-  - Add/remove seats while hold is valid.
+  - Add seats/quantity or remove seats while the reservation is `active`. Does **not** extend the window.
 - `DELETE /api/reservations/:id`
-  - Cancel hold.
+  - Cancel the reservation: releases every seat / GA quantity at once.
+- Live seat updates ride a **Socket.IO** room per showtime (`showtime:<id>`, event `seat:update`);
+  the socket never mutates state and guests may watch read-only. Holds are always the REST calls above.
 - `POST /api/orders`
   - Body: `reservationId`, customer info, promo code. Reservation must still be `active`; one order per reservation.
   - **Debits the wallet and completes the sale in one transaction** — order is created `paid`, seats → `sold`, tickets issued. No redirect.
@@ -241,6 +263,7 @@ suspended organizer's event is a 404 even when its id or slug is guessed.)*
 - `POST /api/wallet/topups`
   - Body: `amount` (5,000 ≤ amount ≤ 10,000,000), optional `reservationId` for the return deep-link.
   - Validates the balance cap **before** hand-off. Creates `payment_transactions` row (`status='initiated'`), returns the signed VNPay URL.
+  - When a `reservationId` is carried, it also applies the **one-time hold grace** (D2 amendment): +7 min once, never past `created_at + 14 min`, guarded by `reservations.extended_once`. A second top-up extends nothing.
 - `GET /api/wallet/topups/:ref`
   - Poll status after the browser returns (`initiated` | `success` | `failed`) — the return URL itself never changes state.
 - `POST /api/payments/webhook`
@@ -600,16 +623,23 @@ CREATE INDEX idx_showtime_seats_showtime ON showtime_seats(showtime_id, status);
 CREATE INDEX idx_showtime_seats_hold_expiry ON showtime_seats(hold_expires_at) WHERE status = 'held';
 
 -- ---------- RESERVATIONS ----------
+-- One in-progress checkout session for one showtime, created at the FIRST hold (hold-on-select).
+-- Seated OR general admission, never mixed (a showtime is one or the other).
 CREATE TABLE reservations (
   id BIGSERIAL PRIMARY KEY,
   user_id BIGINT NOT NULL REFERENCES users(id),   -- login required to hold/reserve
   showtime_id BIGINT NOT NULL REFERENCES showtimes(id),
-  expires_at TIMESTAMPTZ NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,                -- one clock for every seat in the reservation
   status TEXT NOT NULL CHECK (status IN ('active', 'expired', 'converted', 'cancelled')),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  extended_once BOOLEAN NOT NULL DEFAULT false,   -- one-time top-up grace guard (D2 amendment)
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()   -- window origin: expires_at <= created_at + 14 min
 );
 
 CREATE INDEX idx_reservations_expiry ON reservations(status, expires_at);
+
+-- At most one active reservation per (user, showtime): a further hold joins it, never opens a second.
+CREATE UNIQUE INDEX uq_reservation_active ON reservations(user_id, showtime_id)
+  WHERE status = 'active';
 
 -- ---------- RESERVATION ITEMS ----------
 CREATE TABLE reservation_items (
@@ -853,16 +883,20 @@ CREATE INDEX idx_event_views_user ON event_views(user_id, viewed_at);
 
 ## Seat Concurrency Requirement
 
-Two-layer locking, matching the schema (`showtime_seats` + `reservations`/`reservation_items`):
+Two-layer locking, matching the schema (`showtime_seats` + `reservations`/`reservation_items`).
+Authoritative behaviour spec: feature `003-seat-holds`.
 
-- `showtime_seats.status` is the fast, real-time layer: a seat flips to `held` (with `hold_owner_id` — the logged-in user; **login is required to hold a seat**) the moment it's clicked, and is broadcast over the socket so other viewers see it as unavailable immediately.
-- `reservations` + `reservation_items` is the checkout-session layer: created when the user proceeds to checkout, referencing the already-held `showtime_seats` rows.
-- Before inserting `reservation_items`, verify no active reservation or paid order owns the same `showtime_id + seat_id` (`SELECT ... FOR UPDATE` on `showtime_seats`).
-- Add a unique partial index or transactional lock around active holds.
-- Expire both `showtime_seats.hold_expires_at` and `reservations.expires_at` via a scheduled job every minute; release the seat back to `available` on expiry. The TTL is **7 minutes, configurable** (Vision REL-02) and is the only timer on a seat — there is no payment window (D2, DATA-03).
-- `POST /api/orders` converts the reservation only if it is still `active` — re-check under the lock, inside the same transaction as the wallet debit.
-- Rate-limit holds per user to prevent hold-spam. (No anonymous holds — a hold always has a `hold_owner_id`.)
-- **A pending top-up never freezes a hold.** If a top-up could extend or pause the TTL, anyone could lock a whole seat map for free by starting a top-up and never finishing it. The hold expires normally; only the seat is lost, never the money (D2).
+- **Hold-on-select.** `showtime_seats.status` is the fast, real-time layer: a seat flips to `held` (with `hold_owner_id` — the logged-in user; **login is required to hold a seat**) the moment it's clicked, and is broadcast over the socket so other viewers see it as unavailable immediately.
+- `reservations` + `reservation_items` is the checkout-session layer, created by that **same first click** — not later at checkout. Every further hold for that showtime joins the **one active reservation** (`uq_reservation_active`); the user never has two live selections for one showtime, and feature 004 converts one reservation into one order.
+- A reservation is **either seated or GA**, never mixed. Seated items point at a `showtime_seats` row; GA items carry a `ticket_tier_id` + `quantity` and move `ticket_tiers.reserved_quantity`, so `remaining = total_quantity − sold_quantity − reserved_quantity` stays truthful (the table CHECK makes an oversell unrepresentable).
+- Before inserting `reservation_items`, verify no active reservation or paid order owns the same `showtime_id + seat_id` (`SELECT ... FOR UPDATE` on `showtime_seats`; `FOR UPDATE` on the `ticket_tiers` row for GA). A `held` row already past its `hold_expires_at` counts as available. Re-holding a seat the caller already holds is an idempotent success.
+- Only an `available` seat may be held; `sold` and `blocked` are refused.
+- **One clock per reservation.** `reservations.expires_at` governs every seat in it and each seat's `hold_expires_at` mirrors it, so the whole selection expires together. Adding or removing a seat does **not** extend the window; the only extension is the one-time top-up grace (D2 amendment: +7 min once, ceiling `created_at + 14 min`, guarded by `extended_once`).
+- Expire both `showtime_seats.hold_expires_at` and `reservations.expires_at` via a scheduled sweep every minute; release the seats back to `available` (or restore `reserved_quantity`), mark the reservation `expired`, and broadcast. The TTL is **7 minutes, configurable** (Vision REL-02) and is the only timer on a seat — there is no payment window (D2, DATA-03). Release must not depend on the client being connected: a closed tab is released by the sweep, at most ~1 min after expiry.
+- `POST /api/orders` converts the reservation only if it is still `active` — re-check under the lock, inside the same transaction as the wallet debit. Conversion is serialized against the sweep on the same seat, so a committing purchase can never have its seat released underneath it.
+- **Per-user cap:** at most **8 tickets** (configurable) in that one active reservation — counted as held seats for seated, as reserved quantity for GA. This is the anti-hoarding bound and it holds across tabs, because the cap is counted server-side over the user's active holds for the showtime.
+- Rate-limit holds/releases per user to prevent hold-spam. (No anonymous holds — a hold always has a `hold_owner_id`.)
+- **Socket updates are advisory**, the database is the source of truth: a client acting on a stale map is still correctly refused by the row lock.
 
 ## QR One-Time Check-In
 
@@ -878,7 +912,7 @@ Closed loop: money in via a validated VNPay IPN, out only as tickets, **no cash-
 
 **Top-up flow**
 
-1. `POST /api/wallet/topups` — validate `5,000 ≤ amount ≤ 10,000,000` **and** `balance + amount ≤ 20,000,000` **before** hand-off. Rejecting after the IPN would strand money that cannot be returned. (Application rule, not a `CHECK` — refunds are exempt from the ceiling.)
+1. `POST /api/wallet/topups` — validate `5,000 ≤ amount ≤ 10,000,000` **and** `balance + amount ≤ 20,000,000` **before** hand-off. Rejecting after the IPN would strand money that cannot be returned. (Application rule, not a `CHECK` — refunds are exempt from the ceiling.) If a `reservation_id` is carried, apply the **one-time hold grace** here (D2 amendment): +7 min once, capped at `created_at + 14 min`, set `extended_once`.
 2. Insert `payment_transactions` (`status='initiated'`, unique `provider_txn_ref`), build the VNPay URL signed with `vnp_HashSecret` (HMAC-SHA512 over sorted params), return it.
 3. Browser pays on the sandbox. The **return URL is display-only** and never writes (SEC-06); the frontend polls `GET /api/wallet/topups/:ref`.
 4. IPN arrives server-to-server. Validate in order: signature → `97`; ref exists → `01`; amount matches → `04`; not already terminal → `02` (idempotent exit); `vnp_ResponseCode='00'` → else mark `failed`.
@@ -900,7 +934,7 @@ COMMIT;
 ```
 
 6. Reply `{"RspCode":"00","Message":"Confirm Success"}` — VNPay retries otherwise, which is why step 5 must be idempotent.
-7. If `reservation_id` was carried, send the attendee back to `/checkout/:reservationId`. If the hold expired meanwhile, say so plainly — the seats are gone, the money is not.
+7. If `reservation_id` was carried, send the attendee back to `/checkout/:reservationId` — the grace from step 1 is what usually keeps that hold alive across the VNPay detour. If it expired anyway (grace already spent, or past the 14-min ceiling), say so plainly — the seats are gone, the money is not.
 
 **Purchase** — one local transaction, no external system: lock the wallet row `FOR UPDATE`, re-check the reservation is `active` and the seats still held, `422 insufficient_balance` (with shortfall) on a short balance, else insert the `paid` order, debit, write the `purchase` ledger row, flip seats to `sold`, issue tickets with their `refundable_amount` allocation.
 

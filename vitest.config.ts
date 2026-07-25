@@ -1,6 +1,13 @@
+import path from "node:path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  // `@shared/*` is a tsconfig path, which the transform only resolves for erased type imports.
+  // The holds contract also exports runtime values (event names, room key), so the alias has to
+  // exist for the bundler too. `.js` specifiers map back to the TS source.
+  resolve: {
+    alias: [{ find: /^@shared\/(.*)\.js$/, replacement: path.resolve(__dirname, "shared/$1.ts") }],
+  },
   test: {
     include: ["server/tests/**/*.test.ts"],
     // Integration tests share one Postgres database and truncate between tests,
@@ -15,6 +22,13 @@ export default defineConfig({
       // MAIN-03 bar for critical logic (Principle IV). Auth is security-critical.
       thresholds: {
         "server/src/modules/auth/**": {
+          lines: 60,
+          functions: 60,
+          branches: 60,
+          statements: 60,
+        },
+        // Seat holds are the concurrency-critical path: no double-sell, no leaked inventory (SC-009).
+        "server/src/modules/holds/**": {
           lines: 60,
           functions: 60,
           branches: 60,

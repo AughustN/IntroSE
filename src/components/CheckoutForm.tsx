@@ -6,6 +6,7 @@
 import { FormEvent, useState } from "react";
 import { PROMO_VOUCHERS } from "../data";
 import { CheckoutPayload, MovieEvent, Seat } from "../types";
+import { formatHoldClock } from "../services/holdSession";
 
 interface CheckoutFormProps {
   event: MovieEvent;
@@ -13,6 +14,10 @@ interface CheckoutFormProps {
   selectedTime: string;
   selectedSeats: Seat[];
   totalPrice: number;
+  /** Milliseconds left on the hold placed in step 02 — the same clock, not a new one. */
+  remainingMs: number;
+  /** "Quay lại chọn ghế" for a seated event, "…chọn số lượng vé" for general admission. */
+  backLabel: string;
   onBack: () => void;
   onConfirmBooking: (payload: CheckoutPayload) => void;
 }
@@ -34,6 +39,8 @@ export default function CheckoutForm({
   selectedTime,
   selectedSeats,
   totalPrice,
+  remainingMs,
+  backLabel,
   onBack,
   onConfirmBooking,
 }: CheckoutFormProps) {
@@ -102,15 +109,21 @@ export default function CheckoutForm({
           onClick={onBack}
           className="flex items-center gap-2 font-mono text-sm text-la-co transition hover:text-beige-kem"
         >
-          Quay lại chọn ghế
+          {backLabel}
         </button>
 
-        <div className="flex flex-wrap items-center gap-2 font-mono text-xs text-beige-kem/45">
+        <div className="flex flex-wrap items-center gap-3 font-mono text-xs text-beige-kem/45">
           <span className="opacity-60">01 Chọn suất</span>
           <span className="h-px w-6 bg-beige-kem/20" />
-          <span className="opacity-60">02 Chọn ghế</span>
+          <span className="opacity-60">02 {isSeated ? "Chọn ghế" : "Chọn số lượng vé"}</span>
           <span className="h-px w-6 bg-beige-kem/20" />
           <span className="font-semibold text-burgundy">03 Thanh toán</span>
+
+          {/* Same hold, same clock as step 02 — going back does not restart it. */}
+          <span className="inline-flex items-center gap-2 rounded-lg border border-cam-dat/30 bg-cam-dat/5 px-2.5 py-1 text-cam-dat">
+            Giữ chỗ
+            <b className="text-sm font-black text-beige-kem">{formatHoldClock(remainingMs)}</b>
+          </span>
         </div>
       </div>
 

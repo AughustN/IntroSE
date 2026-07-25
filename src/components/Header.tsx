@@ -41,7 +41,7 @@ export default function Header({
           >
             <span>
               <span className="block font-display text-2xl font-black tracking-normal text-beige-kem">
-                TicketBox
+                TixHub
               </span>
               <span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-cam-dat">
                 Music / Stage / Film
