@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import { QueueItem, adminApi } from "../services/catalogClient";
 
-const ghost = "rounded-xl border border-beige-kem/15 px-3 py-2 text-xs font-bold text-beige-kem/80 transition hover:border-cam-dat";
+const ghost = "rounded-xl border-2 border-beige-kem px-3 py-2 text-xs font-bold text-beige-kem/80 transition";
 
 export default function AdminModeration({ onBack }: { onBack: () => void }) {
   const [queue, setQueue] = useState<QueueItem[]>([]);
@@ -43,15 +43,15 @@ export default function AdminModeration({ onBack }: { onBack: () => void }) {
         <h1 className="font-display text-3xl font-black">Kiểm duyệt sự kiện</h1>
         <button onClick={onBack} className={ghost}>← Về trang chủ</button>
       </div>
-      {notice && <div className="rounded-xl border border-la-co/20 bg-la-co/5 p-3 text-xs text-la-co">{notice}</div>}
-      {err && <div className="rounded-xl border border-burgundy/40 bg-burgundy/10 p-3 text-xs">{err}</div>}
+      {notice && <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-xs text-on-tint">{notice}</div>}
+      {err && <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-xs">{err}</div>}
 
       <p className="font-mono text-xs text-beige-kem/60">Hàng chờ duyệt ({queue.length}) — duyệt để hiển thị công khai cho người mua.</p>
 
       <div className="space-y-3">
         {queue.length === 0 && !err && <p className="text-sm text-beige-kem/60">Không có sự kiện nào chờ duyệt.</p>}
         {queue.map((e) => (
-          <div key={e.id} className="rounded-2xl border border-beige-kem/10 bg-white/[0.02] p-4">
+          <div key={e.id} className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="font-display text-lg font-bold">{e.title}</div>
@@ -60,7 +60,7 @@ export default function AdminModeration({ onBack }: { onBack: () => void }) {
               <div className="flex gap-2">
                 <button
                   onClick={() => act(() => adminApi.approve(e.id).then(() => {}), "Đã duyệt.")}
-                  className="rounded-xl bg-la-co/20 px-4 py-2 text-sm font-black text-la-co transition hover:bg-la-co/30"
+                  className="rounded-xl bg-la-co px-4 py-2 text-sm font-black text-on-tint transition hover:brightness-95"
                 >
                   Duyệt
                 </button>
@@ -69,7 +69,7 @@ export default function AdminModeration({ onBack }: { onBack: () => void }) {
                     const reason = window.prompt("Lý do từ chối:");
                     if (reason) act(() => adminApi.reject(e.id, reason).then(() => {}), "Đã từ chối.");
                   }}
-                  className="rounded-xl bg-burgundy/20 px-4 py-2 text-sm font-black text-beige-kem transition hover:bg-burgundy/30"
+                  className="rounded-xl bg-bubblegum px-4 py-2 text-sm font-black text-on-tint transition hover:brightness-95"
                 >
                   Từ chối
                 </button>

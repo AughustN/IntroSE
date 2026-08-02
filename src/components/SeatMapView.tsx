@@ -8,10 +8,10 @@ import type { SeatMap } from "@/shared/catalog/types";
 import { catalogClient } from "../services/catalogClient";
 
 const seatColor: Record<string, string> = {
-  available: "border-la-co/60 text-la-co",
-  held: "border-cam-dat/60 text-cam-dat",
-  sold: "border-beige-kem/15 text-beige-kem/30",
-  blocked: "border-beige-kem/15 text-beige-kem/30",
+  available: "border-la-co/60 text-ink-soft",
+  held: "border-cam-dat/60 text-ink-soft",
+  sold: "border-beige-kem/25 text-beige-kem/30",
+  blocked: "border-beige-kem/25 text-beige-kem/30",
 };
 
 /**
@@ -54,7 +54,7 @@ export default function SeatMapView({ showtimeId }: { showtimeId: number }) {
 
   if (err) {
     return (
-      <div className="rounded-xl border border-burgundy/40 bg-burgundy/10 p-3 text-xs text-beige-kem">
+      <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-xs text-on-tint">
         {err}
       </div>
     );
@@ -64,8 +64,8 @@ export default function SeatMapView({ showtimeId }: { showtimeId: number }) {
   if (map.eventType !== "seated") return null;
 
   return (
-    <div className="rounded-2xl border border-beige-kem/10 bg-white/[0.02] p-5">
-      <div className="mb-4 rounded-lg bg-white/[0.04] py-1 text-center font-mono text-[10px] uppercase tracking-widest text-beige-kem/50">
+    <div className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-5">
+      <div className="mb-4 rounded-lg bg-surface-2 py-1 text-center font-mono text-[10px] uppercase tracking-widest text-beige-kem/50">
         Sân khấu
       </div>
       <div className="space-y-2 overflow-x-auto">
@@ -85,8 +85,8 @@ export default function SeatMapView({ showtimeId }: { showtimeId: number }) {
         ))}
       </div>
       <div className="mt-4 flex flex-wrap gap-4 font-mono text-[10px] text-beige-kem/50">
-        <span className="text-la-co">■ Còn trống</span>
-        <span className="text-cam-dat">■ Đang giữ</span>
+        <span className="text-ink-soft">■ Còn trống</span>
+        <span className="text-ink-soft">■ Đang giữ</span>
         <span className="text-beige-kem/30">■ Đã bán</span>
       </div>
     </div>

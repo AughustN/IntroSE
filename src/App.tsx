@@ -8,7 +8,7 @@ import { SAMPLE_MOVIES } from "./data";
 import { Booking, CheckoutPayload, HoldSession, MovieEvent, Seat } from "./types";
 import AdminPanel from "./components/AdminPanel";
 import AuthModal from "./components/AuthModal";
-import AccountModal from "./components/AccountModal";
+import AccountPage from "./components/account/AccountPage";
 import OrganizerPanel from "./components/OrganizerPanel";
 import AdminModeration from "./components/AdminModeration";
 import ResetPassword from "./components/ResetPassword";
@@ -39,7 +39,16 @@ import SeatLayout from "./components/SeatLayout";
 import TicketTicket from "./components/TicketTicket";
 import { ArrowUp } from "lucide-react";
 
-type Screen = "home" | "detail" | "seats" | "checkout" | "ticket" | "history" | "admin" | "organizer" | "moderation";
+type Screen =
+  | "home"
+  | "detail"
+  | "seats"
+  | "checkout"
+  | "ticket"
+  | "history"
+  | "admin"
+  | "organizer"
+  | "moderation";
 type ThemeMode = "dark" | "light";
 
 /**
@@ -55,25 +64,62 @@ const LEAVE_FLOW_WARNING =
 
 const BOOKINGS_CACHE_KEY = "tixhub_bookings_cache_v2";
 // Pre-rebrand keys, still read (and cleared) so existing local data survives the TixHub rename.
-const LEGACY_BOOKINGS_CACHE_KEYS = [
-  "ticketbox_bookings_cache_v2",
-  "ticketbox_bookings_cache_v1",
-];
+const LEGACY_BOOKINGS_CACHE_KEYS = ["ticketbox_bookings_cache_v2", "ticketbox_bookings_cache_v1"];
 const WISHLIST_CACHE_KEY = "tixhub_wishlist_cache_v1";
 const LEGACY_WISHLIST_CACHE_KEY = "ticketbox_wishlist_cache_v1";
 const USER_CACHE_KEY = "tixhub_mock_user_v1";
 const LEGACY_USER_CACHE_KEY = "ticketbox_mock_user_v1";
+/**
+ * The avatar is cached next to the name so the header can paint the real picture on the first
+ * frame. Without it the letter placeholder always wins the race: `avatarUrl` started as null and
+ * only arrived after /auth/refresh + /me, so every reload flashed the initial and then swapped.
+ * A stale entry is harmless — the image falls back to the initial on error and `restore()`
+ * reconciles it a moment later.
+ */
+const AVATAR_CACHE_KEY = "tixhub_avatar_url_v1";
+/**
+ * Cached for the same reason as the avatar: the default avatar's colour is derived from the email,
+ * so without it the circle would paint in the fallback colour and then change once the session was
+ * restored. Never rendered as text — only fed to `avatarColor`.
+ */
+const EMAIL_CACHE_KEY = "tixhub_user_email_v1";
 const THEME_CACHE_KEY = "tixhub_theme_mode_v1";
 const LEGACY_THEME_CACHE_KEY = "ticketbox_theme_mode_v1";
+
+function getInitialAvatar(): string | null {
+  try {
+    return localStorage.getItem(AVATAR_CACHE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function getInitialEmail(): string | null {
+  try {
+    return localStorage.getItem(EMAIL_CACHE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Keeps a cache entry in step with its state; `null` clears it. */
+function cacheValue(key: string, value: string | null): void {
+  try {
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  } catch (err) {
+    console.error(`Failed to cache ${key}:`, err);
+  }
+}
 
 function getInitialTheme(): ThemeMode {
   try {
     const cached =
       localStorage.getItem(THEME_CACHE_KEY) || localStorage.getItem(LEGACY_THEME_CACHE_KEY);
     if (cached === "dark" || cached === "light") return cached;
-    return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   } catch {
-    return "dark";
+    return "light";
   }
 }
 
@@ -114,7 +160,7 @@ export default function App() {
   const [bookingsHistory, setBookingsHistory] = useState<Booking[]>([]);
   const [wishlistedIds, setWishlistedIds] = useState<string[]>([]);
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [showAccountModal, setShowAccountModal] = useState(false);
+  const [showAccountPage, setShowAccountPage] = useState(false);
   const [userName, setUserName] = useState("");
   const [isSignedIn, setIsSignedIn] = useState(false);
   /**
@@ -123,7 +169,23 @@ export default function App() {
    * identity, so the click is parked here and replayed once they are in.
    */
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(getInitialAvatar);
+  /** Only ever used to seed the default avatar's colour — never displayed in the header. */
+  const [userEmail, setUserEmail] = useState<string | null>(getInitialEmail);
+
+  /**
+   * Single entry point for what the header shows about the account, so state and cache can never
+   * drift apart. Passing `null` is the signed-out case and clears everything.
+   */
+  const applyIdentity = useCallback((user: Me | null) => {
+    const name = user ? user.nickname || user.email : "";
+    setUserName(name);
+    setAvatarUrl(user?.avatarUrl ?? null);
+    setUserEmail(user?.email ?? null);
+    cacheValue(USER_CACHE_KEY, name || null);
+    cacheValue(AVATAR_CACHE_KEY, user?.avatarUrl ?? null);
+    cacheValue(EMAIL_CACHE_KEY, user?.email ?? null);
+  }, []);
 
   const dismissToast = useCallback((id: number) => {
     setToasts((current) => current.filter((toast) => toast.id !== id));
@@ -236,8 +298,7 @@ export default function App() {
         localStorage.getItem(BOOKINGS_CACHE_KEY) ||
         LEGACY_BOOKINGS_CACHE_KEYS.map((key) => localStorage.getItem(key)).find(Boolean);
       const cachedWishlist =
-        localStorage.getItem(WISHLIST_CACHE_KEY) ||
-        localStorage.getItem(LEGACY_WISHLIST_CACHE_KEY);
+        localStorage.getItem(WISHLIST_CACHE_KEY) || localStorage.getItem(LEGACY_WISHLIST_CACHE_KEY);
       const cachedUser =
         localStorage.getItem(USER_CACHE_KEY) || localStorage.getItem(LEGACY_USER_CACHE_KEY);
 
@@ -264,38 +325,49 @@ export default function App() {
   }, []);
 
   // Restore a real session from the httpOnly refresh cookie (reconciles the optimistic
-  // cached name above). Signed out → clear the display.
+  // cached identity above). Signed out → clear the display.
   useEffect(() => {
     authClient
       .restore()
       .then((user) => {
-        const name = user ? user.nickname || user.email : "";
-        setUserName(name);
         setIsSignedIn(Boolean(user));
-        setAvatarUrl(user?.avatarUrl ?? null);
-        try {
-          if (name) localStorage.setItem(USER_CACHE_KEY, name);
-          else localStorage.removeItem(USER_CACHE_KEY);
-        } catch (err) {
-          console.error("Failed to sync cached user:", err);
-        }
+        applyIdentity(user);
       })
       .catch(() => {});
-  }, []);
+  }, [applyIdentity]);
 
   // Load the real catalog (replaces the mock browse source). Maps API cards → MovieEvent.
   useEffect(() => {
+    /*
+     * Dev-only: with no API server (or an unseeded database) the browse grid renders empty, which
+     * makes the whole home screen impossible to work on. Fall back to the bundled samples so the UI
+     * always has something to draw. Gated on `import.meta.env.DEV` on purpose — in production an
+     * empty catalog is real information and must not be papered over with fixtures.
+     */
+    const useSamplesInDev = (reason: string) => {
+      if (!import.meta.env.DEV) return;
+      console.warn(`Catalog ${reason}; falling back to SAMPLE_MOVIES (dev only).`);
+      setEvents(SAMPLE_MOVIES);
+      setHeroMovie(SAMPLE_MOVIES[0]);
+      setSelectedMovie(SAMPLE_MOVIES[0]);
+    };
+
     catalogClient
       .listEvents({ page: 1 })
       .then((res) => {
         const mapped = res.events.map(cardToMovie);
-        setEvents(mapped);
-        if (mapped[0]) {
-          setHeroMovie(mapped[0]);
-          setSelectedMovie(mapped[0]);
+        if (mapped.length === 0) {
+          useSamplesInDev("returned no events");
+          return;
         }
+        setEvents(mapped);
+        setHeroMovie(mapped[0]);
+        setSelectedMovie(mapped[0]);
       })
-      .catch((err) => console.error("Failed to load catalog:", err));
+      .catch((err) => {
+        console.error("Failed to load catalog:", err);
+        useSamplesInDev("request failed");
+      });
   }, []);
 
   const filteredEvents = useMemo(() => {
@@ -335,14 +407,26 @@ export default function App() {
     });
   }, [events, activeCategory, activeCity, activeDate, availability, maxPrice, searchQuery]);
 
+  /**
+   * The date filter's options, taken from the catalog itself. They are compared verbatim against
+   * `movie.dates`, so they have to be the same ISO strings the events carry — a hand-maintained list
+   * drifts out of date and quietly filters everything away.
+   */
+  const dateOptions = useMemo(
+    () => [...new Set(events.flatMap((event) => event.dates))].sort(),
+    [events],
+  );
+
   const relatedEvents = useMemo(() => {
-    return events.filter((event) => {
-      if (event.id === selectedMovie.id) return false;
-      return (
-        event.category === selectedMovie.category ||
-        event.genre.some((genre) => selectedMovie.genre.includes(genre))
-      );
-    }).slice(0, 3);
+    return events
+      .filter((event) => {
+        if (event.id === selectedMovie.id) return false;
+        return (
+          event.category === selectedMovie.category ||
+          event.genre.some((genre) => selectedMovie.genre.includes(genre))
+        );
+      })
+      .slice(0, 3);
   }, [events, selectedMovie]);
 
   /**
@@ -546,12 +630,18 @@ export default function App() {
       } else {
         const updated = hold
           ? await holdsClient.add(hold.reservationId, { seatIds: [seat.showtimeSeatId] })
-          : await holdsClient.hold({ showtimeId: bookingShowtimeId, seatIds: [seat.showtimeSeatId] });
+          : await holdsClient.hold({
+              showtimeId: bookingShowtimeId,
+              seatIds: [seat.showtimeSeatId],
+            });
         setHold(sessionFromReservation(updated, context));
       }
     } catch (e) {
       // Every refusal is explainable: seat just taken, cap reached, showtime closed (SC-008).
-      pushToast("error", e instanceof HoldError ? e.message : "Không giữ được ghế. Vui lòng thử lại.");
+      pushToast(
+        "error",
+        e instanceof HoldError ? e.message : "Không giữ được ghế. Vui lòng thử lại.",
+      );
       if (e instanceof HoldError && e.status === 404) setHold(null); // the hold ended underneath us
     } finally {
       setHoldBusy(false);
@@ -604,7 +694,10 @@ export default function App() {
         setActiveScreen("checkout");
         window.scrollTo({ top: 0, behavior: "smooth" });
       } catch (e) {
-        pushToast("error", e instanceof HoldError ? e.message : "Không giữ được vé. Vui lòng thử lại.");
+        pushToast(
+          "error",
+          e instanceof HoldError ? e.message : "Không giữ được vé. Vui lòng thử lại.",
+        );
       } finally {
         setHoldBusy(false);
       }
@@ -663,16 +756,9 @@ export default function App() {
   };
 
   const handleLogin = (user: Me) => {
-    const name = user.nickname || user.email;
-    setUserName(name);
     setIsSignedIn(true);
-    setAvatarUrl(user.avatarUrl);
+    applyIdentity(user);
     setShowAuthModal(false);
-    try {
-      localStorage.setItem(USER_CACHE_KEY, name);
-    } catch (err) {
-      console.error("Failed to save user:", err);
-    }
 
     // Resume whatever the sign-in interrupted, so signing in is not a dead end.
     const resume = pendingAction;
@@ -695,30 +781,39 @@ export default function App() {
     setShowAuthModal(true);
   };
 
+  /** Clears everything this browser remembers about the signed-in account. */
+  const clearSignedInState = () => {
+    setIsSignedIn(false);
+    applyIdentity(null);
+  };
+
   const handleLogout = async () => {
     try {
       await authClient.logout();
     } catch (err) {
       console.error("Logout failed:", err);
     }
-    setUserName("");
-    setIsSignedIn(false);
-    setAvatarUrl(null);
+    clearSignedInState();
+  };
+
+  /** Revokes every session for the account, this device included (FR-056). */
+  const handleLogoutAll = async () => {
     try {
-      localStorage.removeItem(USER_CACHE_KEY);
+      await authClient.logoutAll();
     } catch (err) {
-      console.error("Failed to clear cached user:", err);
+      console.error("Logout-all failed:", err);
     }
+    clearSignedInState();
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-xanh-pho text-beige-kem selection:bg-burgundy selection:text-white transition-colors duration-300">
+    <div className="flex min-h-screen flex-col bg-xanh-pho text-white selection:bg-burgundy selection:text-white transition-colors duration-300">
       <Header
         searchQuery={searchQuery}
         onSearchChange={(value) => void goHomeAfterFilter(() => setSearchQuery(value))}
         onViewHistory={() => void leaveFlow(() => setActiveScreen("history"))}
         onHomeClick={goHome}
-        onLoginClick={() => (userName ? setShowAccountModal(true) : setShowAuthModal(true))}
+        onLoginClick={() => (userName ? setShowAccountPage(true) : setShowAuthModal(true))}
         onAdminClick={() =>
           leaveFlow(() => {
             setActiveScreen("moderation");
@@ -726,6 +821,7 @@ export default function App() {
           })
         }
         userName={userName}
+        userEmail={userEmail}
         avatarUrl={avatarUrl}
         theme={theme}
         onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
@@ -743,6 +839,7 @@ export default function App() {
               activeCategory={activeCategory}
               onCategoryChange={(value) => void goHomeAfterFilter(() => setActiveCategory(value))}
               activeDate={activeDate}
+              dateOptions={dateOptions}
               onDateChange={(value) => void goHomeAfterFilter(() => setActiveDate(value))}
               activeCity={activeCity}
               onCityChange={(value) => void goHomeAfterFilter(() => setActiveCity(value))}
@@ -762,7 +859,7 @@ export default function App() {
               onToggleWishlist={handleToggleWishlist}
             />
 
-            <section className="border-t border-beige-kem/10 bg-xanh-pho/30 px-4 py-20 sm:px-6 lg:px-8">
+            <section className="border-t border-beige-kem/25 bg-xanh-pho px-4 py-20 sm:px-6 lg:px-8">
               <div className="mx-auto grid max-w-7xl grid-flow-dense grid-cols-1 gap-5 md:grid-cols-3">
                 <TrustCard
                   title="Wishlist và nhắc lịch"
@@ -861,17 +958,21 @@ export default function App() {
         {activeScreen === "moderation" && <AdminModeration onBack={goHome} />}
       </main>
 
-      <footer className="border-t border-beige-kem/10 bg-xanh-pho px-4 py-12 font-mono text-xs sm:px-6 lg:px-8">
+      <footer className="border-t border-beige-kem/25 bg-xanh-pho px-4 py-12 font-mono text-xs sm:px-6 lg:px-8">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-6 md:flex-row">
           <div className="space-y-1 text-center md:text-left">
-            <h5 className="font-display text-sm font-bold tracking-normal text-beige-kem">TIXHUB FRONTEND MVP</h5>
-            <p className="text-[10px] text-la-co">Mock data cho vé ca nhạc, hòa nhạc, kịch và phim</p>
+            <h5 className="font-display text-sm font-bold tracking-normal text-beige-kem">
+              TIXHUB FRONTEND MVP
+            </h5>
+            <p className="text-[10px] text-ink-soft">
+              Mock data cho vé ca nhạc, hòa nhạc, kịch và phim
+            </p>
           </div>
 
           <div className="flex flex-wrap justify-center gap-6 text-beige-kem/60">
-            <span className="cursor-pointer transition hover:text-cam-dat">Chính sách hoàn vé</span>
-            <span className="cursor-pointer transition hover:text-cam-dat">Điều khoản sử dụng</span>
-            <span className="cursor-pointer transition hover:text-cam-dat">Hỗ trợ email/SMS</span>
+            <span className="cursor-pointer transition hover:text-ink-soft">Chính sách hoàn vé</span>
+            <span className="cursor-pointer transition hover:text-ink-soft">Điều khoản sử dụng</span>
+            <span className="cursor-pointer transition hover:text-ink-soft">Hỗ trợ email/SMS</span>
           </div>
 
           <p className="text-center text-[10px] text-beige-kem/40 md:text-right">
@@ -882,30 +983,29 @@ export default function App() {
 
       <button
         onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-        className="fixed bottom-6 right-6 z-30 grid h-12 w-12 place-items-center rounded-xl border border-cam-dat/20 bg-burgundy/90 text-beige-kem shadow-xl transition-all hover:scale-105 hover:bg-burgundy"
+        className="fixed bottom-6 right-6 z-30 grid h-12 w-12 place-items-center rounded-xl border border-cam-dat/20 bg-burgundy text-white shadow-hard transition-all hover:scale-105 hover:brightness-95"
         aria-label="Cuộn lên đầu trang"
         title="Cuộn lên đầu trang"
       >
         <ArrowUp className="h-5 w-5" />
       </button>
 
-      {showAuthModal && (
-        <AuthModal onClose={dismissAuthModal} onLogin={handleLogin} />
-      )}
-      {showAccountModal && userName && (
-        <AccountModal
-          onClose={() => setShowAccountModal(false)}
+      {showAuthModal && <AuthModal onClose={dismissAuthModal} onLogin={handleLogin} />}
+      {showAccountPage && userName && (
+        <AccountPage
+          onClose={() => setShowAccountPage(false)}
           onLogout={async () => {
             await handleLogout();
-            setShowAccountModal(false);
+            setShowAccountPage(false);
           }}
-          onProfileUpdated={(user) => {
-            setUserName(user.nickname || user.email);
-            setAvatarUrl(user.avatarUrl);
+          onLogoutAll={async () => {
+            await handleLogoutAll();
+            setShowAccountPage(false);
           }}
+          onProfileUpdated={applyIdentity}
           onManageEvents={() =>
             leaveFlow(() => {
-              setShowAccountModal(false);
+              setShowAccountPage(false);
               setActiveScreen("organizer");
               window.scrollTo({ top: 0, behavior: "smooth" });
             })
@@ -926,15 +1026,9 @@ export default function App() {
   );
 }
 
-function TrustCard({
-  title,
-  text,
-}: {
-  title: string;
-  text: string;
-}) {
+function TrustCard({ title, text }: { title: string; text: string }) {
   return (
-    <div className="rounded-2xl border border-beige-kem/10 bg-white/[0.035] p-6">
+    <div className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-6">
       <h4 className="font-display text-lg font-black text-beige-kem">{title}</h4>
       <p className="mt-2 text-sm leading-6 text-beige-kem/65">{text}</p>
     </div>

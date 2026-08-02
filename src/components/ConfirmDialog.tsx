@@ -48,7 +48,7 @@ export default function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-4 backdrop-blur-sm sm:items-center"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-4 sm:items-center"
       onClick={onCancel}
       role="presentation"
     >
@@ -58,7 +58,7 @@ export default function ConfirmDialog({
         aria-labelledby="confirm-title"
         aria-describedby="confirm-message"
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-2xl border border-beige-kem/15 bg-xanh-pho p-6 shadow-2xl"
+        className="w-full max-w-md rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 shadow-hard"
       >
         <h2 id="confirm-title" className="font-display text-xl font-black text-beige-kem">
           {title}
@@ -71,14 +71,14 @@ export default function ConfirmDialog({
           <button
             ref={cancelRef}
             onClick={onCancel}
-            className="rounded-xl border border-beige-kem/20 px-4 py-2.5 font-mono text-sm text-beige-kem/80 transition hover:border-beige-kem/40 hover:text-beige-kem"
+            className="rounded-xl border-2 border-beige-kem px-4 py-2.5 font-mono text-sm text-beige-kem/80 transition hover:border-beige-kem/40 hover:text-beige-kem"
           >
             {cancelLabel}
           </button>
           <button
             onClick={onConfirm}
             className={`rounded-xl px-4 py-2.5 font-mono text-sm font-bold text-beige-kem transition ${
-              tone === "danger" ? "bg-burgundy hover:bg-burgundy/90" : "bg-cam-dat/80 hover:bg-cam-dat"
+              tone === "danger" ? "bg-burgundy hover:brightness-95" : "bg-cam-dat hover:brightness-95"
             }`}
           >
             {confirmLabel}

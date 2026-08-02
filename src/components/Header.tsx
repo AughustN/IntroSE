@@ -4,6 +4,49 @@
  */
 
 import { Moon, Sun } from "lucide-react";
+import { useEffect, useState } from "react";
+import { DEFAULT_AVATAR_FG, avatarColor } from "../services/defaultAvatar";
+
+/**
+ * The signed-in user's picture, with a colour-seeded initial as the fallback.
+ *
+ * The URL may come from the local cache, which lets the real picture paint on the first frame
+ * instead of flashing the initial while the session is restored. That cache can be stale — the
+ * avatar could have been replaced from another device — so a failed load quietly falls back
+ * rather than leaving a broken image.
+ */
+function AccountAvatar({
+  userName,
+  userEmail,
+  avatarUrl,
+}: {
+  userName: string;
+  userEmail?: string | null;
+  avatarUrl?: string | null;
+}) {
+  const [broken, setBroken] = useState(false);
+
+  useEffect(() => setBroken(false), [avatarUrl]);
+
+  if (avatarUrl && !broken) {
+    return (
+      <img
+        src={avatarUrl}
+        alt=""
+        onError={() => setBroken(true)}
+        className="h-6 w-6 rounded-full object-cover"
+      />
+    );
+  }
+  return (
+    <span
+      className="grid h-6 w-6 place-items-center rounded-full text-[11px] font-bold normal-case"
+      style={{ backgroundColor: avatarColor(userEmail), color: DEFAULT_AVATAR_FG }}
+    >
+      {userName.charAt(0).toUpperCase()}
+    </span>
+  );
+}
 
 interface HeaderProps {
   searchQuery: string;
@@ -13,6 +56,7 @@ interface HeaderProps {
   onLoginClick: () => void;
   onAdminClick: () => void;
   userName?: string;
+  userEmail?: string | null;
   avatarUrl?: string | null;
   theme: "dark" | "light";
   onToggleTheme: () => void;
@@ -26,24 +70,21 @@ export default function Header({
   onLoginClick,
   onAdminClick,
   userName,
+  userEmail,
   avatarUrl,
   theme,
   onToggleTheme,
 }: HeaderProps) {
   return (
-    <header className="sticky top-0 z-40 border-b border-beige-kem/10 bg-xanh-pho/95 px-4 py-3 text-beige-kem shadow-2xl backdrop-blur-xl sm:px-6 lg:px-8">
+    <header className="sticky top-0 z-40 border-b border-beige-kem/25 bg-xanh-pho px-4 py-3 text-beige-kem shadow-hard sm:px-6 lg:px-8">
       <div className="mx-auto flex max-w-7xl flex-col gap-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <button
-            onClick={onHomeClick}
-            className="group text-left"
-            title="Trang chủ"
-          >
+          <button onClick={onHomeClick} className="group text-left" title="Trang chủ">
             <span>
               <span className="block font-display text-2xl font-black tracking-normal text-beige-kem">
                 TixHub
               </span>
-              <span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-cam-dat">
+              <span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-ink-soft">
                 Music / Stage / Film
               </span>
             </span>
@@ -55,32 +96,26 @@ export default function Header({
               placeholder="Tìm tên sự kiện, nghệ sĩ, phim, rạp, nhà hát, địa điểm..."
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
-              className="h-11 w-full rounded-xl border border-beige-kem/20 bg-white/[0.04] px-4 text-sm text-beige-kem outline-none transition placeholder:text-beige-kem/40 focus:border-cam-dat"
+              className="h-11 w-full rounded-xl border-2 border-beige-kem bg-surface-2 px-4 text-sm text-beige-kem outline-none transition placeholder:text-beige-kem/40 focus:border-burgundy"
             />
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={onViewHistory}
-              className="inline-flex h-10 items-center rounded-xl border border-la-co/35 bg-la-co/10 px-3 text-xs font-bold uppercase tracking-normal text-la-co transition hover:border-la-co hover:bg-la-co/15"
+              className="inline-flex h-10 items-center rounded-xl border-2 border-beige-kem bg-la-co px-3 text-xs font-bold uppercase tracking-normal text-on-tint transition hover:brightness-95"
               title="Vé của tôi"
             >
               Vé của tôi
             </button>
             <button
               onClick={onLoginClick}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-beige-kem/20 bg-white/[0.04] px-3 text-xs font-bold uppercase tracking-normal text-beige-kem transition hover:border-cam-dat"
+              className="inline-flex h-10 items-center gap-2 rounded-xl border-2 border-beige-kem bg-surface-2 px-3 text-xs font-bold uppercase tracking-normal text-beige-kem transition"
               title={userName ? "Tài khoản" : "Đăng nhập"}
             >
               {userName ? (
                 <>
-                  {avatarUrl ? (
-                    <img src={avatarUrl} alt="" className="h-6 w-6 rounded-full object-cover" />
-                  ) : (
-                    <span className="grid h-6 w-6 place-items-center rounded-full bg-burgundy text-[11px] normal-case text-beige-kem">
-                      {userName.charAt(0).toUpperCase()}
-                    </span>
-                  )}
+                  <AccountAvatar userName={userName} userEmail={userEmail} avatarUrl={avatarUrl} />
                   <span className="normal-case">{userName}</span>
                 </>
               ) : (
@@ -89,14 +124,14 @@ export default function Header({
             </button>
             <button
               onClick={onAdminClick}
-              className="inline-flex h-10 items-center rounded-xl border border-burgundy/50 bg-burgundy/15 px-3 text-xs font-bold uppercase tracking-normal text-beige-kem transition hover:bg-burgundy/25"
+              className="inline-flex h-10 items-center rounded-xl border-2 border-beige-kem bg-bubblegum px-3 text-xs font-bold uppercase tracking-normal text-on-tint transition hover:brightness-95"
               title="Trang quản trị mock"
             >
               Admin
             </button>
             <button
               onClick={onToggleTheme}
-              className="grid h-10 w-10 place-items-center rounded-xl border border-cam-dat/35 bg-cam-dat/10 text-cam-dat transition hover:border-cam-dat hover:bg-cam-dat/15"
+              className="grid h-10 w-10 place-items-center rounded-xl border-2 border-beige-kem bg-cam-dat text-on-tint transition hover:brightness-95"
               aria-label={theme === "dark" ? "Chuyển sang light mode" : "Chuyển sang dark mode"}
               title={theme === "dark" ? "Light mode" : "Dark mode"}
             >
@@ -104,7 +139,6 @@ export default function Header({
             </button>
           </div>
         </div>
-
       </div>
     </header>
   );

@@ -38,10 +38,10 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
-      <div className="flex flex-col gap-4 border-b border-beige-kem/10 pb-5 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-4 border-b border-beige-kem/25 pb-5 lg:flex-row lg:items-center lg:justify-between">
         <button
           onClick={onBack}
-          className="flex items-center gap-2 font-mono text-sm text-la-co transition hover:text-beige-kem"
+          className="flex items-center gap-2 font-mono text-sm text-ink-soft transition hover:text-beige-kem"
         >
           Quay lại trang bán vé
         </button>
@@ -61,7 +61,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
-        <nav className="rounded-2xl border border-beige-kem/10 bg-white/[0.025] p-2">
+        <nav className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-2">
           {adminTabs.map((tab) => {
             const selected = activeTab === tab.id;
             return (
@@ -71,7 +71,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                 className={`mb-1 flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-bold transition ${
                   selected
                     ? "bg-beige-kem text-xanh-pho"
-                    : "text-beige-kem/70 hover:bg-white/[0.05] hover:text-beige-kem"
+                    : "text-beige-kem/70 hover:bg-surface-2 hover:text-beige-kem"
                 }`}
               >
                 {tab.label}
@@ -80,13 +80,13 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
           })}
         </nav>
 
-        <section className="min-h-[520px] rounded-2xl border border-beige-kem/10 bg-xanh-pho/40 p-6">
+        <section className="min-h-[520px] rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6">
           {activeTab === "events" && (
             <div className="space-y-5">
               <PanelTitle title="Quản lý sự kiện, suất diễn, địa điểm, sơ đồ ghế" />
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[720px] text-left text-sm">
-                  <thead className="border-b border-beige-kem/10 font-mono text-xs uppercase text-beige-kem/50">
+                  <thead className="border-b border-beige-kem/25 font-mono text-xs uppercase text-beige-kem/50">
                     <tr>
                       <th className="py-3 pr-4">Sự kiện</th>
                       <th className="py-3 pr-4">Thành phố</th>
@@ -97,21 +97,21 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                   </thead>
                   <tbody>
                     {events.map((event) => (
-                      <tr key={event.id} className="border-b border-beige-kem/5">
+                      <tr key={event.id} className="border-b border-beige-kem/25">
                         <td className="py-4 pr-4">
                           <p className="font-display font-bold text-beige-kem">{event.title}</p>
-                          <p className="font-mono text-xs text-cam-dat">{event.venueName}</p>
+                          <p className="font-mono text-xs text-ink-soft">{event.venueName}</p>
                         </td>
                         <td className="py-4 pr-4 text-beige-kem/75">{event.city}</td>
                         <td className="py-4 pr-4 font-mono text-xs text-beige-kem/75">
                           {event.dates.length} ngày / {event.times.length} giờ
                         </td>
                         <td className="py-4 pr-4">
-                          <span className="rounded-full border border-cam-dat/30 bg-cam-dat/10 px-2.5 py-1 font-mono text-[10px] uppercase text-cam-dat">
+                          <span className="rounded-full border-2 border-beige-kem bg-cam-dat px-2.5 py-1 font-mono text-[10px] uppercase text-on-tint">
                             {event.status}
                           </span>
                         </td>
-                        <td className="py-4 pr-4 font-mono text-xs text-la-co">84 ghế mock / row A-H</td>
+                        <td className="py-4 pr-4 font-mono text-xs text-ink-soft">84 ghế mock / row A-H</td>
                       </tr>
                     ))}
                   </tbody>
@@ -128,19 +128,19 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
               ) : (
                 <div className="grid gap-4">
                   {bookings.map((booking) => (
-                    <div key={booking.id} className="rounded-xl border border-beige-kem/10 bg-white/[0.03] p-4">
+                    <div key={booking.id} className="rounded-xl border-2 border-beige-kem bg-surface-2 p-4">
                       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                         <div>
                           <p className="font-display text-lg font-bold text-beige-kem">{booking.movie.title}</p>
-                          <p className="font-mono text-xs text-cam-dat">{booking.id} / {booking.paymentMethod} / {booking.status}</p>
+                          <p className="font-mono text-xs text-ink-soft">{booking.id} / {booking.paymentMethod} / {booking.status}</p>
                         </div>
                         <div className="font-display text-xl font-black text-burgundy">
                           {formatPrice(booking.finalPrice || booking.totalPrice)}
                         </div>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2 font-mono text-[11px] text-beige-kem/65">
-                        <span className="rounded border border-beige-kem/10 px-2 py-1">Ghế {booking.selectedSeats.map((seat) => seat.id).join(", ")}</span>
-                        <span className="rounded border border-beige-kem/10 px-2 py-1">Email {booking.customerEmail}</span>
+                        <span className="rounded border-2 border-beige-kem px-2 py-1">Ghế {booking.selectedSeats.map((seat) => seat.id).join(", ")}</span>
+                        <span className="rounded border-2 border-beige-kem px-2 py-1">Email {booking.customerEmail}</span>
                         <span className="rounded border border-burgundy/30 px-2 py-1 text-burgundy">Hoàn tiền mock</span>
                       </div>
                     </div>
@@ -155,16 +155,16 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
               <PanelTitle title="Quản lý mã giảm giá, combo vé, affiliate" />
               <div className="grid gap-4 md:grid-cols-3">
                 {["WEEKEND50", "FIRSTBOOK", "GROUP4"].map((code, index) => (
-                  <div key={code} className="rounded-2xl border border-beige-kem/10 bg-white/[0.035] p-5">
+                  <div key={code} className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-5">
                     <p className="font-display text-2xl font-black text-beige-kem">{code}</p>
                     <p className="mt-2 text-sm text-beige-kem/65">
                       {index === 0 ? "Cuối tuần" : index === 1 ? "Khách mới" : "Nhóm bạn"}
                     </p>
-                    <p className="mt-4 font-mono text-xs text-cam-dat">Còn hiệu lực / cần API validate</p>
+                    <p className="mt-4 font-mono text-xs text-ink-soft">Còn hiệu lực / cần API validate</p>
                   </div>
                 ))}
               </div>
-              <div className="rounded-xl border border-la-co/20 bg-la-co/5 p-4 text-sm leading-6 text-la-co">
+              <div className="rounded-xl border-2 border-beige-kem bg-la-co p-4 text-sm leading-6 text-on-tint">
                 Combo vé và affiliate hiện đang là mock field trên từng event. Backend cần quản lý campaign, usage limit, min order và commission.
               </div>
             </div>
@@ -177,18 +177,18 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                 <input
                   value={scanCode}
                   onChange={(event) => setScanCode(event.target.value)}
-                  className="h-12 rounded-xl border border-beige-kem/20 bg-xanh-pho px-4 font-mono text-sm text-beige-kem outline-none focus:border-cam-dat"
+                  className="h-12 rounded-xl border-2 border-beige-kem bg-xanh-pho px-4 font-mono text-sm text-beige-kem outline-none focus:border-burgundy"
                 />
-                <button className="rounded-xl bg-burgundy px-6 py-3 text-sm font-black text-beige-kem">
+                <button className="rounded-xl bg-burgundy px-6 py-3 text-sm font-black text-white">
                   Xác nhận check-in
                 </button>
               </div>
-              <div className="rounded-2xl border border-la-co/20 bg-la-co/5 p-5">
+              <div className="rounded-2xl border-2 border-beige-kem bg-la-co p-5">
                 <div className="flex items-center gap-3">
-                  <span className="rounded-lg border border-la-co/30 bg-la-co/10 px-3 py-2 font-mono text-xs font-black uppercase text-la-co">QR</span>
+                  <span className="rounded-lg border-2 border-beige-kem bg-la-co px-3 py-2 font-mono text-xs font-black uppercase text-on-tint">QR</span>
                   <div>
                     <p className="font-display text-xl font-black text-beige-kem">Mã {scanCode}</p>
-                    <p className="text-sm text-la-co">Mock result: hợp lệ nếu mã khớp booking id trong local history.</p>
+                    <p className="text-sm text-ink-soft">Mock result: hợp lệ nếu mã khớp booking id trong local history.</p>
                   </div>
                 </div>
               </div>
@@ -203,7 +203,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                 <Metric label="Seats sold" value={`${soldSeats}`} />
                 <Metric label="Fill rate" value={`${fillRate}%`} />
               </div>
-              <div className="rounded-2xl border border-beige-kem/10 p-5">
+              <div className="rounded-2xl border-2 border-beige-kem p-5">
                 <div className="mb-3 flex items-center justify-between font-mono text-xs text-beige-kem/60">
                   <span>Biểu đồ mock</span>
                   <span>7 ngày gần nhất</span>
@@ -229,13 +229,13 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                   ["Nhân viên", "Check-in QR, xem đơn, gửi lại email/SMS"],
                   ["Đối tác", "Quản lý sự kiện và xem báo cáo của chính mình"],
                 ].map(([role, desc]) => (
-                  <div key={role} className="rounded-2xl border border-beige-kem/10 bg-white/[0.035] p-5">
+                  <div key={role} className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-5">
                     <p className="font-display text-xl font-black text-beige-kem">{role}</p>
                     <p className="mt-2 text-sm leading-6 text-beige-kem/65">{desc}</p>
                   </div>
                 ))}
               </div>
-              <div className="rounded-xl border border-la-co/20 bg-la-co/5 p-4 text-sm leading-6 text-la-co">
+              <div className="rounded-xl border-2 border-beige-kem bg-la-co p-4 text-sm leading-6 text-on-tint">
                 <span>Backend cần RBAC/ABAC, audit log, tenant id cho đối tác tổ chức sự kiện và khóa quyền hoàn tiền.</span>
               </div>
             </div>
@@ -248,7 +248,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-beige-kem/10 bg-white/[0.03] p-5">
+    <div className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-5">
       <p className="font-mono text-xs uppercase text-beige-kem/50">{label}</p>
       <p className="mt-2 font-display text-2xl font-black text-beige-kem">{value}</p>
     </div>
@@ -265,7 +265,7 @@ function PanelTitle({ title }: { title: string }) {
 
 function EmptyState({ text }: { text: string }) {
   return (
-    <div className="rounded-2xl border border-dashed border-beige-kem/15 p-12 text-center text-sm text-beige-kem/55">
+    <div className="rounded-2xl border border-dashed border-beige-kem/25 p-12 text-center text-sm text-beige-kem/55">
       {text}
     </div>
   );

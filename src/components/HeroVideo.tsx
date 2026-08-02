@@ -146,7 +146,7 @@ export default function HeroVideo({ movie, onBookNow }: HeroVideoProps) {
             <button
               id="hero-toggle-play-btn"
               onClick={togglePlay}
-              className="inline-flex h-11 items-center justify-center border border-white/55 bg-black/20 px-4 text-xs font-bold uppercase text-white backdrop-blur-sm transition duration-200 hover:border-white hover:bg-white hover:text-black active:translate-y-px"
+              className="inline-flex h-11 items-center justify-center border border-white/55 bg-black/20 px-4 text-xs font-bold uppercase text-white transition duration-200 hover:border-white hover:bg-white hover:text-black active:translate-y-px"
               title={isPlaying ? "Tạm dừng" : "Phát trailer"}
             >
               {isPlaying ? "Tạm dừng" : "Phát"}
@@ -155,7 +155,7 @@ export default function HeroVideo({ movie, onBookNow }: HeroVideoProps) {
             <button
               id="hero-toggle-mute-btn"
               onClick={toggleMute}
-              className="inline-flex h-11 items-center justify-center border border-white/55 bg-black/20 px-4 text-xs font-bold uppercase text-white backdrop-blur-sm transition duration-200 hover:border-white hover:bg-white hover:text-black active:translate-y-px"
+              className="inline-flex h-11 items-center justify-center border border-white/55 bg-black/20 px-4 text-xs font-bold uppercase text-white transition duration-200 hover:border-white hover:bg-white hover:text-black active:translate-y-px"
               title={isMuted ? "Bật âm thanh" : "Tắt âm thanh"}
             >
               {isMuted ? "Bật âm" : "Tắt âm"}
@@ -166,7 +166,7 @@ export default function HeroVideo({ movie, onBookNow }: HeroVideoProps) {
 
       <button
         type="button"
-        className="absolute bottom-8 right-[8%] z-10 grid h-12 w-12 place-items-center border border-white/45 bg-black/20 text-white/85 backdrop-blur-sm transition duration-200 hover:translate-y-1 hover:border-white hover:text-white"
+        className="absolute bottom-8 right-[8%] z-10 grid h-12 w-12 place-items-center border border-white/45 bg-black/20 text-white/85 transition duration-200 hover:translate-y-1 hover:border-white hover:text-white"
         onClick={() => window.scrollBy({ top: window.innerHeight - 80, behavior: "smooth" })}
         aria-label="Cuộn xuống"
         title="Cuộn xuống"

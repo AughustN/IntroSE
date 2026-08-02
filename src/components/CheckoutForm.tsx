@@ -6,6 +6,7 @@
 import { FormEvent, useState } from "react";
 import { PROMO_VOUCHERS } from "../data";
 import { CheckoutPayload, MovieEvent, Seat } from "../types";
+import { formatEventDate } from "../services/formatDate";
 import { formatHoldClock } from "../services/holdSession";
 
 interface CheckoutFormProps {
@@ -104,23 +105,25 @@ export default function CheckoutForm({
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
-      <div className="flex flex-col gap-4 border-b border-beige-kem/10 pb-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 border-b border-beige-kem/25 pb-4 sm:flex-row sm:items-center sm:justify-between">
         <button
           onClick={onBack}
-          className="flex items-center gap-2 font-mono text-sm text-la-co transition hover:text-beige-kem"
+          className="flex items-center gap-2 font-mono text-sm text-ink-soft transition hover:text-beige-kem"
         >
           {backLabel}
         </button>
 
-        <div className="flex flex-wrap items-center gap-3 font-mono text-xs text-beige-kem/45">
-          <span className="opacity-60">01 Chọn suất</span>
-          <span className="h-px w-6 bg-beige-kem/20" />
-          <span className="opacity-60">02 {isSeated ? "Chọn ghế" : "Chọn số lượng vé"}</span>
-          <span className="h-px w-6 bg-beige-kem/20" />
-          <span className="font-semibold text-burgundy">03 Thanh toán</span>
+        <div className="flex flex-wrap items-center gap-3 font-mono text-xs text-ink-soft">
+          <span>01 Chọn suất</span>
+          <span className="h-0.5 w-6 bg-beige-kem" />
+          <span>02 {isSeated ? "Chọn ghế" : "Chọn số lượng vé"}</span>
+          <span className="h-0.5 w-6 bg-beige-kem" />
+          <span className="rounded-full bg-bubblegum px-2.5 py-1 font-bold text-on-tint">
+            03 Thanh toán
+          </span>
 
           {/* Same hold, same clock as step 02 — going back does not restart it. */}
-          <span className="inline-flex items-center gap-2 rounded-lg border border-cam-dat/30 bg-cam-dat/5 px-2.5 py-1 text-cam-dat">
+          <span className="inline-flex items-center gap-2 rounded-lg border-2 border-beige-kem bg-cam-dat px-2.5 py-1 text-on-tint">
             Giữ chỗ
             <b className="text-sm font-black text-beige-kem">{formatHoldClock(remainingMs)}</b>
           </span>
@@ -128,10 +131,10 @@ export default function CheckoutForm({
       </div>
 
       <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-12">
-        <section className="space-y-6 rounded-2xl border border-beige-kem/10 bg-xanh-pho/50 p-6 sm:p-8 lg:col-span-7">
+        <section className="space-y-6 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 sm:p-8 lg:col-span-7">
           <div>
             <h3 className="font-display text-2xl font-black text-beige-kem">Thông tin người nhận vé</h3>
-            <p className="mt-2 text-sm text-la-co">
+            <p className="mt-2 text-sm text-ink-soft">
               Vé điện tử sẽ được gửi qua email và hiển thị trong thông báo trong ứng dụng (không có SMS).
             </p>
           </div>
@@ -145,7 +148,7 @@ export default function CheckoutForm({
                 placeholder="Nhập đầy đủ tên của bạn"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="h-11 w-full rounded-xl border border-beige-kem/20 bg-xanh-pho px-4 text-sm text-beige-kem outline-none transition focus:border-cam-dat"
+                className="h-11 w-full rounded-xl border-2 border-beige-kem bg-xanh-pho px-4 text-sm text-beige-kem outline-none transition focus:border-burgundy"
               />
             </div>
 
@@ -158,7 +161,7 @@ export default function CheckoutForm({
                   placeholder="name@domain.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="h-11 w-full rounded-xl border border-beige-kem/20 bg-xanh-pho px-4 text-sm text-beige-kem outline-none transition focus:border-cam-dat"
+                  className="h-11 w-full rounded-xl border-2 border-beige-kem bg-xanh-pho px-4 text-sm text-beige-kem outline-none transition focus:border-burgundy"
                 />
               </div>
 
@@ -170,15 +173,15 @@ export default function CheckoutForm({
                   placeholder="09xx xxx xxx"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  className="h-11 w-full rounded-xl border border-beige-kem/20 bg-xanh-pho px-4 text-sm text-beige-kem outline-none transition focus:border-cam-dat"
+                  className="h-11 w-full rounded-xl border-2 border-beige-kem bg-xanh-pho px-4 text-sm text-beige-kem outline-none transition focus:border-burgundy"
                 />
               </div>
             </div>
 
-            <div className="space-y-3 border-t border-beige-kem/10 pt-6">
+            <div className="space-y-3 border-t border-beige-kem/25 pt-6">
               <h4 className="font-display text-lg font-black text-beige-kem">Thanh toán bằng ví</h4>
 
-              <div className="rounded-xl border border-burgundy bg-burgundy/10 p-4">
+              <div className="rounded-xl border border-burgundy bg-bubblegum p-4">
                 <span className="block font-mono text-sm font-bold text-beige-kem">
                   {PAYMENT_METHOD_LABEL} · số dư tài khoản
                 </span>
@@ -189,7 +192,7 @@ export default function CheckoutForm({
                 </span>
               </div>
 
-              <div className="rounded-xl border border-cam-dat/25 bg-cam-dat/5 p-4 font-mono text-[11px] leading-5 text-cam-dat">
+              <div className="rounded-xl border-2 border-beige-kem bg-cam-dat p-4 font-mono text-[11px] leading-5 text-on-tint">
                 Số dư ví và giao dịch trừ tiền chưa nối API — màn hình này vẫn là mock, vé được lưu
                 trong trình duyệt. Tính năng ví (nạp tiền qua VNPay + thanh toán) sẽ thay thế phần này.
               </div>
@@ -205,7 +208,7 @@ export default function CheckoutForm({
               </label>
             </div>
 
-            <div className="space-y-3 border-t border-beige-kem/10 pt-6">
+            <div className="space-y-3 border-t border-beige-kem/25 pt-6">
               <h4 className="font-display text-lg font-black text-beige-kem">
                 Mã giảm giá
               </h4>
@@ -215,7 +218,7 @@ export default function CheckoutForm({
                   placeholder="WEEKEND50, FIRSTBOOK, GROUP4"
                   value={promoInput}
                   onChange={(e) => setPromoInput(e.target.value)}
-                  className="h-11 rounded-xl border border-beige-kem/20 bg-xanh-pho px-4 text-sm uppercase text-beige-kem outline-none transition focus:border-cam-dat"
+                  className="h-11 rounded-xl border-2 border-beige-kem bg-xanh-pho px-4 text-sm uppercase text-beige-kem outline-none transition focus:border-burgundy"
                 />
                 <button
                   type="button"
@@ -226,14 +229,14 @@ export default function CheckoutForm({
                 </button>
               </div>
               {promoMessage && (
-                <p className={`font-mono text-xs ${selectedPromo ? "text-la-co" : "text-cam-dat"}`}>
+                <p className={`font-mono text-xs ${selectedPromo ? "text-ink-soft" : "text-ink-soft"}`}>
                   {promoMessage}
                 </p>
               )}
             </div>
 
             {simulateShortfall && (
-              <div className="space-y-2 rounded-xl border border-burgundy/40 bg-burgundy/10 p-4 text-sm text-beige-kem">
+              <div className="space-y-2 rounded-xl border-2 border-beige-kem bg-bubblegum p-4 text-sm text-on-tint">
                 <p>
                   <span className="font-bold text-burgundy">Số dư không đủ.</span> Cần nạp thêm{" "}
                   <span className="font-mono font-bold">{formatPrice(finalPrice)}</span> để hoàn tất
@@ -270,17 +273,17 @@ export default function CheckoutForm({
             <button
               type="submit"
               disabled={!name || !email || !phone || !agreeTerms || simulateShortfall}
-              className="w-full rounded-xl bg-burgundy px-6 py-4 text-sm font-black text-beige-kem shadow-xl transition hover:bg-burgundy/95 disabled:bg-beige-kem/10 disabled:text-beige-kem/35"
+              className="w-full rounded-xl bg-burgundy px-6 py-4 text-sm font-black text-white shadow-hard transition hover:brightness-95 disabled:bg-surface-2 disabled:text-white/60"
             >
               Trừ tiền từ ví và xuất vé QR
             </button>
           </form>
         </section>
 
-        <aside className="space-y-6 rounded-2xl border border-beige-kem/10 bg-xanh-pho/25 p-6 lg:col-span-5">
+        <aside className="space-y-6 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 lg:col-span-5">
           <div>
             <h4 className="font-display text-xl font-black text-beige-kem">Tóm tắt đơn hàng</h4>
-            <p className="mt-1 font-mono text-xs uppercase text-la-co">Hiển thị phí trước khi thanh toán</p>
+            <p className="mt-1 font-mono text-xs uppercase text-ink-soft">Hiển thị phí trước khi thanh toán</p>
           </div>
 
           <div className="flex gap-4">
@@ -288,21 +291,21 @@ export default function CheckoutForm({
               src={event.imageUrl}
               alt={event.title}
               referrerPolicy="no-referrer"
-              className="h-24 w-20 rounded-xl object-cover shadow"
+              className="h-24 w-20 rounded-xl object-cover border-2 border-beige-kem shadow-hard"
             />
             <div className="min-w-0 flex-1">
               <h5 className="line-clamp-2 font-display text-lg font-black text-beige-kem">{event.title}</h5>
-              <p className="mt-1 font-mono text-xs text-cam-dat">{event.venueName}</p>
-              <p className="mt-3 rounded-lg border border-beige-kem/10 bg-white/[0.035] px-3 py-2 font-mono text-xs text-beige-kem/70">
-                {selectedTime} / {selectedDate}
+              <p className="mt-1 font-mono text-xs text-ink-soft">{event.venueName}</p>
+              <p className="mt-3 rounded-lg border-2 border-beige-kem bg-surface-2 px-3 py-2 font-mono text-xs text-beige-kem/70">
+                {selectedTime} / {formatEventDate(selectedDate, true)}
               </p>
             </div>
           </div>
 
-          <div className="space-y-3 border-t border-dashed border-beige-kem/10 pt-4 font-mono text-xs text-beige-kem/78">
+          <div className="space-y-3 border-t border-dashed border-beige-kem/25 pt-4 font-mono text-xs text-beige-kem/78">
             <div className="flex justify-between gap-4">
               <span>{isSeated ? "Ghế" : "Vé"}</span>
-              <span className="font-bold text-cam-dat">{selectedSeats.map((seat) => seat.id).join(", ")}</span>
+              <span className="font-bold text-ink-soft">{selectedSeats.map((seat) => seat.id).join(", ")}</span>
             </div>
             {/* Seat type is a seated-event concept; general admission counts tickets instead. */}
             <div className="flex justify-between gap-4">
@@ -321,21 +324,21 @@ export default function CheckoutForm({
               <span>Phí dịch vụ</span>
               <span>{formatPrice(serviceFee)}</span>
             </div>
-            <div className="flex justify-between gap-4 text-la-co">
+            <div className="flex justify-between gap-4 text-ink-soft">
               <span>Giảm giá</span>
               <span>-{formatPrice(discount)}</span>
             </div>
           </div>
 
-          <div className="border-t border-beige-kem/10 pt-5">
+          <div className="border-t border-beige-kem/25 pt-5">
             <div className="flex items-baseline justify-between gap-4">
               <span className="font-mono text-xs uppercase text-beige-kem/60">Cần thanh toán</span>
               <span className="font-display text-3xl font-black text-burgundy">{formatPrice(finalPrice)}</span>
             </div>
-            <div className="mt-4 rounded-xl border border-la-co/20 bg-la-co/5 p-3 text-[11px] leading-5 text-la-co">
+            <div className="mt-4 rounded-xl border-2 border-beige-kem bg-la-co p-3 text-[11px] leading-5 text-on-tint">
               <span>Mock UI cho xác nhận qua email, trừ tiền từ ví trong một giao dịch, và QR dùng một lần.</span>
             </div>
-            <div className="mt-3 rounded-xl border border-cam-dat/20 bg-cam-dat/5 p-3 text-[11px] leading-5 text-cam-dat">
+            <div className="mt-3 rounded-xl border-2 border-beige-kem bg-cam-dat p-3 text-[11px] leading-5 text-on-tint">
               <span>Vé sẽ xuất hiện trong Vé của tôi, có thể in/tải lại/gửi lại email ở màn vé.</span>
             </div>
           </div>
