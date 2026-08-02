@@ -3,10 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { CheckoutPayload, MovieEvent, Seat } from "../types";
 import { formatEventDate } from "../services/formatDate";
 import { formatHoldClock } from "../services/holdSession";
+import { walletClient, type WalletLimits } from "../services/walletClient";
+import TopUpSheet, { formatVnd } from "./wallet/TopUpSheet";
 
 interface CheckoutFormProps {
   event: MovieEvent;
@@ -18,6 +20,13 @@ interface CheckoutFormProps {
   remainingMs: number;
   /** "Quay lại chọn ghế" for a seated event, "…chọn số lượng vé" for general admission. */
   backLabel: string;
+  /** The hold being bought. Carried into a top-up so the seats survive the VNPay detour. */
+  reservationId: number | null;
+  /**
+   * Set by the parent when checkout came back `insufficient_wallet_balance`, carrying the server's
+   * numbers so the top-up opens pre-filled with the exact shortfall (UC-12 A2).
+   */
+  shortfall: { required: number; balance: number; shortfall: number } | null;
   onBack: () => void;
   onConfirmBooking: (payload: CheckoutPayload) => Promise<void>;
 }
@@ -39,6 +48,8 @@ export default function CheckoutForm({
   totalPrice,
   remainingMs,
   backLabel,
+  reservationId,
+  shortfall,
   onBack,
   onConfirmBooking,
 }: CheckoutFormProps) {
@@ -47,6 +58,37 @@ export default function CheckoutForm({
   const [phone, setPhone] = useState("");
   const [agreeTerms, setAgreeTerms] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [balance, setBalance] = useState<number | null>(null);
+  const [limits, setLimits] = useState<WalletLimits | null>(null);
+  const [showTopUp, setShowTopUp] = useState(false);
+
+  // The balance belongs on the order summary: UC-12 step 1 says the buyer reviews the total
+  // *alongside* what they have, so a shortfall is visible before they commit rather than after.
+  useEffect(() => {
+    let cancelled = false;
+    walletClient
+      .summary()
+      .then((summary) => {
+        if (cancelled) return;
+        setBalance(summary.balanceAmount);
+        setLimits(summary.limits);
+      })
+      .catch(() => {
+        // A wallet that cannot be read is not a reason to block the screen — the server re-checks
+        // the balance under a row lock when they submit anyway.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Arriving back with a rejection means the sheet should already be open, pre-filled.
+  useEffect(() => {
+    if (shortfall) {
+      setShowTopUp(true);
+      setBalance(shortfall.balance);
+    }
+  }, [shortfall]);
 
   const isSeated = event.eventType === "seated";
   const serviceFee = 0;
@@ -170,6 +212,47 @@ export default function CheckoutForm({
                   dạng vé; hoàn vé trả tiền về lại ví, không rút ra tiền mặt.
                 </span>
               </div>
+
+              {balance !== null && (
+                <div className="flex flex-wrap items-baseline justify-between gap-2 rounded-xl border-2 border-beige-kem bg-surface-2 px-4 py-3 font-mono text-xs">
+                  <span className="text-ink-soft">Số dư ví hiện tại</span>
+                  <b className="text-sm text-beige-kem">{formatVnd(balance)}</b>
+                </div>
+              )}
+
+              {/* UC-12 A2: the shortfall is named, and topping it up is one click — not a dead end. */}
+              {shortfall && !showTopUp && (
+                <div className="space-y-3 rounded-xl border-2 border-beige-kem bg-bubblegum p-4 text-sm text-on-tint">
+                  <p>
+                    <span className="font-bold text-burgundy">Số dư không đủ.</span> Cần nạp thêm{" "}
+                    <span className="font-mono font-bold">{formatVnd(shortfall.shortfall)}</span> để
+                    hoàn tất đơn này.
+                  </p>
+                  <p className="font-mono text-[11px] leading-5">
+                    Chưa có gì được tạo ra: chưa có đơn hàng, chưa trừ tiền, chưa xuất vé. Chỗ bạn
+                    giữ vẫn chạy theo đồng hồ cũ; bắt đầu nạp tiền sẽ gia hạn thêm một lần duy nhất.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowTopUp(true)}
+                    className="rounded-lg bg-burgundy px-4 py-2 text-xs font-black uppercase text-white"
+                  >
+                    Nạp thêm vào ví
+                  </button>
+                </div>
+              )}
+
+              {showTopUp && limits && (
+                <TopUpSheet
+                  balance={balance ?? 0}
+                  limits={limits}
+                  reservationId={reservationId ?? undefined}
+                  suggestedAmount={
+                    shortfall ? Math.max(shortfall.shortfall, limits.min) : undefined
+                  }
+                  onCancel={() => setShowTopUp(false)}
+                />
+              )}
             </div>
 
             <div className="flex items-start gap-2 text-xs leading-relaxed text-beige-kem/62">

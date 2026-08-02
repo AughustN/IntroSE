@@ -52,6 +52,7 @@ interface HeaderProps {
   searchQuery: string;
   onSearchChange: (query: string) => void;
   onViewHistory: () => void;
+  onViewWallet: () => void;
   onHomeClick: () => void;
   onLoginClick: () => void;
   onAdminClick: () => void;
@@ -66,6 +67,7 @@ export default function Header({
   searchQuery,
   onSearchChange,
   onViewHistory,
+  onViewWallet,
   onHomeClick,
   onLoginClick,
   onAdminClick,
@@ -108,6 +110,16 @@ export default function Header({
             >
               Vé của tôi
             </button>
+            {/* Only for signed-in users: a wallet is per-account, and a guest has none to show. */}
+            {userName && (
+              <button
+                onClick={onViewWallet}
+                className="inline-flex h-10 items-center rounded-xl border-2 border-beige-kem bg-cam-dat px-3 text-xs font-bold uppercase tracking-normal text-on-tint transition hover:brightness-95"
+                title="Ví TixHub"
+              >
+                Ví
+              </button>
+            )}
             <button
               onClick={onLoginClick}
               className="inline-flex h-10 items-center gap-2 rounded-xl border-2 border-beige-kem bg-surface-2 px-3 text-xs font-bold uppercase tracking-normal text-beige-kem transition"

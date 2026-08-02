@@ -25,7 +25,9 @@ import {
   sessionFromReservation,
 } from "./services/holdSession";
 import { HoldError, holdsClient } from "./services/holdsClient";
-import { walletClient, WalletError } from "./services/walletClient";
+import { walletClient, WalletError, type Topup } from "./services/walletClient";
+import WalletPanel from "./components/wallet/WalletPanel";
+import VnpayReturn from "./components/wallet/VnpayReturn";
 import { useHoldCountdown } from "./hooks/useHoldCountdown";
 import BookingHistory from "./components/BookingHistory";
 import ToastStack, { type ToastKind, type ToastMessage } from "./components/ToastStack";
@@ -47,6 +49,7 @@ type Screen =
   | "checkout"
   | "ticket"
   | "history"
+  | "wallet"
   | "admin"
   | "organizer"
   | "moderation";
@@ -157,6 +160,12 @@ export default function App() {
   /** A hold/release round trip is in flight; seat clicks are disabled so two do not race. */
   const [holdBusy, setHoldBusy] = useState(false);
   const [finalBooking, setFinalBooking] = useState<Booking | null>(null);
+  /** The server's numbers from a rejected checkout, handed to the top-up sheet (UC-12 A2). */
+  const [shortfall, setShortfall] = useState<{
+    required: number;
+    balance: number;
+    shortfall: number;
+  } | null>(null);
 
   const [bookingsHistory, setBookingsHistory] = useState<Booking[]>([]);
   const [wishlistedIds, setWishlistedIds] = useState<string[]>([]);
@@ -283,6 +292,35 @@ export default function App() {
     const url = new URL(window.location.href);
     return url.pathname === "/reset-password" ? url.searchParams.get("token") : null;
   }, []);
+
+  // Where VNPay drops the browser after a top-up. Same no-router treatment: read the path and show
+  // the polling screen over everything else. Nothing in the query string is trusted — the wallet is
+  // credited by the IPN, so the screen asks the server what really happened (UC-13 A6).
+  const [onVnpayReturn, setOnVnpayReturn] = useState(
+    () => window.location.pathname === "/vnpay-return",
+  );
+
+  const finishVnpayReturn = (topup: Topup | null) => {
+    setOnVnpayReturn(false);
+    window.history.replaceState({}, "", "/");
+    if (topup?.status === "paid") {
+      pushToast("success", "Đã nạp tiền vào ví.");
+      // Straight back to the checkout they left, if the hold outlived the detour (UC-40 step 6).
+      if (topup.reservationId !== null && hold?.reservationId === topup.reservationId) {
+        setShortfall(null);
+        setActiveScreen("checkout");
+        return;
+      }
+      if (topup.reservationId !== null) {
+        pushToast(
+          "warning",
+          "Chỗ giữ đã hết hạn khi bạn thanh toán. Tiền vẫn ở trong ví — mời chọn lại chỗ.",
+          9000,
+        );
+      }
+    }
+    setActiveScreen("wallet");
+  };
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -756,6 +794,15 @@ export default function App() {
       setActiveScreen("ticket");
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e) {
+      // A short balance is not a failed purchase — it is a step the buyer can complete. The server
+      // sends the exact numbers, which the checkout screen turns into a pre-filled top-up (UC-12 A2).
+      if (e instanceof WalletError && e.code === "insufficient_wallet_balance" && e.details) {
+        setShortfall({
+          required: Number(e.details.required ?? 0),
+          balance: Number(e.details.balance ?? 0),
+          shortfall: Number(e.details.shortfall ?? 0),
+        });
+      }
       pushToast(
         "error",
         e instanceof WalletError ? e.message : "Không thể hoàn tất thanh toán. Vui lòng thử lại.",
@@ -822,6 +869,7 @@ export default function App() {
         searchQuery={searchQuery}
         onSearchChange={(value) => void goHomeAfterFilter(() => setSearchQuery(value))}
         onViewHistory={() => void leaveFlow(() => setActiveScreen("history"))}
+        onViewWallet={() => void leaveFlow(() => setActiveScreen("wallet"))}
         onHomeClick={goHome}
         onLoginClick={() => (userName ? setShowAccountPage(true) : setShowAuthModal(true))}
         onAdminClick={() =>
@@ -940,6 +988,8 @@ export default function App() {
             backLabel={hold?.mode === "ga" ? "Quay lại chọn số lượng vé" : "Quay lại chọn ghế"}
             // Also inside the flow — the selection and the countdown are still there when they return.
             onBack={() => setActiveScreen(hold?.mode === "ga" ? "detail" : "seats")}
+            reservationId={hold?.reservationId ?? null}
+            shortfall={shortfall}
             onConfirmBooking={handleConfirmPurchase}
           />
         )}
@@ -964,6 +1014,7 @@ export default function App() {
           <AdminPanel events={SAMPLE_MOVIES} bookings={bookingsHistory} onBack={goHome} />
         )}
 
+        {activeScreen === "wallet" && <WalletPanel onBack={goHome} />}
         {activeScreen === "organizer" && <OrganizerPanel onBack={goHome} />}
         {activeScreen === "moderation" && <AdminModeration onBack={goHome} />}
       </main>
@@ -1027,6 +1078,7 @@ export default function App() {
         />
       )}
       {resetToken && <ResetPassword token={resetToken} />}
+      {onVnpayReturn && <VnpayReturn onDone={finishVnpayReturn} />}
 
       {confirmRequest && (
         <ConfirmDialog
