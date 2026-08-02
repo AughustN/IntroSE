@@ -4,7 +4,6 @@
  */
 
 import { FormEvent, useState } from "react";
-import { PROMO_VOUCHERS } from "../data";
 import { CheckoutPayload, MovieEvent, Seat } from "../types";
 import { formatEventDate } from "../services/formatDate";
 import { formatHoldClock } from "../services/holdSession";
@@ -20,7 +19,7 @@ interface CheckoutFormProps {
   /** "Quay lại chọn ghế" for a seated event, "…chọn số lượng vé" for general admission. */
   backLabel: string;
   onBack: () => void;
-  onConfirmBooking: (payload: CheckoutPayload) => void;
+  onConfirmBooking: (payload: CheckoutPayload) => Promise<void>;
 }
 
 /**
@@ -29,8 +28,6 @@ interface CheckoutFormProps {
  * There is no card, bank-transfer or e-wallet leg on an order — offering one here would contradict
  * the schema, the constitution's four-integration cap, and the seat lifecycle (DATA-03).
  *
- * The real balance, debit and ledger arrive with the wallet & checkout feature; this screen is
- * still a mock that writes to localStorage.
  */
 const PAYMENT_METHOD_LABEL = "Ví TixHub";
 
@@ -48,51 +45,30 @@ export default function CheckoutForm({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [promoInput, setPromoInput] = useState("");
-  const [appliedPromo, setAppliedPromo] = useState("");
-  const [promoMessage, setPromoMessage] = useState("");
   const [agreeTerms, setAgreeTerms] = useState(true);
-  /** Simulates the one failure a wallet purchase actually has: not enough balance (UC-12 A2). */
-  const [simulateShortfall, setSimulateShortfall] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const isSeated = event.eventType === "seated";
-  const serviceFee = Math.max(Math.round(totalPrice * 0.04), totalPrice ? 10000 : 0);
-  const selectedPromo = PROMO_VOUCHERS.find((promo) => promo.code === appliedPromo);
-  const discount = selectedPromo ? selectedPromo.discountAmount : 0;
-  const finalPrice = Math.max(totalPrice + serviceFee - discount, 0);
+  const serviceFee = 0;
+  const discount = 0;
+  const finalPrice = totalPrice;
 
-  const handleApplyPromo = () => {
-    const normalized = promoInput.trim().toUpperCase();
-    const voucher = PROMO_VOUCHERS.find((promo) => promo.code === normalized);
-
-    if (!voucher) {
-      setAppliedPromo("");
-      setPromoMessage("Mã không tồn tại trong mock data.");
-      return;
-    }
-
-    if (totalPrice < voucher.minOrder) {
-      setAppliedPromo("");
-      setPromoMessage(`Đơn cần tối thiểu ${formatPrice(voucher.minOrder)} để dùng ${voucher.code}.`);
-      return;
-    }
-
-    setAppliedPromo(voucher.code);
-    setPromoMessage(`${voucher.label} đã được áp dụng.`);
-  };
-
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!name || !email || !phone || !agreeTerms || simulateShortfall) return;
+    if (!name || !email || !phone || !agreeTerms || submitting) return;
 
-    onConfirmBooking({
-      customer: { name, email, phone },
-      paymentMethod: PAYMENT_METHOD_LABEL,
-      serviceFee,
-      discount,
-      finalPrice,
-      promoCode: selectedPromo?.code,
-    });
+    setSubmitting(true);
+    try {
+      await onConfirmBooking({
+        customer: { name, email, phone },
+        paymentMethod: PAYMENT_METHOD_LABEL,
+        serviceFee,
+        discount,
+        finalPrice,
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const formatPrice = (price: number) => {
@@ -133,9 +109,12 @@ export default function CheckoutForm({
       <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-12">
         <section className="space-y-6 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 sm:p-8 lg:col-span-7">
           <div>
-            <h3 className="font-display text-2xl font-black text-beige-kem">Thông tin người nhận vé</h3>
+            <h3 className="font-display text-2xl font-black text-beige-kem">
+              Thông tin người nhận vé
+            </h3>
             <p className="mt-2 text-sm text-ink-soft">
-              Vé điện tử sẽ được gửi qua email và hiển thị trong thông báo trong ứng dụng (không có SMS).
+              Vé điện tử sẽ được gửi qua email và hiển thị trong thông báo trong ứng dụng (không có
+              SMS).
             </p>
           </div>
 
@@ -191,71 +170,7 @@ export default function CheckoutForm({
                   dạng vé; hoàn vé trả tiền về lại ví, không rút ra tiền mặt.
                 </span>
               </div>
-
-              <div className="rounded-xl border-2 border-beige-kem bg-cam-dat p-4 font-mono text-[11px] leading-5 text-on-tint">
-                Số dư ví và giao dịch trừ tiền chưa nối API — màn hình này vẫn là mock, vé được lưu
-                trong trình duyệt. Tính năng ví (nạp tiền qua VNPay + thanh toán) sẽ thay thế phần này.
-              </div>
-
-              <label className="flex cursor-pointer items-start gap-2 text-xs leading-relaxed text-beige-kem/62">
-                <input
-                  type="checkbox"
-                  checked={simulateShortfall}
-                  onChange={(e) => setSimulateShortfall(e.target.checked)}
-                  className="mt-0.5 accent-burgundy"
-                />
-                <span>Mô phỏng số dư không đủ</span>
-              </label>
             </div>
-
-            <div className="space-y-3 border-t border-beige-kem/25 pt-6">
-              <h4 className="font-display text-lg font-black text-beige-kem">
-                Mã giảm giá
-              </h4>
-              <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                <input
-                  type="text"
-                  placeholder="WEEKEND50, FIRSTBOOK, GROUP4"
-                  value={promoInput}
-                  onChange={(e) => setPromoInput(e.target.value)}
-                  className="h-11 rounded-xl border-2 border-beige-kem bg-xanh-pho px-4 text-sm uppercase text-beige-kem outline-none transition focus:border-burgundy"
-                />
-                <button
-                  type="button"
-                  onClick={handleApplyPromo}
-                  className="rounded-xl bg-beige-kem px-5 py-3 text-xs font-black uppercase text-xanh-pho transition hover:bg-white"
-                >
-                  Áp dụng
-                </button>
-              </div>
-              {promoMessage && (
-                <p className={`font-mono text-xs ${selectedPromo ? "text-ink-soft" : "text-ink-soft"}`}>
-                  {promoMessage}
-                </p>
-              )}
-            </div>
-
-            {simulateShortfall && (
-              <div className="space-y-2 rounded-xl border-2 border-beige-kem bg-bubblegum p-4 text-sm text-on-tint">
-                <p>
-                  <span className="font-bold text-burgundy">Số dư không đủ.</span> Cần nạp thêm{" "}
-                  <span className="font-mono font-bold">{formatPrice(finalPrice)}</span> để hoàn tất
-                  đơn này.
-                </p>
-                <p className="font-mono text-[11px] leading-5 text-beige-kem/62">
-                  Không có gì được tạo ra: chưa có đơn hàng, chưa trừ tiền, chưa xuất vé. Ghế bạn giữ
-                  vẫn chạy theo TTL bình thường, không được gia hạn thêm vì đang chờ nạp tiền.
-                </p>
-                <button
-                  type="button"
-                  disabled
-                  className="rounded-lg border border-burgundy/40 px-4 py-2 text-xs font-bold uppercase text-burgundy/50"
-                  title="Nạp tiền sẽ có ở tính năng ví"
-                >
-                  Nạp thêm vào ví (sắp có)
-                </button>
-              </div>
-            )}
 
             <div className="flex items-start gap-2 text-xs leading-relaxed text-beige-kem/62">
               <input
@@ -266,16 +181,17 @@ export default function CheckoutForm({
                 className="mt-0.5 accent-burgundy"
               />
               <label htmlFor="agree-terms" className="cursor-pointer select-none">
-                Tôi đồng ý điều khoản bán vé và chính sách hoàn vé (hoàn tiền về ví, trước giờ diễn 24 tiếng).
+                Tôi đồng ý điều khoản bán vé và chính sách hoàn vé (hoàn tiền về ví, trước giờ diễn
+                24 tiếng).
               </label>
             </div>
 
             <button
               type="submit"
-              disabled={!name || !email || !phone || !agreeTerms || simulateShortfall}
+              disabled={!name || !email || !phone || !agreeTerms || submitting}
               className="w-full rounded-xl bg-burgundy px-6 py-4 text-sm font-black text-white shadow-hard transition hover:brightness-95 disabled:bg-surface-2 disabled:text-white/60"
             >
-              Trừ tiền từ ví và xuất vé QR
+              {submitting ? "Đang thanh toán..." : "Trừ tiền từ ví và xuất vé QR"}
             </button>
           </form>
         </section>
@@ -283,7 +199,9 @@ export default function CheckoutForm({
         <aside className="space-y-6 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 lg:col-span-5">
           <div>
             <h4 className="font-display text-xl font-black text-beige-kem">Tóm tắt đơn hàng</h4>
-            <p className="mt-1 font-mono text-xs uppercase text-ink-soft">Hiển thị phí trước khi thanh toán</p>
+            <p className="mt-1 font-mono text-xs uppercase text-ink-soft">
+              Hiển thị phí trước khi thanh toán
+            </p>
           </div>
 
           <div className="flex gap-4">
@@ -294,7 +212,9 @@ export default function CheckoutForm({
               className="h-24 w-20 rounded-xl object-cover border-2 border-beige-kem shadow-hard"
             />
             <div className="min-w-0 flex-1">
-              <h5 className="line-clamp-2 font-display text-lg font-black text-beige-kem">{event.title}</h5>
+              <h5 className="line-clamp-2 font-display text-lg font-black text-beige-kem">
+                {event.title}
+              </h5>
               <p className="mt-1 font-mono text-xs text-ink-soft">{event.venueName}</p>
               <p className="mt-3 rounded-lg border-2 border-beige-kem bg-surface-2 px-3 py-2 font-mono text-xs text-beige-kem/70">
                 {selectedTime} / {formatEventDate(selectedDate, true)}
@@ -305,7 +225,9 @@ export default function CheckoutForm({
           <div className="space-y-3 border-t border-dashed border-beige-kem/25 pt-4 font-mono text-xs text-beige-kem/78">
             <div className="flex justify-between gap-4">
               <span>{isSeated ? "Ghế" : "Vé"}</span>
-              <span className="font-bold text-ink-soft">{selectedSeats.map((seat) => seat.id).join(", ")}</span>
+              <span className="font-bold text-ink-soft">
+                {selectedSeats.map((seat) => seat.id).join(", ")}
+              </span>
             </div>
             {/* Seat type is a seated-event concept; general admission counts tickets instead. */}
             <div className="flex justify-between gap-4">
@@ -320,26 +242,24 @@ export default function CheckoutForm({
               <span>Tạm tính</span>
               <span>{formatPrice(totalPrice)}</span>
             </div>
-            <div className="flex justify-between gap-4">
-              <span>Phí dịch vụ</span>
-              <span>{formatPrice(serviceFee)}</span>
-            </div>
-            <div className="flex justify-between gap-4 text-ink-soft">
-              <span>Giảm giá</span>
-              <span>-{formatPrice(discount)}</span>
-            </div>
           </div>
 
           <div className="border-t border-beige-kem/25 pt-5">
             <div className="flex items-baseline justify-between gap-4">
               <span className="font-mono text-xs uppercase text-beige-kem/60">Cần thanh toán</span>
-              <span className="font-display text-3xl font-black text-burgundy">{formatPrice(finalPrice)}</span>
+              <span className="font-display text-3xl font-black text-burgundy">
+                {formatPrice(finalPrice)}
+              </span>
             </div>
             <div className="mt-4 rounded-xl border-2 border-beige-kem bg-la-co p-3 text-[11px] leading-5 text-on-tint">
-              <span>Mock UI cho xác nhận qua email, trừ tiền từ ví trong một giao dịch, và QR dùng một lần.</span>
+              <span>
+                Ví, đơn hàng và mã vé được tạo trong một giao dịch khi thanh toán thành công.
+              </span>
             </div>
             <div className="mt-3 rounded-xl border-2 border-beige-kem bg-cam-dat p-3 text-[11px] leading-5 text-on-tint">
-              <span>Vé sẽ xuất hiện trong Vé của tôi, có thể in/tải lại/gửi lại email ở màn vé.</span>
+              <span>
+                Vé sẽ xuất hiện trong Vé của tôi, có thể in/tải lại/gửi lại email ở màn vé.
+              </span>
             </div>
           </div>
         </aside>

@@ -25,6 +25,7 @@ import {
   sessionFromReservation,
 } from "./services/holdSession";
 import { HoldError, holdsClient } from "./services/holdsClient";
+import { walletClient, WalletError } from "./services/walletClient";
 import { useHoldCountdown } from "./hooks/useHoldCountdown";
 import BookingHistory from "./components/BookingHistory";
 import ToastStack, { type ToastKind, type ToastMessage } from "./components/ToastStack";
@@ -714,45 +715,54 @@ export default function App() {
     });
   };
 
-  const handleConfirmPurchase = (payload: CheckoutPayload) => {
-    const trackingId = "TB" + Math.floor(100000 + Math.random() * 900000);
-    const timeNow = new Date().toLocaleString("vi-VN", { timeZone: "Asia/Saigon" });
+  const handleConfirmPurchase = async (payload: CheckoutPayload) => {
+    if (!hold) {
+      pushToast("error", "Đơn giữ chỗ không còn hiệu lực. Vui lòng chọn vé lại.");
+      return;
+    }
 
-    const newBooking: Booking = {
-      id: trackingId,
-      movie: selectedMovie,
-      selectedDate: bookingDate,
-      selectedTime: bookingTime,
-      selectedSeats: bookingSeats,
-      customerName: payload.customer.name,
-      customerEmail: payload.customer.email,
-      customerPhone: payload.customer.phone,
-      totalPrice: bookingTotalPrice,
-      serviceFee: payload.serviceFee,
-      discount: payload.discount,
-      finalPrice: payload.finalPrice,
-      paymentMethod: payload.paymentMethod,
-      promoCode: payload.promoCode,
-      deliveryChannel: "email_sms",
-      status: "paid",
-      qrStatus: "unused",
-      bookingTime: timeNow,
-      qrPayload: JSON.stringify({
-        bookingId: trackingId,
-        eventId: selectedMovie.id,
-        event: selectedMovie.title,
-        seats: bookingSeats.map((seat) => seat.id).join(","),
-        time: `${bookingTime} - ${bookingDate}`,
+    setHoldBusy(true);
+    try {
+      const order = await walletClient.checkout(hold.reservationId);
+      const ticket = order.tickets[0];
+      if (!ticket) throw new Error("Đơn hàng chưa có vé.");
+
+      const newBooking: Booking = {
+        id: String(order.id),
+        movie: selectedMovie,
+        selectedDate: bookingDate,
+        selectedTime: bookingTime,
+        selectedSeats: bookingSeats,
+        customerName: payload.customer.name,
+        customerEmail: payload.customer.email,
+        customerPhone: payload.customer.phone,
+        totalPrice: order.totalAmount,
+        serviceFee: 0,
+        discount: 0,
+        finalPrice: order.totalAmount,
+        paymentMethod: "Ví TixHub",
+        deliveryChannel: "email_sms",
+        status: "paid",
         qrStatus: "unused",
-      }),
-    };
+        bookingTime: new Date(order.createdAt).toLocaleString("vi-VN", {
+          timeZone: "Asia/Ho_Chi_Minh",
+        }),
+        qrPayload: ticket.ticketCode,
+      };
 
-    saveBookingToHistory(newBooking);
-    setFinalBooking(newBooking);
-    // The flow completed: the hold became a ticket, so it is released without any warning.
-    setHold(null);
-    setActiveScreen("ticket");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+      saveBookingToHistory(newBooking);
+      setFinalBooking(newBooking);
+      setHold(null);
+      setActiveScreen("ticket");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (e) {
+      pushToast(
+        "error",
+        e instanceof WalletError ? e.message : "Không thể hoàn tất thanh toán. Vui lòng thử lại.",
+      );
+    } finally {
+      setHoldBusy(false);
+    }
   };
 
   const handleLogin = (user: Me) => {
@@ -970,8 +980,12 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap justify-center gap-6 text-beige-kem/60">
-            <span className="cursor-pointer transition hover:text-ink-soft">Chính sách hoàn vé</span>
-            <span className="cursor-pointer transition hover:text-ink-soft">Điều khoản sử dụng</span>
+            <span className="cursor-pointer transition hover:text-ink-soft">
+              Chính sách hoàn vé
+            </span>
+            <span className="cursor-pointer transition hover:text-ink-soft">
+              Điều khoản sử dụng
+            </span>
             <span className="cursor-pointer transition hover:text-ink-soft">Hỗ trợ email/SMS</span>
           </div>
 
