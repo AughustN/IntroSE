@@ -5,7 +5,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Showtime } from "@/shared/catalog/types";
-import { MovieEvent } from "../types";
+import { MovieEvent, TicketTier } from "../types";
+import { catalogClient } from "../services/catalogClient";
 import { formatEventDate } from "../services/formatDate";
 import { formatHoldClock } from "../services/holdSession";
 import { watchShowtime } from "../services/seatSocket";
@@ -91,9 +92,26 @@ export default function EventDetail({
 }: EventDetailProps) {
   const isSeated = event.eventType === "seated";
 
+  /**
+   * The tiers of the selected showtime, with their real `ticket_tiers.id`.
+   *
+   * `event.ticketTiers` cannot be used to buy with: the event detail groups tiers by label across
+   * every showtime, so it has no single row to point at and numbers them by array position instead.
+   * Sending that index as `ticketTierId` reserved nothing — the first tier came out as 0, which the
+   * hold API rejects outright. It is also why live "Còn N vé" never updated: the socket reports the
+   * real id, which matched none of the synthetic ones.
+   *
+   * The summary still drives the display before a showtime is picked, since prices are what the
+   * buyer is comparing at that point.
+   */
+  const [showtimeTiers, setShowtimeTiers] = useState<TicketTier[] | null>(null);
+
   // An event carries at most 4 ticket tiers (enforced server-side); slice defensively so a bad
   // payload can never break the even 1–4 column layout below.
-  const tiers = useMemo(() => event.ticketTiers.slice(0, MAX_TIERS), [event.ticketTiers]);
+  const tiers = useMemo(
+    () => (showtimeTiers ?? event.ticketTiers).slice(0, MAX_TIERS),
+    [showtimeTiers, event.ticketTiers],
+  );
   // Divide the row evenly by tier count so 1/2/3/4 tiers each fill the width (mobile stays single
   // column, and 4 tiers fall to two rows of two on a narrow screen).
   const tierGridClass =
@@ -168,13 +186,52 @@ export default function EventDetail({
    */
   const [liveRemaining, setLiveRemaining] = useState<Record<string, number | null>>({});
 
+  // Load the real tiers as soon as a general-admission showtime is chosen — the quantity steppers
+  // must be bound to ids the hold API accepts, not to the detail summary's positions.
+  useEffect(() => {
+    const showtimeId = selectedSlot?.showtimeId;
+    if (isSeated || !showtimeId) {
+      setShowtimeTiers(null);
+      return;
+    }
+    let cancelled = false;
+    catalogClient
+      .getSeatMap(showtimeId)
+      .then((map) => {
+        if (cancelled) return;
+        setShowtimeTiers(
+          (map.tiers ?? []).map((tier) => ({
+            id: String(tier.id),
+            label: tier.label,
+            price: tier.price,
+            remaining: tier.remaining,
+            // The seat map carries no copy; reuse the summary's blurb for the same tier so the
+            // cards do not lose their description the moment a showtime is picked.
+            description:
+              event.ticketTiers.find((summary) => summary.label === tier.label)?.description ?? "",
+          })),
+        );
+      })
+      .catch(() => {
+        // Keep showing the summary rather than an empty picker; the buy button stays disabled
+        // because nothing can be selected without a tier the server knows.
+        if (!cancelled) setShowtimeTiers(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSeated, selectedSlot?.showtimeId, event.ticketTiers]);
+
   useEffect(() => {
     setLiveRemaining({});
     const showtimeId = selectedSlot?.showtimeId;
     if (isSeated || !showtimeId) return;
     return watchShowtime(showtimeId, (update) => {
       if (!update.tier) return;
-      setLiveRemaining((current) => ({ ...current, [String(update.tier!.ticketTierId)]: update.tier!.remaining }));
+      setLiveRemaining((current) => ({
+        ...current,
+        [String(update.tier!.ticketTierId)]: update.tier!.remaining,
+      }));
     });
   }, [isSeated, selectedSlot?.showtimeId]);
 
@@ -195,10 +252,7 @@ export default function EventDetail({
   const totalPrice = selection.reduce((sum, line) => sum + line.quantity * line.price, 0);
 
   const bookingDisabled =
-    eventUnavailable ||
-    !selectedSlot ||
-    selectedSlot.soldOut ||
-    (!isSeated && totalQuantity === 0);
+    eventUnavailable || !selectedSlot || selectedSlot.soldOut || (!isSeated && totalQuantity === 0);
 
   const isWishlisted = wishlistedIds.includes(event.id);
 
@@ -208,7 +262,9 @@ export default function EventDetail({
 
   const tierCap = (tier: MovieEvent["ticketTiers"][number]) => {
     const remaining = remainingOf(tier);
-    return remaining === null || remaining === undefined ? MAX_PER_TIER : Math.min(remaining, MAX_PER_TIER);
+    return remaining === null || remaining === undefined
+      ? MAX_PER_TIER
+      : Math.min(remaining, MAX_PER_TIER);
   };
 
   const adjustQuantity = (tierId: string, delta: number, cap: number) => {
@@ -221,8 +277,15 @@ export default function EventDetail({
   const handlePrimaryAction = () => {
     if (!selectedSlot) return;
     // The showtime id is what the hold API locks against — carry it, not just the display strings.
-    if (isSeated) onProceedToSeatSelection(selectedSlot.showtimeId, selectedSlot.date, selectedSlot.time);
-    else onProceedToQuantityCheckout(selection, selectedSlot.showtimeId, selectedSlot.date, selectedSlot.time);
+    if (isSeated)
+      onProceedToSeatSelection(selectedSlot.showtimeId, selectedSlot.date, selectedSlot.time);
+    else
+      onProceedToQuantityCheckout(
+        selection,
+        selectedSlot.showtimeId,
+        selectedSlot.date,
+        selectedSlot.time,
+      );
   };
 
   const primaryLabel = eventUnavailable
@@ -268,7 +331,9 @@ export default function EventDetail({
           {restoreHold && holdRemainingMs > 0 && (
             <span className="inline-flex items-center gap-2 rounded-lg border-2 border-beige-kem bg-cam-dat px-2.5 py-1 text-on-tint">
               Đang giữ chỗ
-              <b className="text-sm font-black text-beige-kem">{formatHoldClock(holdRemainingMs)}</b>
+              <b className="text-sm font-black text-beige-kem">
+                {formatHoldClock(holdRemainingMs)}
+              </b>
             </span>
           )}
         </div>
@@ -385,7 +450,9 @@ export default function EventDetail({
 
           {isSeated && selectedSlot?.showtimeId !== null && selectedSlot && (
             <section className="rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6">
-              <h3 className="mb-1 font-display text-lg font-black text-beige-kem">Tình trạng ghế</h3>
+              <h3 className="mb-1 font-display text-lg font-black text-beige-kem">
+                Tình trạng ghế
+              </h3>
               <p className="mb-4 font-mono text-[11px] text-beige-kem/50">
                 Xem trước chỗ còn trống của suất đã chọn. Chọn ghế ở bước sau.
               </p>
@@ -411,14 +478,18 @@ export default function EventDetail({
                      tile — no card border, no hover — so it never reads as a tappable button. */
                   <div key={tier.id} className="border-l-2 border-cam-dat/40 pl-3">
                     <div className="flex items-center gap-2">
-                      <span className="font-display text-base font-black text-beige-kem">{tier.label}</span>
+                      <span className="font-display text-base font-black text-beige-kem">
+                        {tier.label}
+                      </span>
                       {tier.badge && (
                         <span className="rounded-full border-2 border-beige-kem bg-cam-dat px-2 py-0.5 font-mono text-[10px] font-bold text-on-tint">
                           {tier.badge}
                         </span>
                       )}
                     </div>
-                    <p className="mt-1 font-mono text-sm font-bold text-ink-soft">{formatPrice(tier.price)}</p>
+                    <p className="mt-1 font-mono text-sm font-bold text-ink-soft">
+                      {formatPrice(tier.price)}
+                    </p>
                     {tier.description && (
                       <p className="mt-1 text-xs leading-5 text-beige-kem/62">{tier.description}</p>
                     )}
@@ -436,16 +507,22 @@ export default function EventDetail({
                         className="flex flex-col rounded-xl border-2 border-beige-kem bg-surface-2 p-4"
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-display text-base font-black text-beige-kem">{tier.label}</span>
+                          <span className="font-display text-base font-black text-beige-kem">
+                            {tier.label}
+                          </span>
                           {tier.badge && (
                             <span className="rounded-full border-2 border-beige-kem bg-cam-dat px-2 py-0.5 font-mono text-[10px] font-bold text-on-tint">
                               {tier.badge}
                             </span>
                           )}
                         </div>
-                        <p className="mt-2 font-mono text-sm font-bold text-ink-soft">{formatPrice(tier.price)}</p>
+                        <p className="mt-2 font-mono text-sm font-bold text-ink-soft">
+                          {formatPrice(tier.price)}
+                        </p>
                         {tier.description && (
-                          <p className="mt-2 text-xs leading-5 text-beige-kem/62">{tier.description}</p>
+                          <p className="mt-2 text-xs leading-5 text-beige-kem/62">
+                            {tier.description}
+                          </p>
                         )}
                         <p className="mt-2 font-mono text-[11px] text-beige-kem/55">
                           {remainingOf(tier) === null || remainingOf(tier) === undefined
@@ -464,7 +541,9 @@ export default function EventDetail({
                           >
                             −
                           </button>
-                          <span className="font-mono text-base font-black text-beige-kem">{quantity}</span>
+                          <span className="font-mono text-base font-black text-beige-kem">
+                            {quantity}
+                          </span>
                           <button
                             type="button"
                             onClick={() => adjustQuantity(tier.id, 1, cap)}
@@ -495,7 +574,8 @@ export default function EventDetail({
             <div className="rounded-2xl border-2 border-beige-kem bg-bubblegum p-4">
               <h4 className="font-display font-bold text-beige-kem">Nhắc lịch</h4>
               <p className="mt-2 text-xs leading-5 text-beige-kem/68">
-                Bấm Lưu để thêm vào wishlist và nhắc lịch gần ngày diễn. Trạng thái này đang lưu local trong frontend.
+                Bấm Lưu để thêm vào wishlist và nhắc lịch gần ngày diễn. Trạng thái này đang lưu
+                local trong frontend.
               </p>
             </div>
           </section>
@@ -538,7 +618,9 @@ export default function EventDetail({
 
           {relatedEvents.length > 0 && (
             <section className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-6">
-              <h3 className="mb-4 font-display text-xl font-black text-beige-kem">Gợi ý tương tự</h3>
+              <h3 className="mb-4 font-display text-xl font-black text-beige-kem">
+                Gợi ý tương tự
+              </h3>
               <div className="grid gap-3 md:grid-cols-3">
                 {relatedEvents.map((related) => (
                   <button
@@ -553,8 +635,12 @@ export default function EventDetail({
                       className="h-24 w-full object-cover transition duration-500 group-hover:scale-105"
                     />
                     <span className="block p-3">
-                      <span className="line-clamp-2 font-display text-sm font-bold text-beige-kem">{related.title}</span>
-                      <span className="mt-1 block font-mono text-[11px] text-ink-soft">{formatPrice(related.price)}</span>
+                      <span className="line-clamp-2 font-display text-sm font-bold text-beige-kem">
+                        {related.title}
+                      </span>
+                      <span className="mt-1 block font-mono text-[11px] text-ink-soft">
+                        {formatPrice(related.price)}
+                      </span>
                     </span>
                   </button>
                 ))}
