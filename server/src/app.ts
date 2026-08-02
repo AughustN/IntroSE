@@ -1,33 +1,35 @@
-import { join } from 'node:path';
-import cookieParser from 'cookie-parser';
-import express, { type Express } from 'express';
-import { errorHandler, notFound } from './middleware/error.js';
-import { authRouter } from './modules/auth/auth.routes.js';
-import { catalogPublicRouter } from './modules/catalog/catalog.public.routes.js';
-import { organizerRouter } from './modules/catalog/organizer.routes.js';
-import { moderationRouter } from './modules/catalog/moderation.routes.js';
-import { reservationsRouter } from './modules/holds/reservations.routes.js';
+import { join } from "node:path";
+import cookieParser from "cookie-parser";
+import express, { type Express } from "express";
+import { errorHandler, notFound } from "./middleware/error.js";
+import { authRouter } from "./modules/auth/auth.routes.js";
+import { catalogPublicRouter } from "./modules/catalog/catalog.public.routes.js";
+import { organizerRouter } from "./modules/catalog/organizer.routes.js";
+import { moderationRouter } from "./modules/catalog/moderation.routes.js";
+import { reservationsRouter } from "./modules/holds/reservations.routes.js";
+import { walletRouter } from "./modules/payments/wallet.routes.js";
 
 /** Build the Express app (no listen) so tests can drive it with supertest. */
 export function createApp(): Express {
   const app = express();
-  app.set('trust proxy', 1); // one Nginx hop (ADR 0003) → req.ip is the real client
-  app.use(express.json({ limit: '1mb' }));
+  app.set("trust proxy", 1); // one Nginx hop (ADR 0003) → req.ip is the real client
+  app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
 
   // Uploaded avatars, served as static files, never executed (ADR 0004).
   app.use(
-    '/uploads',
-    express.static(join(process.cwd(), 'uploads'), {
-      setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff'),
+    "/uploads",
+    express.static(join(process.cwd(), "uploads"), {
+      setHeaders: (res) => res.setHeader("X-Content-Type-Options", "nosniff"),
     }),
   );
 
-  app.use('/api', authRouter);
-  app.use('/api', catalogPublicRouter);
-  app.use('/api', reservationsRouter);
-  app.use('/api/organizer', organizerRouter);
-  app.use('/api/admin', moderationRouter);
+  app.use("/api", authRouter);
+  app.use("/api", catalogPublicRouter);
+  app.use("/api", reservationsRouter);
+  app.use("/api", walletRouter);
+  app.use("/api/organizer", organizerRouter);
+  app.use("/api/admin", moderationRouter);
 
   app.use(notFound);
   app.use(errorHandler);

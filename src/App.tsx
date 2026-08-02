@@ -25,6 +25,7 @@ import {
   sessionFromReservation,
 } from "./services/holdSession";
 import { HoldError, holdsClient } from "./services/holdsClient";
+import { walletClient, WalletError } from "./services/walletClient";
 import { useHoldCountdown } from "./hooks/useHoldCountdown";
 import BookingHistory from "./components/BookingHistory";
 import ToastStack, { type ToastKind, type ToastMessage } from "./components/ToastStack";
@@ -39,7 +40,16 @@ import SeatLayout from "./components/SeatLayout";
 import TicketTicket from "./components/TicketTicket";
 import { ArrowUp } from "lucide-react";
 
-type Screen = "home" | "detail" | "seats" | "checkout" | "ticket" | "history" | "admin" | "organizer" | "moderation";
+type Screen =
+  | "home"
+  | "detail"
+  | "seats"
+  | "checkout"
+  | "ticket"
+  | "history"
+  | "admin"
+  | "organizer"
+  | "moderation";
 type ThemeMode = "dark" | "light";
 
 /**
@@ -55,10 +65,7 @@ const LEAVE_FLOW_WARNING =
 
 const BOOKINGS_CACHE_KEY = "tixhub_bookings_cache_v2";
 // Pre-rebrand keys, still read (and cleared) so existing local data survives the TixHub rename.
-const LEGACY_BOOKINGS_CACHE_KEYS = [
-  "ticketbox_bookings_cache_v2",
-  "ticketbox_bookings_cache_v1",
-];
+const LEGACY_BOOKINGS_CACHE_KEYS = ["ticketbox_bookings_cache_v2", "ticketbox_bookings_cache_v1"];
 const WISHLIST_CACHE_KEY = "tixhub_wishlist_cache_v1";
 const LEGACY_WISHLIST_CACHE_KEY = "ticketbox_wishlist_cache_v1";
 const USER_CACHE_KEY = "tixhub_mock_user_v1";
@@ -236,8 +243,7 @@ export default function App() {
         localStorage.getItem(BOOKINGS_CACHE_KEY) ||
         LEGACY_BOOKINGS_CACHE_KEYS.map((key) => localStorage.getItem(key)).find(Boolean);
       const cachedWishlist =
-        localStorage.getItem(WISHLIST_CACHE_KEY) ||
-        localStorage.getItem(LEGACY_WISHLIST_CACHE_KEY);
+        localStorage.getItem(WISHLIST_CACHE_KEY) || localStorage.getItem(LEGACY_WISHLIST_CACHE_KEY);
       const cachedUser =
         localStorage.getItem(USER_CACHE_KEY) || localStorage.getItem(LEGACY_USER_CACHE_KEY);
 
@@ -336,13 +342,15 @@ export default function App() {
   }, [events, activeCategory, activeCity, activeDate, availability, maxPrice, searchQuery]);
 
   const relatedEvents = useMemo(() => {
-    return events.filter((event) => {
-      if (event.id === selectedMovie.id) return false;
-      return (
-        event.category === selectedMovie.category ||
-        event.genre.some((genre) => selectedMovie.genre.includes(genre))
-      );
-    }).slice(0, 3);
+    return events
+      .filter((event) => {
+        if (event.id === selectedMovie.id) return false;
+        return (
+          event.category === selectedMovie.category ||
+          event.genre.some((genre) => selectedMovie.genre.includes(genre))
+        );
+      })
+      .slice(0, 3);
   }, [events, selectedMovie]);
 
   /**
@@ -546,12 +554,18 @@ export default function App() {
       } else {
         const updated = hold
           ? await holdsClient.add(hold.reservationId, { seatIds: [seat.showtimeSeatId] })
-          : await holdsClient.hold({ showtimeId: bookingShowtimeId, seatIds: [seat.showtimeSeatId] });
+          : await holdsClient.hold({
+              showtimeId: bookingShowtimeId,
+              seatIds: [seat.showtimeSeatId],
+            });
         setHold(sessionFromReservation(updated, context));
       }
     } catch (e) {
       // Every refusal is explainable: seat just taken, cap reached, showtime closed (SC-008).
-      pushToast("error", e instanceof HoldError ? e.message : "Không giữ được ghế. Vui lòng thử lại.");
+      pushToast(
+        "error",
+        e instanceof HoldError ? e.message : "Không giữ được ghế. Vui lòng thử lại.",
+      );
       if (e instanceof HoldError && e.status === 404) setHold(null); // the hold ended underneath us
     } finally {
       setHoldBusy(false);
@@ -604,7 +618,10 @@ export default function App() {
         setActiveScreen("checkout");
         window.scrollTo({ top: 0, behavior: "smooth" });
       } catch (e) {
-        pushToast("error", e instanceof HoldError ? e.message : "Không giữ được vé. Vui lòng thử lại.");
+        pushToast(
+          "error",
+          e instanceof HoldError ? e.message : "Không giữ được vé. Vui lòng thử lại.",
+        );
       } finally {
         setHoldBusy(false);
       }
@@ -621,45 +638,54 @@ export default function App() {
     });
   };
 
-  const handleConfirmPurchase = (payload: CheckoutPayload) => {
-    const trackingId = "TB" + Math.floor(100000 + Math.random() * 900000);
-    const timeNow = new Date().toLocaleString("vi-VN", { timeZone: "Asia/Saigon" });
+  const handleConfirmPurchase = async (payload: CheckoutPayload) => {
+    if (!hold) {
+      pushToast("error", "Đơn giữ chỗ không còn hiệu lực. Vui lòng chọn vé lại.");
+      return;
+    }
 
-    const newBooking: Booking = {
-      id: trackingId,
-      movie: selectedMovie,
-      selectedDate: bookingDate,
-      selectedTime: bookingTime,
-      selectedSeats: bookingSeats,
-      customerName: payload.customer.name,
-      customerEmail: payload.customer.email,
-      customerPhone: payload.customer.phone,
-      totalPrice: bookingTotalPrice,
-      serviceFee: payload.serviceFee,
-      discount: payload.discount,
-      finalPrice: payload.finalPrice,
-      paymentMethod: payload.paymentMethod,
-      promoCode: payload.promoCode,
-      deliveryChannel: "email_sms",
-      status: "paid",
-      qrStatus: "unused",
-      bookingTime: timeNow,
-      qrPayload: JSON.stringify({
-        bookingId: trackingId,
-        eventId: selectedMovie.id,
-        event: selectedMovie.title,
-        seats: bookingSeats.map((seat) => seat.id).join(","),
-        time: `${bookingTime} - ${bookingDate}`,
+    setHoldBusy(true);
+    try {
+      const order = await walletClient.checkout(hold.reservationId);
+      const ticket = order.tickets[0];
+      if (!ticket) throw new Error("Đơn hàng chưa có vé.");
+
+      const newBooking: Booking = {
+        id: String(order.id),
+        movie: selectedMovie,
+        selectedDate: bookingDate,
+        selectedTime: bookingTime,
+        selectedSeats: bookingSeats,
+        customerName: payload.customer.name,
+        customerEmail: payload.customer.email,
+        customerPhone: payload.customer.phone,
+        totalPrice: order.totalAmount,
+        serviceFee: 0,
+        discount: 0,
+        finalPrice: order.totalAmount,
+        paymentMethod: "Ví TixHub",
+        deliveryChannel: "email_sms",
+        status: "paid",
         qrStatus: "unused",
-      }),
-    };
+        bookingTime: new Date(order.createdAt).toLocaleString("vi-VN", {
+          timeZone: "Asia/Ho_Chi_Minh",
+        }),
+        qrPayload: ticket.ticketCode,
+      };
 
-    saveBookingToHistory(newBooking);
-    setFinalBooking(newBooking);
-    // The flow completed: the hold became a ticket, so it is released without any warning.
-    setHold(null);
-    setActiveScreen("ticket");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+      saveBookingToHistory(newBooking);
+      setFinalBooking(newBooking);
+      setHold(null);
+      setActiveScreen("ticket");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (e) {
+      pushToast(
+        "error",
+        e instanceof WalletError ? e.message : "Không thể hoàn tất thanh toán. Vui lòng thử lại.",
+      );
+    } finally {
+      setHoldBusy(false);
+    }
   };
 
   const handleLogin = (user: Me) => {
@@ -864,8 +890,12 @@ export default function App() {
       <footer className="border-t border-beige-kem/10 bg-xanh-pho px-4 py-12 font-mono text-xs sm:px-6 lg:px-8">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-6 md:flex-row">
           <div className="space-y-1 text-center md:text-left">
-            <h5 className="font-display text-sm font-bold tracking-normal text-beige-kem">TIXHUB FRONTEND MVP</h5>
-            <p className="text-[10px] text-la-co">Mock data cho vé ca nhạc, hòa nhạc, kịch và phim</p>
+            <h5 className="font-display text-sm font-bold tracking-normal text-beige-kem">
+              TIXHUB FRONTEND MVP
+            </h5>
+            <p className="text-[10px] text-la-co">
+              Mock data cho vé ca nhạc, hòa nhạc, kịch và phim
+            </p>
           </div>
 
           <div className="flex flex-wrap justify-center gap-6 text-beige-kem/60">
@@ -889,9 +919,7 @@ export default function App() {
         <ArrowUp className="h-5 w-5" />
       </button>
 
-      {showAuthModal && (
-        <AuthModal onClose={dismissAuthModal} onLogin={handleLogin} />
-      )}
+      {showAuthModal && <AuthModal onClose={dismissAuthModal} onLogin={handleLogin} />}
       {showAccountModal && userName && (
         <AccountModal
           onClose={() => setShowAccountModal(false)}
@@ -926,13 +954,7 @@ export default function App() {
   );
 }
 
-function TrustCard({
-  title,
-  text,
-}: {
-  title: string;
-  text: string;
-}) {
+function TrustCard({ title, text }: { title: string; text: string }) {
   return (
     <div className="rounded-2xl border border-beige-kem/10 bg-white/[0.035] p-6">
       <h4 className="font-display text-lg font-black text-beige-kem">{title}</h4>
