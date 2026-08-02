@@ -2,7 +2,12 @@
 .env
 .env.*
 !.env.example
-.sql
+
+# Local database dumps at the repo root. Anchored with a leading slash on purpose:
+# a bare `*.sql` would also untrack server/src/db/migrations/*.sql, which is the
+# schema and must stay in git.
+/*.sql
+
 # Claude
 .claude/
 

@@ -1,5 +1,9 @@
--- 0004_wallet_checkout.sql - add only the wallet layer missing from tixhub.sql.
--- Reuses the existing orders, payment_transactions, tickets, reservations and reservation_items tables.
+-- 0004_wallet_checkout.sql - the wallet layer for VNPay top-ups and wallet checkout.
+--
+-- BROKEN AS WRITTEN — do not run yet. It ALTERs orders, payment_transactions and tickets,
+-- but 0001-0003 never create them: they only ever existed in tixhub.sql, the Navicat dump
+-- dropped in b2d68f6. Creating those three tables has to come first, in this file or ahead
+-- of it. Recover their definitions with:  git show 311ce03:tixhub.sql
 
 BEGIN;
 
