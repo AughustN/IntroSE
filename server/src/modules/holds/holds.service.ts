@@ -1,9 +1,9 @@
-import type { HoldRequest, Reservation, SeatUpdate } from '@shared/holds/types.js';
-import { HOLD_ABSOLUTE_MS, HOLD_GRACE_MS, HOLD_TTL_MS, SEAT_CAP } from '../../config.js';
-import { pool, withTransaction } from '../../db/pool.js';
-import { err } from '../../http.js';
-import { broadcastSeatUpdate } from '../../realtime/io.js';
-import * as repo from './holds.repo.js';
+import type { HoldRequest, Reservation, SeatUpdate } from "@shared/holds/types.js";
+import { HOLD_ABSOLUTE_MS, HOLD_GRACE_MS, HOLD_TTL_MS, SEAT_CAP } from "../../config.js";
+import { pool, withTransaction } from "../../db/pool.js";
+import { err } from "../../http.js";
+import { broadcastSeatUpdate } from "../../realtime/io.js";
+import * as repo from "./holds.repo.js";
 
 /**
  * Seat holds (feature 003). Every path here obeys four rules:
@@ -27,38 +27,41 @@ const ttlFrom = (createdAt: Date): Date => new Date(createdAt.getTime() + HOLD_T
 /** Load the caller's reservation as the API returns it. */
 async function view(reservationId: number): Promise<Reservation> {
   const row = await repo.findReservation(pool, reservationId);
-  if (!row) throw err.notFound('not_found', 'Không tìm thấy đơn giữ chỗ.');
+  if (!row) throw err.notFound("not_found", "Không tìm thấy đơn giữ chỗ.");
   return repo.toReservationView(row, await repo.listItems(pool, reservationId));
 }
 
-function assertSelection(body: HoldRequest): { kind: 'seated'; seatIds: number[] } | { kind: 'ga'; tierId: number; quantity: number } {
+function assertSelection(
+  body: HoldRequest,
+): { kind: "seated"; seatIds: number[] } | { kind: "ga"; tierId: number; quantity: number } {
   const seatIds = body.seatIds ?? [];
   const hasSeats = seatIds.length > 0;
   const hasGa = body.ticketTierId !== undefined && body.quantity !== undefined;
 
   // A reservation is seated or GA, never both and never empty (FR-012, edge cases).
-  if (hasSeats && hasGa) throw err.unprocessable('invalid_selection', 'Không thể vừa chọn ghế vừa chọn số lượng.');
+  if (hasSeats && hasGa)
+    throw err.unprocessable("invalid_selection", "Không thể vừa chọn ghế vừa chọn số lượng.");
   if (hasSeats) {
     if (new Set(seatIds).size !== seatIds.length) {
-      throw err.unprocessable('invalid_selection', 'Danh sách ghế bị trùng.');
+      throw err.unprocessable("invalid_selection", "Danh sách ghế bị trùng.");
     }
-    return { kind: 'seated', seatIds };
+    return { kind: "seated", seatIds };
   }
   if (hasGa) {
     const quantity = Number(body.quantity);
     if (!Number.isInteger(quantity) || quantity <= 0) {
-      throw err.unprocessable('invalid_selection', 'Số lượng vé không hợp lệ.');
+      throw err.unprocessable("invalid_selection", "Số lượng vé không hợp lệ.");
     }
-    return { kind: 'ga', tierId: Number(body.ticketTierId), quantity };
+    return { kind: "ga", tierId: Number(body.ticketTierId), quantity };
   }
-  throw err.unprocessable('invalid_selection', 'Chưa chọn ghế hoặc số lượng vé.');
+  throw err.unprocessable("invalid_selection", "Chưa chọn ghế hoặc số lượng vé.");
 }
 
 async function requireSellableShowtime(showtimeId: number): Promise<repo.ShowtimeInfo> {
   const info = await repo.getShowtimeInfo(showtimeId);
-  if (!info) throw err.notFound('not_found', 'Không tìm thấy suất diễn.');
+  if (!info) throw err.notFound("not_found", "Không tìm thấy suất diễn.");
   if (!info.sellable) {
-    throw err.unprocessable('showtime_unavailable', 'Suất diễn này không còn mở bán.');
+    throw err.unprocessable("showtime_unavailable", "Suất diễn này không còn mở bán.");
   }
   return info;
 }
@@ -69,11 +72,11 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
   const selection = assertSelection(body);
   const showtime = await requireSellableShowtime(body.showtimeId);
 
-  if (selection.kind === 'seated' && showtime.eventType !== 'seated') {
-    throw err.unprocessable('invalid_selection', 'Suất diễn này không có sơ đồ ghế.');
+  if (selection.kind === "seated" && showtime.eventType !== "seated") {
+    throw err.unprocessable("invalid_selection", "Suất diễn này không có sơ đồ ghế.");
   }
-  if (selection.kind === 'ga' && showtime.eventType !== 'general_admission') {
-    throw err.unprocessable('invalid_selection', 'Suất diễn này phải chọn ghế cụ thể.');
+  if (selection.kind === "ga" && showtime.eventType !== "general_admission") {
+    throw err.unprocessable("invalid_selection", "Suất diễn này phải chọn ghế cụ thể.");
   }
 
   const outcome = await withTransaction(async (client) => {
@@ -81,7 +84,7 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
     let reservation = await repo.findActiveReservation(client, userId, body.showtimeId, true);
     // An active row whose window already passed is spent — the sweep just has not reached it yet.
     if (reservation && reservation.expires_at.getTime() <= now.getTime()) {
-      await repo.setReservationStatus(client, reservation.id, 'expired');
+      await repo.setReservationStatus(client, reservation.id, "expired");
       await repo.releaseSeats(client, await repo.listSeatIds(client, reservation.id));
       for (const line of await repo.listGaLines(client, reservation.id)) {
         await repo.bumpReserved(client, line.ticket_tier_id, -line.quantity);
@@ -91,11 +94,11 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
 
     const held = reservation ? await repo.countHeldTickets(client, reservation.id) : 0;
 
-    if (selection.kind === 'seated') {
+    if (selection.kind === "seated") {
       const seats = await repo.lockSeats(client, body.showtimeId, selection.seatIds);
       if (seats.length !== selection.seatIds.length) {
         // A seat id that is not on this showtime (or does not exist) — refuse the whole request.
-        throw err.unprocessable('invalid_selection', 'Ghế không thuộc suất diễn này.');
+        throw err.unprocessable("invalid_selection", "Ghế không thuộc suất diễn này.");
       }
 
       const mine = seats.filter((s) => repo.isHeldBy(s, userId, now));
@@ -108,13 +111,13 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
 
       for (const seat of fresh) {
         if (!repo.isHoldable(seat, now)) {
-          throw err.conflict('seat_taken', 'Ghế vừa được người khác giữ.');
+          throw err.conflict("seat_taken", "Ghế vừa được người khác giữ.");
         }
       }
 
       if (held + fresh.length > SEAT_CAP) {
         throw err.unprocessable(
-          'cap_exceeded',
+          "cap_exceeded",
           `Mỗi tài khoản chỉ giữ tối đa ${SEAT_CAP} vé cho một suất diễn.`,
         );
       }
@@ -132,7 +135,7 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
         created: true,
         update: {
           showtimeId: body.showtimeId,
-          seats: freshIds.map((id) => ({ showtimeSeatId: id, status: 'held' as const })),
+          seats: freshIds.map((id) => ({ showtimeSeatId: id, status: "held" as const })),
         },
       };
     }
@@ -140,16 +143,16 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
     // ---- General admission: a quantity against a tier, no seat rows (R-7) ----
     const tier = await repo.lockTier(client, selection.tierId);
     if (!tier || tier.showtime_id !== body.showtimeId) {
-      throw err.unprocessable('invalid_selection', 'Hạng vé không thuộc suất diễn này.');
+      throw err.unprocessable("invalid_selection", "Hạng vé không thuộc suất diễn này.");
     }
 
     const remaining = repo.tierRemaining(tier);
     if (remaining !== null && selection.quantity > remaining) {
-      throw err.unprocessable('insufficient_stock', 'Không đủ vé còn lại cho hạng vé này.');
+      throw err.unprocessable("insufficient_stock", "Không đủ vé còn lại cho hạng vé này.");
     }
     if (held + selection.quantity > SEAT_CAP) {
       throw err.unprocessable(
-        'cap_exceeded',
+        "cap_exceeded",
         `Mỗi tài khoản chỉ giữ tối đa ${SEAT_CAP} vé cho một suất diễn.`,
       );
     }
@@ -160,7 +163,10 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
     await repo.bumpReserved(client, tier.id, selection.quantity);
     await repo.upsertGaItem(client, reservation.id, tier.id, selection.quantity, tier.price_amount);
 
-    const left = repo.tierRemaining({ ...tier, reserved_quantity: tier.reserved_quantity + selection.quantity });
+    const left = repo.tierRemaining({
+      ...tier,
+      reserved_quantity: tier.reserved_quantity + selection.quantity,
+    });
     return {
       reservationId: reservation.id,
       created: true,
@@ -193,21 +199,32 @@ export async function removeSeats(
   if (seatIds.length === 0) return view(reservationId);
 
   const released = await withTransaction(async (client) => {
-    const seats = await repo.lockSeats(client, reservation.showtime_id, seatIds);
+    // Re-lock the reservation in this transaction: checkout also owns this lock, so a stale
+    // remove request cannot delete items from a reservation that just became an order.
+    const lockedReservation = await repo.findReservation(client, reservation.id, true);
+    if (
+      !lockedReservation ||
+      lockedReservation.user_id !== userId ||
+      lockedReservation.status !== "active" ||
+      lockedReservation.expires_at.getTime() <= Date.now()
+    ) {
+      throw err.notFound("not_found", "Đơn giữ chỗ đã hết hạn hoặc đã kết thúc.");
+    }
+    const seats = await repo.lockSeats(client, lockedReservation.showtime_id, seatIds);
     const now = new Date();
     // Releasing a seat the caller does not own is refused; one that already lapsed is a no-op
     // success — it is free either way (FR-004, edge case).
     const owned = seats.filter((s) => repo.isHeldBy(s, userId, now));
-    const foreign = seats.filter((s) => s.status === 'held' && s.hold_owner_id !== userId);
-    if (foreign.length > 0) throw err.forbidden('not_owner', 'Bạn không giữ ghế này.');
+    const foreign = seats.filter((s) => s.status === "held" && s.hold_owner_id !== userId);
+    if (foreign.length > 0) throw err.forbidden("not_owner", "Bạn không giữ ghế này.");
 
     const ids = owned.map((s) => s.id);
     await repo.releaseSeats(client, ids);
-    await repo.removeSeatItems(client, reservation.id, seatIds);
+    await repo.removeSeatItems(client, lockedReservation.id, seatIds);
 
     // An empty reservation is finished — it must not linger and block the next selection (FR-011).
-    if ((await repo.countHeldTickets(client, reservation.id)) === 0) {
-      await repo.setReservationStatus(client, reservation.id, 'cancelled');
+    if ((await repo.countHeldTickets(client, lockedReservation.id)) === 0) {
+      await repo.setReservationStatus(client, lockedReservation.id, "cancelled");
     }
     return ids;
   });
@@ -215,7 +232,7 @@ export async function removeSeats(
   if (released.length > 0) {
     broadcastSeatUpdate({
       showtimeId: reservation.showtime_id,
-      seats: released.map((id) => ({ showtimeSeatId: id, status: 'available' as const })),
+      seats: released.map((id) => ({ showtimeSeatId: id, status: "available" as const })),
     });
   }
   return view(reservationId);
@@ -225,7 +242,7 @@ export async function removeSeats(
 
 export async function cancel(userId: number, reservationId: number): Promise<void> {
   const reservation = await requireOwnedActive(userId, reservationId);
-  const update = await releaseEverything(reservation, 'cancelled');
+  const update = await releaseEverything(reservation, "cancelled");
   for (const u of update) broadcastSeatUpdate(u);
 }
 
@@ -235,31 +252,35 @@ export async function cancel(userId: number, reservationId: number): Promise<voi
  */
 export async function releaseEverything(
   reservation: repo.ReservationRow,
-  status: 'cancelled' | 'expired',
+  status: "cancelled" | "expired",
 ): Promise<SeatUpdate[]> {
   return withTransaction(async (client) => {
     const locked = await repo.findReservation(client, reservation.id, true);
-    if (!locked || locked.status !== 'active') return []; // someone got there first (or 004 converted it)
+    if (!locked || locked.status !== "active") return []; // someone got there first (or 004 converted it)
 
     const seatIds = await repo.listSeatIds(client, locked.id);
     const gaLines = await repo.listGaLines(client, locked.id);
 
     await repo.releaseSeats(client, seatIds);
-    for (const line of gaLines) await repo.bumpReserved(client, line.ticket_tier_id, -line.quantity);
+    for (const line of gaLines)
+      await repo.bumpReserved(client, line.ticket_tier_id, -line.quantity);
     await repo.setReservationStatus(client, locked.id, status);
 
     const updates: SeatUpdate[] = [];
     if (seatIds.length > 0) {
       updates.push({
         showtimeId: locked.showtime_id,
-        seats: seatIds.map((id) => ({ showtimeSeatId: id, status: 'available' as const })),
+        seats: seatIds.map((id) => ({ showtimeSeatId: id, status: "available" as const })),
       });
     }
     for (const line of gaLines) {
       const tier = await repo.lockTier(client, line.ticket_tier_id);
       updates.push({
         showtimeId: locked.showtime_id,
-        tier: { ticketTierId: line.ticket_tier_id, remaining: tier ? repo.tierRemaining(tier) : null },
+        tier: {
+          ticketTierId: line.ticket_tier_id,
+          remaining: tier ? repo.tierRemaining(tier) : null,
+        },
       });
     }
     return updates;
@@ -277,38 +298,53 @@ export async function extendOnce(userId: number, reservationId: number): Promise
   const reservation = await requireOwnedActive(userId, reservationId);
 
   const extended = await withTransaction(async (client) => {
-    const row = await repo.extendReservationOnce(client, reservation.id, HOLD_GRACE_MS, HOLD_ABSOLUTE_MS);
+    const row = await repo.extendReservationOnce(
+      client,
+      reservation.id,
+      HOLD_GRACE_MS,
+      HOLD_ABSOLUTE_MS,
+    );
     if (row) await repo.syncSeatExpiry(client, row.id, row.expires_at);
     return row;
   });
 
   // Already spent: not an error, just no extra time — the window stands as it is.
-  return extended ? repo.toReservationView(extended, await repo.listItems(pool, reservation.id)) : view(reservation.id);
+  return extended
+    ? repo.toReservationView(extended, await repo.listItems(pool, reservation.id))
+    : view(reservation.id);
 }
 
 // ---- Read -----------------------------------------------------------------
 
 export async function getReservation(userId: number, reservationId: number): Promise<Reservation> {
   const row = await repo.findReservation(pool, reservationId);
-  if (!row) throw err.notFound('not_found', 'Không tìm thấy đơn giữ chỗ.');
-  if (row.user_id !== userId) throw err.forbidden('not_owner', 'Đơn giữ chỗ này không phải của bạn.');
+  if (!row) throw err.notFound("not_found", "Không tìm thấy đơn giữ chỗ.");
+  if (row.user_id !== userId)
+    throw err.forbidden("not_owner", "Đơn giữ chỗ này không phải của bạn.");
   return repo.toReservationView(row, await repo.listItems(pool, reservationId));
 }
 
 /** The caller's live selection for a showtime, if any — what the map shows a returning owner (FR-022). */
-export async function getActiveForShowtime(userId: number, showtimeId: number): Promise<Reservation | null> {
+export async function getActiveForShowtime(
+  userId: number,
+  showtimeId: number,
+): Promise<Reservation | null> {
   const row = await repo.findActiveReservation(pool, userId, showtimeId);
   if (!row || row.expires_at.getTime() <= Date.now()) return null;
   return repo.toReservationView(row, await repo.listItems(pool, row.id));
 }
 
-async function requireOwnedActive(userId: number, reservationId: number): Promise<repo.ReservationRow> {
+async function requireOwnedActive(
+  userId: number,
+  reservationId: number,
+): Promise<repo.ReservationRow> {
   const row = await repo.findReservation(pool, reservationId);
-  if (!row) throw err.notFound('not_found', 'Không tìm thấy đơn giữ chỗ.');
-  if (row.user_id !== userId) throw err.forbidden('not_owner', 'Đơn giữ chỗ này không phải của bạn.');
+  if (!row) throw err.notFound("not_found", "Không tìm thấy đơn giữ chỗ.");
+  if (row.user_id !== userId)
+    throw err.forbidden("not_owner", "Đơn giữ chỗ này không phải của bạn.");
   // Expired / cancelled / converted are all closed to changes (FR-013).
-  if (row.status !== 'active' || row.expires_at.getTime() <= Date.now()) {
-    throw err.notFound('not_found', 'Đơn giữ chỗ đã hết hạn hoặc đã kết thúc.');
+  if (row.status !== "active" || row.expires_at.getTime() <= Date.now()) {
+    throw err.notFound("not_found", "Đơn giữ chỗ đã hết hạn hoặc đã kết thúc.");
   }
   return row;
 }

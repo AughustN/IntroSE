@@ -8,18 +8,18 @@ import { EVENT_CATEGORIES, MyEvent, MyVenue, organizerApi } from "../services/ca
 import SeatMapBuilder from "./SeatMapBuilder";
 
 const input =
-  "h-11 w-full rounded-xl border border-beige-kem/20 bg-white/[0.035] px-4 text-sm text-beige-kem outline-none focus:border-cam-dat";
+  "h-11 w-full rounded-xl border-2 border-beige-kem bg-surface-2 px-4 text-sm text-beige-kem outline-none focus:border-burgundy";
 const label = "mb-1.5 block font-mono text-xs text-beige-kem/70";
-const card = "rounded-2xl border border-beige-kem/10 bg-white/[0.02] p-5";
-const btn = "rounded-xl bg-burgundy px-4 py-2.5 text-sm font-black text-beige-kem transition hover:bg-burgundy/90 disabled:opacity-60";
-const ghost = "rounded-xl border border-beige-kem/15 px-3 py-2 text-xs font-bold text-beige-kem/80 transition hover:border-cam-dat";
+const card = "rounded-2xl border-2 border-beige-kem bg-surface-2 p-5";
+const btn = "rounded-xl bg-burgundy px-4 py-2.5 text-sm font-black text-white transition hover:brightness-95 disabled:opacity-60";
+const ghost = "rounded-xl border-2 border-beige-kem px-3 py-2 text-xs font-bold text-beige-kem/80 transition";
 
 const badge = (m: string) => {
   const map: Record<string, string> = {
-    pending_review: "text-cam-dat border-cam-dat/40 bg-cam-dat/10",
-    approved: "text-la-co border-la-co/40 bg-la-co/10",
-    removed: "text-beige-kem/60 border-beige-kem/20 bg-white/[0.03]",
-    flagged: "text-cam-dat border-cam-dat/40 bg-cam-dat/10",
+    pending_review: "text-on-tint border-beige-kem bg-cam-dat",
+    approved: "text-on-tint border-beige-kem bg-la-co",
+    removed: "text-beige-kem/60 border-beige-kem/25 bg-surface-2",
+    flagged: "text-on-tint border-beige-kem bg-cam-dat",
   };
   const text: Record<string, string> = { pending_review: "Chờ duyệt", approved: "Đã duyệt", removed: "Đã gỡ/từ chối", flagged: "Bị gắn cờ" };
   return <span className={`rounded-lg border px-2 py-0.5 font-mono text-[10px] ${map[m] ?? ""}`}>{text[m] ?? m}</span>;
@@ -128,8 +128,8 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
         <h1 className="font-display text-3xl font-black">Quản lý sự kiện</h1>
         <button onClick={onBack} className={ghost}>← Về trang chủ</button>
       </div>
-      {notice && <div className="rounded-xl border border-la-co/20 bg-la-co/5 p-3 text-xs text-la-co">{notice}</div>}
-      {err && <div className="rounded-xl border border-burgundy/40 bg-burgundy/10 p-3 text-xs">{err}</div>}
+      {notice && <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-xs text-on-tint">{notice}</div>}
+      {err && <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-xs">{err}</div>}
 
       <form onSubmit={createEvent} className={card}>
         <h2 className="mb-3 font-display text-lg font-bold">Tạo sự kiện</h2>
@@ -179,7 +179,7 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
         <div className="space-y-3">
           {events.length === 0 && <p className="text-sm text-beige-kem/60">Chưa có sự kiện nào.</p>}
           {events.map((ev) => (
-            <div key={ev.id} className="rounded-xl border border-beige-kem/10 p-3">
+            <div key={ev.id} className="rounded-xl border-2 border-beige-kem p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <span className="font-bold">{ev.title}</span>
@@ -196,7 +196,7 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
                 </div>
               </div>
               {openEvent === ev.id && (
-                <div className="mt-3 space-y-3 border-t border-beige-kem/10 pt-3">
+                <div className="mt-3 space-y-3 border-t border-beige-kem/25 pt-3">
                   <div className="grid gap-2 sm:grid-cols-2">
                     <select value={stVenue} onChange={(e) => setStVenue(Number(e.target.value) || "")} className={input}>
                       <option value="" className="bg-xanh-pho">Chọn địa điểm</option>

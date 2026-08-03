@@ -5,7 +5,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Showtime } from "@/shared/catalog/types";
-import { MovieEvent } from "../types";
+import { MovieEvent, TicketTier } from "../types";
+import { catalogClient } from "../services/catalogClient";
+import { formatEventDate } from "../services/formatDate";
 import { formatHoldClock } from "../services/holdSession";
 import { watchShowtime } from "../services/seatSocket";
 import SeatMapView from "./SeatMapView";
@@ -90,9 +92,26 @@ export default function EventDetail({
 }: EventDetailProps) {
   const isSeated = event.eventType === "seated";
 
+  /**
+   * The tiers of the selected showtime, with their real `ticket_tiers.id`.
+   *
+   * `event.ticketTiers` cannot be used to buy with: the event detail groups tiers by label across
+   * every showtime, so it has no single row to point at and numbers them by array position instead.
+   * Sending that index as `ticketTierId` reserved nothing — the first tier came out as 0, which the
+   * hold API rejects outright. It is also why live "Còn N vé" never updated: the socket reports the
+   * real id, which matched none of the synthetic ones.
+   *
+   * The summary still drives the display before a showtime is picked, since prices are what the
+   * buyer is comparing at that point.
+   */
+  const [showtimeTiers, setShowtimeTiers] = useState<TicketTier[] | null>(null);
+
   // An event carries at most 4 ticket tiers (enforced server-side); slice defensively so a bad
   // payload can never break the even 1–4 column layout below.
-  const tiers = useMemo(() => event.ticketTiers.slice(0, MAX_TIERS), [event.ticketTiers]);
+  const tiers = useMemo(
+    () => (showtimeTiers ?? event.ticketTiers).slice(0, MAX_TIERS),
+    [showtimeTiers, event.ticketTiers],
+  );
   // Divide the row evenly by tier count so 1/2/3/4 tiers each fill the width (mobile stays single
   // column, and 4 tiers fall to two rows of two on a narrow screen).
   const tierGridClass =
@@ -167,13 +186,52 @@ export default function EventDetail({
    */
   const [liveRemaining, setLiveRemaining] = useState<Record<string, number | null>>({});
 
+  // Load the real tiers as soon as a general-admission showtime is chosen — the quantity steppers
+  // must be bound to ids the hold API accepts, not to the detail summary's positions.
+  useEffect(() => {
+    const showtimeId = selectedSlot?.showtimeId;
+    if (isSeated || !showtimeId) {
+      setShowtimeTiers(null);
+      return;
+    }
+    let cancelled = false;
+    catalogClient
+      .getSeatMap(showtimeId)
+      .then((map) => {
+        if (cancelled) return;
+        setShowtimeTiers(
+          (map.tiers ?? []).map((tier) => ({
+            id: String(tier.id),
+            label: tier.label,
+            price: tier.price,
+            remaining: tier.remaining,
+            // The seat map carries no copy; reuse the summary's blurb for the same tier so the
+            // cards do not lose their description the moment a showtime is picked.
+            description:
+              event.ticketTiers.find((summary) => summary.label === tier.label)?.description ?? "",
+          })),
+        );
+      })
+      .catch(() => {
+        // Keep showing the summary rather than an empty picker; the buy button stays disabled
+        // because nothing can be selected without a tier the server knows.
+        if (!cancelled) setShowtimeTiers(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSeated, selectedSlot?.showtimeId, event.ticketTiers]);
+
   useEffect(() => {
     setLiveRemaining({});
     const showtimeId = selectedSlot?.showtimeId;
     if (isSeated || !showtimeId) return;
     return watchShowtime(showtimeId, (update) => {
       if (!update.tier) return;
-      setLiveRemaining((current) => ({ ...current, [String(update.tier!.ticketTierId)]: update.tier!.remaining }));
+      setLiveRemaining((current) => ({
+        ...current,
+        [String(update.tier!.ticketTierId)]: update.tier!.remaining,
+      }));
     });
   }, [isSeated, selectedSlot?.showtimeId]);
 
@@ -194,10 +252,7 @@ export default function EventDetail({
   const totalPrice = selection.reduce((sum, line) => sum + line.quantity * line.price, 0);
 
   const bookingDisabled =
-    eventUnavailable ||
-    !selectedSlot ||
-    selectedSlot.soldOut ||
-    (!isSeated && totalQuantity === 0);
+    eventUnavailable || !selectedSlot || selectedSlot.soldOut || (!isSeated && totalQuantity === 0);
 
   const isWishlisted = wishlistedIds.includes(event.id);
 
@@ -207,7 +262,9 @@ export default function EventDetail({
 
   const tierCap = (tier: MovieEvent["ticketTiers"][number]) => {
     const remaining = remainingOf(tier);
-    return remaining === null || remaining === undefined ? MAX_PER_TIER : Math.min(remaining, MAX_PER_TIER);
+    return remaining === null || remaining === undefined
+      ? MAX_PER_TIER
+      : Math.min(remaining, MAX_PER_TIER);
   };
 
   const adjustQuantity = (tierId: string, delta: number, cap: number) => {
@@ -220,8 +277,15 @@ export default function EventDetail({
   const handlePrimaryAction = () => {
     if (!selectedSlot) return;
     // The showtime id is what the hold API locks against — carry it, not just the display strings.
-    if (isSeated) onProceedToSeatSelection(selectedSlot.showtimeId, selectedSlot.date, selectedSlot.time);
-    else onProceedToQuantityCheckout(selection, selectedSlot.showtimeId, selectedSlot.date, selectedSlot.time);
+    if (isSeated)
+      onProceedToSeatSelection(selectedSlot.showtimeId, selectedSlot.date, selectedSlot.time);
+    else
+      onProceedToQuantityCheckout(
+        selection,
+        selectedSlot.showtimeId,
+        selectedSlot.date,
+        selectedSlot.time,
+      );
   };
 
   const primaryLabel = eventUnavailable
@@ -240,34 +304,44 @@ export default function EventDetail({
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
-      <div className="flex flex-col gap-4 border-b border-beige-kem/10 pb-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 border-b border-beige-kem/25 pb-4 sm:flex-row sm:items-center sm:justify-between">
         <button
           onClick={onBack}
-          className="flex items-center gap-2 font-mono text-sm text-la-co transition hover:text-beige-kem"
+          className="flex items-center gap-2 font-mono text-sm text-ink-soft transition hover:text-beige-kem"
         >
           Quay lại danh sách
         </button>
 
-        <div className="flex flex-wrap items-center gap-3 font-mono text-xs text-beige-kem/45">
-          <span className="font-semibold text-burgundy">01 Chọn suất</span>
-          <span className="h-px w-6 bg-beige-kem/20" />
+        {/*
+          The connectors carry the text colour so the three steps read as one line rather than as
+          three loose labels — a tint here washes out against the page in light mode. The current
+          step is a filled chip instead of tomato text: tomato only clears 4.45:1 on cream, which is
+          under AA for a label this size.
+        */}
+        <div className="flex flex-wrap items-center gap-3 font-mono text-xs text-ink-soft">
+          <span className="rounded-full bg-bubblegum px-2.5 py-1 font-bold text-on-tint">
+            01 Chọn suất
+          </span>
+          <span className="h-0.5 w-6 bg-beige-kem" />
           <span>02 {isSeated ? "Chọn ghế" : "Chọn số lượng vé"}</span>
-          <span className="h-px w-6 bg-beige-kem/20" />
+          <span className="h-0.5 w-6 bg-beige-kem" />
           <span>03 Thanh toán</span>
 
           {/* A hold placed further along the flow is still running while the buyer looks back here. */}
           {restoreHold && holdRemainingMs > 0 && (
-            <span className="inline-flex items-center gap-2 rounded-lg border border-cam-dat/30 bg-cam-dat/5 px-2.5 py-1 text-cam-dat">
+            <span className="inline-flex items-center gap-2 rounded-lg border-2 border-beige-kem bg-cam-dat px-2.5 py-1 text-on-tint">
               Đang giữ chỗ
-              <b className="text-sm font-black text-beige-kem">{formatHoldClock(holdRemainingMs)}</b>
+              <b className="text-sm font-black text-beige-kem">
+                {formatHoldClock(holdRemainingMs)}
+              </b>
             </span>
           )}
         </div>
       </div>
 
       <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-12">
-        <aside className="space-y-6 rounded-2xl border border-beige-kem/10 bg-xanh-pho/50 p-5 lg:col-span-5">
-          <div className="relative aspect-[4/3] overflow-hidden rounded-2xl shadow-2xl">
+        <aside className="space-y-6 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-5 lg:col-span-5">
+          <div className="relative aspect-[4/3] overflow-hidden rounded-2xl shadow-hard">
             <img
               src={event.imageUrl}
               alt={event.title}
@@ -277,12 +351,12 @@ export default function EventDetail({
             <div className="absolute inset-0 bg-gradient-to-t from-xanh-pho/90 via-transparent to-transparent" />
             <button
               onClick={() => onToggleWishlist(event.id)}
-              className="absolute right-4 top-4 inline-flex h-10 items-center justify-center rounded-full border border-white/25 bg-black/35 px-3 text-[10px] font-bold uppercase text-white backdrop-blur transition hover:bg-white hover:text-xanh-pho"
+              className="absolute right-4 top-4 inline-flex h-10 items-center justify-center rounded-full border border-white/25 bg-black/35 px-3 text-[10px] font-bold uppercase text-white transition hover:bg-white hover:text-xanh-pho"
               title="Wishlist hoặc nhắc lịch"
             >
               {isWishlisted ? "Đã lưu" : "Lưu"}
             </button>
-            <div className="absolute bottom-4 left-4 rounded-lg bg-burgundy px-3 py-1 font-mono text-xs font-bold text-beige-kem shadow">
+            <div className="absolute bottom-4 left-4 rounded-lg bg-burgundy px-3 py-1 font-mono text-xs font-bold text-white shadow">
               {statusLabels[event.status]} / còn {event.ticketsLeft} vé
             </div>
           </div>
@@ -292,7 +366,7 @@ export default function EventDetail({
               <span className="rounded bg-cam-dat px-2 py-0.5 font-mono text-xs font-bold text-xanh-pho">
                 {event.ageRating}
               </span>
-              <span className="font-mono text-xs font-semibold text-la-co">
+              <span className="font-mono text-xs font-semibold text-ink-soft">
                 {event.rating} / {event.reviewCount} đánh giá
               </span>
             </div>
@@ -302,32 +376,32 @@ export default function EventDetail({
                 {event.title}
               </h2>
               {event.originalTitle && (
-                <p className="mt-1 font-mono text-sm text-cam-dat">{event.originalTitle}</p>
+                <p className="mt-1 font-mono text-sm text-ink-soft">{event.originalTitle}</p>
               )}
             </div>
 
-            <p className="rounded-xl border border-beige-kem/10 bg-beige-kem/5 p-3 text-xs leading-relaxed text-la-co">
+            <p className="rounded-xl border-2 border-beige-kem bg-surface-2 p-3 text-xs leading-relaxed text-ink-soft">
               <span className="mb-1 block font-semibold text-beige-kem">Độ tuổi phù hợp</span>
               {event.ageDescription}
             </p>
 
             <p className="text-sm leading-7 text-beige-kem/80">{event.description}</p>
 
-            <div className="space-y-3 border-t border-beige-kem/10 pt-4 text-xs text-beige-kem/72">
+            <div className="space-y-3 border-t border-beige-kem/25 pt-4 text-xs text-beige-kem/72">
               <div className="flex items-center gap-3">
-                <span className="font-bold text-cam-dat">Thời lượng</span>
+                <span className="font-bold text-ink-soft">Thời lượng</span>
                 <span>{event.duration} phút</span>
               </div>
               <div className="flex items-center gap-3">
-                <span className="font-bold text-cam-dat">Thể loại</span>
+                <span className="font-bold text-ink-soft">Thể loại</span>
                 <span>{event.genre.join(", ")}</span>
               </div>
               <div className="flex items-center gap-3">
-                <span className="font-bold text-cam-dat">Đơn vị/nghệ sĩ</span>
+                <span className="font-bold text-ink-soft">Đơn vị/nghệ sĩ</span>
                 <span>{event.cast.join(", ")}</span>
               </div>
               <div className="flex items-start gap-3">
-                <span className="shrink-0 font-bold text-cam-dat">Địa điểm</span>
+                <span className="shrink-0 font-bold text-ink-soft">Địa điểm</span>
                 <span>{event.location}</span>
               </div>
             </div>
@@ -337,12 +411,12 @@ export default function EventDetail({
         <div className="space-y-6 lg:col-span-7">
           {/* Step 01 — Chọn suất. Placed first so the on-screen order matches the flow the
               step indicator promises (Chọn suất → Chọn vé → Thanh toán). */}
-          <section className="rounded-2xl border border-beige-kem/10 bg-xanh-pho/40 p-6">
+          <section className="rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6">
             <h3 className="mb-4 font-display text-lg font-black text-beige-kem">
-              <span className="font-mono text-xs text-cam-dat">01 · </span>Chọn suất
+              <span className="font-mono text-xs text-ink-soft">01 · </span>Chọn suất
             </h3>
             {slots.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-beige-kem/15 py-6 text-center text-xs text-beige-kem/45">
+              <p className="rounded-xl border border-dashed border-beige-kem/25 py-6 text-center text-xs text-beige-kem/45">
                 Chưa có suất nào đang mở bán.
               </p>
             ) : (
@@ -354,14 +428,14 @@ export default function EventDetail({
                       key={slot.key}
                       onClick={() => setSelectedSlotKey(slot.key)}
                       disabled={slot.soldOut}
-                      className={`rounded-xl border p-3 text-left transition ${
+                      className={`rounded-xl border-2 p-3 text-left transition ${
                         isSelected
-                          ? "border-burgundy bg-burgundy text-beige-kem"
-                          : "border-beige-kem/10 bg-white/[0.035] text-beige-kem/78 hover:border-cam-dat"
-                      } disabled:cursor-not-allowed disabled:border-beige-kem/10 disabled:bg-white/[0.02] disabled:text-beige-kem/30`}
+                          ? "border-beige-kem bg-burgundy text-white"
+                          : "border-beige-kem bg-surface-2 text-beige-kem hover:border-burgundy"
+                      } disabled:cursor-not-allowed disabled:border-ink-soft disabled:bg-surface-2 disabled:text-ink-soft`}
                     >
                       <span className="block font-mono text-sm font-bold">
-                        {slot.date} · {slot.time}
+                        {formatEventDate(slot.date, true)} · {slot.time}
                       </span>
                       <span className="mt-0.5 block font-mono text-[11px] opacity-70">
                         {slot.venue}
@@ -375,8 +449,10 @@ export default function EventDetail({
           </section>
 
           {isSeated && selectedSlot?.showtimeId !== null && selectedSlot && (
-            <section className="rounded-2xl border border-beige-kem/10 bg-xanh-pho/40 p-6">
-              <h3 className="mb-1 font-display text-lg font-black text-beige-kem">Tình trạng ghế</h3>
+            <section className="rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6">
+              <h3 className="mb-1 font-display text-lg font-black text-beige-kem">
+                Tình trạng ghế
+              </h3>
               <p className="mb-4 font-mono text-[11px] text-beige-kem/50">
                 Xem trước chỗ còn trống của suất đã chọn. Chọn ghế ở bước sau.
               </p>
@@ -385,9 +461,9 @@ export default function EventDetail({
           )}
 
           {/* Step 02 — Chọn vé (seat tiers for a seated event, quantity per tier for GA). */}
-          <section className="rounded-2xl border border-beige-kem/10 bg-xanh-pho/40 p-6">
+          <section className="rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6">
             <h3 className="mb-1 font-display text-xl font-black text-beige-kem">
-              <span className="font-mono text-xs text-cam-dat">02 · </span>
+              <span className="font-mono text-xs text-ink-soft">02 · </span>
               {isSeated ? "Hạng vé đang bán" : "Chọn số lượng vé"}
             </h3>
             <p className="mb-4 font-mono text-[11px] text-beige-kem/50">
@@ -402,14 +478,18 @@ export default function EventDetail({
                      tile — no card border, no hover — so it never reads as a tappable button. */
                   <div key={tier.id} className="border-l-2 border-cam-dat/40 pl-3">
                     <div className="flex items-center gap-2">
-                      <span className="font-display text-base font-black text-beige-kem">{tier.label}</span>
+                      <span className="font-display text-base font-black text-beige-kem">
+                        {tier.label}
+                      </span>
                       {tier.badge && (
-                        <span className="rounded-full border border-cam-dat/35 bg-cam-dat/10 px-2 py-0.5 font-mono text-[10px] font-bold text-cam-dat">
+                        <span className="rounded-full border-2 border-beige-kem bg-cam-dat px-2 py-0.5 font-mono text-[10px] font-bold text-on-tint">
                           {tier.badge}
                         </span>
                       )}
                     </div>
-                    <p className="mt-1 font-mono text-sm font-bold text-cam-dat">{formatPrice(tier.price)}</p>
+                    <p className="mt-1 font-mono text-sm font-bold text-ink-soft">
+                      {formatPrice(tier.price)}
+                    </p>
                     {tier.description && (
                       <p className="mt-1 text-xs leading-5 text-beige-kem/62">{tier.description}</p>
                     )}
@@ -424,19 +504,25 @@ export default function EventDetail({
                     return (
                       <div
                         key={tier.id}
-                        className="flex flex-col rounded-xl border border-beige-kem/10 bg-white/[0.035] p-4"
+                        className="flex flex-col rounded-xl border-2 border-beige-kem bg-surface-2 p-4"
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-display text-base font-black text-beige-kem">{tier.label}</span>
+                          <span className="font-display text-base font-black text-beige-kem">
+                            {tier.label}
+                          </span>
                           {tier.badge && (
-                            <span className="rounded-full border border-cam-dat/35 bg-cam-dat/10 px-2 py-0.5 font-mono text-[10px] font-bold text-cam-dat">
+                            <span className="rounded-full border-2 border-beige-kem bg-cam-dat px-2 py-0.5 font-mono text-[10px] font-bold text-on-tint">
                               {tier.badge}
                             </span>
                           )}
                         </div>
-                        <p className="mt-2 font-mono text-sm font-bold text-cam-dat">{formatPrice(tier.price)}</p>
+                        <p className="mt-2 font-mono text-sm font-bold text-ink-soft">
+                          {formatPrice(tier.price)}
+                        </p>
                         {tier.description && (
-                          <p className="mt-2 text-xs leading-5 text-beige-kem/62">{tier.description}</p>
+                          <p className="mt-2 text-xs leading-5 text-beige-kem/62">
+                            {tier.description}
+                          </p>
                         )}
                         <p className="mt-2 font-mono text-[11px] text-beige-kem/55">
                           {remainingOf(tier) === null || remainingOf(tier) === undefined
@@ -445,23 +531,25 @@ export default function EventDetail({
                               ? "Hết vé"
                               : `Còn ${remainingOf(tier)} vé`}
                         </p>
-                        <div className="mt-3 flex items-center justify-between gap-2 border-t border-beige-kem/10 pt-3">
+                        <div className="mt-3 flex items-center justify-between gap-2 border-t border-beige-kem/25 pt-3">
                           <button
                             type="button"
                             onClick={() => adjustQuantity(tier.id, -1, cap)}
                             disabled={quantity === 0}
                             aria-label={`Bớt vé ${tier.label}`}
-                            className="grid h-8 w-8 place-items-center rounded-lg border border-beige-kem/20 font-mono text-sm font-bold text-beige-kem transition hover:border-cam-dat disabled:cursor-not-allowed disabled:opacity-30"
+                            className="grid h-8 w-8 place-items-center rounded-lg border-2 border-beige-kem font-mono text-sm font-bold text-beige-kem transition disabled:cursor-not-allowed disabled:opacity-30"
                           >
                             −
                           </button>
-                          <span className="font-mono text-base font-black text-beige-kem">{quantity}</span>
+                          <span className="font-mono text-base font-black text-beige-kem">
+                            {quantity}
+                          </span>
                           <button
                             type="button"
                             onClick={() => adjustQuantity(tier.id, 1, cap)}
                             disabled={soldOut || quantity >= cap}
                             aria-label={`Thêm vé ${tier.label}`}
-                            className="grid h-8 w-8 place-items-center rounded-lg border border-beige-kem/20 font-mono text-sm font-bold text-beige-kem transition hover:border-cam-dat disabled:cursor-not-allowed disabled:opacity-30"
+                            className="grid h-8 w-8 place-items-center rounded-lg border-2 border-beige-kem font-mono text-sm font-bold text-beige-kem transition disabled:cursor-not-allowed disabled:opacity-30"
                           >
                             +
                           </button>
@@ -475,29 +563,30 @@ export default function EventDetail({
           </section>
 
           <section className="grid gap-4 md:grid-cols-3">
-            <div className="rounded-2xl border border-la-co/25 bg-la-co/5 p-4">
+            <div className="rounded-2xl border-2 border-beige-kem bg-la-co p-4">
               <h4 className="font-display font-bold text-beige-kem">Hoàn/đổi vé</h4>
               <p className="mt-2 text-xs leading-5 text-beige-kem/68">{event.refundPolicy}</p>
             </div>
-            <div className="rounded-2xl border border-cam-dat/25 bg-cam-dat/5 p-4">
+            <div className="rounded-2xl border-2 border-beige-kem bg-cam-dat p-4">
               <h4 className="font-display font-bold text-beige-kem">Hướng dẫn đến nơi</h4>
               <p className="mt-2 text-xs leading-5 text-beige-kem/68">{event.venueGuide}</p>
             </div>
-            <div className="rounded-2xl border border-burgundy/30 bg-burgundy/5 p-4">
+            <div className="rounded-2xl border-2 border-beige-kem bg-bubblegum p-4">
               <h4 className="font-display font-bold text-beige-kem">Nhắc lịch</h4>
               <p className="mt-2 text-xs leading-5 text-beige-kem/68">
-                Bấm Lưu để thêm vào wishlist và nhắc lịch gần ngày diễn. Trạng thái này đang lưu local trong frontend.
+                Bấm Lưu để thêm vào wishlist và nhắc lịch gần ngày diễn. Trạng thái này đang lưu
+                local trong frontend.
               </p>
             </div>
           </section>
 
-          <section className="rounded-2xl border border-beige-kem/10 bg-xanh-pho/40 p-6">
+          <section className="rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-1">
-                <p className="font-mono text-xs uppercase text-la-co">Suất bạn chọn</p>
+                <p className="font-mono text-xs uppercase text-ink-soft">Suất bạn chọn</p>
                 <h4 className="font-display text-lg font-black text-beige-kem">
                   {selectedSlot
-                    ? `${selectedSlot.date} · ${selectedSlot.time} · ${selectedSlot.venue}`
+                    ? `${formatEventDate(selectedSlot.date, true)} · ${selectedSlot.time} · ${selectedSlot.venue}`
                     : "Chưa chọn suất"}
                 </h4>
                 {!isSeated && (
@@ -514,7 +603,7 @@ export default function EventDetail({
                 <button
                   onClick={handlePrimaryAction}
                   disabled={bookingDisabled}
-                  className="inline-flex items-center justify-center rounded-xl bg-burgundy px-7 py-4 text-sm font-black text-beige-kem shadow-xl transition hover:bg-burgundy/90 disabled:cursor-not-allowed disabled:bg-beige-kem/10 disabled:text-beige-kem/35"
+                  className="inline-flex items-center justify-center rounded-xl bg-burgundy px-7 py-4 text-sm font-black text-white shadow-hard transition hover:brightness-95 disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-white/60"
                 >
                   {primaryLabel}
                 </button>
@@ -528,14 +617,16 @@ export default function EventDetail({
           </section>
 
           {relatedEvents.length > 0 && (
-            <section className="rounded-2xl border border-beige-kem/10 bg-white/[0.025] p-6">
-              <h3 className="mb-4 font-display text-xl font-black text-beige-kem">Gợi ý tương tự</h3>
+            <section className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-6">
+              <h3 className="mb-4 font-display text-xl font-black text-beige-kem">
+                Gợi ý tương tự
+              </h3>
               <div className="grid gap-3 md:grid-cols-3">
                 {relatedEvents.map((related) => (
                   <button
                     key={related.id}
                     onClick={() => onBookRelated(related)}
-                    className="group overflow-hidden rounded-xl border border-beige-kem/10 bg-xanh-pho text-left transition hover:border-cam-dat"
+                    className="group overflow-hidden rounded-xl border-2 border-beige-kem bg-xanh-pho text-left transition"
                   >
                     <img
                       src={related.imageUrl}
@@ -544,8 +635,12 @@ export default function EventDetail({
                       className="h-24 w-full object-cover transition duration-500 group-hover:scale-105"
                     />
                     <span className="block p-3">
-                      <span className="line-clamp-2 font-display text-sm font-bold text-beige-kem">{related.title}</span>
-                      <span className="mt-1 block font-mono text-[11px] text-cam-dat">{formatPrice(related.price)}</span>
+                      <span className="line-clamp-2 font-display text-sm font-bold text-beige-kem">
+                        {related.title}
+                      </span>
+                      <span className="mt-1 block font-mono text-[11px] text-ink-soft">
+                        {formatPrice(related.price)}
+                      </span>
                     </span>
                   </button>
                 ))}

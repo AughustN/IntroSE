@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { formatEventDate } from "../services/formatDate";
+
 interface EventFiltersProps {
   activeCategory: string;
   onCategoryChange: (category: string) => void;
@@ -15,6 +17,12 @@ interface EventFiltersProps {
   availability: string;
   onAvailabilityChange: (status: string) => void;
   wishlistCount: number;
+  /**
+   * Every date the loaded events actually run on, ISO and ascending. Derived from the catalog rather
+   * than hardcoded: the option value is compared against `movie.dates` verbatim, so a fixed list
+   * silently stops matching the moment the catalog moves on.
+   */
+  dateOptions: string[];
 }
 
 const categories = [
@@ -24,7 +32,6 @@ const categories = [
   { id: "theatre", label: "Kịch" },
 ];
 
-const dateOptions = ["all", "Hôm nay", "Ngày mai", "11/06", "12/06", "13/06", "20/06"];
 const cityOptions = ["all", "TP.HCM", "Hà Nội", "Đà Nẵng"];
 
 export default function EventFilters({
@@ -39,6 +46,7 @@ export default function EventFilters({
   availability,
   onAvailabilityChange,
   wishlistCount,
+  dateOptions,
 }: EventFiltersProps) {
   const formatPrice = (price: number) =>
     new Intl.NumberFormat("vi-VN", {
@@ -48,11 +56,11 @@ export default function EventFilters({
     }).format(price);
 
   return (
-    <section className="border-b border-beige-kem/10 bg-xanh-pho px-4 py-6 sm:px-6 lg:px-8">
+    <section className="border-b border-beige-kem/25 bg-xanh-pho px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[92rem]">
         <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="font-mono text-[11px] font-bold uppercase tracking-normal text-cam-dat">
+            <p className="font-mono text-[11px] font-bold uppercase tracking-normal text-ink-soft">
               Bộ lọc nhanh
             </p>
             <h2 className="font-display text-xl font-black text-beige-kem">
@@ -64,8 +72,8 @@ export default function EventFilters({
           </p>
         </div>
 
-        <div className="grid gap-3 rounded-2xl border border-beige-kem/10 bg-white/[0.035] p-3 shadow-2xl shadow-black/10 lg:grid-cols-12">
-          <div className="flex min-w-0 flex-wrap items-center gap-1 rounded-xl border border-beige-kem/10 bg-xanh-pho/70 p-1 lg:col-span-4">
+        <div className="grid gap-3 rounded-2xl border-2 border-beige-kem bg-surface-2 p-3 shadow-hard shadow-black/10 lg:grid-cols-12">
+          <div className="flex min-w-0 flex-wrap items-center gap-1 rounded-xl border-2 border-beige-kem bg-xanh-pho p-1 lg:col-span-4">
             {categories.map((cat) => (
               <button
                 key={cat.id}
@@ -73,7 +81,7 @@ export default function EventFilters({
                 className={`h-9 min-w-fit rounded-lg px-3 text-xs font-bold transition ${
                   activeCategory === cat.id
                     ? "bg-beige-kem text-xanh-pho"
-                    : "text-beige-kem/72 hover:bg-white/[0.06] hover:text-beige-kem"
+                    : "text-beige-kem/72 hover:bg-surface-2 hover:text-beige-kem"
                 }`}
               >
                 {cat.label}
@@ -85,11 +93,11 @@ export default function EventFilters({
             <select
               value={activeDate}
               onChange={(e) => onDateChange(e.target.value)}
-              className="h-11 w-full appearance-none rounded-xl border border-beige-kem/10 bg-xanh-pho/70 px-4 text-xs font-bold text-beige-kem outline-none focus:border-cam-dat"
+              className="h-11 w-full appearance-none rounded-xl border-2 border-beige-kem bg-xanh-pho px-4 text-xs font-bold text-beige-kem outline-none focus:border-burgundy"
             >
-              {dateOptions.map((date) => (
+              {["all", ...dateOptions].map((date) => (
                 <option key={date} value={date} className="bg-xanh-pho">
-                  {date === "all" ? "Mọi ngày" : date}
+                  {date === "all" ? "Mọi ngày" : formatEventDate(date, true)}
                 </option>
               ))}
             </select>
@@ -99,7 +107,7 @@ export default function EventFilters({
             <select
               value={activeCity}
               onChange={(e) => onCityChange(e.target.value)}
-              className="h-11 w-full appearance-none rounded-xl border border-beige-kem/10 bg-xanh-pho/70 px-4 text-xs font-bold text-beige-kem outline-none focus:border-cam-dat"
+              className="h-11 w-full appearance-none rounded-xl border-2 border-beige-kem bg-xanh-pho px-4 text-xs font-bold text-beige-kem outline-none focus:border-burgundy"
             >
               {cityOptions.map((city) => (
                 <option key={city} value={city} className="bg-xanh-pho">
@@ -109,10 +117,10 @@ export default function EventFilters({
             </select>
           </label>
 
-          <label className="rounded-xl border border-beige-kem/10 bg-xanh-pho/70 px-3 py-2 lg:col-span-2">
+          <label className="rounded-xl border-2 border-beige-kem bg-xanh-pho px-3 py-2 lg:col-span-2">
             <span className="flex items-center justify-between text-[10px] font-bold uppercase text-beige-kem/60">
               <span>Giá tối đa</span>
-              <span className="text-cam-dat">{formatPrice(maxPrice)}</span>
+              <span className="text-ink-soft">{formatPrice(maxPrice)}</span>
             </span>
             <input
               type="range"
@@ -129,7 +137,7 @@ export default function EventFilters({
             <select
               value={availability}
               onChange={(e) => onAvailabilityChange(e.target.value)}
-              className="h-11 rounded-xl border border-beige-kem/10 bg-xanh-pho/70 px-3 text-xs font-bold text-beige-kem outline-none focus:border-cam-dat"
+              className="h-11 rounded-xl border-2 border-beige-kem bg-xanh-pho px-3 text-xs font-bold text-beige-kem outline-none focus:border-burgundy"
             >
               <option value="all" className="bg-xanh-pho">Mọi trạng thái</option>
               <option value="available" className="bg-xanh-pho">Còn vé</option>
@@ -137,7 +145,7 @@ export default function EventFilters({
               <option value="sold_out" className="bg-xanh-pho">Hết vé</option>
               <option value="cancelled" className="bg-xanh-pho">Đã hủy</option>
             </select>
-            <span className="inline-flex h-11 items-center rounded-xl border border-burgundy/30 bg-burgundy/10 px-3 text-xs font-bold text-beige-kem">
+            <span className="inline-flex h-11 items-center rounded-xl border-2 border-beige-kem bg-bubblegum px-3 text-xs font-bold text-on-tint">
               Lưu {wishlistCount}
             </span>
           </div>

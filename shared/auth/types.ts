@@ -1,8 +1,8 @@
 // One typed contract shared by server and web (Constitution Principle VI).
 // Derived from src/specs/001-account-auth/contracts/auth.openapi.yaml.
 
-export type Provider = 'email' | 'google';
-export type AccountStatus = 'active' | 'suspended';
+export type Provider = "email" | "google";
+export type AccountStatus = "active" | "suspended";
 
 /** Current account, as returned by GET /api/me and inside AuthSuccess. */
 export interface Me {
@@ -30,34 +30,40 @@ export interface ApiError {
   error: AuthErrorCode | string;
   /** Vietnamese, user-facing. */
   message?: string;
+  /**
+   * Machine-readable numbers the client needs to act on the refusal rather than only report it —
+   * the shortfall on `insufficient_wallet_balance` (UC-12 A2), the maximum still addable on
+   * `wallet_cap_exceeded` (UC-40 A2). Never carries anything secret: this is sent to the browser.
+   */
+  details?: Record<string, number | string>;
 }
 
 /** Stable machine codes the frontend switches on. */
 export type AuthErrorCode =
-  | 'validation_failed'
-  | 'password_mismatch'
-  | 'weak_password'
-  | 'email_taken'
-  | 'phone_taken'
-  | 'email_registered_with_google'
-  | 'email_registered_with_password'
-  | 'invalid_credentials'
-  | 'account_suspended'
-  | 'account_uses_google'
-  | 'invalid_or_revoked_session'
-  | 'session_expired'
-  | 'invalid_session'
-  | 'session_revoked'
-  | 'invalid_or_expired_token'
-  | 'unauthenticated'
-  | 'wrong_current_password'
-  | 'invalid_image'
-  | 'file_too_large'
-  | 'already_pending'
-  | 'already_approved'
-  | 'suspended_cannot_reapply'
-  | 'invalid_google_credential'
-  | 'rate_limited';
+  | "validation_failed"
+  | "password_mismatch"
+  | "weak_password"
+  | "email_taken"
+  | "phone_taken"
+  | "email_registered_with_google"
+  | "email_registered_with_password"
+  | "invalid_credentials"
+  | "account_suspended"
+  | "account_uses_google"
+  | "invalid_or_revoked_session"
+  | "session_expired"
+  | "invalid_session"
+  | "session_revoked"
+  | "invalid_or_expired_token"
+  | "unauthenticated"
+  | "wrong_current_password"
+  | "invalid_image"
+  | "file_too_large"
+  | "already_pending"
+  | "already_approved"
+  | "suspended_cannot_reapply"
+  | "invalid_google_credential"
+  | "rate_limited";
 
 // ---- Request bodies (email/password flows) ----
 

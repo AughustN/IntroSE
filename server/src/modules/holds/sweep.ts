@@ -34,7 +34,12 @@ let timer: NodeJS.Timeout | null = null;
 export function startHoldSweep(intervalMs = HOLD_SWEEP_INTERVAL_MS): void {
   if (timer) return;
   timer = setInterval(() => {
-    void sweepExpiredHolds();
+    // A database blip must not take the API down with it. `findExpiredActive` runs before the
+    // per-reservation try/catch inside the sweep, so without this its rejection is unhandled and
+    // Node exits the whole process — one lost DNS lookup logged out every signed-in user.
+    void sweepExpiredHolds().catch((e) => {
+      console.error("hold sweep failed:", e instanceof Error ? e.message : e);
+    });
   }, intervalMs);
   // Never keep the process alive just to sweep.
   timer.unref?.();

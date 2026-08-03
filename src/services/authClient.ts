@@ -11,7 +11,22 @@ import type {
   RegisterBody,
   ResetBody,
   UpdateMeBody,
-} from '@/shared/auth/types';
+} from "@/shared/auth/types";
+
+/** Mirrors `OrganizerApplication` as GET /api/organizers/me returns it (newest first). */
+export interface OrganizerApplicationView {
+  id: number;
+  status: "pending" | "approved" | "rejected" | "suspended";
+  display_name: string;
+  description: string | null;
+  review_note: string | null;
+  applied_at: string;
+}
+
+export interface OrganizerStatusResponse {
+  isOrganizer: boolean;
+  applications: OrganizerApplicationView[];
+}
 
 let accessToken: string | null = null;
 export const getAccessToken = (): string | null => accessToken;
@@ -29,16 +44,21 @@ export class ApiClientError extends Error {
   }
 }
 
-type Options = { method?: string; body?: unknown; auth?: boolean; headers?: Record<string, string> };
+type Options = {
+  method?: string;
+  body?: unknown;
+  auth?: boolean;
+  headers?: Record<string, string>;
+};
 
 async function raw(path: string, opts: Options = {}): Promise<Response> {
   const headers: Record<string, string> = { ...opts.headers };
-  if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
+  if (opts.body !== undefined) headers["Content-Type"] = "application/json";
   if (opts.auth && accessToken) headers.Authorization = `Bearer ${accessToken}`;
   return fetch(`/api${path}`, {
-    method: opts.method ?? 'GET',
+    method: opts.method ?? "GET",
     headers,
-    credentials: 'include', // send/receive the tix_refresh cookie
+    credentials: "include", // send/receive the tix_refresh cookie
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   });
 }
@@ -47,7 +67,7 @@ async function parse<T>(res: Response): Promise<T> {
   const data = res.status === 204 ? null : await res.json().catch(() => null);
   if (!res.ok) {
     const err = (data ?? {}) as { error?: string; message?: string };
-    throw new ApiClientError(res.status, err.error ?? 'error', err.message);
+    throw new ApiClientError(res.status, err.error ?? "error", err.message);
   }
   return data as T;
 }
@@ -59,7 +79,7 @@ let refreshing: Promise<boolean> | null = null;
 function doRefresh(): Promise<boolean> {
   if (!refreshing) {
     const key = crypto.randomUUID();
-    refreshing = raw('/auth/refresh', { method: 'POST', headers: { 'x-idempotency-key': key } })
+    refreshing = raw("/auth/refresh", { method: "POST", headers: { "x-idempotency-key": key } })
       .then(async (res) => {
         if (!res.ok) {
           setToken(null);
@@ -92,7 +112,9 @@ async function authed<T>(path: string, opts: Options = {}): Promise<T> {
  * seat map above all — will eventually send a stale one. Without this, that reads to the user as
  * "please sign in" while their refresh cookie is still perfectly valid.
  */
-export async function withAuthRetry(send: (token: string | null) => Promise<Response>): Promise<Response> {
+export async function withAuthRetry(
+  send: (token: string | null) => Promise<Response>,
+): Promise<Response> {
   let res = await send(accessToken);
   if (res.status === 401 && (await doRefresh())) res = await send(accessToken);
   return res;
@@ -102,30 +124,32 @@ export async function withAuthRetry(send: (token: string | null) => Promise<Resp
 
 export const authClient = {
   async register(body: RegisterBody): Promise<Me> {
-    const data = await parse<AuthSuccess>(await raw('/auth/register', { method: 'POST', body }));
+    const data = await parse<AuthSuccess>(await raw("/auth/register", { method: "POST", body }));
     setToken(data.accessToken);
     return data.user;
   },
 
   async login(body: LoginBody): Promise<Me> {
-    const data = await parse<AuthSuccess>(await raw('/auth/login', { method: 'POST', body }));
+    const data = await parse<AuthSuccess>(await raw("/auth/login", { method: "POST", body }));
     setToken(data.accessToken);
     return data.user;
   },
 
   async loginWithGoogle(credential: string): Promise<Me> {
-    const data = await parse<AuthSuccess>(await raw('/auth/oauth/google', { method: 'POST', body: { credential } }));
+    const data = await parse<AuthSuccess>(
+      await raw("/auth/oauth/google", { method: "POST", body: { credential } }),
+    );
     setToken(data.accessToken);
     return data.user;
   },
 
   async logout(): Promise<void> {
-    await authed<void>('/auth/logout', { method: 'POST' });
+    await authed<void>("/auth/logout", { method: "POST" });
     setToken(null);
   },
 
   async logoutAll(): Promise<void> {
-    await authed<void>('/auth/logout-all', { method: 'POST' });
+    await authed<void>("/auth/logout-all", { method: "POST" });
     setToken(null);
   },
 
@@ -136,44 +160,48 @@ export const authClient = {
   },
 
   me(): Promise<Me> {
-    return authed<Me>('/me');
+    return authed<Me>("/me");
   },
 
   async forgotPassword(body: ForgotBody): Promise<void> {
     // Always a uniform 200 (unless rate-limited); nothing to read.
-    await raw('/auth/password/forgot', { method: 'POST', body });
+    await raw("/auth/password/forgot", { method: "POST", body });
   },
 
   async resetPassword(body: ResetBody): Promise<void> {
-    await parse<{ ok: true }>(await raw('/auth/password/reset', { method: 'POST', body }));
+    await parse<{ ok: true }>(await raw("/auth/password/reset", { method: "POST", body }));
   },
 
   changePassword(body: ChangePasswordBody): Promise<void> {
-    return authed<void>('/me/password', { method: 'POST', body });
+    return authed<void>("/me/password", { method: "POST", body });
   },
 
   updateProfile(body: UpdateMeBody): Promise<Me> {
-    return authed<Me>('/me', { method: 'PATCH', body });
+    return authed<Me>("/me", { method: "PATCH", body });
   },
 
   async uploadAvatar(file: File): Promise<Me> {
     const send = () => {
       const fd = new FormData();
-      fd.append('file', file);
+      fd.append("file", file);
       const headers: Record<string, string> = {};
       if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-      return fetch('/api/me/avatar', { method: 'POST', headers, credentials: 'include', body: fd });
+      return fetch("/api/me/avatar", { method: "POST", headers, credentials: "include", body: fd });
     };
     let res = await send();
     if (res.status === 401 && (await doRefresh())) res = await send();
     return parse<Me>(res);
   },
 
-  applyOrganizer(body: { displayName: string; description: string; logoUrl?: string | null }): Promise<{ ok: true }> {
-    return authed<{ ok: true }>('/organizers/apply', { method: 'POST', body });
+  applyOrganizer(body: {
+    displayName: string;
+    description: string;
+    logoUrl?: string | null;
+  }): Promise<{ ok: true }> {
+    return authed<{ ok: true }>("/organizers/apply", { method: "POST", body });
   },
 
-  organizerStatus(): Promise<{ isOrganizer: boolean; applications: Array<{ status: string; display_name: string }> }> {
-    return authed('/organizers/me');
+  organizerStatus(): Promise<OrganizerStatusResponse> {
+    return authed("/organizers/me");
   },
 };

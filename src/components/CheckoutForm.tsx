@@ -3,10 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { FormEvent, useState } from "react";
-import { PROMO_VOUCHERS } from "../data";
+import { FormEvent, useEffect, useState } from "react";
 import { CheckoutPayload, MovieEvent, Seat } from "../types";
+import { formatEventDate } from "../services/formatDate";
 import { formatHoldClock } from "../services/holdSession";
+import { walletClient, type WalletLimits } from "../services/walletClient";
+import TopUpSheet, { formatVnd } from "./wallet/TopUpSheet";
 
 interface CheckoutFormProps {
   event: MovieEvent;
@@ -18,8 +20,15 @@ interface CheckoutFormProps {
   remainingMs: number;
   /** "Quay lại chọn ghế" for a seated event, "…chọn số lượng vé" for general admission. */
   backLabel: string;
+  /** The hold being bought. Carried into a top-up so the seats survive the VNPay detour. */
+  reservationId: number | null;
+  /**
+   * Set by the parent when checkout came back `insufficient_wallet_balance`, carrying the server's
+   * numbers so the top-up opens pre-filled with the exact shortfall (UC-12 A2).
+   */
+  shortfall: { required: number; balance: number; shortfall: number } | null;
   onBack: () => void;
-  onConfirmBooking: (payload: CheckoutPayload) => void;
+  onConfirmBooking: (payload: CheckoutPayload) => Promise<void>;
 }
 
 /**
@@ -28,8 +37,6 @@ interface CheckoutFormProps {
  * There is no card, bank-transfer or e-wallet leg on an order — offering one here would contradict
  * the schema, the constitution's four-integration cap, and the seat lifecycle (DATA-03).
  *
- * The real balance, debit and ledger arrive with the wallet & checkout feature; this screen is
- * still a mock that writes to localStorage.
  */
 const PAYMENT_METHOD_LABEL = "Ví TixHub";
 
@@ -41,57 +48,69 @@ export default function CheckoutForm({
   totalPrice,
   remainingMs,
   backLabel,
+  reservationId,
+  shortfall,
   onBack,
   onConfirmBooking,
 }: CheckoutFormProps) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [promoInput, setPromoInput] = useState("");
-  const [appliedPromo, setAppliedPromo] = useState("");
-  const [promoMessage, setPromoMessage] = useState("");
   const [agreeTerms, setAgreeTerms] = useState(true);
-  /** Simulates the one failure a wallet purchase actually has: not enough balance (UC-12 A2). */
-  const [simulateShortfall, setSimulateShortfall] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [balance, setBalance] = useState<number | null>(null);
+  const [limits, setLimits] = useState<WalletLimits | null>(null);
+  const [showTopUp, setShowTopUp] = useState(false);
+
+  // The balance belongs on the order summary: UC-12 step 1 says the buyer reviews the total
+  // *alongside* what they have, so a shortfall is visible before they commit rather than after.
+  useEffect(() => {
+    let cancelled = false;
+    walletClient
+      .summary()
+      .then((summary) => {
+        if (cancelled) return;
+        setBalance(summary.balanceAmount);
+        setLimits(summary.limits);
+      })
+      .catch(() => {
+        // A wallet that cannot be read is not a reason to block the screen — the server re-checks
+        // the balance under a row lock when they submit anyway.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Arriving back with a rejection means the sheet should already be open, pre-filled.
+  useEffect(() => {
+    if (shortfall) {
+      setShowTopUp(true);
+      setBalance(shortfall.balance);
+    }
+  }, [shortfall]);
 
   const isSeated = event.eventType === "seated";
-  const serviceFee = Math.max(Math.round(totalPrice * 0.04), totalPrice ? 10000 : 0);
-  const selectedPromo = PROMO_VOUCHERS.find((promo) => promo.code === appliedPromo);
-  const discount = selectedPromo ? selectedPromo.discountAmount : 0;
-  const finalPrice = Math.max(totalPrice + serviceFee - discount, 0);
+  const serviceFee = 0;
+  const discount = 0;
+  const finalPrice = totalPrice;
 
-  const handleApplyPromo = () => {
-    const normalized = promoInput.trim().toUpperCase();
-    const voucher = PROMO_VOUCHERS.find((promo) => promo.code === normalized);
-
-    if (!voucher) {
-      setAppliedPromo("");
-      setPromoMessage("Mã không tồn tại trong mock data.");
-      return;
-    }
-
-    if (totalPrice < voucher.minOrder) {
-      setAppliedPromo("");
-      setPromoMessage(`Đơn cần tối thiểu ${formatPrice(voucher.minOrder)} để dùng ${voucher.code}.`);
-      return;
-    }
-
-    setAppliedPromo(voucher.code);
-    setPromoMessage(`${voucher.label} đã được áp dụng.`);
-  };
-
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!name || !email || !phone || !agreeTerms || simulateShortfall) return;
+    if (!name || !email || !phone || !agreeTerms || submitting) return;
 
-    onConfirmBooking({
-      customer: { name, email, phone },
-      paymentMethod: PAYMENT_METHOD_LABEL,
-      serviceFee,
-      discount,
-      finalPrice,
-      promoCode: selectedPromo?.code,
-    });
+    setSubmitting(true);
+    try {
+      await onConfirmBooking({
+        customer: { name, email, phone },
+        paymentMethod: PAYMENT_METHOD_LABEL,
+        serviceFee,
+        discount,
+        finalPrice,
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const formatPrice = (price: number) => {
@@ -104,23 +123,25 @@ export default function CheckoutForm({
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
-      <div className="flex flex-col gap-4 border-b border-beige-kem/10 pb-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 border-b border-beige-kem/25 pb-4 sm:flex-row sm:items-center sm:justify-between">
         <button
           onClick={onBack}
-          className="flex items-center gap-2 font-mono text-sm text-la-co transition hover:text-beige-kem"
+          className="flex items-center gap-2 font-mono text-sm text-ink-soft transition hover:text-beige-kem"
         >
           {backLabel}
         </button>
 
-        <div className="flex flex-wrap items-center gap-3 font-mono text-xs text-beige-kem/45">
-          <span className="opacity-60">01 Chọn suất</span>
-          <span className="h-px w-6 bg-beige-kem/20" />
-          <span className="opacity-60">02 {isSeated ? "Chọn ghế" : "Chọn số lượng vé"}</span>
-          <span className="h-px w-6 bg-beige-kem/20" />
-          <span className="font-semibold text-burgundy">03 Thanh toán</span>
+        <div className="flex flex-wrap items-center gap-3 font-mono text-xs text-ink-soft">
+          <span>01 Chọn suất</span>
+          <span className="h-0.5 w-6 bg-beige-kem" />
+          <span>02 {isSeated ? "Chọn ghế" : "Chọn số lượng vé"}</span>
+          <span className="h-0.5 w-6 bg-beige-kem" />
+          <span className="rounded-full bg-bubblegum px-2.5 py-1 font-bold text-on-tint">
+            03 Thanh toán
+          </span>
 
           {/* Same hold, same clock as step 02 — going back does not restart it. */}
-          <span className="inline-flex items-center gap-2 rounded-lg border border-cam-dat/30 bg-cam-dat/5 px-2.5 py-1 text-cam-dat">
+          <span className="inline-flex items-center gap-2 rounded-lg border-2 border-beige-kem bg-cam-dat px-2.5 py-1 text-on-tint">
             Giữ chỗ
             <b className="text-sm font-black text-beige-kem">{formatHoldClock(remainingMs)}</b>
           </span>
@@ -128,11 +149,14 @@ export default function CheckoutForm({
       </div>
 
       <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-12">
-        <section className="space-y-6 rounded-2xl border border-beige-kem/10 bg-xanh-pho/50 p-6 sm:p-8 lg:col-span-7">
+        <section className="space-y-6 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 sm:p-8 lg:col-span-7">
           <div>
-            <h3 className="font-display text-2xl font-black text-beige-kem">Thông tin người nhận vé</h3>
-            <p className="mt-2 text-sm text-la-co">
-              Vé điện tử sẽ được gửi qua email và hiển thị trong thông báo trong ứng dụng (không có SMS).
+            <h3 className="font-display text-2xl font-black text-beige-kem">
+              Thông tin người nhận vé
+            </h3>
+            <p className="mt-2 text-sm text-ink-soft">
+              Vé điện tử sẽ được gửi qua email và hiển thị trong thông báo trong ứng dụng (không có
+              SMS).
             </p>
           </div>
 
@@ -145,7 +169,7 @@ export default function CheckoutForm({
                 placeholder="Nhập đầy đủ tên của bạn"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="h-11 w-full rounded-xl border border-beige-kem/20 bg-xanh-pho px-4 text-sm text-beige-kem outline-none transition focus:border-cam-dat"
+                className="h-11 w-full rounded-xl border-2 border-beige-kem bg-xanh-pho px-4 text-sm text-beige-kem outline-none transition focus:border-burgundy"
               />
             </div>
 
@@ -158,7 +182,7 @@ export default function CheckoutForm({
                   placeholder="name@domain.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="h-11 w-full rounded-xl border border-beige-kem/20 bg-xanh-pho px-4 text-sm text-beige-kem outline-none transition focus:border-cam-dat"
+                  className="h-11 w-full rounded-xl border-2 border-beige-kem bg-xanh-pho px-4 text-sm text-beige-kem outline-none transition focus:border-burgundy"
                 />
               </div>
 
@@ -170,15 +194,15 @@ export default function CheckoutForm({
                   placeholder="09xx xxx xxx"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  className="h-11 w-full rounded-xl border border-beige-kem/20 bg-xanh-pho px-4 text-sm text-beige-kem outline-none transition focus:border-cam-dat"
+                  className="h-11 w-full rounded-xl border-2 border-beige-kem bg-xanh-pho px-4 text-sm text-beige-kem outline-none transition focus:border-burgundy"
                 />
               </div>
             </div>
 
-            <div className="space-y-3 border-t border-beige-kem/10 pt-6">
+            <div className="space-y-3 border-t border-beige-kem/25 pt-6">
               <h4 className="font-display text-lg font-black text-beige-kem">Thanh toán bằng ví</h4>
 
-              <div className="rounded-xl border border-burgundy bg-burgundy/10 p-4">
+              <div className="rounded-xl border border-burgundy bg-bubblegum p-4">
                 <span className="block font-mono text-sm font-bold text-beige-kem">
                   {PAYMENT_METHOD_LABEL} · số dư tài khoản
                 </span>
@@ -189,70 +213,47 @@ export default function CheckoutForm({
                 </span>
               </div>
 
-              <div className="rounded-xl border border-cam-dat/25 bg-cam-dat/5 p-4 font-mono text-[11px] leading-5 text-cam-dat">
-                Số dư ví và giao dịch trừ tiền chưa nối API — màn hình này vẫn là mock, vé được lưu
-                trong trình duyệt. Tính năng ví (nạp tiền qua VNPay + thanh toán) sẽ thay thế phần này.
-              </div>
+              {balance !== null && (
+                <div className="flex flex-wrap items-baseline justify-between gap-2 rounded-xl border-2 border-beige-kem bg-surface-2 px-4 py-3 font-mono text-xs">
+                  <span className="text-ink-soft">Số dư ví hiện tại</span>
+                  <b className="text-sm text-beige-kem">{formatVnd(balance)}</b>
+                </div>
+              )}
 
-              <label className="flex cursor-pointer items-start gap-2 text-xs leading-relaxed text-beige-kem/62">
-                <input
-                  type="checkbox"
-                  checked={simulateShortfall}
-                  onChange={(e) => setSimulateShortfall(e.target.checked)}
-                  className="mt-0.5 accent-burgundy"
-                />
-                <span>Mô phỏng số dư không đủ</span>
-              </label>
-            </div>
+              {/* UC-12 A2: the shortfall is named, and topping it up is one click — not a dead end. */}
+              {shortfall && !showTopUp && (
+                <div className="space-y-3 rounded-xl border-2 border-beige-kem bg-bubblegum p-4 text-sm text-on-tint">
+                  <p>
+                    <span className="font-bold text-burgundy">Số dư không đủ.</span> Cần nạp thêm{" "}
+                    <span className="font-mono font-bold">{formatVnd(shortfall.shortfall)}</span> để
+                    hoàn tất đơn này.
+                  </p>
+                  <p className="font-mono text-[11px] leading-5">
+                    Chưa có gì được tạo ra: chưa có đơn hàng, chưa trừ tiền, chưa xuất vé. Chỗ bạn
+                    giữ vẫn chạy theo đồng hồ cũ; bắt đầu nạp tiền sẽ gia hạn thêm một lần duy nhất.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowTopUp(true)}
+                    className="rounded-lg bg-burgundy px-4 py-2 text-xs font-black uppercase text-white"
+                  >
+                    Nạp thêm vào ví
+                  </button>
+                </div>
+              )}
 
-            <div className="space-y-3 border-t border-beige-kem/10 pt-6">
-              <h4 className="font-display text-lg font-black text-beige-kem">
-                Mã giảm giá
-              </h4>
-              <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                <input
-                  type="text"
-                  placeholder="WEEKEND50, FIRSTBOOK, GROUP4"
-                  value={promoInput}
-                  onChange={(e) => setPromoInput(e.target.value)}
-                  className="h-11 rounded-xl border border-beige-kem/20 bg-xanh-pho px-4 text-sm uppercase text-beige-kem outline-none transition focus:border-cam-dat"
+              {showTopUp && limits && (
+                <TopUpSheet
+                  balance={balance ?? 0}
+                  limits={limits}
+                  reservationId={reservationId ?? undefined}
+                  suggestedAmount={
+                    shortfall ? Math.max(shortfall.shortfall, limits.min) : undefined
+                  }
+                  onCancel={() => setShowTopUp(false)}
                 />
-                <button
-                  type="button"
-                  onClick={handleApplyPromo}
-                  className="rounded-xl bg-beige-kem px-5 py-3 text-xs font-black uppercase text-xanh-pho transition hover:bg-white"
-                >
-                  Áp dụng
-                </button>
-              </div>
-              {promoMessage && (
-                <p className={`font-mono text-xs ${selectedPromo ? "text-la-co" : "text-cam-dat"}`}>
-                  {promoMessage}
-                </p>
               )}
             </div>
-
-            {simulateShortfall && (
-              <div className="space-y-2 rounded-xl border border-burgundy/40 bg-burgundy/10 p-4 text-sm text-beige-kem">
-                <p>
-                  <span className="font-bold text-burgundy">Số dư không đủ.</span> Cần nạp thêm{" "}
-                  <span className="font-mono font-bold">{formatPrice(finalPrice)}</span> để hoàn tất
-                  đơn này.
-                </p>
-                <p className="font-mono text-[11px] leading-5 text-beige-kem/62">
-                  Không có gì được tạo ra: chưa có đơn hàng, chưa trừ tiền, chưa xuất vé. Ghế bạn giữ
-                  vẫn chạy theo TTL bình thường, không được gia hạn thêm vì đang chờ nạp tiền.
-                </p>
-                <button
-                  type="button"
-                  disabled
-                  className="rounded-lg border border-burgundy/40 px-4 py-2 text-xs font-bold uppercase text-burgundy/50"
-                  title="Nạp tiền sẽ có ở tính năng ví"
-                >
-                  Nạp thêm vào ví (sắp có)
-                </button>
-              </div>
-            )}
 
             <div className="flex items-start gap-2 text-xs leading-relaxed text-beige-kem/62">
               <input
@@ -263,24 +264,27 @@ export default function CheckoutForm({
                 className="mt-0.5 accent-burgundy"
               />
               <label htmlFor="agree-terms" className="cursor-pointer select-none">
-                Tôi đồng ý điều khoản bán vé và chính sách hoàn vé (hoàn tiền về ví, trước giờ diễn 24 tiếng).
+                Tôi đồng ý điều khoản bán vé và chính sách hoàn vé (hoàn tiền về ví, trước giờ diễn
+                24 tiếng).
               </label>
             </div>
 
             <button
               type="submit"
-              disabled={!name || !email || !phone || !agreeTerms || simulateShortfall}
-              className="w-full rounded-xl bg-burgundy px-6 py-4 text-sm font-black text-beige-kem shadow-xl transition hover:bg-burgundy/95 disabled:bg-beige-kem/10 disabled:text-beige-kem/35"
+              disabled={!name || !email || !phone || !agreeTerms || submitting}
+              className="w-full rounded-xl bg-burgundy px-6 py-4 text-sm font-black text-white shadow-hard transition hover:brightness-95 disabled:bg-surface-2 disabled:text-white/60"
             >
-              Trừ tiền từ ví và xuất vé QR
+              {submitting ? "Đang thanh toán..." : "Trừ tiền từ ví và xuất vé QR"}
             </button>
           </form>
         </section>
 
-        <aside className="space-y-6 rounded-2xl border border-beige-kem/10 bg-xanh-pho/25 p-6 lg:col-span-5">
+        <aside className="space-y-6 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 lg:col-span-5">
           <div>
             <h4 className="font-display text-xl font-black text-beige-kem">Tóm tắt đơn hàng</h4>
-            <p className="mt-1 font-mono text-xs uppercase text-la-co">Hiển thị phí trước khi thanh toán</p>
+            <p className="mt-1 font-mono text-xs uppercase text-ink-soft">
+              Hiển thị phí trước khi thanh toán
+            </p>
           </div>
 
           <div className="flex gap-4">
@@ -288,21 +292,25 @@ export default function CheckoutForm({
               src={event.imageUrl}
               alt={event.title}
               referrerPolicy="no-referrer"
-              className="h-24 w-20 rounded-xl object-cover shadow"
+              className="h-24 w-20 rounded-xl object-cover border-2 border-beige-kem shadow-hard"
             />
             <div className="min-w-0 flex-1">
-              <h5 className="line-clamp-2 font-display text-lg font-black text-beige-kem">{event.title}</h5>
-              <p className="mt-1 font-mono text-xs text-cam-dat">{event.venueName}</p>
-              <p className="mt-3 rounded-lg border border-beige-kem/10 bg-white/[0.035] px-3 py-2 font-mono text-xs text-beige-kem/70">
-                {selectedTime} / {selectedDate}
+              <h5 className="line-clamp-2 font-display text-lg font-black text-beige-kem">
+                {event.title}
+              </h5>
+              <p className="mt-1 font-mono text-xs text-ink-soft">{event.venueName}</p>
+              <p className="mt-3 rounded-lg border-2 border-beige-kem bg-surface-2 px-3 py-2 font-mono text-xs text-beige-kem/70">
+                {selectedTime} / {formatEventDate(selectedDate, true)}
               </p>
             </div>
           </div>
 
-          <div className="space-y-3 border-t border-dashed border-beige-kem/10 pt-4 font-mono text-xs text-beige-kem/78">
+          <div className="space-y-3 border-t border-dashed border-beige-kem/25 pt-4 font-mono text-xs text-beige-kem/78">
             <div className="flex justify-between gap-4">
               <span>{isSeated ? "Ghế" : "Vé"}</span>
-              <span className="font-bold text-cam-dat">{selectedSeats.map((seat) => seat.id).join(", ")}</span>
+              <span className="font-bold text-ink-soft">
+                {selectedSeats.map((seat) => seat.id).join(", ")}
+              </span>
             </div>
             {/* Seat type is a seated-event concept; general admission counts tickets instead. */}
             <div className="flex justify-between gap-4">
@@ -317,26 +325,24 @@ export default function CheckoutForm({
               <span>Tạm tính</span>
               <span>{formatPrice(totalPrice)}</span>
             </div>
-            <div className="flex justify-between gap-4">
-              <span>Phí dịch vụ</span>
-              <span>{formatPrice(serviceFee)}</span>
-            </div>
-            <div className="flex justify-between gap-4 text-la-co">
-              <span>Giảm giá</span>
-              <span>-{formatPrice(discount)}</span>
-            </div>
           </div>
 
-          <div className="border-t border-beige-kem/10 pt-5">
+          <div className="border-t border-beige-kem/25 pt-5">
             <div className="flex items-baseline justify-between gap-4">
               <span className="font-mono text-xs uppercase text-beige-kem/60">Cần thanh toán</span>
-              <span className="font-display text-3xl font-black text-burgundy">{formatPrice(finalPrice)}</span>
+              <span className="font-display text-3xl font-black text-burgundy">
+                {formatPrice(finalPrice)}
+              </span>
             </div>
-            <div className="mt-4 rounded-xl border border-la-co/20 bg-la-co/5 p-3 text-[11px] leading-5 text-la-co">
-              <span>Mock UI cho xác nhận qua email, trừ tiền từ ví trong một giao dịch, và QR dùng một lần.</span>
+            <div className="mt-4 rounded-xl border-2 border-beige-kem bg-la-co p-3 text-[11px] leading-5 text-on-tint">
+              <span>
+                Ví, đơn hàng và mã vé được tạo trong một giao dịch khi thanh toán thành công.
+              </span>
             </div>
-            <div className="mt-3 rounded-xl border border-cam-dat/20 bg-cam-dat/5 p-3 text-[11px] leading-5 text-cam-dat">
-              <span>Vé sẽ xuất hiện trong Vé của tôi, có thể in/tải lại/gửi lại email ở màn vé.</span>
+            <div className="mt-3 rounded-xl border-2 border-beige-kem bg-cam-dat p-3 text-[11px] leading-5 text-on-tint">
+              <span>
+                Vé sẽ xuất hiện trong Vé của tôi, có thể in/tải lại/gửi lại email ở màn vé.
+              </span>
             </div>
           </div>
         </aside>

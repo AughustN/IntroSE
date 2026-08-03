@@ -1,38 +1,90 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Fraunces:opsz,wght@9..144,400..700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
+/*
+ * Token names are the pre-redesign ones (`xanh-pho`, `beige-kem`, …) so this palette swap stays a
+ * single-file change; the semantic rename happens as its own pass. Read them by role, not by name:
+ *   xanh-pho = surface   beige-kem = ink (foreground)
+ *   burgundy = tomato    cam-dat   = peach    la-co = periwinkle
+ *
+ * `@theme` values are the light palette; the `:root` blocks below re-declare the same custom
+ * properties so switching `data-theme` repaints at runtime.
+ */
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Space Grotesk", sans-serif;
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", ui-serif, Georgia, serif;
   --font-mono: "JetBrains Mono", monospace;
-  
-  --color-beige-kem: #E0E2CA;
-  --color-la-co: #A6A15E;
-  --color-cam-dat: #C69F89;
-  --color-burgundy: #93032E;
-  --color-xanh-pho: #071628;
+
+  --color-xanh-pho: #FDF6EA;
+  --color-surface-2: #FFFCF5;
+  --color-beige-kem: #8A0C24;
+  --color-ink-soft: #B4566A;
+  --color-burgundy: #D93025;
+  --color-cam-dat: #F7A97C;
+  --color-la-co: #BFC0F2;
+  --color-bubblegum: #FBD0DC;
+
+  /* Large fills. Identical to the tints in light mode, deep shades in dark — see below. */
+  --color-tomato-band: #D93025;
+  --color-bubblegum-band: #FBD0DC;
+  --color-periwinkle-band: #BFC0F2;
+  --color-peach-band: #F7A97C;
+
+  --color-hard-shadow: #8A0C24;
+
+  /*
+   * Text sitting on a tint fill. Constant across modes: the tints stay light in dark mode while
+   * `beige-kem` flips to cream, so `text-beige-kem` on a bubblegum chip is unreadable at night.
+   * Anything filled bubblegum / periwinkle / peach uses this; tomato fills use white.
+   */
+  --color-on-tint: #8A0C24;
 }
 
 html {
   scroll-behavior: smooth;
 }
 
-:root {
-  color-scheme: dark;
-  --color-beige-kem: #E0E2CA;
-  --color-la-co: #A6A15E;
-  --color-cam-dat: #C69F89;
-  --color-burgundy: #93032E;
-  --color-xanh-pho: #071628;
-}
-
+:root,
 :root[data-theme="light"] {
   color-scheme: light;
-  --color-beige-kem: #071628;
-  --color-la-co: #A6A15E;
-  --color-cam-dat: #C69F89;
-  --color-burgundy: #93032E;
-  --color-xanh-pho: #F3EFD9;
+  --color-xanh-pho: #FDF6EA;
+  --color-surface-2: #FFFCF5;
+  --color-beige-kem: #8A0C24;
+  --color-ink-soft: #B4566A;
+  --color-burgundy: #D93025;
+  --color-cam-dat: #F7A97C;
+  --color-la-co: #BFC0F2;
+  --color-bubblegum: #FBD0DC;
+  --color-tomato-band: #D93025;
+  --color-bubblegum-band: #FBD0DC;
+  --color-periwinkle-band: #BFC0F2;
+  --color-peach-band: #F7A97C;
+  --color-hard-shadow: #8A0C24;
+  --color-on-tint: #8A0C24;
+}
+
+/*
+ * Dark keeps every role and every accent hue — only the large fills go deep. The bright tints
+ * (bubblegum / periwinkle / peach) stay at their light values because they carry badges, strokes
+ * and stickers in both modes; as full-bleed fills on a dark page they would blow out, which is what
+ * the `-band` variants are for.
+ */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-xanh-pho: #260810;
+  --color-surface-2: #35101B;
+  --color-beige-kem: #FDF6EA;
+  --color-ink-soft: #D9A8B2;
+  --color-burgundy: #D93025;
+  --color-cam-dat: #F7A97C;
+  --color-la-co: #BFC0F2;
+  --color-bubblegum: #FBD0DC;
+  --color-tomato-band: #7A1710;
+  --color-bubblegum-band: #4A1526;
+  --color-periwinkle-band: #2E2A5C;
+  --color-peach-band: #5A2E1C;
+  --color-hard-shadow: rgb(0 0 0 / 0.55);
+  --color-on-tint: #8A0C24;
 }
 
 body {
@@ -42,20 +94,46 @@ body {
   transition: background-color 240ms ease, color 240ms ease;
 }
 
+/* Fraunces carries an optical-size axis; let it tighten itself as headings scale up. */
+:where(h1, h2, h3, h4) {
+  font-optical-sizing: auto;
+}
+
 button,
 input,
 select {
   font: inherit;
 }
 
+/* Peach is too pale against cream to read as a focus ring — tomato is the only accent that does. */
 button:focus-visible,
 input:focus-visible,
 select:focus-visible {
-  outline: 2px solid var(--color-cam-dat);
+  outline: 2px solid var(--color-burgundy);
   outline-offset: 2px;
 }
 
-/* Elegant scrollbar to match cinema theme */
+/*
+ * Shape language: flat offset shadows instead of blurred ones, so surfaces read as cut paper
+ * stacked on the page rather than as glass floating above it.
+ */
+@utility shadow-hard {
+  box-shadow: 4px 4px 0 var(--color-hard-shadow);
+}
+
+@utility shadow-hard-lg {
+  box-shadow: 7px 7px 0 var(--color-hard-shadow);
+}
+
+/* Small labels — uppercase, letterspaced, never larger than the body text around them. */
+@utility label-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -66,7 +144,7 @@ select:focus-visible {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-cam-dat);
+  background: var(--color-beige-kem);
   border-radius: 4px;
 }
 

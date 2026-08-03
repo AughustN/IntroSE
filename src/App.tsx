@@ -4,20 +4,30 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { SAMPLE_MOVIES } from "./data";
 import { Booking, CheckoutPayload, HoldSession, MovieEvent, Seat } from "./types";
 import AdminPanel from "./components/AdminPanel";
 import AuthModal from "./components/AuthModal";
-import AccountModal from "./components/AccountModal";
+import AccountPage from "./components/account/AccountPage";
 import OrganizerPanel from "./components/OrganizerPanel";
 import AdminModeration from "./components/AdminModeration";
 import ResetPassword from "./components/ResetPassword";
 import type { Me } from "@/shared/auth/types";
-import type { Showtime } from "@/shared/catalog/types";
+import type { EventDetail as CatalogEventDetail, Showtime } from "@/shared/catalog/types";
 import { authClient } from "./services/authClient";
 import { catalogClient } from "./services/catalogClient";
 import { cardToMovie, detailToMovie } from "./services/catalogAdapter";
 import { applyEventSeo, clearEventSeo } from "./services/seo";
+import {
+  ACCOUNT_PATH,
+  isOverlayPath,
+  pathToRoute,
+  RESET_PASSWORD_PATH,
+  screenToPath,
+  VNPAY_RETURN_PATH,
+  type Screen,
+} from "./routes";
 import {
   holdTotalPrice,
   loadHoldSession,
@@ -25,6 +35,9 @@ import {
   sessionFromReservation,
 } from "./services/holdSession";
 import { HoldError, holdsClient } from "./services/holdsClient";
+import { walletClient, WalletError, type Topup } from "./services/walletClient";
+import WalletPanel from "./components/wallet/WalletPanel";
+import VnpayReturn from "./components/wallet/VnpayReturn";
 import { useHoldCountdown } from "./hooks/useHoldCountdown";
 import BookingHistory from "./components/BookingHistory";
 import ToastStack, { type ToastKind, type ToastMessage } from "./components/ToastStack";
@@ -39,7 +52,6 @@ import SeatLayout from "./components/SeatLayout";
 import TicketTicket from "./components/TicketTicket";
 import { ArrowUp } from "lucide-react";
 
-type Screen = "home" | "detail" | "seats" | "checkout" | "ticket" | "history" | "admin" | "organizer" | "moderation";
 type ThemeMode = "dark" | "light";
 
 /**
@@ -55,25 +67,75 @@ const LEAVE_FLOW_WARNING =
 
 const BOOKINGS_CACHE_KEY = "tixhub_bookings_cache_v2";
 // Pre-rebrand keys, still read (and cleared) so existing local data survives the TixHub rename.
-const LEGACY_BOOKINGS_CACHE_KEYS = [
-  "ticketbox_bookings_cache_v2",
-  "ticketbox_bookings_cache_v1",
-];
+const LEGACY_BOOKINGS_CACHE_KEYS = ["ticketbox_bookings_cache_v2", "ticketbox_bookings_cache_v1"];
 const WISHLIST_CACHE_KEY = "tixhub_wishlist_cache_v1";
 const LEGACY_WISHLIST_CACHE_KEY = "ticketbox_wishlist_cache_v1";
 const USER_CACHE_KEY = "tixhub_mock_user_v1";
 const LEGACY_USER_CACHE_KEY = "ticketbox_mock_user_v1";
+/**
+ * The avatar is cached next to the name so the header can paint the real picture on the first
+ * frame. Without it the letter placeholder always wins the race: `avatarUrl` started as null and
+ * only arrived after /auth/refresh + /me, so every reload flashed the initial and then swapped.
+ * A stale entry is harmless — the image falls back to the initial on error and `restore()`
+ * reconciles it a moment later.
+ */
+const AVATAR_CACHE_KEY = "tixhub_avatar_url_v1";
+/**
+ * Cached for the same reason as the avatar: the default avatar's colour is derived from the email,
+ * so without it the circle would paint in the fallback colour and then change once the session was
+ * restored. Never rendered as text — only fed to `avatarColor`.
+ */
+const EMAIL_CACHE_KEY = "tixhub_user_email_v1";
 const THEME_CACHE_KEY = "tixhub_theme_mode_v1";
 const LEGACY_THEME_CACHE_KEY = "ticketbox_theme_mode_v1";
+
+function getInitialAvatar(): string | null {
+  try {
+    return localStorage.getItem(AVATAR_CACHE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function getInitialEmail(): string | null {
+  try {
+    return localStorage.getItem(EMAIL_CACHE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Keeps a cache entry in step with its state; `null` clears it. */
+function cacheValue(key: string, value: string | null): void {
+  try {
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  } catch (err) {
+    console.error(`Failed to cache ${key}:`, err);
+  }
+}
+
+/**
+ * Mirrors a value into a ref every render. Lets the URL effect read the current flow — the hold, the
+ * selected event, the booking being shown — without listing any of it as a dependency, which would
+ * make it re-run on things that have nothing to do with the address bar.
+ */
+function useLatest<T>(value: T) {
+  const ref = useRef(value);
+  useEffect(() => {
+    ref.current = value;
+  });
+  return ref;
+}
 
 function getInitialTheme(): ThemeMode {
   try {
     const cached =
       localStorage.getItem(THEME_CACHE_KEY) || localStorage.getItem(LEGACY_THEME_CACHE_KEY);
     if (cached === "dark" || cached === "light") return cached;
-    return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   } catch {
-    return "dark";
+    return "light";
   }
 }
 
@@ -110,11 +172,16 @@ export default function App() {
   /** A hold/release round trip is in flight; seat clicks are disabled so two do not race. */
   const [holdBusy, setHoldBusy] = useState(false);
   const [finalBooking, setFinalBooking] = useState<Booking | null>(null);
+  /** The server's numbers from a rejected checkout, handed to the top-up sheet (UC-12 A2). */
+  const [shortfall, setShortfall] = useState<{
+    required: number;
+    balance: number;
+    shortfall: number;
+  } | null>(null);
 
   const [bookingsHistory, setBookingsHistory] = useState<Booking[]>([]);
   const [wishlistedIds, setWishlistedIds] = useState<string[]>([]);
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [showAccountModal, setShowAccountModal] = useState(false);
   const [userName, setUserName] = useState("");
   const [isSignedIn, setIsSignedIn] = useState(false);
   /**
@@ -123,7 +190,78 @@ export default function App() {
    * identity, so the click is parked here and replayed once they are in.
    */
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(getInitialAvatar);
+  /** Only ever used to seed the default avatar's colour — never displayed in the header. */
+  const [userEmail, setUserEmail] = useState<string | null>(getInitialEmail);
+
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  /**
+   * Move to a screen and put it on the address bar, in that order and in one place.
+   *
+   * Navigation is explicit rather than derived from `activeScreen` by an effect: the screens that
+   * carry a parameter (`/events/:slug`, `/tickets/:id`) know it at the call site, while an effect
+   * would have to read it back out of state that is still catching up — and would push the stale
+   * value over a deep link before the URL had been read.
+   */
+  const goTo = useCallback(
+    (screen: Screen, params?: { eventSlug?: string | null; bookingId?: string | null }) => {
+      setActiveScreen(screen);
+      navigate(screenToPath(screen, params));
+    },
+    [navigate],
+  );
+
+  const activeScreenRef = useLatest(activeScreen);
+  const selectedMovieRef = useLatest(selectedMovie);
+  const bookingShowtimeIdRef = useLatest(bookingShowtimeId);
+  const finalBookingRef = useLatest(finalBooking);
+  const bookingsHistoryRef = useLatest(bookingsHistory);
+
+  /** An overlay route (see routes.ts): the address bar is the only state the account page needs. */
+  const showAccountPage = location.pathname === ACCOUNT_PATH;
+
+  /**
+   * True once the cached history has been read out of localStorage. `/tickets/:id` cannot decide
+   * that a booking is missing before then — on the first frame the list is empty for everyone, and
+   * bouncing off it would break every ticket link.
+   */
+  const [bookingsLoaded, setBookingsLoaded] = useState(false);
+
+  /**
+   * The event slug the browser arrived on, if any. Captured once, because the catalog listing
+   * resolves later and ends by selecting its first event — which would otherwise overwrite the
+   * event the URL actually asked for.
+   */
+  const deepLinkedEventRef = useRef<string | null>(
+    pathToRoute(window.location.pathname)?.eventSlug ?? null,
+  );
+
+  /**
+   * The payload the event SEO tags were built from. Kept so stepping back onto the event screen can
+   * restore them without another round trip — the tags are removed on the way out, and the buyer
+   * returning from checkout does not re-fetch the detail.
+   */
+  const eventSeoRef = useRef<{
+    slug: string;
+    detail: CatalogEventDetail;
+    showtimes: Showtime[];
+  } | null>(null);
+
+  /**
+   * Single entry point for what the header shows about the account, so state and cache can never
+   * drift apart. Passing `null` is the signed-out case and clears everything.
+   */
+  const applyIdentity = useCallback((user: Me | null) => {
+    const name = user ? user.nickname || user.email : "";
+    setUserName(name);
+    setAvatarUrl(user?.avatarUrl ?? null);
+    setUserEmail(user?.email ?? null);
+    cacheValue(USER_CACHE_KEY, name || null);
+    cacheValue(AVATAR_CACHE_KEY, user?.avatarUrl ?? null);
+    cacheValue(EMAIL_CACHE_KEY, user?.email ?? null);
+  }, []);
 
   const dismissToast = useCallback((id: number) => {
     setToasts((current) => current.filter((toast) => toast.id !== id));
@@ -192,14 +330,11 @@ export default function App() {
 
     // UC-11 A2: the whole selection lapses together and the buyer is returned to pick again.
     pushToast("warning", "Đã hết thời gian giữ chỗ. Ghế đã được trả lại, vui lòng chọn lại.", 9000);
-    setActiveScreen((current) =>
-      current === "seats" || current === "checkout"
-        ? expired.mode === "ga"
-          ? "detail"
-          : "seats"
-        : current,
-    );
-  }, []);
+    const current = activeScreenRef.current;
+    if (current === "seats" || current === "checkout") {
+      goTo(expired.mode === "ga" ? "detail" : "seats", { eventSlug: expired.eventId });
+    }
+  }, [activeScreenRef, goTo]);
 
   const holdRemainingMs = useHoldCountdown(hold?.expiresAt ?? null, handleHoldExpired);
 
@@ -214,12 +349,152 @@ export default function App() {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [hold]);
 
-  // Password-reset deep link (/reset-password?token=…). No router in this app, so read
-  // the URL directly and show the reset screen as a full-page overlay.
-  const resetToken = useMemo(() => {
-    const url = new URL(window.location.href);
-    return url.pathname === "/reset-password" ? url.searchParams.get("token") : null;
-  }, []);
+  // Password-reset deep link (/reset-password?token=…), rendered as a full-page overlay over
+  // whatever screen is mounted underneath.
+  const resetToken = useMemo(
+    () =>
+      location.pathname === RESET_PASSWORD_PATH
+        ? new URLSearchParams(location.search).get("token")
+        : null,
+    [location.pathname, location.search],
+  );
+
+  // Where VNPay drops the browser after a top-up — another overlay route. Nothing in the query
+  // string is trusted: the wallet is credited by the IPN, so the screen asks the server what really
+  // happened (UC-13 A6).
+  const onVnpayReturn = location.pathname === VNPAY_RETURN_PATH;
+
+  const finishVnpayReturn = (topup: Topup | null) => {
+    /** Leaves the overlay for a real screen. `replace` so Back never re-enters the return page. */
+    const leaveTo = (screen: Screen) => {
+      setActiveScreen(screen);
+      navigate(screenToPath(screen), { replace: true });
+    };
+
+    if (topup?.status === "paid") {
+      pushToast("success", "Đã nạp tiền vào ví.");
+      // Straight back to the checkout they left, if the hold outlived the detour (UC-40 step 6).
+      if (topup.reservationId !== null && hold?.reservationId === topup.reservationId) {
+        setShortfall(null);
+        leaveTo("checkout");
+        return;
+      }
+      if (topup.reservationId !== null) {
+        pushToast(
+          "warning",
+          "Chỗ giữ đã hết hạn khi bạn thanh toán. Tiền vẫn ở trong ví — mời chọn lại chỗ.",
+          9000,
+        );
+      }
+    }
+    leaveTo("wallet");
+  };
+
+  /**
+   * Closing the account overlay drops back onto the screen underneath rather than out of the app —
+   * `navigate(-1)` would leave the site entirely when `/account` was opened from a bookmark.
+   */
+  const closeAccountPage = useCallback(() => {
+    navigate(
+      screenToPath(activeScreen, {
+        eventSlug: selectedMovie.id,
+        bookingId: finalBooking?.id,
+      }),
+      { replace: true },
+    );
+  }, [activeScreen, finalBooking?.id, navigate, selectedMovie.id]);
+
+  /**
+   * Loads an event the URL named directly — the same two calls a card click makes, minus the
+   * optimistic paint: arriving cold there is no card data to show first.
+   */
+  const openEventBySlug = useCallback(
+    async (slug: string) => {
+      try {
+        const detail = await catalogClient.getEvent(slug);
+        const loaded = await catalogClient.getShowtimes(detail.id);
+        setSelectedMovie(detailToMovie(detail, loaded));
+        setShowtimes(loaded);
+        eventSeoRef.current = { slug, detail, showtimes: loaded };
+        applyEventSeo(detail, loaded);
+      } catch (e) {
+        // Same dev-only fallback as the listing: with no API server the samples are the catalog, so
+        // an event link has to resolve against them or every deep link bounces home while working
+        // on the UI. In production a slug the API does not know is simply not an event.
+        const sample = import.meta.env.DEV
+          ? SAMPLE_MOVIES.find((movie) => movie.id === slug)
+          : undefined;
+        if (sample) {
+          setSelectedMovie(sample);
+          setShowtimes([]);
+          return;
+        }
+        console.error("Failed to open the event named by the URL:", e);
+        navigate("/", { replace: true });
+      }
+    },
+    [navigate],
+  );
+
+  /**
+   * URL → screen. The one automatic direction: it runs on Back/Forward and on a cold deep link,
+   * where the address bar is the only thing that knows what to show.
+   *
+   * A screen whose data the path cannot carry either recovers it here or redirects somewhere
+   * honest. None of them is allowed to render empty because the buyer pressed F5.
+   *
+   * Kept off `hold` / `selectedMovie` / `bookingsHistory` as dependencies on purpose — this reacts
+   * to the address bar, not to the flow. `bookingsLoaded` is the exception: the ticket lookup below
+   * genuinely cannot answer before the cache has been read.
+   */
+  useEffect(() => {
+    if (isOverlayPath(location.pathname)) return;
+
+    const route = pathToRoute(location.pathname);
+    if (!route) {
+      navigate("/", { replace: true });
+      return;
+    }
+
+    if (route.eventSlug && route.eventSlug !== selectedMovieRef.current.id) {
+      deepLinkedEventRef.current = route.eventSlug;
+      void openEventBySlug(route.eventSlug);
+    }
+
+    // The seat map needs a showtime, which the path does not name. A live hold knows which one;
+    // without it the buyer has to pick a suất again.
+    if (route.screen === "seats" && bookingShowtimeIdRef.current === null) {
+      const held = holdRef.current;
+      if (held && held.eventId === route.eventSlug) {
+        setBookingShowtimeId(held.showtimeId);
+        setBookingDate(held.selectedDate);
+        setBookingTime(held.selectedTime);
+      } else {
+        navigate(screenToPath("detail", { eventSlug: route.eventSlug }), { replace: true });
+        return;
+      }
+    }
+
+    // Checkout without a hold has nothing to pay for.
+    if (route.screen === "checkout" && !holdRef.current) {
+      navigate("/", { replace: true });
+      return;
+    }
+
+    if (route.screen === "ticket" && route.bookingId) {
+      if (finalBookingRef.current?.id !== route.bookingId) {
+        if (!bookingsLoaded) return; // the cache decides; until then leave the screen as it was
+        const found = bookingsHistoryRef.current.find((b) => b.id === route.bookingId);
+        if (!found) {
+          navigate("/bookings", { replace: true });
+          return;
+        }
+        setFinalBooking(normalizeBooking(found));
+      }
+    }
+
+    setActiveScreen(route.screen);
+  }, [location.pathname, bookingsLoaded, navigate, openEventBySlug]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -236,8 +511,7 @@ export default function App() {
         localStorage.getItem(BOOKINGS_CACHE_KEY) ||
         LEGACY_BOOKINGS_CACHE_KEYS.map((key) => localStorage.getItem(key)).find(Boolean);
       const cachedWishlist =
-        localStorage.getItem(WISHLIST_CACHE_KEY) ||
-        localStorage.getItem(LEGACY_WISHLIST_CACHE_KEY);
+        localStorage.getItem(WISHLIST_CACHE_KEY) || localStorage.getItem(LEGACY_WISHLIST_CACHE_KEY);
       const cachedUser =
         localStorage.getItem(USER_CACHE_KEY) || localStorage.getItem(LEGACY_USER_CACHE_KEY);
 
@@ -260,42 +534,66 @@ export default function App() {
       }
     } catch (err) {
       console.error("Failed to read local TixHub cache:", err);
+    } finally {
+      // Even a failed read is an answer: /tickets/:id must stop waiting and decide.
+      setBookingsLoaded(true);
     }
   }, []);
 
   // Restore a real session from the httpOnly refresh cookie (reconciles the optimistic
-  // cached name above). Signed out → clear the display.
+  // cached identity above). Signed out → clear the display.
   useEffect(() => {
     authClient
       .restore()
       .then((user) => {
-        const name = user ? user.nickname || user.email : "";
-        setUserName(name);
         setIsSignedIn(Boolean(user));
-        setAvatarUrl(user?.avatarUrl ?? null);
-        try {
-          if (name) localStorage.setItem(USER_CACHE_KEY, name);
-          else localStorage.removeItem(USER_CACHE_KEY);
-        } catch (err) {
-          console.error("Failed to sync cached user:", err);
-        }
+        applyIdentity(user);
       })
       .catch(() => {});
-  }, []);
+  }, [applyIdentity]);
 
   // Load the real catalog (replaces the mock browse source). Maps API cards → MovieEvent.
   useEffect(() => {
+    /*
+     * Dev-only: with no API server (or an unseeded database) the browse grid renders empty, which
+     * makes the whole home screen impossible to work on. Fall back to the bundled samples so the UI
+     * always has something to draw. Gated on `import.meta.env.DEV` on purpose — in production an
+     * empty catalog is real information and must not be papered over with fixtures.
+     */
+    /**
+     * The listing ends by selecting its first event as the default. When the browser arrived on
+     * `/events/:slug` that default must not win — the URL already named which event to show, and
+     * its own fetch may still be in flight.
+     */
+    const selectDefault = (movie: MovieEvent) => {
+      if (deepLinkedEventRef.current) return;
+      setSelectedMovie(movie);
+    };
+
+    const useSamplesInDev = (reason: string) => {
+      if (!import.meta.env.DEV) return;
+      console.warn(`Catalog ${reason}; falling back to SAMPLE_MOVIES (dev only).`);
+      setEvents(SAMPLE_MOVIES);
+      setHeroMovie(SAMPLE_MOVIES[0]);
+      selectDefault(SAMPLE_MOVIES[0]);
+    };
+
     catalogClient
       .listEvents({ page: 1 })
       .then((res) => {
         const mapped = res.events.map(cardToMovie);
-        setEvents(mapped);
-        if (mapped[0]) {
-          setHeroMovie(mapped[0]);
-          setSelectedMovie(mapped[0]);
+        if (mapped.length === 0) {
+          useSamplesInDev("returned no events");
+          return;
         }
+        setEvents(mapped);
+        setHeroMovie(mapped[0]);
+        selectDefault(mapped[0]);
       })
-      .catch((err) => console.error("Failed to load catalog:", err));
+      .catch((err) => {
+        console.error("Failed to load catalog:", err);
+        useSamplesInDev("request failed");
+      });
   }, []);
 
   const filteredEvents = useMemo(() => {
@@ -335,14 +633,26 @@ export default function App() {
     });
   }, [events, activeCategory, activeCity, activeDate, availability, maxPrice, searchQuery]);
 
+  /**
+   * The date filter's options, taken from the catalog itself. They are compared verbatim against
+   * `movie.dates`, so they have to be the same ISO strings the events carry — a hand-maintained list
+   * drifts out of date and quietly filters everything away.
+   */
+  const dateOptions = useMemo(
+    () => [...new Set(events.flatMap((event) => event.dates))].sort(),
+    [events],
+  );
+
   const relatedEvents = useMemo(() => {
-    return events.filter((event) => {
-      if (event.id === selectedMovie.id) return false;
-      return (
-        event.category === selectedMovie.category ||
-        event.genre.some((genre) => selectedMovie.genre.includes(genre))
-      );
-    }).slice(0, 3);
+    return events
+      .filter((event) => {
+        if (event.id === selectedMovie.id) return false;
+        return (
+          event.category === selectedMovie.category ||
+          event.genre.some((genre) => selectedMovie.genre.includes(genre))
+        );
+      })
+      .slice(0, 3);
   }, [events, selectedMovie]);
 
   /**
@@ -375,10 +685,26 @@ export default function App() {
     exitDeclinedRef.current = false;
   }, [hold?.expiresAt, activeScreen]);
 
+  /**
+   * Event SEO belongs to the event screens and nowhere else. One effect owns it rather than each
+   * exit remembering to clean up: every screen is a shareable URL now, so a leftover title, og: tag
+   * or Event JSON-LD would advertise /wallet or /bookings as somebody's concert.
+   */
+  useEffect(() => {
+    const onEventScreen = activeScreen === "detail" || activeScreen === "seats";
+    if (!onEventScreen) {
+      clearEventSeo();
+      return;
+    }
+    // Returning from checkout does not re-fetch the detail, so re-apply what was already loaded.
+    const cached = eventSeoRef.current;
+    if (cached && cached.slug === selectedMovie.id) applyEventSeo(cached.detail, cached.showtimes);
+  }, [activeScreen, selectedMovie.id]);
+
   const goHome = () => {
     void leaveFlow(() => {
-      setActiveScreen("home");
-      clearEventSeo();
+      deepLinkedEventRef.current = null;
+      goTo("home");
       window.scrollTo({ top: 0, behavior: "smooth" });
     });
   };
@@ -394,7 +720,8 @@ export default function App() {
         return;
       }
     }
-    setActiveScreen("home");
+    deepLinkedEventRef.current = null;
+    goTo("home");
   };
 
   const saveBookingToHistory = (newBooking: Booking) => {
@@ -458,7 +785,8 @@ export default function App() {
 
     setSelectedMovie(movie); // optimistic (card data)
     setShowtimes([]);
-    setActiveScreen("detail");
+    deepLinkedEventRef.current = movie.id;
+    goTo("detail", { eventSlug: movie.id });
     window.scrollTo({ top: 0, behavior: "smooth" });
     // enrich with full detail from the API (movie.id carries the event slug)
     catalogClient
@@ -467,6 +795,7 @@ export default function App() {
         const loaded = await catalogClient.getShowtimes(detail.id);
         setSelectedMovie(detailToMovie(detail, loaded));
         setShowtimes(loaded);
+        eventSeoRef.current = { slug: movie.id, detail, showtimes: loaded };
         applyEventSeo(detail, loaded);
       })
       .catch((err) => console.error("Failed to load event detail:", err));
@@ -496,7 +825,7 @@ export default function App() {
       setBookingDate(date);
       setBookingTime(time);
       setBookingShowtimeId(showtimeId);
-      setActiveScreen("seats");
+      goTo("seats", { eventSlug: selectedMovie.id });
       window.scrollTo({ top: 0, behavior: "smooth" });
 
       // A returning owner must see their own live holds, not an empty map (FR-022).
@@ -546,12 +875,18 @@ export default function App() {
       } else {
         const updated = hold
           ? await holdsClient.add(hold.reservationId, { seatIds: [seat.showtimeSeatId] })
-          : await holdsClient.hold({ showtimeId: bookingShowtimeId, seatIds: [seat.showtimeSeatId] });
+          : await holdsClient.hold({
+              showtimeId: bookingShowtimeId,
+              seatIds: [seat.showtimeSeatId],
+            });
         setHold(sessionFromReservation(updated, context));
       }
     } catch (e) {
       // Every refusal is explainable: seat just taken, cap reached, showtime closed (SC-008).
-      pushToast("error", e instanceof HoldError ? e.message : "Không giữ được ghế. Vui lòng thử lại.");
+      pushToast(
+        "error",
+        e instanceof HoldError ? e.message : "Không giữ được ghế. Vui lòng thử lại.",
+      );
       if (e instanceof HoldError && e.status === 404) setHold(null); // the hold ended underneath us
     } finally {
       setHoldBusy(false);
@@ -601,10 +936,13 @@ export default function App() {
             quantities: Object.fromEntries(selection.map((line) => [line.tierId, line.quantity])),
           }),
         );
-        setActiveScreen("checkout");
+        goTo("checkout");
         window.scrollTo({ top: 0, behavior: "smooth" });
       } catch (e) {
-        pushToast("error", e instanceof HoldError ? e.message : "Không giữ được vé. Vui lòng thử lại.");
+        pushToast(
+          "error",
+          e instanceof HoldError ? e.message : "Không giữ được vé. Vui lòng thử lại.",
+        );
       } finally {
         setHoldBusy(false);
       }
@@ -616,63 +954,74 @@ export default function App() {
   // and its countdown carry straight through.
   const handleProceedToCheckout = () => {
     runSignedIn(() => {
-      setActiveScreen("checkout");
+      goTo("checkout");
       window.scrollTo({ top: 0, behavior: "smooth" });
     });
   };
 
-  const handleConfirmPurchase = (payload: CheckoutPayload) => {
-    const trackingId = "TB" + Math.floor(100000 + Math.random() * 900000);
-    const timeNow = new Date().toLocaleString("vi-VN", { timeZone: "Asia/Saigon" });
+  const handleConfirmPurchase = async (payload: CheckoutPayload) => {
+    if (!hold) {
+      pushToast("error", "Đơn giữ chỗ không còn hiệu lực. Vui lòng chọn vé lại.");
+      return;
+    }
 
-    const newBooking: Booking = {
-      id: trackingId,
-      movie: selectedMovie,
-      selectedDate: bookingDate,
-      selectedTime: bookingTime,
-      selectedSeats: bookingSeats,
-      customerName: payload.customer.name,
-      customerEmail: payload.customer.email,
-      customerPhone: payload.customer.phone,
-      totalPrice: bookingTotalPrice,
-      serviceFee: payload.serviceFee,
-      discount: payload.discount,
-      finalPrice: payload.finalPrice,
-      paymentMethod: payload.paymentMethod,
-      promoCode: payload.promoCode,
-      deliveryChannel: "email_sms",
-      status: "paid",
-      qrStatus: "unused",
-      bookingTime: timeNow,
-      qrPayload: JSON.stringify({
-        bookingId: trackingId,
-        eventId: selectedMovie.id,
-        event: selectedMovie.title,
-        seats: bookingSeats.map((seat) => seat.id).join(","),
-        time: `${bookingTime} - ${bookingDate}`,
+    setHoldBusy(true);
+    try {
+      const order = await walletClient.checkout(hold.reservationId);
+      const ticket = order.tickets[0];
+      if (!ticket) throw new Error("Đơn hàng chưa có vé.");
+
+      const newBooking: Booking = {
+        id: String(order.id),
+        movie: selectedMovie,
+        selectedDate: bookingDate,
+        selectedTime: bookingTime,
+        selectedSeats: bookingSeats,
+        customerName: payload.customer.name,
+        customerEmail: payload.customer.email,
+        customerPhone: payload.customer.phone,
+        totalPrice: order.totalAmount,
+        serviceFee: 0,
+        discount: 0,
+        finalPrice: order.totalAmount,
+        paymentMethod: "Ví TixHub",
+        deliveryChannel: "email_sms",
+        status: "paid",
         qrStatus: "unused",
-      }),
-    };
+        bookingTime: new Date(order.createdAt).toLocaleString("vi-VN", {
+          timeZone: "Asia/Ho_Chi_Minh",
+        }),
+        qrPayload: ticket.ticketCode,
+      };
 
-    saveBookingToHistory(newBooking);
-    setFinalBooking(newBooking);
-    // The flow completed: the hold became a ticket, so it is released without any warning.
-    setHold(null);
-    setActiveScreen("ticket");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+      saveBookingToHistory(newBooking);
+      setFinalBooking(newBooking);
+      setHold(null);
+      goTo("ticket", { bookingId: newBooking.id });
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (e) {
+      // A short balance is not a failed purchase — it is a step the buyer can complete. The server
+      // sends the exact numbers, which the checkout screen turns into a pre-filled top-up (UC-12 A2).
+      if (e instanceof WalletError && e.code === "insufficient_wallet_balance" && e.details) {
+        setShortfall({
+          required: Number(e.details.required ?? 0),
+          balance: Number(e.details.balance ?? 0),
+          shortfall: Number(e.details.shortfall ?? 0),
+        });
+      }
+      pushToast(
+        "error",
+        e instanceof WalletError ? e.message : "Không thể hoàn tất thanh toán. Vui lòng thử lại.",
+      );
+    } finally {
+      setHoldBusy(false);
+    }
   };
 
   const handleLogin = (user: Me) => {
-    const name = user.nickname || user.email;
-    setUserName(name);
     setIsSignedIn(true);
-    setAvatarUrl(user.avatarUrl);
+    applyIdentity(user);
     setShowAuthModal(false);
-    try {
-      localStorage.setItem(USER_CACHE_KEY, name);
-    } catch (err) {
-      console.error("Failed to save user:", err);
-    }
 
     // Resume whatever the sign-in interrupted, so signing in is not a dead end.
     const resume = pendingAction;
@@ -695,37 +1044,48 @@ export default function App() {
     setShowAuthModal(true);
   };
 
+  /** Clears everything this browser remembers about the signed-in account. */
+  const clearSignedInState = () => {
+    setIsSignedIn(false);
+    applyIdentity(null);
+  };
+
   const handleLogout = async () => {
     try {
       await authClient.logout();
     } catch (err) {
       console.error("Logout failed:", err);
     }
-    setUserName("");
-    setIsSignedIn(false);
-    setAvatarUrl(null);
+    clearSignedInState();
+  };
+
+  /** Revokes every session for the account, this device included (FR-056). */
+  const handleLogoutAll = async () => {
     try {
-      localStorage.removeItem(USER_CACHE_KEY);
+      await authClient.logoutAll();
     } catch (err) {
-      console.error("Failed to clear cached user:", err);
+      console.error("Logout-all failed:", err);
     }
+    clearSignedInState();
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-xanh-pho text-beige-kem selection:bg-burgundy selection:text-white transition-colors duration-300">
+    <div className="flex min-h-screen flex-col bg-xanh-pho text-white selection:bg-burgundy selection:text-white transition-colors duration-300">
       <Header
         searchQuery={searchQuery}
         onSearchChange={(value) => void goHomeAfterFilter(() => setSearchQuery(value))}
-        onViewHistory={() => void leaveFlow(() => setActiveScreen("history"))}
+        onViewHistory={() => void leaveFlow(() => goTo("history"))}
+        onViewWallet={() => void leaveFlow(() => goTo("wallet"))}
         onHomeClick={goHome}
-        onLoginClick={() => (userName ? setShowAccountModal(true) : setShowAuthModal(true))}
+        onLoginClick={() => (userName ? navigate(ACCOUNT_PATH) : setShowAuthModal(true))}
         onAdminClick={() =>
           leaveFlow(() => {
-            setActiveScreen("moderation");
+            goTo("moderation");
             window.scrollTo({ top: 0, behavior: "smooth" });
           })
         }
         userName={userName}
+        userEmail={userEmail}
         avatarUrl={avatarUrl}
         theme={theme}
         onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
@@ -743,6 +1103,7 @@ export default function App() {
               activeCategory={activeCategory}
               onCategoryChange={(value) => void goHomeAfterFilter(() => setActiveCategory(value))}
               activeDate={activeDate}
+              dateOptions={dateOptions}
               onDateChange={(value) => void goHomeAfterFilter(() => setActiveDate(value))}
               activeCity={activeCity}
               onCityChange={(value) => void goHomeAfterFilter(() => setActiveCity(value))}
@@ -762,7 +1123,7 @@ export default function App() {
               onToggleWishlist={handleToggleWishlist}
             />
 
-            <section className="border-t border-beige-kem/10 bg-xanh-pho/30 px-4 py-20 sm:px-6 lg:px-8">
+            <section className="border-t border-beige-kem/25 bg-xanh-pho px-4 py-20 sm:px-6 lg:px-8">
               <div className="mx-auto grid max-w-7xl grid-flow-dense grid-cols-1 gap-5 md:grid-cols-3">
                 <TrustCard
                   title="Wishlist và nhắc lịch"
@@ -817,7 +1178,7 @@ export default function App() {
             busy={holdBusy}
             onToggleSeat={(seat) => void handleToggleSeat(seat)}
             // Stepping back to the showtime picker stays inside the flow: the hold is kept.
-            onBack={() => setActiveScreen("detail")}
+            onBack={() => goTo("detail", { eventSlug: selectedMovie.id })}
             onProceedToCheckout={handleProceedToCheckout}
           />
         )}
@@ -832,7 +1193,11 @@ export default function App() {
             remainingMs={holdRemainingMs}
             backLabel={hold?.mode === "ga" ? "Quay lại chọn số lượng vé" : "Quay lại chọn ghế"}
             // Also inside the flow — the selection and the countdown are still there when they return.
-            onBack={() => setActiveScreen(hold?.mode === "ga" ? "detail" : "seats")}
+            onBack={() =>
+              goTo(hold?.mode === "ga" ? "detail" : "seats", { eventSlug: selectedMovie.id })
+            }
+            reservationId={hold?.reservationId ?? null}
+            shortfall={shortfall}
             onConfirmBooking={handleConfirmPurchase}
           />
         )}
@@ -847,7 +1212,7 @@ export default function App() {
             onBack={goHome}
             onSelectBooking={(booking) => {
               setFinalBooking(normalizeBooking(booking));
-              setActiveScreen("ticket");
+              goTo("ticket", { bookingId: booking.id });
             }}
             onClearHistory={() => void clearHistory()}
           />
@@ -857,21 +1222,30 @@ export default function App() {
           <AdminPanel events={SAMPLE_MOVIES} bookings={bookingsHistory} onBack={goHome} />
         )}
 
+        {activeScreen === "wallet" && <WalletPanel onBack={goHome} />}
         {activeScreen === "organizer" && <OrganizerPanel onBack={goHome} />}
         {activeScreen === "moderation" && <AdminModeration onBack={goHome} />}
       </main>
 
-      <footer className="border-t border-beige-kem/10 bg-xanh-pho px-4 py-12 font-mono text-xs sm:px-6 lg:px-8">
+      <footer className="border-t border-beige-kem/25 bg-xanh-pho px-4 py-12 font-mono text-xs sm:px-6 lg:px-8">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-6 md:flex-row">
           <div className="space-y-1 text-center md:text-left">
-            <h5 className="font-display text-sm font-bold tracking-normal text-beige-kem">TIXHUB FRONTEND MVP</h5>
-            <p className="text-[10px] text-la-co">Mock data cho vé ca nhạc, hòa nhạc, kịch và phim</p>
+            <h5 className="font-display text-sm font-bold tracking-normal text-beige-kem">
+              TIXHUB FRONTEND MVP
+            </h5>
+            <p className="text-[10px] text-ink-soft">
+              Mock data cho vé ca nhạc, hòa nhạc, kịch và phim
+            </p>
           </div>
 
           <div className="flex flex-wrap justify-center gap-6 text-beige-kem/60">
-            <span className="cursor-pointer transition hover:text-cam-dat">Chính sách hoàn vé</span>
-            <span className="cursor-pointer transition hover:text-cam-dat">Điều khoản sử dụng</span>
-            <span className="cursor-pointer transition hover:text-cam-dat">Hỗ trợ email/SMS</span>
+            <span className="cursor-pointer transition hover:text-ink-soft">
+              Chính sách hoàn vé
+            </span>
+            <span className="cursor-pointer transition hover:text-ink-soft">
+              Điều khoản sử dụng
+            </span>
+            <span className="cursor-pointer transition hover:text-ink-soft">Hỗ trợ email/SMS</span>
           </div>
 
           <p className="text-center text-[10px] text-beige-kem/40 md:text-right">
@@ -882,37 +1256,37 @@ export default function App() {
 
       <button
         onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-        className="fixed bottom-6 right-6 z-30 grid h-12 w-12 place-items-center rounded-xl border border-cam-dat/20 bg-burgundy/90 text-beige-kem shadow-xl transition-all hover:scale-105 hover:bg-burgundy"
+        className="fixed bottom-6 right-6 z-30 grid h-12 w-12 place-items-center rounded-xl border border-cam-dat/20 bg-burgundy text-white shadow-hard transition-all hover:scale-105 hover:brightness-95"
         aria-label="Cuộn lên đầu trang"
         title="Cuộn lên đầu trang"
       >
         <ArrowUp className="h-5 w-5" />
       </button>
 
-      {showAuthModal && (
-        <AuthModal onClose={dismissAuthModal} onLogin={handleLogin} />
-      )}
-      {showAccountModal && userName && (
-        <AccountModal
-          onClose={() => setShowAccountModal(false)}
+      {showAuthModal && <AuthModal onClose={dismissAuthModal} onLogin={handleLogin} />}
+      {showAccountPage && userName && (
+        <AccountPage
+          onClose={closeAccountPage}
           onLogout={async () => {
             await handleLogout();
-            setShowAccountModal(false);
+            closeAccountPage();
           }}
-          onProfileUpdated={(user) => {
-            setUserName(user.nickname || user.email);
-            setAvatarUrl(user.avatarUrl);
+          onLogoutAll={async () => {
+            await handleLogoutAll();
+            closeAccountPage();
           }}
+          onProfileUpdated={applyIdentity}
           onManageEvents={() =>
             leaveFlow(() => {
-              setShowAccountModal(false);
-              setActiveScreen("organizer");
+              // One navigation, not a close followed by a move: `/organizer` replaces `/account`.
+              goTo("organizer");
               window.scrollTo({ top: 0, behavior: "smooth" });
             })
           }
         />
       )}
       {resetToken && <ResetPassword token={resetToken} />}
+      {onVnpayReturn && <VnpayReturn onDone={finishVnpayReturn} />}
 
       {confirmRequest && (
         <ConfirmDialog
@@ -926,15 +1300,9 @@ export default function App() {
   );
 }
 
-function TrustCard({
-  title,
-  text,
-}: {
-  title: string;
-  text: string;
-}) {
+function TrustCard({ title, text }: { title: string; text: string }) {
   return (
-    <div className="rounded-2xl border border-beige-kem/10 bg-white/[0.035] p-6">
+    <div className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-6">
       <h4 className="font-display text-lg font-black text-beige-kem">{title}</h4>
       <p className="mt-2 text-sm leading-6 text-beige-kem/65">{text}</p>
     </div>

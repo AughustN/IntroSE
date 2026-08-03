@@ -6,9 +6,9 @@
 import { useEffect, useState } from "react";
 import { ManageShowtime, organizerApi } from "../services/catalogClient";
 
-const input = "h-10 w-full rounded-lg border border-beige-kem/20 bg-white/[0.035] px-3 text-sm text-beige-kem outline-none focus:border-cam-dat";
-const btn = "rounded-lg bg-burgundy px-3 py-2 text-xs font-black text-beige-kem transition hover:bg-burgundy/90";
-const ghost = "rounded-lg border border-beige-kem/15 px-3 py-2 text-xs font-bold text-beige-kem/80 transition hover:border-cam-dat";
+const input = "h-10 w-full rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
+const btn = "rounded-lg bg-burgundy px-3 py-2 text-xs font-black text-white transition hover:brightness-95";
+const ghost = "rounded-lg border-2 border-beige-kem px-3 py-2 text-xs font-bold text-beige-kem/80 transition";
 
 export default function SeatMapBuilder({ eventId, onClose }: { eventId: number; onClose: () => void }) {
   const [rows, setRows] = useState<ManageShowtime[]>([]);
@@ -51,21 +51,21 @@ export default function SeatMapBuilder({ eventId, onClose }: { eventId: number; 
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-xanh-pho/95 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-xanh-pho">
       <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8 text-beige-kem">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-2xl font-black">Sơ đồ ghế</h2>
           <button onClick={onClose} className={ghost}>Đóng</button>
         </div>
-        {notice && <div className="rounded-xl border border-la-co/20 bg-la-co/5 p-3 text-xs text-la-co">{notice}</div>}
-        {err && <div className="rounded-xl border border-burgundy/40 bg-burgundy/10 p-3 text-xs">{err}</div>}
+        {notice && <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-xs text-on-tint">{notice}</div>}
+        {err && <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-xs">{err}</div>}
         {rows.length === 0 && <p className="text-sm text-beige-kem/60">Chưa có suất chiếu. Thêm suất chiếu trước ở màn "Quản lý sự kiện".</p>}
 
         {rows.map((st) => (
-          <div key={st.id} className="rounded-2xl border border-beige-kem/10 bg-white/[0.02] p-4">
+          <div key={st.id} className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
             <div className="mb-3 flex items-center justify-between">
               <span className="font-bold">{new Date(st.startsAt).toLocaleString("vi-VN")} · {st.venueName}</span>
-              {st.hasSeatMap && <span className="rounded-lg border border-la-co/40 bg-la-co/10 px-2 py-0.5 font-mono text-[10px] text-la-co">Đã có sơ đồ ghế</span>}
+              {st.hasSeatMap && <span className="rounded-lg border-2 border-beige-kem bg-la-co px-2 py-0.5 font-mono text-[10px] text-on-tint">Đã có sơ đồ ghế</span>}
             </div>
 
             {!st.hasSeatMap && (

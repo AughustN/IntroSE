@@ -1,12 +1,13 @@
-import 'dotenv/config';
+import "dotenv/config";
 
 /** Fail-fast env loading + validation (task T004).
  *  REQUIRED: DATABASE_URL, JWT_SECRET, AUTH_EVENT_HASH_KEY.
+ *  REQUIRED under vitest: TEST_DATABASE_URL.
  *  Optional / gated: GOOGLE_CLIENT_ID (US3), RESEND_API_KEY (empty → ConsoleMailer). */
 
 function required(name: string): string {
   const v = process.env[name];
-  if (!v || v.trim() === '' || v.includes('REPLACE_WITH')) {
+  if (!v || v.trim() === "" || v.includes("REPLACE_WITH")) {
     throw new Error(`Missing required env var: ${name}`);
   }
   return v;
@@ -14,22 +15,58 @@ function required(name: string): string {
 
 // node-pg does not understand libpq's channel_binding param in the URL — strip it.
 function normalizeDbUrl(url: string): string {
-  return url.replace(/([?&])channel_binding=[^&]*/i, '').replace(/[?&]$/, '');
+  return url.replace(/([?&])channel_binding=[^&]*/i, "").replace(/[?&]$/, "");
 }
 
+/**
+ * The project runs against three Neon branches, one per job:
+ *
+ *   DATABASE_URL       the app. `dev:server`, `db:migrate` and `seed` all talk to this one.
+ *   TEST_DATABASE_URL  vitest, and nothing else. The suite truncates every table between cases.
+ *   DEMO_DATABASE_URL  the demo branch. Its data was uploaded by hand and nothing regenerates it,
+ *                      so no destructive job may point at it — see server/src/db/guards.ts.
+ *
+ * The test URL is resolved here rather than in the suite because `pool.ts` builds one pool at
+ * import time from `config.databaseUrl`. Deliberately no fallback to DATABASE_URL: a suite that
+ * silently truncates whatever database happens to be configured is the exact accident this
+ * split exists to prevent, so a missing TEST_DATABASE_URL fails the run instead.
+ */
+const isTest = Boolean(process.env.VITEST);
+
 export const config = {
-  nodeEnv: process.env.NODE_ENV ?? 'development',
-  isProd: process.env.NODE_ENV === 'production',
+  nodeEnv: process.env.NODE_ENV ?? "development",
+  isProd: process.env.NODE_ENV === "production",
+  isTest,
   port: Number(process.env.PORT ?? 4000),
-  appUrl: process.env.APP_URL ?? 'http://localhost:3000',
+  appUrl: process.env.APP_URL ?? "http://localhost:3000",
 
-  databaseUrl: normalizeDbUrl(required('DATABASE_URL')),
-  jwtSecret: required('JWT_SECRET'),
-  authEventHashKey: required('AUTH_EVENT_HASH_KEY'),
+  databaseUrl: normalizeDbUrl(required(isTest ? "TEST_DATABASE_URL" : "DATABASE_URL")),
+  /** Empty until the demo branch URL is filled in. Only ever compared against, never connected to. */
+  demoDatabaseUrl: normalizeDbUrl(process.env.DEMO_DATABASE_URL ?? ""),
+  jwtSecret: required("JWT_SECRET"),
+  authEventHashKey: required("AUTH_EVENT_HASH_KEY"),
 
-  googleClientId: process.env.GOOGLE_CLIENT_ID ?? '', // gated (US3)
-  resendApiKey: process.env.RESEND_API_KEY ?? '', // empty → ConsoleMailer
-  mailFrom: process.env.MAIL_FROM ?? 'TixHub <no-reply@tixhub.fit>',
+  googleClientId: process.env.GOOGLE_CLIENT_ID ?? "", // gated (US3)
+  resendApiKey: process.env.RESEND_API_KEY ?? "", // empty → ConsoleMailer
+  mailFrom: process.env.MAIL_FROM ?? "TixHub <no-reply@tixhub.fit>",
+
+  // VNPay is optional at boot so local catalog/hold development does not require gateway secrets.
+  vnpayTmnCode: process.env.VNPAY_TMN_CODE ?? "",
+  vnpayHashSecret: process.env.VNPAY_HASH_SECRET ?? "",
+  vnpayPaymentUrl:
+    process.env.VNPAY_PAYMENT_URL ?? "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html",
+  /** `querydr` endpoint — the reconciliation sweep's only way to settle a top-up whose IPN was lost. */
+  vnpayQueryUrl:
+    process.env.VNPAY_QUERY_URL ?? "https://sandbox.vnpayment.vn/merchant_webapi/api/transaction",
+  /**
+   * Where VNPay sends the browser back. A frontend page, not the API: the buyer must land on
+   * something that explains itself, and the return URL is display-only anyway — the balance moves
+   * on the signed IPN, so this page polls the top-up's status rather than reading the redirect
+   * (UC-13 A6, SEC-06). `GET /api/payments/vnpay/return` still exists for verifying the signature.
+   */
+  vnpayReturnUrl:
+    process.env.VNPAY_RETURN_URL ??
+    `${process.env.APP_URL ?? "http://localhost:3000"}/vnpay-return`,
 } as const;
 
 // ---- Auth constants (decisions from research/ADRs) ----
@@ -39,9 +76,9 @@ export const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7-day sliding (R-3)
 export const REFRESH_ABSOLUTE_MS = 30 * 24 * 60 * 60 * 1000; // 30-day cap (R-12 #6)
 export const RESET_TTL_MS = 30 * 60 * 1000; // 30 min (R-3)
 export const REFRESH_GRACE_MS = 60 * 1000; // idempotency-keyed grace cap (R-12)
-export const REFRESH_COOKIE = 'tix_refresh';
-export const JWT_ISS = 'tixhub.fit';
-export const JWT_AUD = 'tixhub.fit';
+export const REFRESH_COOKIE = "tix_refresh";
+export const JWT_ISS = "tixhub.fit";
+export const JWT_AUD = "tixhub.fit";
 
 // ---- Seat holds (feature 003). Settings an admin can adjust (UC-36), never hard-coded. ----
 const ms = (name: string, fallback: number): number => {
@@ -50,15 +87,34 @@ const ms = (name: string, fallback: number): number => {
 };
 
 /** Hold window from the reservation's first hold (Vision REL-02, FR-006). */
-export const HOLD_TTL_MS = ms('HOLD_TTL_MS', 7 * 60 * 1000);
+export const HOLD_TTL_MS = ms("HOLD_TTL_MS", 7 * 60 * 1000);
 /** One-time grace granted when a wallet top-up carries the reservation (FR-010, schema D2 amendment). */
-export const HOLD_GRACE_MS = ms('HOLD_GRACE_MS', 7 * 60 * 1000);
+export const HOLD_GRACE_MS = ms("HOLD_GRACE_MS", 7 * 60 * 1000);
 /** Absolute ceiling measured from `reservations.created_at` — the window can never exceed it. */
-export const HOLD_ABSOLUTE_MS = ms('HOLD_ABSOLUTE_MS', 14 * 60 * 1000);
+export const HOLD_ABSOLUTE_MS = ms("HOLD_ABSOLUTE_MS", 14 * 60 * 1000);
 /** Tickets one attendee may hold at once for one showtime: seats (seated) or quantity (GA) (FR-016). */
-export const SEAT_CAP = ms('SEAT_CAP', 8);
+export const SEAT_CAP = ms("SEAT_CAP", 8);
 /** How often the release sweep runs. Expiry is exact; the sweep is what acts on it (REL-02). */
-export const HOLD_SWEEP_INTERVAL_MS = ms('HOLD_SWEEP_INTERVAL_MS', 60 * 1000);
+export const HOLD_SWEEP_INTERVAL_MS = ms("HOLD_SWEEP_INTERVAL_MS", 60 * 1000);
 /** Hold/release requests allowed per user per window — anti hold-spam (FR-017). */
-export const HOLD_RATE_LIMIT = ms('HOLD_RATE_LIMIT', 30);
-export const HOLD_RATE_WINDOW_MS = ms('HOLD_RATE_WINDOW_MS', 10 * 1000);
+export const HOLD_RATE_LIMIT = ms("HOLD_RATE_LIMIT", 30);
+export const HOLD_RATE_WINDOW_MS = ms("HOLD_RATE_WINDOW_MS", 10 * 1000);
+
+// ---- Wallet & top-ups (feature 004, UC-40). Admin-adjustable (UC-36). VND đồng, integers [STD-03].
+/** Smallest top-up VNPay is worth a round trip for. */
+export const TOPUP_MIN_AMOUNT = ms("TOPUP_MIN_AMOUNT", 5_000);
+/** Per-transaction ceiling. */
+export const TOPUP_MAX_AMOUNT = ms("TOPUP_MAX_AMOUNT", 10_000_000);
+/**
+ * Most store credit one wallet may hold. Checked at top-up time only, never on credit: applying it
+ * to a refund would strand a refund the buyer is owed, and the ceiling exists to bound how much
+ * money the platform holds on someone's behalf, not to reject money coming back (UC-40 A2, DATA-04).
+ */
+export const WALLET_BALANCE_CAP = ms("WALLET_BALANCE_CAP", 20_000_000);
+/**
+ * How stale an `initiated` top-up must be before the reconciliation sweep asks VNPay what happened
+ * (UC-40 A5). Long enough that a buyer still on the sandbox page is not queried mid-payment.
+ */
+export const TOPUP_RECONCILE_AFTER_MS = ms("TOPUP_RECONCILE_AFTER_MS", 15 * 60 * 1000);
+/** How often that sweep runs. */
+export const TOPUP_SWEEP_INTERVAL_MS = ms("TOPUP_SWEEP_INTERVAL_MS", 5 * 60 * 1000);

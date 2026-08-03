@@ -35,7 +35,7 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
     imageUrl: "https://images.unsplash.com/photo-1536440136628-849c177e76a1?auto=format&fit=crop&q=80&w=600",
     trailerUrl: LOCAL_TRAILER_URL,
     times: ["09:30", "12:15", "15:00", "18:20", "20:45", "23:15"],
-    dates: ["Hôm nay", "Ngày mai", "11/06", "12/06", "13/06"],
+    dates: ["2026-08-01", "2026-08-02", "2026-08-03", "2026-08-04", "2026-08-05"],
     city: "TP.HCM",
     location: "TixHub Cinema - Chi nhánh Pasteur Quận 1",
     venueName: "TixHub Pasteur",
@@ -75,7 +75,7 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
     imageUrl: "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&q=80&w=600",
     trailerUrl: LOCAL_TRAILER_URL,
     times: ["14:00", "17:30", "20:00"],
-    dates: ["Hôm nay", "12/06", "14/06", "15/06"],
+    dates: ["2026-08-01", "2026-08-06", "2026-08-08", "2026-08-09"],
     city: "TP.HCM",
     location: "Nhà hát TP. Hồ Chí Minh - Tràng Tiền Plaza",
     venueName: "Nhà hát Thành phố",
@@ -115,7 +115,7 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
     imageUrl: "https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?auto=format&fit=crop&q=80&w=600",
     trailerUrl: LOCAL_TRAILER_URL,
     times: ["18:00"],
-    dates: ["Hôm nay", "13/06", "20/06"],
+    dates: ["2026-08-01", "2026-08-07", "2026-08-14"],
     city: "TP.HCM",
     location: "Trung tâm Hội chợ và Triển lãm Sài Gòn (SECC) - Q.7",
     venueName: "SECC Hall A",
@@ -155,7 +155,7 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
     imageUrl: "https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&q=80&w=600",
     trailerUrl: LOCAL_TRAILER_URL,
     times: ["10:00", "13:30", "16:45", "19:00", "21:30"],
-    dates: ["Hôm nay", "Ngày mai", "11/06", "12/06"],
+    dates: ["2026-08-01", "2026-08-02", "2026-08-03", "2026-08-04"],
     city: "Hà Nội",
     location: "TixHub Cinema - Chi nhánh Hai Bà Trưng Hà Nội",
     venueName: "TixHub Hai Bà Trưng",
@@ -195,7 +195,7 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
     imageUrl: "https://images.unsplash.com/photo-1509248961158-e54f6934749c?auto=format&fit=crop&q=80&w=600",
     trailerUrl: LOCAL_TRAILER_URL,
     times: ["18:30", "20:45", "22:50", "00:15"],
-    dates: ["Hôm nay", "Ngày mai", "11/06"],
+    dates: ["2026-08-01", "2026-08-02", "2026-08-03"],
     city: "TP.HCM",
     location: "TixHub Cinema - Chi nhánh Pasteur Quận 1",
     venueName: "TixHub Pasteur",
@@ -207,6 +207,51 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
     isFeatured: false,
     comboOffer: "Chờ mở thêm suất khuya, có thể bấm nhắc lịch.",
     affiliateCode: "HORROR-NIGHT"
+  },
+  {
+    /*
+     * The only cancelled sample. Kept deliberately: it is the sole card that exercises the
+     * cancelled status badge and the disabled booking button, and its million-đồng price is what
+     * drives the card price tag into its "Tr" short form. Omitting `comboOffer` also shows the
+     * card's fallback offer line.
+     */
+    id: "sym-hanoi-cancelled",
+    eventType: "seated",
+    category: "concert",
+    title: "Đêm Giao Hưởng Hà Nội - Bốn Mùa",
+    originalTitle: "Hanoi Symphony Night: Four Seasons",
+    tags: ["Giao Hưởng", "Ghế Ngồi", "VIP"],
+    ageRating: "P",
+    ageDescription: "Chương trình được phép phổ biến rộng rãi đến mọi đối tượng khán giả",
+    duration: 120,
+    genre: ["Giao Hưởng", "Cổ Điển"],
+    director: "Lê Phi Phi",
+    cast: ["Dàn nhạc Giao hưởng Quốc gia", "Bùi Công Duy", "Nguyễn Thu Hà"],
+    releaseDate: "2026-09-14",
+    rating: 8.8,
+    reviewCount: 214,
+    description: "Bốn chương nhạc theo bốn mùa Hà Nội, trình diễn cùng dàn dây thính phòng và phần độc tấu violin. Đêm diễn đã bị hủy do sự cố kỹ thuật tại nhà hát; ban tổ chức sẽ hoàn tiền toàn bộ về ví TixHub.",
+    price: 1200000,
+    doublePrice: 2200000,
+    ticketTiers: [
+      { id: "standard", label: "Standard", price: 1200000, description: "Tầng 2, tầm nhìn trọn sân khấu" },
+      { id: "vip", label: "VIP", price: 1800000, description: "Tầng 1, 10 hàng đầu", badge: "VIP" },
+      { id: "box", label: "Lô riêng", price: 2200000, description: "Lô 2 chỗ có phục vụ riêng", badge: "Cặp đôi" }
+    ],
+    imageUrl: "https://images.unsplash.com/photo-1465847899084-d164df4dedc6?auto=format&fit=crop&q=80&w=600",
+    trailerUrl: LOCAL_TRAILER_URL,
+    times: ["20:00"],
+    dates: ["2026-09-14"],
+    city: "Hà Nội",
+    location: "Nhà hát Lớn Hà Nội - 01 Tràng Tiền, Hoàn Kiếm",
+    venueName: "Nhà hát Lớn Hà Nội",
+    venueMapUrl: "https://maps.google.com/?q=Nha+hat+Lon+Ha+Noi",
+    venueGuide: "Cửa soát vé mở trước giờ diễn 45 phút. Khán giả vào muộn chờ hết chương đầu.",
+    refundPolicy: "Đêm diễn bị hủy: hoàn 100% về ví TixHub trong vòng 5 ngày làm việc.",
+    status: "cancelled",
+    ticketsLeft: 0,
+    isFeatured: false,
+    affiliateCode: "SYM-HN-2026"
   }
 ];
 

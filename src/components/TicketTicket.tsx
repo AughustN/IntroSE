@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Booking } from "../types";
+import { formatEventDate } from "../services/formatDate";
 
 interface TicketTicketProps {
   booking: Booking;
@@ -37,26 +38,26 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
       
       {/* Success Banner */}
       <div className="text-center space-y-3">
-        <div className="inline-flex items-center justify-center rounded-full border border-la-co/40 bg-la-co/15 px-4 py-2 font-mono text-xs font-bold uppercase text-la-co">
+        <div className="inline-flex items-center justify-center rounded-full border-2 border-beige-kem bg-la-co px-4 py-2 font-mono text-xs font-bold uppercase text-on-tint">
           Đã thanh toán
         </div>
         <h2 className="font-display text-3xl font-black text-beige-kem tracking-tight">Đặt vé thành công</h2>
         <p className="text-sm text-beige-kem/80 max-w-lg mx-auto leading-relaxed">
-          Giao dịch mã số <span className="font-mono text-cam-dat font-bold">{booking.id}</span> đã được hạch toán qua {booking.paymentMethod}. Vé QR đã được gửi mock về <span className="text-la-co font-semibold">{booking.customerEmail}</span> và SMS {booking.customerPhone}.
+          Giao dịch mã số <span className="font-mono text-ink-soft font-bold">{booking.id}</span> đã được hạch toán qua {booking.paymentMethod}. Vé QR đã được gửi mock về <span className="text-ink-soft font-semibold">{booking.customerEmail}</span> và SMS {booking.customerPhone}.
         </p>
       </div>
 
       {/* Retro Perforated Ticket Coupon */}
-      <div className="bg-beige-kem border-4 border-xanh-pho rounded-2xl shadow-2xl relative overflow-hidden text-xanh-pho max-w-2xl mx-auto">
+      <div className="bg-beige-kem border-4 border-xanh-pho rounded-2xl shadow-hard relative overflow-hidden text-xanh-pho max-w-2xl mx-auto">
         
         {/* Decorative Ticket Side Notch Circles */}
         <div className="absolute -left-4 top-1/2 -translate-y-1/2 w-8 h-8 bg-xanh-pho rounded-full z-10 border-r-4 border-xanh-pho" />
         <div className="absolute -right-4 top-1/2 -translate-y-1/2 w-8 h-8 bg-xanh-pho rounded-full z-10 border-l-4 border-xanh-pho" />
 
         {/* Part A: Ticket Header */}
-        <div className="bg-burgundy text-beige-kem p-6 flex justify-between items-center border-b-4 border-dashed border-xanh-pho">
+        <div className="bg-burgundy text-white p-6 flex justify-between items-center border-b-4 border-dashed border-xanh-pho">
           <div className="space-y-1">
-            <span className="text-[9px] font-mono tracking-widest text-cam-dat uppercase font-bold">CINEMA VINTAGE STUB</span>
+            <span className="text-[9px] font-mono tracking-widest text-ink-soft uppercase font-bold">CINEMA VINTAGE STUB</span>
             <div className="flex items-baseline gap-1.5">
               <h3 className="font-display font-black text-xl tracking-tighter">TIXHUB</h3>
               <span className="text-[9px] font-mono bg-[#E0E2CA] text-burgundy px-1 py-0.2 rounded font-black">STUB</span>
@@ -65,7 +66,7 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
 
           <div className="text-right font-mono text-xs">
             <p className="opacity-75">Mã Vé</p>
-            <p className="font-bold text-cam-dat text-sm">{booking.id}</p>
+            <p className="font-bold text-ink-soft text-sm">{booking.id}</p>
           </div>
         </div>
 
@@ -75,7 +76,7 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
           {/* Main info columns (8 cols) */}
           <div className="md:col-span-8 space-y-5">
             <div className="space-y-1">
-              <span className="text-[10px] font-mono font-semibold bg-burgundy/10 text-burgundy border border-burgundy/25 px-2 py-0.5 rounded">
+              <span className="text-[10px] font-mono font-semibold bg-bubblegum text-on-tint border-2 border-beige-kem px-2 py-0.5 rounded">
                 Rated: {booking.movie.ageRating}
               </span>
               <h4 className="font-display font-black text-2xl tracking-tight text-burgundy leading-tight pt-1">
@@ -91,7 +92,7 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
                 <span className="text-gray-500">
                   Ngày chiếu
                 </span>
-                <span className="font-bold text-xanh-pho">{booking.selectedDate}</span>
+                <span className="font-bold text-xanh-pho">{formatEventDate(booking.selectedDate, true)}</span>
               </div>
               <div className="space-y-1">
                 <span className="text-gray-500">
@@ -131,7 +132,7 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Giảm giá:</span>
-                <span className="font-bold text-la-co">-{formatPrice(booking.discount)}</span>
+                <span className="font-bold text-ink-soft">-{formatPrice(booking.discount)}</span>
               </div>
               <div className="flex justify-between items-baseline border-t border-gray-300 pt-2">
                 <span className="text-gray-500">Tổng thanh toán:</span>
@@ -141,7 +142,7 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
           </div>
 
           {/* QR Scan Column (4 cols) */}
-          <div className="md:col-span-4 flex flex-col items-center justify-center p-4 bg-xanh-pho/5 border border-xanh-pho/15 rounded-xl space-y-3">
+          <div className="md:col-span-4 flex flex-col items-center justify-center p-4 bg-xanh-pho border border-xanh-pho/15 rounded-xl space-y-3">
             
             {/* Elegant SVG custom QR code code */}
             <div className="w-28 h-28 bg-xanh-pho p-2 rounded-lg shadow-inner flex items-center justify-center">
@@ -199,41 +200,41 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
       <div className="flex flex-wrap justify-center items-center gap-4 py-4 font-mono text-sm">
         <button
           onClick={onHomeClick}
-          className="flex items-center px-5 py-2.5 bg-xanh-pho/80 border border-beige-kem/20 hover:border-beige-kem/60 text-beige-kem rounded-lg transition"
+          className="flex items-center px-5 py-2.5 bg-xanh-pho border-2 border-beige-kem hover:border-beige-kem/60 text-beige-kem rounded-lg transition"
         >
           VỀ TRANG CHỦ
         </button>
 
         <button
           onClick={handleCopyCode}
-          className="flex items-center px-5 py-2.5 bg-xanh-pho/80 border border-beige-kem/20 hover:border-beige-kem/60 text-beige-kem rounded-lg transition"
+          className="flex items-center px-5 py-2.5 bg-xanh-pho border-2 border-beige-kem hover:border-beige-kem/60 text-beige-kem rounded-lg transition"
         >
           {copied ? "ĐÃ SAO CHÉP" : "SAO CHÉP MÃ VÉ"}
         </button>
 
         <button
           onClick={handlePrint}
-          className="flex items-center px-6 py-2.5 bg-burgundy text-beige-kem rounded-lg hover:bg-burgundy/80 transition shadow-lg"
+          className="flex items-center px-6 py-2.5 bg-burgundy text-white rounded-lg hover:brightness-95 transition shadow-hard"
         >
           IN VÉ NÀY
         </button>
 
         <button
           onClick={handlePrint}
-          className="flex items-center px-5 py-2.5 bg-xanh-pho/80 border border-beige-kem/20 hover:border-beige-kem/60 text-beige-kem rounded-lg transition"
+          className="flex items-center px-5 py-2.5 bg-xanh-pho border-2 border-beige-kem hover:border-beige-kem/60 text-beige-kem rounded-lg transition"
         >
           TẢI VÉ
         </button>
 
         <button
           onClick={handleResend}
-          className="flex items-center px-5 py-2.5 bg-xanh-pho/80 border border-la-co/25 hover:border-la-co/60 text-la-co rounded-lg transition"
+          className="flex items-center px-5 py-2.5 bg-xanh-pho border border-la-co/25 hover:border-burgundy text-ink-soft rounded-lg transition"
         >
           {resent ? "ĐÃ GỬI LẠI" : "GỬI LẠI EMAIL/SMS"}
         </button>
       </div>
 
-      <div className="mx-auto max-w-2xl rounded-xl border border-la-co/20 bg-la-co/5 p-4 text-xs leading-6 text-la-co">
+      <div className="mx-auto max-w-2xl rounded-xl border-2 border-beige-kem bg-la-co p-4 text-xs leading-6 text-on-tint">
         Đây là vé frontend mock. Backend sau này cần khóa QR theo trạng thái một lần, ghi log check-in và cho phép gửi lại email/SMS từ lịch sử đơn hàng.
       </div>
 

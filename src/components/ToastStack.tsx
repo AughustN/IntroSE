@@ -26,10 +26,10 @@ interface ToastStackProps {
  * Announced politely to screen readers, except errors, which interrupt (WCAG 2.1, USE-02).
  */
 const TONE: Record<ToastKind, { frame: string; accent: string; label: string }> = {
-  info: { frame: "border-beige-kem/25 bg-xanh-pho/95", accent: "bg-beige-kem/60", label: "Thông báo" },
-  success: { frame: "border-la-co/45 bg-xanh-pho/95", accent: "bg-la-co", label: "Thành công" },
-  warning: { frame: "border-cam-dat/50 bg-xanh-pho/95", accent: "bg-cam-dat", label: "Lưu ý" },
-  error: { frame: "border-burgundy/60 bg-xanh-pho/95", accent: "bg-burgundy", label: "Lỗi" },
+  info: { frame: "border-beige-kem/25 bg-xanh-pho", accent: "bg-surface-2", label: "Thông báo" },
+  success: { frame: "border-la-co/45 bg-xanh-pho", accent: "bg-la-co", label: "Thành công" },
+  warning: { frame: "border-cam-dat/50 bg-xanh-pho", accent: "bg-cam-dat", label: "Lưu ý" },
+  error: { frame: "border-burgundy/60 bg-xanh-pho", accent: "bg-burgundy", label: "Lỗi" },
 };
 
 export default function ToastStack({ toasts, onDismiss }: ToastStackProps) {
@@ -47,7 +47,7 @@ export default function ToastStack({ toasts, onDismiss }: ToastStackProps) {
           <div
             key={toast.id}
             role={toast.kind === "error" ? "alert" : "status"}
-            className={`pointer-events-auto flex items-start gap-3 overflow-hidden rounded-xl border ${tone.frame} p-3 pr-2 shadow-xl backdrop-blur`}
+            className={`pointer-events-auto flex items-start gap-3 overflow-hidden rounded-xl border ${tone.frame} p-3 pr-2 shadow-hard`}
           >
             <span className={`mt-0.5 h-full w-1 shrink-0 self-stretch rounded-full ${tone.accent}`} />
 
@@ -58,7 +58,7 @@ export default function ToastStack({ toasts, onDismiss }: ToastStackProps) {
 
             <button
               onClick={() => onDismiss(toast.id)}
-              className="shrink-0 rounded-lg p-1.5 text-beige-kem/40 transition hover:bg-white/5 hover:text-beige-kem"
+              className="shrink-0 rounded-lg p-1.5 text-beige-kem/40 transition hover:bg-surface-2 hover:text-beige-kem"
               aria-label="Đóng thông báo"
             >
               <X className="h-4 w-4" />
