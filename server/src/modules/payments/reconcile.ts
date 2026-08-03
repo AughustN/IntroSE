@@ -74,7 +74,11 @@ let timer: NodeJS.Timeout | null = null;
 export function startTopupReconciliation(intervalMs = TOPUP_SWEEP_INTERVAL_MS): void {
   if (timer) return;
   timer = setInterval(() => {
-    void reconcilePendingTopups();
+    // Same reason as the hold sweep: the SELECT above runs outside the per-row try/catch, so an
+    // unreachable database would otherwise kill the process instead of being retried next tick.
+    void reconcilePendingTopups().catch((e) => {
+      console.error("top-up reconciliation sweep failed:", e instanceof Error ? e.message : e);
+    });
   }, intervalMs);
   // Never keep the process alive just to reconcile.
   timer.unref?.();
