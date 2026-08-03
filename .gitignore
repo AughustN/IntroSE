@@ -6,6 +6,10 @@
 # Claude
 .claude/
 
+# IDEs
+.vscode/
+.idea/
+
 # Spec Kit local state (regenerable, machine-specific)
 src/.specify/feature.json
 src/.specify/init-options.json
@@ -18,6 +22,11 @@ node_modules/
 dist/
 build/
 coverage/
+*.log
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
 
 # Uploaded avatars (runtime, ADR 0004)
 uploads/

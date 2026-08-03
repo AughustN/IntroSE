@@ -3,8 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Booking, MovieEvent } from "../types";
+import { adminClient } from "../services/adminClient";
+import type { AdminModerationQueue } from "@shared/admin/types.js";
 
 interface AdminPanelProps {
   events: MovieEvent[];
@@ -24,10 +26,42 @@ const adminTabs = [
 export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState("events");
   const [scanCode, setScanCode] = useState(bookings[0]?.id || "TB123456");
+  const [moderation, setModeration] = useState<AdminModerationQueue | null>(null);
+  const [moderationError, setModerationError] = useState<string | null>(null);
+  const [moderationBusy, setModerationBusy] = useState(false);
+  const [auditLogs, setAuditLogs] = useState<import("@shared/admin/types.js").AuditLog[]>([]);
+
+  const loadModeration = async () => {
+    setModerationError(null);
+    try {
+      const [data, logs] = await Promise.all([adminClient.queue(), adminClient.auditLogs()]);
+      setModeration(data);
+      setAuditLogs(logs);
+    } catch (error) {
+      setModerationError(error instanceof Error ? error.message : "Không tải được hàng chờ kiểm duyệt.");
+    }
+  };
+
+  const moderate = async (action: () => Promise<unknown>) => {
+    setModerationBusy(true);
+    setModerationError(null);
+    try {
+      await action();
+      await loadModeration();
+    } catch (error) {
+      setModerationError(error instanceof Error ? error.message : "Thao tác kiểm duyệt thất bại.");
+    } finally {
+      setModerationBusy(false);
+    }
+  };
   const revenue = bookings.reduce((sum, booking) => sum + (booking.finalPrice || booking.totalPrice), 0);
   const soldSeats = bookings.reduce((sum, booking) => sum + booking.selectedSeats.length, 0);
   const capacity = events.length * 84;
   const fillRate = capacity ? Math.round((soldSeats / capacity) * 100) : 0;
+
+  useEffect(() => {
+    void loadModeration();
+  }, []);
 
   const formatPrice = (price: number) =>
     new Intl.NumberFormat("vi-VN", {
@@ -84,6 +118,25 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
           {activeTab === "events" && (
             <div className="space-y-5">
               <PanelTitle title="Quản lý sự kiện, suất diễn, địa điểm, sơ đồ ghế" />
+              {moderationError && <div className="rounded-xl border border-burgundy/40 bg-burgundy/10 p-3 text-sm text-beige-kem">{moderationError}</div>}
+              {moderation && (
+                <div className="space-y-4 rounded-xl border border-beige-kem/10 p-4">
+                  <p className="font-mono text-xs uppercase text-beige-kem/60">Hàng chờ kiểm duyệt: {moderation.events.length} sự kiện · {moderation.organizers.length} ban tổ chức</p>
+                  {moderation.organizers.map((organizer) => (
+                    <div key={`organizer-${organizer.id}`} className="flex flex-wrap items-center justify-between gap-3 border-b border-beige-kem/10 pb-3">
+                      <div><p className="font-bold text-beige-kem">{organizer.displayName}</p><p className="text-xs text-beige-kem/60">{organizer.status} · {organizer.reviewNote ?? "Chưa có ghi chú"}</p></div>
+                      {organizer.status === "pending" && <div className="flex gap-2"><button disabled={moderationBusy} onClick={() => moderate(() => adminClient.approveOrganizer(organizer.id))} className="rounded-lg bg-la-co/20 px-3 py-2 text-xs font-bold text-la-co">Duyệt</button><button disabled={moderationBusy} onClick={() => { const value = window.prompt("Lý do từ chối:"); if (value) void moderate(() => adminClient.rejectOrganizer(organizer.id, value)); }} className="rounded-lg bg-burgundy/20 px-3 py-2 text-xs font-bold text-beige-kem">Từ chối</button></div>}
+                      {organizer.status === "approved" && <button disabled={moderationBusy} onClick={() => { const value = window.prompt("Lý do đình chỉ:"); if (value) void moderate(() => adminClient.suspendOrganizer(organizer.id, value)); }} className="rounded-lg bg-burgundy/20 px-3 py-2 text-xs font-bold text-beige-kem">Đình chỉ</button>}
+                    </div>
+                  ))}
+                  {moderation.events.map((event) => (
+                    <div key={`moderation-event-${event.id}`} className="flex flex-wrap items-center justify-between gap-3 border-b border-beige-kem/10 pb-3">
+                      <div><p className="font-bold text-beige-kem">{event.title}</p><p className="text-xs text-beige-kem/60">{event.organizer} · {event.moderation}</p></div>
+                      <div className="flex gap-2"><button disabled={moderationBusy} onClick={() => moderate(() => adminClient.approveEvent(event.id))} className="rounded-lg bg-la-co/20 px-3 py-2 text-xs font-bold text-la-co">Duyệt</button><button disabled={moderationBusy} onClick={() => { const value = window.prompt("Lý do gỡ:"); if (value) void moderate(() => adminClient.removeEvent(event.id, value)); }} className="rounded-lg bg-burgundy/20 px-3 py-2 text-xs font-bold text-beige-kem">Gỡ</button></div>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[720px] text-left text-sm">
                   <thead className="border-b border-beige-kem/10 font-mono text-xs uppercase text-beige-kem/50">
@@ -223,6 +276,17 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
           {activeTab === "roles" && (
             <div className="space-y-5">
               <PanelTitle title="Phân quyền admin, nhân viên, đối tác" />
+              {auditLogs.length === 0 ? (
+                <EmptyState text="Chưa có audit log kiểm duyệt." />
+              ) : (
+                <div className="space-y-2">
+                  {auditLogs.map((log) => (
+                    <div key={log.id} className="rounded-xl border border-beige-kem/10 p-3 text-xs text-beige-kem/75">
+                      <span className="font-mono">{log.createdAt}</span> · <strong>{log.action}</strong> · {log.targetType} #{log.targetId ?? "-"} · {log.outcome}
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="grid gap-4 md:grid-cols-3">
                 {[
                   ["Admin", "Toàn quyền sự kiện, thanh toán, hoàn tiền, báo cáo"],
@@ -236,7 +300,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                 ))}
               </div>
               <div className="rounded-xl border border-la-co/20 bg-la-co/5 p-4 text-sm leading-6 text-la-co">
-                <span>Backend cần RBAC/ABAC, audit log, tenant id cho đối tác tổ chức sự kiện và khóa quyền hoàn tiền.</span>
+                <span>Audit log chỉ đọc. Backend thực thi RBAC và PostgreSQL chặn UPDATE/DELETE.</span>
               </div>
             </div>
           )}
