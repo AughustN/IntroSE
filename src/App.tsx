@@ -14,7 +14,7 @@ import OrganizerPanel from "./components/OrganizerPanel";
 import AdminModeration from "./components/AdminModeration";
 import ResetPassword from "./components/ResetPassword";
 import type { Me } from "@/shared/auth/types";
-import type { Showtime } from "@/shared/catalog/types";
+import type { EventDetail as CatalogEventDetail, Showtime } from "@/shared/catalog/types";
 import { authClient } from "./services/authClient";
 import { catalogClient } from "./services/catalogClient";
 import { cardToMovie, detailToMovie } from "./services/catalogAdapter";
@@ -239,6 +239,17 @@ export default function App() {
   );
 
   /**
+   * The payload the event SEO tags were built from. Kept so stepping back onto the event screen can
+   * restore them without another round trip — the tags are removed on the way out, and the buyer
+   * returning from checkout does not re-fetch the detail.
+   */
+  const eventSeoRef = useRef<{
+    slug: string;
+    detail: CatalogEventDetail;
+    showtimes: Showtime[];
+  } | null>(null);
+
+  /**
    * Single entry point for what the header shows about the account, so state and cache can never
    * drift apart. Passing `null` is the signed-out case and clears everything.
    */
@@ -404,6 +415,7 @@ export default function App() {
         const loaded = await catalogClient.getShowtimes(detail.id);
         setSelectedMovie(detailToMovie(detail, loaded));
         setShowtimes(loaded);
+        eventSeoRef.current = { slug, detail, showtimes: loaded };
         applyEventSeo(detail, loaded);
       } catch (e) {
         // Same dev-only fallback as the listing: with no API server the samples are the catalog, so
@@ -673,11 +685,26 @@ export default function App() {
     exitDeclinedRef.current = false;
   }, [hold?.expiresAt, activeScreen]);
 
+  /**
+   * Event SEO belongs to the event screens and nowhere else. One effect owns it rather than each
+   * exit remembering to clean up: every screen is a shareable URL now, so a leftover title, og: tag
+   * or Event JSON-LD would advertise /wallet or /bookings as somebody's concert.
+   */
+  useEffect(() => {
+    const onEventScreen = activeScreen === "detail" || activeScreen === "seats";
+    if (!onEventScreen) {
+      clearEventSeo();
+      return;
+    }
+    // Returning from checkout does not re-fetch the detail, so re-apply what was already loaded.
+    const cached = eventSeoRef.current;
+    if (cached && cached.slug === selectedMovie.id) applyEventSeo(cached.detail, cached.showtimes);
+  }, [activeScreen, selectedMovie.id]);
+
   const goHome = () => {
     void leaveFlow(() => {
       deepLinkedEventRef.current = null;
       goTo("home");
-      clearEventSeo();
       window.scrollTo({ top: 0, behavior: "smooth" });
     });
   };
@@ -768,6 +795,7 @@ export default function App() {
         const loaded = await catalogClient.getShowtimes(detail.id);
         setSelectedMovie(detailToMovie(detail, loaded));
         setShowtimes(loaded);
+        eventSeoRef.current = { slug: movie.id, detail, showtimes: loaded };
         applyEventSeo(detail, loaded);
       })
       .catch((err) => console.error("Failed to load event detail:", err));
