@@ -9,6 +9,12 @@ export class HttpError extends Error {
     public userMessage?: string,
     /** Numbers the client acts on — see `ApiError.details`. Optional; most refusals carry none. */
     public details?: Record<string, number | string>,
+    /**
+     * Structured payload merged into the response body. For refusals that must name *which* things
+     * were refused and why — the per-seat `refusals` of a rejected map edit (005 FR-029) and the
+     * `issues` of an invalid layout (FR-031) — where a flat string/number map is not enough.
+     */
+    public extra?: Record<string, unknown>,
   ) {
     super(code);
   }
@@ -24,5 +30,8 @@ export const err = {
   conflict: (code: AuthErrorCode | string, msg?: string) => new HttpError(409, code, msg),
   unprocessable: (code: AuthErrorCode | string, msg?: string, details?: Details) =>
     new HttpError(422, code, msg, details),
+  /** A refusal that must name what it refused — see `HttpError.extra`. */
+  refused: (status: number, code: string, msg: string, extra: Record<string, unknown>) =>
+    new HttpError(status, code, msg, undefined, extra),
   tooMany: (code: AuthErrorCode | string, msg?: string) => new HttpError(429, code, msg),
 };

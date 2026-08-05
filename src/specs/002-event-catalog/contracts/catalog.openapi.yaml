@@ -191,7 +191,7 @@ paths:
       responses:
         '201': { description: "one showtime_seat per physical seat, all available, tier-assigned by section" }
         '400': { description: section_without_tier (every section must map to a tier), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '409': { description: seat_map_exists (refuse regenerating over a live map), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: "SUPERSEDED by feature 005 — the blanket `seat_map_exists` refusal is replaced by `map_edit_refused`, carrying a per-seat `refusals` list. An existing map is corrected through PUT /organizer/showtimes/{id}/seat-map or a previewed re-apply, evaluated per seat against live inventory (005 FR-027..FR-029).", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /organizer/venues:
     get: { summary: My venues (US5, D-F), security: [{ accessToken: [] }], responses: { '200': { description: venues owned by caller } } }
     post: { summary: Create a venue I own (US5, FR-020), security: [{ accessToken: [] }], responses: { '201': { description: "created with created_by = caller" } } }

@@ -18,14 +18,16 @@ export function errorHandler(
     const body: ApiError = { error: errv.code };
     if (errv.userMessage) body.message = errv.userMessage;
     if (errv.details) body.details = errv.details;
-    res.status(errv.status).json(body);
+    // Structured refusal payloads (which seats, which validation issues) ride alongside the uniform
+    // shape rather than replacing it, so existing clients are unaffected.
+    res.status(errv.status).json(errv.extra ? { ...body, ...errv.extra } : body);
     return;
   }
   if (errv instanceof MulterError) {
     const code = errv.code === "LIMIT_FILE_SIZE" ? "file_too_large" : "invalid_image";
     res
       .status(400)
-      .json({ error: code, message: "Ảnh vượt quá 2MB hoặc không hợp lệ." } satisfies ApiError);
+      .json({ error: code, message: "Ảnh vượt quá dung lượng cho phép hoặc không hợp lệ." } satisfies ApiError);
     return;
   }
   console.error("unhandled error:", errv instanceof Error ? errv.message : errv);

@@ -34,6 +34,14 @@ export default defineConfig({
           branches: 60,
           statements: 60,
         },
+        // The seat-map designer edits maps with money already taken: a sold seat must never be
+        // deleted or re-tiered, and a held seat must never be touched (005 SC-003/SC-004, MAIN-03).
+        "server/src/modules/seatmap/**": {
+          lines: 60,
+          functions: 60,
+          branches: 60,
+          statements: 60,
+        },
       },
     },
   },

@@ -120,24 +120,54 @@ export async function addShowtimeWithTiers(
 
 // ---- sections / seats / seat-map generation (US5, R-7) ----
 
-export async function createSection(venueId: number, name: string, db: Db = pool): Promise<number> {
-  const { rows } = await db.query(`INSERT INTO sections (venue_id, name) VALUES ($1, $2) RETURNING id`, [venueId, name]);
+/** Find-or-create the venue's default layout. Seats and sections belong to a LAYOUT now (feature 005,
+ *  FR-002); these venue-level helpers keep working by resolving to that default one. */
+export async function defaultLayoutId(venueId: number, db: Db = pool): Promise<number> {
+  const found = await db.query<{ id: number }>(
+    `SELECT id FROM venue_layouts WHERE venue_id = $1 ORDER BY created_at LIMIT 1`,
+    [venueId],
+  );
+  if (found.rows[0]) return found.rows[0].id;
+  const { rows } = await db.query<{ id: number }>(
+    `INSERT INTO venue_layouts (venue_id, name, status) VALUES ($1, 'Sơ đồ mặc định', 'ready') RETURNING id`,
+    [venueId],
+  );
   return rows[0].id;
 }
 
-/** Bulk-add seats to a section: rowLabel-1 .. rowLabel-count. Returns how many were created. */
+export async function createSection(venueId: number, name: string, db: Db = pool): Promise<number> {
+  const layoutId = await defaultLayoutId(venueId, db);
+  const { rows } = await db.query(`INSERT INTO sections (layout_id, name) VALUES ($1, $2) RETURNING id`, [layoutId, name]);
+  return rows[0].id;
+}
+
+/** Bulk-add seats to a section: rowLabel-1 .. rowLabel-count. Returns how many were created.
+ *  Seeds each seat a grid position — geometry is required, and the grid is what buyers already see. */
 export async function addSeats(venueId: number, sectionId: number, rowLabel: string, count: number, db: Db = pool): Promise<number> {
+  const layoutId = await defaultLayoutId(venueId, db);
+  const { rows: prior } = await db.query<{ max_y: number | null }>(
+    `SELECT max(pos_y) AS max_y FROM seats WHERE layout_id = $1`,
+    [layoutId],
+  );
+  const y = Math.min(10000, (prior[0].max_y ?? 1050) + 150);
+  const startX = Math.max(0, Math.round(5000 - ((count - 1) * 150) / 2));
   await db.query(
-    `INSERT INTO seats (venue_id, section_id, row_label, seat_number)
-     SELECT $1, $2, $3, gs FROM generate_series(1, $4) AS gs
-     ON CONFLICT (venue_id, row_label, seat_number) DO NOTHING`,
-    [venueId, sectionId, rowLabel, count],
+    `INSERT INTO seats (layout_id, section_id, row_label, seat_number, pos_x, pos_y)
+     SELECT $1, $2, $3, gs, LEAST(10000, $4::int + (gs - 1) * 150), $5 FROM generate_series(1, $6) AS gs
+     ON CONFLICT (section_id, row_label, seat_number) DO NOTHING`,
+    [layoutId, sectionId, rowLabel, startX, y, count],
   );
   return count;
 }
 
 export async function seatVenueOwnerUserId(seatId: number, db: Db = pool): Promise<number | null> {
-  const { rows } = await db.query(`SELECT v.created_by FROM seats s JOIN venues v ON v.id = s.venue_id WHERE s.id = $1`, [seatId]);
+  const { rows } = await db.query(
+    `SELECT v.created_by FROM seats s
+       JOIN venue_layouts l ON l.id = s.layout_id
+       JOIN venues v ON v.id = l.venue_id
+      WHERE s.id = $1`,
+    [seatId],
+  );
   return rows[0]?.created_by ?? null;
 }
 
@@ -168,8 +198,10 @@ export async function listSections(venueId: number, db: Db = pool) {
   return (
     await db.query(
       `SELECT s.id, s.name, count(se.id)::int AS "seatCount"
-         FROM sections s LEFT JOIN seats se ON se.section_id = s.id
-        WHERE s.venue_id = $1 GROUP BY s.id ORDER BY s.id`,
+         FROM sections s
+         JOIN venue_layouts l ON l.id = s.layout_id
+         LEFT JOIN seats se ON se.section_id = s.id
+        WHERE l.venue_id = $1 GROUP BY s.id ORDER BY s.id`,
       [venueId],
     )
   ).rows;
@@ -194,7 +226,12 @@ export async function eventShowtimesManage(eventId: number, db: Db = pool) {
 }
 
 export async function sectionsWithSeats(venueId: number, db: Db = pool): Promise<number[]> {
-  const { rows } = await db.query<{ section_id: number }>(`SELECT DISTINCT section_id FROM seats WHERE venue_id = $1 AND section_id IS NOT NULL`, [venueId]);
+  const { rows } = await db.query<{ section_id: number }>(
+    `SELECT DISTINCT s.section_id FROM seats s
+       JOIN venue_layouts l ON l.id = s.layout_id
+      WHERE l.venue_id = $1 AND s.section_id IS NOT NULL`,
+    [venueId],
+  );
   return rows.map((r) => r.section_id);
 }
 
@@ -207,17 +244,55 @@ export async function showtimeHasSeatMap(showtimeId: number, db: Db = pool): Pro
   return (await db.query(`SELECT 1 FROM showtime_seats WHERE showtime_id = $1 LIMIT 1`, [showtimeId])).rows.length > 0;
 }
 
-/** Generate the seated seat map: one showtime_seat per physical seat, tier assigned per section (R-7). */
+/**
+ * Generate the seated seat map: one showtime_seat per physical seat, tier assigned per section (R-7).
+ *
+ * Feature 005: this SNAPSHOTS the layout onto the showtime (FR-005). Each seat's geometry is copied
+ * onto its `showtime_seats` row, and the layout's decoration and background are frozen into
+ * `showtimes.layout_snapshot`. From here the showtime owns its map — a later layout edit reaches it
+ * only through an explicit, previewed re-apply.
+ */
 export async function generateSeatMap(showtimeId: number, sectionTiers: { sectionId: number; ticketTierId: number }[]): Promise<number> {
   return withTransaction(async (client) => {
     let total = 0;
+    let layoutId: number | null = null;
     for (const { sectionId, ticketTierId } of sectionTiers) {
       const res = await client.query(
-        `INSERT INTO showtime_seats (showtime_id, seat_id, ticket_tier_id, status)
-         SELECT $1, s.id, $2, 'available' FROM seats s WHERE s.section_id = $3`,
+        `INSERT INTO showtime_seats (showtime_id, seat_id, ticket_tier_id, status,
+                                     pos_x, pos_y, rotation, row_label, seat_number, section_name)
+         SELECT $1, s.id, $2, 'available', s.pos_x, s.pos_y, s.rotation, s.row_label, s.seat_number,
+                (SELECT sec.name FROM sections sec WHERE sec.id = s.section_id)
+           FROM seats s WHERE s.section_id = $3`,
         [showtimeId, ticketTierId, sectionId],
       );
       total += res.rowCount ?? 0;
+      if (layoutId === null) {
+        const { rows } = await client.query<{ layout_id: number }>(`SELECT layout_id FROM sections WHERE id = $1`, [sectionId]);
+        layoutId = rows[0]?.layout_id ?? null;
+      }
+    }
+
+    if (layoutId !== null) {
+      await client.query(
+        `UPDATE showtimes st
+            SET layout_id = $2,
+                layout_snapshot = jsonb_build_object(
+                  'elements', COALESCE((
+                    SELECT jsonb_agg(jsonb_build_object(
+                      'kind', e.kind, 'x', e.pos_x, 'y', e.pos_y,
+                      'width', e.width, 'height', e.height, 'rotation', e.rotation, 'label', e.label))
+                      FROM layout_elements e WHERE e.layout_id = l.id), '[]'::jsonb),
+                  'planUrl', l.background_url,
+                  'planScale', round(l.background_scale * 1000),
+                  'planOffsetX', l.background_offset_x,
+                  'planOffsetY', l.background_offset_y,
+                  'planOpacity', round(l.background_opacity * 100),
+                  'planVisibleToBuyers', l.background_public
+                )
+           FROM venue_layouts l
+          WHERE st.id = $1 AND l.id = $2`,
+        [showtimeId, layoutId],
+      );
     }
     return total;
   });

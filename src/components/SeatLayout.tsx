@@ -9,6 +9,7 @@ import { MovieEvent, Seat } from "../types";
 import { catalogClient } from "../services/catalogClient";
 import { formatHoldClock } from "../services/holdSession";
 import { watchShowtime } from "../services/seatSocket";
+import SeatCanvas from "./seatmap/SeatCanvas";
 
 interface SeatLayoutProps {
   event: MovieEvent;
@@ -42,6 +43,7 @@ export default function SeatLayout({
   onProceedToCheckout,
 }: SeatLayoutProps) {
   const [seats, setSeats] = useState<SeatMapSeat[]>([]);
+  const [mapMeta, setMapMeta] = useState<Pick<SeatMap, "space" | "elements" | "floorPlan">>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -56,6 +58,10 @@ export default function SeatLayout({
     try {
       const map: SeatMap = await catalogClient.getSeatMap(showtimeId);
       setSeats(map.seats ?? []);
+      // The static half of the map — coordinate space, decoration, background. It changes only when
+      // the organizer edits the map, never on a hold, so it is kept apart from the seat statuses
+      // that `seat:update` refreshes (feature 005, FR-041).
+      setMapMeta({ space: map.space, elements: map.elements, floorPlan: map.floorPlan });
       setLoadError(null);
     } catch {
       setLoadError("Không tải được sơ đồ ghế. Vui lòng thử lại.");
@@ -102,18 +108,8 @@ export default function SeatLayout({
     previousHeldCount.current = heldCount;
   }, [heldCount, loadMap]);
 
-  const rows = useMemo(() => {
-    const grouped = new Map<string, SeatMapSeat[]>();
-    for (const seat of seats) {
-      const list = grouped.get(seat.row) ?? [];
-      list.push(seat);
-      grouped.set(seat.row, list);
-    }
-    return [...grouped.entries()].map(([row, rowSeats]) => ({
-      row,
-      seats: [...rowSeats].sort((a, b) => a.number - b.number),
-    }));
-  }, [seats]);
+  // Seats arrive already ordered section → row → number, which is both the draw order and the tab
+  // order (feature 005, FR-039a). The old row-grouping is gone: geometry decides placement now.
 
   const toggleSeatSelection = (seat: SeatMapSeat) => {
     const mine = heldByMe.has(seat.id);
@@ -137,27 +133,26 @@ export default function SeatLayout({
   const holdTimeLabel = formatHoldClock(remainingMs);
   const tierPrices = [...new Set(seats.map((s) => s.price))].sort((a, b) => a - b);
 
-  const seatClasses = (seat: SeatMapSeat, mine: boolean): string => {
-    const base =
-      "w-8 h-8 rounded-md border font-mono text-[10px] font-bold transition-all relative flex items-center justify-center select-none ";
-    if (mine) return `${base} cursor-pointer bg-burgundy border-burgundy text-white shadow-inner`;
-    if (seat.status === "sold" || seat.status === "blocked")
-      return `${base} cursor-not-allowed bg-stone-800 border-stone-800 text-stone-600`;
-    if (seat.status === "held")
-      return `${base} cursor-not-allowed bg-stone-700/60 border-stone-700 text-stone-400`;
-    return `${base} cursor-pointer bg-transparent border-beige-kem/25 text-beige-kem/80 hover:border-burgundy hover:text-white`;
+  const seatClasses = (seat: SeatMapSeat): string => {
+    if (heldByMe.has(seat.id)) return "fill-burgundy stroke-burgundy";
+    if (seat.status === "sold" || seat.status === "blocked") return "fill-stone-800 stroke-stone-800";
+    if (seat.status === "held") return "fill-stone-700/60 stroke-stone-700";
+    return "fill-transparent stroke-beige-kem/40 hover:stroke-burgundy";
   };
 
-  const statusTitle = (seat: SeatMapSeat, mine: boolean): string => {
+  /** What a screen reader announces. Section, row, seat, status, price — enough to choose a seat
+   *  without seeing the map (FR-039a). */
+  const statusTitle = (seat: SeatMapSeat): string => {
     const price = formatPrice(seat.price);
-    if (mine) return `Ghế ${seat.row}${seat.number} — bạn đang giữ (${price})`;
+    const where = `${seat.section ? `${seat.section}, ` : ""}hàng ${seat.row}, ghế ${seat.number}`;
+    if (heldByMe.has(seat.id)) return `${where} — bạn đang giữ (${price})`;
     const label: Record<SeatStatus, string> = {
       available: "còn trống",
       held: "người khác đang giữ",
       sold: "đã bán",
       blocked: "không mở bán",
     };
-    return `Ghế ${seat.row}${seat.number} — ${label[seat.status]} (${price})`;
+    return `${where} — ${label[seat.status]} (${price})`;
   };
 
   return (
@@ -197,41 +192,27 @@ export default function SeatLayout({
             <div className="absolute inset-x-0 -bottom-8 h-20 bg-gradient-to-b from-beige-kem/10 to-transparent pointer-events-none" />
           </div>
 
-          <div className="w-full overflow-x-auto pb-4 no-scrollbar">
+          {/* The map, drawn from coordinates through the shared canvas — the same surface the event
+              page's preview uses, with zoom and pan (feature 005, FR-038/FR-039). The hold path
+              below is untouched: geometry changed where a seat is drawn, not how it is held. */}
+          <div className="w-full pb-4">
             {loading ? (
               <p className="py-10 text-center font-mono text-xs text-beige-kem/50">Đang tải sơ đồ ghế…</p>
-            ) : rows.length === 0 ? (
+            ) : seats.length === 0 ? (
               <p className="py-10 text-center font-mono text-xs text-beige-kem/50">
                 Suất diễn này chưa có sơ đồ ghế.
               </p>
             ) : (
-              <div className="min-w-[500px] flex flex-col gap-3 items-center">
-                {rows.map(({ row, seats: rowSeats }) => (
-                  <div key={row} className="flex items-center gap-4">
-                    <span className="w-5 text-center font-mono font-bold text-xs text-ink-soft">{row}</span>
-
-                    <div className="flex items-center gap-2">
-                      {rowSeats.map((seat) => {
-                        const mine = heldByMe.has(seat.id);
-                        return (
-                          <button
-                            key={seat.id}
-                            id={`seat-${seat.id}`}
-                            disabled={busy || (!mine && seat.status !== "available")}
-                            onClick={() => toggleSeatSelection(seat)}
-                            className={seatClasses(seat, mine)}
-                            title={statusTitle(seat, mine)}
-                          >
-                            <span className="z-10">{seat.number}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <span className="w-5 text-center font-mono font-bold text-xs text-ink-soft">{row}</span>
-                  </div>
-                ))}
-              </div>
+              <SeatCanvas
+                seats={seats}
+                elements={mapMeta.elements}
+                floorPlan={mapMeta.floorPlan}
+                space={mapMeta.space}
+                interactive={!busy}
+                seatClass={seatClasses}
+                seatLabel={statusTitle}
+                onSeatActivate={toggleSeatSelection}
+              />
             )}
           </div>
 

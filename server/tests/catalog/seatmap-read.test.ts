@@ -13,6 +13,53 @@ describe('showtimes & read-only seat map (US3)', () => {
     expect(Number.isInteger(res.body.seats[0].price)).toBe(true);
   });
 
+  // --- feature 005: the buyer read now carries geometry (contracts/seatmap-read-contract.md) ---
+
+  it('carries seat geometry, the coordinate space and the section name (FR-008, FR-038)', async () => {
+    const { showtimeId } = await seed.seedSeatedEventWithMap();
+    const res = await request(app).get(`/api/showtimes/${showtimeId}/seat-map`).expect(200);
+
+    expect(res.body.space).toMatchObject({ width: 10000, height: 10000, seatDiameter: 100 });
+    for (const seat of res.body.seats) {
+      expect(Number.isInteger(seat.x)).toBe(true);
+      expect(Number.isInteger(seat.y)).toBe(true);
+      expect(seat.x).toBeGreaterThanOrEqual(0);
+      expect(seat.x).toBeLessThanOrEqual(10000);
+      expect(seat.rotation).toBeGreaterThanOrEqual(0);
+      expect(seat.rotation).toBeLessThan(360);
+      expect(seat.section).toBe('Khu A');
+      // FR-046 / STD-03: money stays a whole VND integer through the geometry rewrite.
+      expect(Number.isInteger(seat.price)).toBe(true);
+    }
+    // Distinct positions — not every seat stacked at the origin.
+    expect(new Set(res.body.seats.map((s: { x: number }) => s.x)).size).toBeGreaterThan(1);
+  });
+
+  it('orders seats section → row → number, which IS the buyer map tab order (FR-039a)', async () => {
+    const { showtimeId } = await seed.seedSeatedEventWithMap();
+    const res = await request(app).get(`/api/showtimes/${showtimeId}/seat-map`).expect(200);
+    const key = (s: { section: string | null; row: string; number: number }) =>
+      `${s.section ?? ''}|${s.row}|${String(s.number).padStart(5, '0')}`;
+    const keys = res.body.seats.map(key);
+    expect(keys).toEqual([...keys].sort());
+  });
+
+  it('omits the floor plan unless the organizer made it buyer-visible (FR-026)', async () => {
+    const { showtimeId } = await seed.seedSeatedEventWithMap();
+    const res = await request(app).get(`/api/showtimes/${showtimeId}/seat-map`).expect(200);
+    // Default is off, so the buyer payload carries no plan at all.
+    expect(res.body.floorPlan).toBeNull();
+    expect(Array.isArray(res.body.elements)).toBe(true);
+  });
+
+  it('adds nothing to the general-admission path (US2 scenario 5)', async () => {
+    const { showtimeId } = await seed.seedVisibleGaEvent();
+    const res = await request(app).get(`/api/showtimes/${showtimeId}/seat-map`).expect(200);
+    expect(res.body.seats).toBeUndefined();
+    expect(res.body.space).toBeUndefined();
+    expect(res.body.elements).toBeUndefined();
+  });
+
   it('returns GA tier remaining (FR-011)', async () => {
     const { showtimeId } = await seed.seedVisibleGaEvent();
     const res = await request(app).get(`/api/showtimes/${showtimeId}/seat-map`).expect(200);

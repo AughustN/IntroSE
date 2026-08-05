@@ -16,8 +16,11 @@ export interface SeatedFixture {
 export async function seedSeatedShowtime(seatCount = 4, price = 500_000): Promise<SeatedFixture> {
   const org = await seed.seedOrganizer(await seed.seedUser());
   const venue = await seed.seedVenue(await seed.seedUser());
+  const layout = (
+    await pool.query(`INSERT INTO venue_layouts (venue_id, name, status) VALUES ($1, 'Sơ đồ mặc định', 'ready') RETURNING id`, [venue])
+  ).rows[0].id;
   const section = (
-    await pool.query(`INSERT INTO sections (venue_id, name) VALUES ($1, 'Khu A') RETURNING id`, [venue])
+    await pool.query(`INSERT INTO sections (layout_id, name) VALUES ($1, 'Khu A') RETURNING id`, [layout])
   ).rows[0].id;
   const ev = await seed.seedEvent({ organizerId: org, eventType: 'seated' });
   const showtimeId = await seed.seedShowtime(ev.id, venue);
@@ -27,13 +30,14 @@ export async function seedSeatedShowtime(seatCount = 4, price = 500_000): Promis
   for (let i = 1; i <= seatCount; i++) {
     const seatId = (
       await pool.query(
-        `INSERT INTO seats (venue_id, section_id, row_label, seat_number) VALUES ($1, $2, 'A', $3) RETURNING id`,
-        [venue, section, i],
+        `INSERT INTO seats (layout_id, section_id, row_label, seat_number, pos_x, pos_y) VALUES ($1, $2, 'A', $3, $4, 1200) RETURNING id`,
+        [layout, section, i, 5000 + (i - 1) * 150],
       )
     ).rows[0].id;
     const ss = await pool.query(
-      `INSERT INTO showtime_seats (showtime_id, seat_id, ticket_tier_id, status) VALUES ($1, $2, $3, 'available') RETURNING id`,
-      [showtimeId, seatId, tierId],
+      `INSERT INTO showtime_seats (showtime_id, seat_id, ticket_tier_id, status, pos_x, pos_y, rotation, row_label, seat_number, section_name)
+       VALUES ($1, $2, $3, 'available', $4, 1200, 0, 'A', $5, 'Khu A') RETURNING id`,
+      [showtimeId, seatId, tierId, 5000 + (i - 1) * 150, i],
     );
     seatIds.push(ss.rows[0].id);
   }

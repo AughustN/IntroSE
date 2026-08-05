@@ -4,7 +4,9 @@
  */
 
 import { useEffect, useState } from "react";
-import { ManageShowtime, organizerApi } from "../services/catalogClient";
+import { ManageShowtime, layoutApi, organizerApi } from "../services/catalogClient";
+import LayoutEditor from "./seatmap/LayoutEditor";
+import ShowtimeMapPanel from "./seatmap/ShowtimeMapPanel";
 
 const input = "h-10 w-full rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
 const btn = "rounded-lg bg-burgundy px-3 py-2 text-xs font-black text-white transition hover:brightness-95";
@@ -20,6 +22,17 @@ export default function SeatMapBuilder({ eventId, onClose }: { eventId: number; 
   const [seatSection, setSeatSection] = useState<number | "">("");
   const [seatRow, setSeatRow] = useState("A");
   const [seatCount, setSeatCount] = useState("10");
+  // Which layout the free-hand editor is open on. The Section/Row/Count form above stays as the fast
+  // first step; the canvas is where it gets refined by hand (FR-010).
+  const [editing, setEditing] = useState<number | null>(null);
+
+  /** Open the venue's layout on the canvas, creating one if the venue has none yet. */
+  const openEditor = (venueId: number) =>
+    run(async () => {
+      const { layouts } = await layoutApi.list(venueId);
+      const target = layouts[0] ?? (await layoutApi.create(venueId, "Sơ đồ mặc định"));
+      setEditing(target.id);
+    }, "Đang mở trình vẽ sơ đồ.");
 
   const reload = () => organizerApi.showtimesManage(eventId).then(setRows).catch((e) => setErr((e as Error).message));
   useEffect(() => {
@@ -50,6 +63,10 @@ export default function SeatMapBuilder({ eventId, onClose }: { eventId: number; 
     }, "Đã tạo sơ đồ ghế.");
   };
 
+  if (editing !== null) {
+    return <LayoutEditor layoutId={editing} onClose={() => { setEditing(null); void reload(); }} />;
+  }
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-xanh-pho">
       <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8 text-beige-kem">
@@ -65,8 +82,15 @@ export default function SeatMapBuilder({ eventId, onClose }: { eventId: number; 
           <div key={st.id} className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
             <div className="mb-3 flex items-center justify-between">
               <span className="font-bold">{new Date(st.startsAt).toLocaleString("vi-VN")} · {st.venueName}</span>
-              {st.hasSeatMap && <span className="rounded-lg border-2 border-beige-kem bg-la-co px-2 py-0.5 font-mono text-[10px] text-on-tint">Đã có sơ đồ ghế</span>}
+              <div className="flex items-center gap-2">
+                {st.hasSeatMap && <span className="rounded-lg border-2 border-beige-kem bg-la-co px-2 py-0.5 font-mono text-[10px] text-on-tint">Đã có sơ đồ ghế</span>}
+                <button className={ghost} onClick={() => openEditor(st.venueId)}>Vẽ sơ đồ</button>
+              </div>
             </div>
+
+            {st.hasSeatMap && (
+              <ShowtimeMapPanel showtimeId={st.id} tiers={st.tiers} onDone={() => void reload()} />
+            )}
 
             {!st.hasSeatMap && (
               <>
