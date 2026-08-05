@@ -39,6 +39,10 @@ export const config = {
   isTest,
   port: Number(process.env.PORT ?? 4000),
   appUrl: process.env.APP_URL ?? "http://localhost:3000",
+  corsOrigins: (process.env.CORS_ORIGINS ?? "https://tixhub.fit,http://localhost:3000")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
 
   databaseUrl: normalizeDbUrl(required(isTest ? "TEST_DATABASE_URL" : "DATABASE_URL")),
   /** Empty until the demo branch URL is filled in. Only ever compared against, never connected to. */

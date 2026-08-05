@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import cookieParser from "cookie-parser";
 import express, { type Express } from "express";
+import { config } from "./config.js";
 import { errorHandler, notFound } from "./middleware/error.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
 import { catalogPublicRouter } from "./modules/catalog/catalog.public.routes.js";
@@ -13,6 +14,18 @@ import { walletRouter } from "./modules/payments/wallet.routes.js";
 export function createApp(): Express {
   const app = express();
   app.set("trust proxy", 1); // one Nginx hop (ADR 0003) → req.ip is the real client
+  app.use((req, res, next) => {
+    const origin = req.get("origin");
+    if (origin && config.corsOrigins.includes(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,PATCH,DELETE,OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type,X-Idempotency-Key");
+      res.vary("Origin");
+      if (req.method === "OPTIONS") return res.sendStatus(204);
+    }
+    next();
+  });
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
 

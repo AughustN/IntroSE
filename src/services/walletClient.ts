@@ -1,4 +1,5 @@
 import { withAuthRetry } from "./authClient";
+import { apiUrl } from "./api";
 
 export interface CheckoutOrder {
   id: number;
@@ -78,7 +79,7 @@ async function call<T>(path: string, opts: { method?: string; body?: unknown } =
     const headers: Record<string, string> = { Accept: "application/json" };
     if (opts.body !== undefined) headers["Content-Type"] = "application/json";
     if (token) headers.Authorization = `Bearer ${token}`;
-    return fetch(`/api${path}`, {
+    return fetch(apiUrl(`/api${path}`), {
       method: opts.method ?? "GET",
       headers,
       credentials: "include",
