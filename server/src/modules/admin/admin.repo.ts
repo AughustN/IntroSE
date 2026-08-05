@@ -33,7 +33,14 @@ export async function updateEvent(id: number, status: string, reason: string | n
   return rows[0];
 }
 
+/** Durable notification intent, committed with the moderation transaction (FR-004/FR-024).
+ *  Delivery itself is out of scope — this row IS the intent (moderation_action_id stays null
+ *  until the idempotency-keyed command path of T011/T018 lands). */
+export async function insertNotification(db: Db, n: { recipientUserId: number; kind: string; targetType: string; targetId: number; payload: Record<string, unknown> }) {
+  await db.query(`INSERT INTO moderation_notifications (recipient_user_id, kind, target_type, target_id, payload) VALUES ($1, $2, $3, $4, $5::jsonb)`, [n.recipientUserId, n.kind, n.targetType, n.targetId, JSON.stringify(n.payload)]);
+}
+
 export async function resolveReport(id: number, status: string, reason: string | null, adminId: number, db: Db) {
-  const { rows } = await db.query(`UPDATE content_reports SET status = $2, resolution_note = $3, resolved_by = $4, resolved_at = now() WHERE id = $1 AND status = 'open' RETURNING id`, [id, status, reason, adminId]);
+  const { rows } = await db.query(`UPDATE content_reports SET status = $2, resolution_note = $3, resolved_by = $4, resolved_at = now() WHERE id = $1 AND status = 'open' RETURNING id, target_type, target_id`, [id, status, reason, adminId]);
   return rows[0] ?? null;
 }

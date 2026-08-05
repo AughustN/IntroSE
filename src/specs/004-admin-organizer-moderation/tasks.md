@@ -36,14 +36,14 @@
 
 ## Phase 4: Integration Tests (Vitest)
 
-- [ ] T022 Create PostgreSQL fixtures in `server/tests/integration/admin-moderation.test.ts`.
-- [ ] T023 [US1] Test organizer approval/rejection, capability refresh, notification intent, conflict, and RBAC in `server/tests/integration/admin-moderation.test.ts`.
-- [ ] T024 [US2] Test suspension and immediate public hiding in `server/tests/integration/admin-moderation.test.ts`.
-- [ ] T025 [US3] Test pre-publish approve/reject gate in `server/tests/integration/admin-moderation.test.ts`.
-- [ ] T026 [US4] Test report actions, removal, future-only effects, and notifications in `server/tests/integration/admin-moderation.test.ts`.
-- [ ] T027 [US4] Test exactly-once wallet refund/idempotency after canonical schema exists in `server/tests/integration/admin-moderation.test.ts`.
-- [ ] T028 [US5] Test concurrent actions and transaction rollback in `server/tests/integration/admin-moderation.test.ts`.
-- [ ] T029 [US5] Test PostgreSQL audit UPDATE/DELETE rejection in `server/tests/integration/admin-moderation.test.ts`.
+- [X] T022 Create PostgreSQL fixtures in `server/tests/helpers/moderationSeed.ts` (extracted from the test file so the suite and future features share one fixture set).
+- [X] T023 [US1] Test organizer approval/rejection, capability refresh, notification intent, conflict, and RBAC in `server/tests/integration/admin-moderation.test.ts`.
+- [X] T024 [US2] Test suspension and immediate public hiding in `server/tests/integration/admin-moderation.test.ts`.
+- [X] T025 [US3] Test pre-publish approve/reject gate in `server/tests/integration/admin-moderation.test.ts`.
+- [X] T026 [US4] Test report actions, removal, future-only effects, and notifications in `server/tests/integration/admin-moderation.test.ts`.
+- [ ] T027 [US4] **SKIPPED — blocked on absent schema.** Test exactly-once wallet refund/idempotency in `server/tests/integration/admin-moderation.test.ts`. Asserting FR-018/FR-025 needs order, ticket, and wallet-ledger tables: a ticket row to void, a per-ticket amount to refund, and a ledger with a unique refund key to prove the credit lands exactly once across retries. The repository has none — `0001_auth.sql` creates `wallets` with a balance only (no ledger) and `0003_holds.sql` stops at `reservations`/`reservation_items` (held inventory, never sold tickets). The same gap blocks T011 and T018, so `admin.service.ts` has no refund path to test, and writing one here would assert against a fake refund. Present in the suite as an explicit `describe.skip` carrying this reason. **Unblock:** land the checkout/ticket/wallet-ledger migration, implement T011 + T018, then cover one 100% wallet credit per eligible future ticket, no credit for a started showtime, and zero duplicate credits on a repeated removal command.
+- [X] T028 [US5] Test concurrent actions and transaction rollback in `server/tests/integration/admin-moderation.test.ts`.
+- [X] T029 [US5] Test PostgreSQL audit UPDATE/DELETE rejection in `server/tests/integration/admin-moderation.test.ts`.
 
 ## Phase 5: Frontend UI `AdminPanel.tsx`
 
@@ -63,13 +63,19 @@
 
 ## Blockers
 
-- `T011`, `T018`, and `T027` remain blocked: current repository has no canonical order/ticket/wallet-ledger migration. No fake refund path added.
-- Full suite has unrelated existing failures in hold tests; focused moderation suite passes.
+- `T011`, `T018`, and `T027` remain blocked: current repository has no canonical order/ticket/wallet-ledger migration. No fake refund path added. See T027 for the full reason and unblock steps.
 - `T039` full quickstart remains pending because it includes refund scenarios requiring absent ticket/wallet schema.
+- `npm run lint` was unrunnable: `eslint.config.js` imports `typescript-eslint`, `@eslint/js`, and `eslint-plugin-react-hooks`, none of which were in `package.json`. Installed as devDependencies (`@eslint/js` pinned to `^9` — latest wants eslint 10, repo is on eslint 9). `eslint` now runs; every feature-004 file is clean. 25 pre-existing errors remain elsewhere (`no-console` in `server/src/db/*` scripts, `react-hooks/set-state-in-effect` across `src/components/*`) — out of scope here, and `eslint-plugin-react-hooks@7` enforces rules the config predates. `prettier --check` also fails on 11 files already unformatted at `60c36d1`, so no reformatting was done.
 
 ## Notes
 
 - `[X]` marks completed work.
 - Refunds remain wallet-only whole VND; no cash settlement or card data.
-- `audit_logs` DB trigger applied successfully and focused moderation tests pass.
+- `audit_logs` DB trigger applied successfully and the moderation tests assert it directly (T029).
+- Full suite is green: 25 files, 129 passed, 1 skipped (T027). `npm run typecheck` clean.
+- Phase 4 required three fixes outside the tests themselves:
+  - `admin.repo.ts` / `admin.service.ts`: `moderation_notifications` existed in migration 0004 but nothing wrote to it (FR-004/FR-024), and `POST /reports/:id/resolve` stamped the report row without flagging/removing the reported event (FR-015/FR-016). `moderateEvent` was split into `moderateEvent` + `moderateEventIn(db, …)` so a report resolution applies the transition inside its own transaction.
+  - `server/src/modules/auth/throttle.ts`: added `resetAuthThrottle()` and called it from the test setup. The per-IP register bucket is process-wide, so a file registering many users from loopback tripped a 429 mid-suite (mirrors the existing `resetHoldRateLimit` seam).
+  - `server/tests/helpers/holdsSeed.ts`: `expireReservation` backdated by 1000 ms, but expiry is evaluated in Postgres (`now()`) *and* in JS (`Date.now()`), and the hosted DB clock runs ~1.4 s ahead of the app process. A 1 s backdate was past for the DB yet still future for JS, so `grace.test.ts` and `hold.test.ts` failed at `60c36d1`. Now 60 s, which clears any plausible skew and stays inside the TTL. These two failures were pre-existing, not caused by this feature.
+  - `server/src/app.ts`: dropped the dead `moderationRouter` import. `admin.routes.ts` (T020) superseded the legacy `catalog/moderation.routes.ts`, which was left imported but never mounted — dead code (Principle VI), surfaced by `@typescript-eslint/no-unused-vars` once lint could run.
 - Compatibility retained: `/api/admin/moderation` returns event array for existing catalog tests; `/api/admin/moderation/queue` returns unified queue.

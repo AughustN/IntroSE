@@ -5,7 +5,6 @@ import { errorHandler, notFound } from './middleware/error.js';
 import { authRouter } from './modules/auth/auth.routes.js';
 import { catalogPublicRouter } from './modules/catalog/catalog.public.routes.js';
 import { organizerRouter } from './modules/catalog/organizer.routes.js';
-import { moderationRouter } from './modules/catalog/moderation.routes.js';
 import { adminRouter } from './modules/admin/admin.routes.js';
 import { reservationsRouter } from './modules/holds/reservations.routes.js';
 
