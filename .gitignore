@@ -10,12 +10,16 @@
 
 # Claude
 .claude/
+.agents/
 
 # Spec Kit local state (regenerable, machine-specific)
 src/.specify/feature.json
 src/.specify/init-options.json
 src/.specify/integration.json
 src/.specify/integrations/
+# Junction at the repo root pointing at src/.specify (lets Claude Code load
+# speckit skills from g:\IntroSE). Machine-local, not a real directory.
+/.specify
 # Assembled submission bundle (a copy of the repo — regenerable)
 PA3-Group02/
 
