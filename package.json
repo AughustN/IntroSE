@@ -6,6 +6,7 @@
   "scripts": {
     "dev:web": "vite --port=3000",
     "dev:server": "tsx watch --tsconfig tsconfig.server.json server/src/index.ts",
+    "start:server": "tsx --tsconfig tsconfig.server.json server/src/index.ts",
     "build": "vite build",
     "preview": "vite preview",
     "db:migrate": "tsx --tsconfig tsconfig.server.json server/src/db/migrate.ts",
