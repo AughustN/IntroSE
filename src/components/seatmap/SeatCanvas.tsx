@@ -4,7 +4,7 @@
  */
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import type { SeatMapElement, SeatMapFloorPlan, SeatMapSeat, SeatMapSpace } from "@/shared/catalog/types";
+import type { SeatMapTable, SeatMapElement, SeatMapFloorPlan, SeatMapSeat, SeatMapSpace } from "@/shared/catalog/types";
 
 /**
  * The one surface that turns layout coordinates into pixels (research R-4).
@@ -29,11 +29,20 @@ export interface SeatCanvasProps {
   space?: SeatMapSpace;
   /** Per-seat fill/stroke classes, by seat id. */
   seatClass?: (seat: SeatMapSeat) => string;
+  /**
+   * Per-seat fill colour, for colouring by PRICE TIER (FR-067). Returned as a colour rather than a
+   * class because tier colours are derived from the tier list at read time, not from a fixed set.
+   * Status still outranks it: the caller returns undefined for a seat that is not available, so a
+   * sold or held seat keeps its unavailable styling whatever it costs (FR-068).
+   */
+  seatFill?: (seat: SeatMapSeat) => string | undefined;
   /** Accessible label — what a screen reader announces for this seat (FR-039a). */
   seatLabel?: (seat: SeatMapSeat) => string;
   onSeatActivate?: (seat: SeatMapSeat) => void;
   /** False for the read-only preview: seats are drawn but not focusable or clickable. */
   interactive?: boolean;
+  /** Snapshotted tables, drawn beneath the seats so "Bàn 5 - Ghế 3" has a table (FR-082). */
+  tables?: SeatMapTable[];
   className?: string;
 }
 
@@ -44,7 +53,21 @@ const ELEMENT_FILL: Record<SeatMapElement["kind"], string> = {
   bar: "fill-cam-dat/15 stroke-cam-dat/40",
   label: "fill-transparent stroke-transparent",
   area: "fill-beige-kem/5 stroke-beige-kem/30",
+  // Hall outline and dividers — drawn behind the seats, never interactive (FR-060).
+  boundary: "fill-transparent stroke-beige-kem/45",
+  divider: "fill-transparent stroke-beige-kem/35",
+  // Facility icons (FR-062).
+  exit: "fill-la-co/20 stroke-la-co/60",
+  restroom: "fill-beige-kem/10 stroke-beige-kem/50",
+  food_drink: "fill-cam-dat/15 stroke-cam-dat/50",
+  smoking: "fill-beige-kem/10 stroke-beige-kem/40",
+  first_aid: "fill-bubblegum/20 stroke-bubblegum/60",
+  lift_stairs: "fill-beige-kem/10 stroke-beige-kem/40",
+  wheelchair: "fill-la-co/15 stroke-la-co/50",
 };
+
+/** Kinds drawn from a point list rather than a rectangle (FR-058). */
+const SHAPE_KINDS = new Set(["boundary", "divider"]);
 
 const ZOOM_MIN = 1;
 const ZOOM_MAX = 6;
@@ -55,6 +78,8 @@ export default function SeatCanvas({
   floorPlan = null,
   space = DEFAULT_SPACE,
   seatClass,
+  seatFill,
+  tables = [],
   seatLabel,
   onSeatActivate,
   interactive = false,
@@ -173,9 +198,42 @@ export default function SeatCanvas({
         )}
 
         {/* Non-sellable decoration. Excluded from the seat tab order (FR-040). */}
+        {/* Tables first: they sit under their seats. Decoration — never interactive (FR-082). */}
+        {tables.map((t, i) => (
+          <g key={`tbl-${i}`} transform={`rotate(${t.rotation} ${t.x} ${t.y})`} aria-hidden="true" pointerEvents="none">
+            {t.shape === "round" ? (
+              <circle cx={t.x} cy={t.y} r={t.width / 2} className="fill-beige-kem/10 stroke-beige-kem/40" strokeWidth={8} />
+            ) : (
+              <rect
+                x={t.x - t.width / 2}
+                y={t.y - t.height / 2}
+                width={t.width}
+                height={t.height}
+                rx={24}
+                className="fill-beige-kem/10 stroke-beige-kem/40"
+                strokeWidth={8}
+              />
+            )}
+            <text x={t.x} y={t.y} textAnchor="middle" dominantBaseline="central" fontSize={110} className="fill-beige-kem/70">
+              {t.name}
+            </text>
+          </g>
+        ))}
+
         {elements.map((el, i) => (
           <g key={`el-${i}`} transform={`rotate(${el.rotation} ${el.x} ${el.y})`} aria-hidden="true" pointerEvents="none">
-            {el.kind !== "label" && (
+            {SHAPE_KINDS.has(el.kind) && el.points && el.points.length >= 2 && (
+              <polyline
+                // A boundary closes back to its first point; a divider stays an open line.
+                points={(el.kind === "boundary" ? [...el.points, el.points[0]] : el.points)
+                  .map((p) => `${p.x},${p.y}`)
+                  .join(" ")}
+                className={ELEMENT_FILL[el.kind]}
+                strokeWidth={10}
+                fill="none"
+              />
+            )}
+            {el.kind !== "label" && !SHAPE_KINDS.has(el.kind) && (
               <rect
                 x={el.x - el.width / 2}
                 y={el.y - el.height / 2}
@@ -228,15 +286,25 @@ export default function SeatCanvas({
               className={interactive ? "cursor-pointer outline-none focus-visible:opacity-80" : ""}
             >
               <title>{label}</title>
-              <rect
-                x={seat.x - r}
-                y={seat.y - r}
-                width={space.seatDiameter}
-                height={space.seatDiameter}
-                rx={r * 0.35}
-                strokeWidth={6}
-                className={seatClass?.(seat) ?? "fill-transparent stroke-beige-kem/50"}
-              />
+              {/* The seat's own footprint: its section's size multiplier scaled off the space's
+                  nominal diameter, and its section's shape (FR-064). What is drawn is exactly what
+                  the publish-time overlap rule measures, so a map that looks clear is one. */}
+              {(() => {
+                const d = space.seatDiameter * (seat.sizeMultiplier ?? 1);
+                const rr = d / 2;
+                return (
+                  <rect
+                    x={seat.x - rr}
+                    y={seat.y - rr}
+                    width={d}
+                    height={d}
+                    rx={seat.shape === "square" ? rr * 0.15 : rr}
+                    strokeWidth={6}
+                    className={seatClass?.(seat) ?? "fill-transparent stroke-beige-kem/50"}
+                    style={seatFill?.(seat) ? { fill: seatFill(seat) } : undefined}
+                  />
+                );
+              })()}
             </g>
           );
         })}

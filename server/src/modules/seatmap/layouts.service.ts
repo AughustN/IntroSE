@@ -118,7 +118,15 @@ export async function validate(layoutId: number, sectionsWithTier?: number[]): P
       x: s.x,
       y: s.y,
     })),
-    sections: layout.sections.map((s) => ({ id: s.id ?? 0, name: s.name })),
+    // The style fields matter to validation now: `color` is required to publish (FR-066) and the size
+    // multiplier feeds the overlap test (FR-065). Dropping them here made every layout look colourless.
+    sections: layout.sections.map((s) => ({
+      id: s.id ?? 0,
+      name: s.name,
+      color: s.color,
+      seatSizeMultiplier: s.seatSizeMultiplier,
+    })),
+    elements: layout.elements.map((e) => ({ kind: e.kind, x: e.x, y: e.y, points: e.points })),
     sectionsWithTier,
   });
 }

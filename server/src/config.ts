@@ -139,6 +139,23 @@ export const UPLOAD_RATE_LIMIT = ms("UPLOAD_RATE_LIMIT", 10);
 export const UPLOAD_RATE_WINDOW_MS = ms("UPLOAD_RATE_WINDOW_MS", 60 * 1000);
 export const UPLOAD_CONCURRENCY = ms("UPLOAD_CONCURRENCY", 2);
 
+// ---- Hall-scheme parity (feature 005 amendment). Settings with defaults, not hard-coded constants.
+/** A table seats 2–20. Fewer than 2 is a loose seat, not a table (FR-054). */
+export const TABLE_MIN_SEATS = ms("TABLE_MIN_SEATS", 2);
+export const TABLE_MAX_SEATS = ms("TABLE_MAX_SEATS", 20);
+/** Tables per layout. Their seats still count toward LAYOUT_MAX_SEATS — no separate budget (FR-055). */
+export const LAYOUT_MAX_TABLES = ms("LAYOUT_MAX_TABLES", 100);
+/** A boundary polygon needs 3+ points; a divider is exactly 2 (FR-059). */
+export const POLYGON_MIN_POINTS = ms("POLYGON_MIN_POINTS", 3);
+export const POLYGON_MAX_POINTS = ms("POLYGON_MAX_POINTS", 64);
+/**
+ * How far a section may scale its seats (FR-065). The overlap test uses the EFFECTIVE size, so these
+ * bounds also bound how far the drawing and the publish gate can diverge — they cannot.
+ * Stored as hundredths because `ms()` yields integers; 100 = 1.0× = today's rendering.
+ */
+export const SEAT_SIZE_MIN_PCT = ms("SEAT_SIZE_MIN_PCT", 50);
+export const SEAT_SIZE_MAX_PCT = ms("SEAT_SIZE_MAX_PCT", 200);
+
 // ---- Organizer event studio (feature 006). Settings with defaults, not constants (UC-36).
 /** A showtime carries at most this many ACTIVE tiers — the layout rule established in 002 (FR-002). */
 export const MAX_TIERS_PER_SHOWTIME = ms("MAX_TIERS_PER_SHOWTIME", 4);

@@ -168,3 +168,163 @@ Alternatives rejected**.
   toward socket updates).
 - **Alternatives**: Server-only validation — every drag would need a round trip for the overlap
   highlight. Rejected. Client-only — trivially bypassed, and FR-030 is a publish gate. Rejected.
+
+---
+
+# Amendment (007-scope) research — 2026-08-06
+
+Eight further decisions, covering only the amendment. R-1..R-11 above are unchanged.
+
+---
+
+## R-12 — A table is its own table, not an element
+
+**Decision.** New relation `layout_tables` (layout, section, name, shape round|rect, position, size,
+rotation, seat count, per-side counts), and `seats` gains a nullable `table_id`. A seat at a table is an
+ordinary seat that happens to point at one.
+
+**Rationale.** The obvious cheaper option is `layout_elements` with `kind='table'` and a
+`seats.element_id`. It was rejected for one reason: `layout_elements` carries an explicit rule —
+"stored separately from seats so it can never become inventory" (FR-017). A foreign key from a seat to
+an element would blur precisely the line that keeps decoration out of the ticket path, and that line is
+worth more than one table. Tables also need things elements do not have: a **section** they impart to
+their seats (FR-049), a seat count, and their own ceiling (100 vs 200 elements).
+
+**Alternatives considered.** (a) `kind='table'` element + `seats.element_id` — rejected above. (b) No
+table row at all, tagging seats with a shared `table_name` string and re-deriving the group — makes
+"move the table" an N-seat guess and gives the geometry nowhere to live. (c) A table as a *section* —
+conflates pricing with furniture; a gala hall prices "Khu VIP" across several tables.
+
+**Consequence.** `seats.table_id` is `ON DELETE` guarded by the service, not by the database: deleting a
+table with sold seats must produce a *refusal with reasons*, not a constraint error (FR-052).
+
+---
+
+## R-13 — Shape points ride on the element row
+
+**Decision.** `layout_elements` gains `points JSONB` — an ordered array of `{x, y}` — with the existing
+`pos_x/pos_y/width/height` retained as the shape's **bounding box**. No `shape_points` table.
+
+**Rationale.** This geometry is only ever read whole, drawn, and written whole; it is never queried by
+point. A child table would add a join to every layout read and a delete-and-reinsert to every save for
+no query it enables. Keeping the rectangle fields populated means every existing reader — including the
+buyer renderers before they learn about points — still positions the shape sensibly instead of at the
+origin. Settled in the spec's amendment clarifications; recorded here for the schema.
+
+**Alternatives considered.** A normalised `shape_points(element_id, ordinal, x, y)` — the textbook shape,
+and the wrong one for a value that behaves like a document. `layout_snapshot` already sets the precedent
+that whole-document geometry lives in JSONB.
+
+---
+
+## R-14 — Widening the element vocabulary, exactly as 0010 did
+
+**Decision.** `ALTER TABLE layout_elements DROP CONSTRAINT IF EXISTS layout_elements_kind_check;` then
+re-add it over the **union** of the old vocabulary and the seven new facility kinds (`exit`, `restroom`,
+`food_drink`, `smoking`, `first_aid`, `lift_stairs`, `wheelchair`).
+
+**Rationale.** `0010_element_kinds.sql` already widened this CHECK once, in exactly this shape, with the
+same reasoning written into it: widening to the union is additive, so nothing that was valid becomes
+invalid and no existing row or writer is affected. Repeating a reviewed pattern beats inventing a second.
+
+---
+
+## R-15 — Section style columns, defaulted so nothing changes
+
+**Decision.** `sections` gains `color TEXT`, `seat_shape TEXT CHECK (seat_shape IN ('circle','square'))
+DEFAULT 'circle'`, and `seat_size_multiplier NUMERIC DEFAULT 1.0` bounded to 0.5–2.0 in validation.
+
+**Rationale.** Defaults reproduce today's rendering exactly — every existing seat is a circle at 1.0 —
+so the day this ships, no stored layout looks different and no stored layout changes its publishability.
+`color` is deliberately **nullable**: a layout drafted before this change has none, and FR-066 makes it a
+*publish* requirement rather than a storage one, so drafts stay permissive exactly as they already are
+for overlap (FR-032).
+
+---
+
+## R-16 — Overlap uses the effective seat size
+
+**Decision.** `shared/catalog/seatmap-validate.ts` computes each seat's effective diameter as
+`SEAT_DIAMETER × its section's multiplier`, and two seats overlap when their centre distance is less
+than the **larger** of the two. The spatial bucket size becomes the largest effective diameter in the
+layout rather than the constant.
+
+**Rationale.** The alternative — keep the test on the nominal diameter and treat the multiplier as
+decoration — lets a 2× section draw seats visibly on top of each other while validation reports the
+layout clean. A picture that contradicts the publish gate is worse than no picture, and the organizer
+has no way to tell which one to believe. With the default at 1.0 this is mathematically identical to
+today's rule, so only a layout that opts in can newly fail, and it fails for something visible.
+
+**Cost.** The bucket sweep widens with the largest multiplier. Bounded at 2.0, that is at most a 2×
+neighbourhood, still O(n) at the 2,000-seat ceiling.
+
+---
+
+## R-17 — Tier colours are derived, never stored
+
+**Decision.** One shared function in `shared/catalog/tier-palette.ts`: given a showtime's tiers, sort by
+price ascending and map index → a fixed palette entry, repeating if there are more tiers than colours.
+Nothing is written; no ticket-tier column is added.
+
+**Rationale.** A stored colour would mean a column on `ticket_tiers`, which **feature 006 owns**, plus
+its create/edit forms — cross-feature work landing in a seat-map change for no requirement that asks for
+it. Deriving also makes the visual order consistent across every event (cheap is always the same end of
+the palette, so a buyer learns it once) and self-healing: when 006 reprices a tier, the map re-colours on
+the next read with no stale value anywhere. And because it is one function imported by both renderers,
+the two cannot disagree — there is no stored value for them to disagree about.
+
+**Alternatives considered.** Organizer-chosen colours (rejected: cross-feature, and organizers do not
+want the decision); auto with an override (rejected as both costs for no asked-for benefit — additive
+later if it is ever requested).
+
+---
+
+## R-18 — The new objects ride in the snapshot that already exists
+
+**Decision.** `apply.ts` extends the `showtimes.layout_snapshot` JSONB it already writes to include
+tables and shapes alongside the elements and floor-plan settings. **No migration** for this.
+
+**Rationale.** The snapshot exists precisely so a later layout edit cannot reshape a show that is
+selling (R-2, FR-005). Decoration sits in the same picture as the seats; reading it live would let an
+organizer tidying the hall outline silently change a live show's map — the failure the snapshot was
+written to prevent. Extending the existing blob keeps **one** rule instead of two contradictory ones, and
+keeps the previewed re-apply as the only path by which any layout edit reaches a live showtime.
+
+**Consequence.** FR-081's guarantee is exactly as good as this one write. `apply.ts` is the single place
+that must be extended, and the isolation test (SC-027) is what pins it.
+
+**Note.** Buyer-side table labels need no new column: `seats.row_label` already carries "Bàn 5" (FR-053)
+and is already copied onto `showtime_seats.row_label`, so the label and the geometry arrive by the two
+mechanisms that already exist.
+
+---
+
+## R-19 — Seat distribution is arithmetic, and it belongs in one file
+
+**Decision.** `modules/seatmap/tables.ts` owns distribution: round tables place seats at
+`angle = 2π·i/n` on the table's radius plus a seat offset; rectangular tables walk the per-side counts
+around the perimeter. Seats are stored as ordinary absolute coordinates, **not** as offsets from the
+table.
+
+**Rationale.** Storing absolute coordinates means every existing reader — the renderers, the overlap
+test, the snapshot — keeps working unchanged; a table seat is indistinguishable from any other seat to
+everything except the editor. Moving a table then means recomputing its seats' absolute positions, which
+is the same arithmetic run again, and is why the sold/held refusal (FR-051) has to sit in front of it.
+
+**Alternatives considered.** Storing seats as table-relative offsets and resolving at read time — would
+push table awareness into every renderer and the overlap test, for a saving only the editor would notice.
+
+---
+
+## R-20 — Table name uniqueness is checked at placement, in the service
+
+**Decision.** The service refuses a table whose name collides with an existing table in the **same
+section** at placement time, naming the clash. No new database constraint.
+
+**Rationale.** The real invariant is already enforced: seat labels are unique per
+`(section, row_label, seat_number)` (FR-003), and a table's name *is* its seats' row label (FR-053), so a
+colliding table would fail on save at the seat level — with a confusing message, after the organizer has
+placed ten seats. Checking at placement turns a late, cryptic failure into an immediate, specific one.
+A `UNIQUE (section_id, name)` on `layout_tables` was considered and rejected: a draft may legitimately
+hold a transient collision while the organizer is renaming, exactly as drafts may hold transient overlap
+(FR-032).

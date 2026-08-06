@@ -9,13 +9,84 @@ import type { ValidationIssue } from './seatmap-validate.js';
 export type LayoutStatus = 'draft' | 'ready' | 'archived';
 export type SeatType = 'single' | 'double' | 'standing';
 /** `area` predates feature 005 and is kept so existing rows still render (migration 0010). */
-export type ElementKind = 'stage' | 'aisle' | 'door' | 'bar' | 'label' | 'area';
+export type ElementKind =
+  | 'stage'
+  | 'aisle'
+  | 'door'
+  | 'bar'
+  | 'label'
+  | 'area'
+  // Hall outline and dividers — decorative geometry, never sellable (FR-057).
+  | 'boundary'
+  | 'divider'
+  // Facility icons (FR-061). Widened additively, so no stored element becomes invalid.
+  | 'exit'
+  | 'restroom'
+  | 'food_drink'
+  | 'smoking'
+  | 'first_aid'
+  | 'lift_stairs'
+  | 'wheelchair';
+
+/** Kinds whose geometry is a point list rather than a rectangle. */
+export const SHAPE_KINDS = ['boundary', 'divider'] as const;
+/** Kinds drawn as a facility marker with an optional Vietnamese label. */
+export const FACILITY_KINDS = [
+  'exit',
+  'restroom',
+  'food_drink',
+  'smoking',
+  'first_aid',
+  'lift_stairs',
+  'wheelchair',
+] as const;
+
+export const isShapeKind = (k: ElementKind): boolean => (SHAPE_KINDS as readonly string[]).includes(k);
+export const isFacilityKind = (k: ElementKind): boolean =>
+  (FACILITY_KINDS as readonly string[]).includes(k);
+
+export type SeatShape = 'circle' | 'square';
+
+/** One vertex of a boundary polygon or a divider (FR-058). */
+export interface ShapePoint {
+  x: number;
+  y: number;
+}
 
 export interface LayoutSection {
   /** Absent for a section being created in this save. */
   id?: number;
   name: string;
   description?: string | null;
+  /**
+   * Visual style (FR-064). `color` is an EDITOR-ONLY aid and is never sent to the buyer map, where
+   * colour is reserved for price tier. `seatShape` and `seatSizeMultiplier` DO reach buyers, so
+   * sections stay distinguishable by form rather than by fill.
+   */
+  color?: string | null;
+  seatShape?: SeatShape;
+  /** Scales the nominal diameter. 1.0 = today's rendering; bounded 0.5–2.0 (FR-065). */
+  seatSizeMultiplier?: number;
+}
+
+/**
+ * A table (FR-047). A DRAWING object that owns seats — never sellable, never in inventory. Its seats
+ * inherit its section, and its name becomes their row label so they read as "Bàn 5 - Ghế 3" (FR-053).
+ */
+export interface LayoutTable {
+  id?: number;
+  sectionId: number | null;
+  name: string;
+  shape: 'round' | 'rect';
+  x: number;
+  y: number;
+  /** Round: width === height === diameter. */
+  width: number;
+  height: number;
+  rotation: number;
+  seatCount: number;
+  /** Rectangular only: seats per side, clockwise from the top. Null for a round table (FR-048). */
+  sideCounts?: number[] | null;
 }
 
 export interface LayoutSeat {
@@ -29,6 +100,8 @@ export interface LayoutSeat {
   x: number;
   y: number;
   rotation: number;
+  /** Set when this seat belongs to a table, so the editor can select the table as one object. */
+  tableId?: number | null;
 }
 
 export interface LayoutElement {
@@ -40,6 +113,11 @@ export interface LayoutElement {
   height: number;
   rotation: number;
   label: string | null;
+  /**
+   * Ordered vertices for `boundary` and `divider` (FR-058). The rectangle fields above stay populated
+   * as the shape's BOUNDING BOX, so a reader that does not understand points still positions it.
+   */
+  points?: ShapePoint[] | null;
 }
 
 export interface LayoutFloorPlan {
@@ -62,6 +140,7 @@ export interface Layout {
   sections: LayoutSection[];
   seats: LayoutSeat[];
   elements: LayoutElement[];
+  tables: LayoutTable[];
   floorPlan: LayoutFloorPlan;
 }
 

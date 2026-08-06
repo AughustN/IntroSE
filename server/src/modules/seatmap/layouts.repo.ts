@@ -84,9 +84,17 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
   const l = head.rows[0];
   if (!l) return null;
 
-  const [sections, seats, elements] = await Promise.all([
-    db.query<{ id: number; name: string; description: string | null }>(
-      `SELECT id, name, description FROM sections WHERE layout_id = $1 ORDER BY name`,
+  const [sections, seats, elements, tables] = await Promise.all([
+    db.query<{
+      id: number;
+      name: string;
+      description: string | null;
+      color: string | null;
+      seat_shape: 'circle' | 'square';
+      seat_size_multiplier: string;
+    }>(
+      `SELECT id, name, description, color, seat_shape, seat_size_multiplier
+         FROM sections WHERE layout_id = $1 ORDER BY name`,
       [layoutId],
     ),
     db.query<{
@@ -98,8 +106,9 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
       pos_x: number;
       pos_y: number;
       rotation: number;
+      table_id: number | null;
     }>(
-      `SELECT id, section_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation
+      `SELECT id, section_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation, table_id
          FROM seats WHERE layout_id = $1 ORDER BY section_id, row_label, seat_number`,
       [layoutId],
     ),
@@ -112,9 +121,29 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
       height: number;
       rotation: number;
       label: string | null;
-    }>(`SELECT id, kind, pos_x, pos_y, width, height, rotation, label FROM layout_elements WHERE layout_id = $1 ORDER BY id`, [
-      layoutId,
-    ]),
+      points: { x: number; y: number }[] | null;
+    }>(
+      `SELECT id, kind, pos_x, pos_y, width, height, rotation, label, points
+         FROM layout_elements WHERE layout_id = $1 ORDER BY id`,
+      [layoutId],
+    ),
+    db.query<{
+      id: number;
+      section_id: number | null;
+      name: string;
+      shape: 'round' | 'rect';
+      pos_x: number;
+      pos_y: number;
+      width: number;
+      height: number;
+      rotation: number;
+      seat_count: number;
+      side_counts: number[] | null;
+    }>(
+      `SELECT id, section_id, name, shape, pos_x, pos_y, width, height, rotation, seat_count, side_counts
+         FROM layout_tables WHERE layout_id = $1 ORDER BY id`,
+      [layoutId],
+    ),
   ]);
 
   return {
@@ -124,7 +153,27 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
     status: l.status,
     isTemplate: l.is_template,
     version: l.version,
-    sections: sections.rows.map((s) => ({ id: s.id, name: s.name, description: s.description })),
+    sections: sections.rows.map((s) => ({
+      id: s.id,
+      name: s.name,
+      description: s.description,
+      color: s.color,
+      seatShape: s.seat_shape,
+      seatSizeMultiplier: Number(s.seat_size_multiplier),
+    })),
+    tables: tables.rows.map((t) => ({
+      id: t.id,
+      sectionId: t.section_id,
+      name: t.name,
+      shape: t.shape,
+      x: t.pos_x,
+      y: t.pos_y,
+      width: t.width,
+      height: t.height,
+      rotation: t.rotation,
+      seatCount: t.seat_count,
+      sideCounts: t.side_counts,
+    })),
     seats: seats.rows.map((s) => ({
       id: s.id,
       sectionId: s.section_id,
@@ -215,18 +264,41 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
     const sectionIdMap = new Map<number, number>(); // client-side id → real id
     for (const s of body.sections) {
       if (s.id) {
-        await client.query(`UPDATE sections SET name = $2, description = $3 WHERE id = $1 AND layout_id = $4`, [
-          s.id,
-          s.name,
-          s.description ?? null,
-          layoutId,
-        ]);
+        await client.query(
+          `UPDATE sections SET name = $2, description = $3,
+                               color = $5, seat_shape = COALESCE($6, seat_shape),
+                               seat_size_multiplier = COALESCE($7, seat_size_multiplier)
+             WHERE id = $1 AND layout_id = $4`,
+          [
+            s.id,
+            s.name,
+            s.description ?? null,
+            layoutId,
+            s.color ?? null,
+            s.seatShape ?? null,
+            s.seatSizeMultiplier ?? null,
+          ],
+        );
         keptSections.push(s.id);
         sectionIdMap.set(s.id, s.id);
       } else {
         const { rows } = await client.query<{ id: number }>(
-          `INSERT INTO sections (layout_id, name, description) VALUES ($1, $2, $3) RETURNING id`,
-          [layoutId, s.name, s.description ?? null],
+          // A new section gets a palette colour by position unless the organizer chose one. FR-066
+          // makes a colourless section block publishing, so defaulting here is what stops the gate
+          // from blocking work the organizer was never asked to do — it still catches a colour that
+          // was explicitly cleared.
+          `INSERT INTO sections (layout_id, name, description, color, seat_shape, seat_size_multiplier)
+           VALUES ($1, $2, $3,
+                   COALESCE($4, (ARRAY['#4C9A6B','#3E7CB1','#C9762F','#9B4D8E','#B3453C'])[(SELECT count(*) FROM sections WHERE layout_id = $1)::int % 5 + 1]),
+                   COALESCE($5, 'circle'), COALESCE($6, 1.0)) RETURNING id`,
+          [
+            layoutId,
+            s.name,
+            s.description ?? null,
+            s.color ?? null,
+            s.seatShape ?? null,
+            s.seatSizeMultiplier ?? null,
+          ],
         );
         keptSections.push(rows[0].id);
       }
@@ -268,9 +340,20 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
     await client.query(`DELETE FROM layout_elements WHERE layout_id = $1`, [layoutId]);
     for (const e of body.elements) {
       await client.query(
-        `INSERT INTO layout_elements (layout_id, kind, pos_x, pos_y, width, height, rotation, label)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [layoutId, e.kind, clampCoord(e.x), clampCoord(e.y), e.width, e.height, normaliseRotation(e.rotation), e.label],
+        `INSERT INTO layout_elements (layout_id, kind, pos_x, pos_y, width, height, rotation, label, points)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [
+          layoutId,
+          e.kind,
+          clampCoord(e.x),
+          clampCoord(e.y),
+          e.width,
+          e.height,
+          normaliseRotation(e.rotation),
+          e.label,
+          // Shapes carry an ordered point list; every other kind stores null (FR-058).
+          e.points ? JSON.stringify(e.points.map((pt) => ({ x: clampCoord(pt.x), y: clampCoord(pt.y) }))) : null,
+        ],
       );
     }
 
@@ -378,8 +461,10 @@ export async function cloneLayout(sourceId: number, targetVenueId: number, name:
 
     const { rows: sections } = await client.query<{ old_id: number; new_id: number }>(
       `WITH ins AS (
-         INSERT INTO sections (layout_id, name, description)
-         SELECT $2, name, description FROM sections WHERE layout_id = $1 ORDER BY id
+         INSERT INTO sections (layout_id, name, description, color, seat_shape, seat_size_multiplier)
+         -- A clone is an independent copy, so it carries the source's visual style too.
+         SELECT $2, name, description, color, seat_shape, seat_size_multiplier
+           FROM sections WHERE layout_id = $1 ORDER BY id
          RETURNING id, name
        )
        SELECT s.id AS old_id, ins.id AS new_id

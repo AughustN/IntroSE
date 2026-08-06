@@ -3,6 +3,7 @@ import type { EventDetail, EventListResponse, SeatMap, Showtime } from "@/shared
 import type {
   ApplyPreview,
   Layout,
+  LayoutTable,
   LayoutFloorPlan,
   LayoutSummary,
   SaveLayoutRequest,
@@ -162,6 +163,23 @@ export const layoutApi = {
   publish: (id: number) => authed<Layout>(`/organizer/layouts/${id}/publish`, { method: "POST" }),
   clone: (id: number, b: { targetVenueId: number; name: string }) =>
     authed<Layout>(`/organizer/layouts/${id}/clone`, { method: "POST", body: b }),
+
+  // Tables (feature 005 amendment). Placing one generates its seats server-side, where the sold/held
+  // guards can see them; moving, re-counting or deleting is refused whole if any seat is committed.
+  addTable: (layoutId: number, body: Record<string, unknown>) =>
+    authed<LayoutTable>(`/organizer/layouts/${layoutId}/tables`, { method: 'POST', body }),
+  updateTable: (tableId: number, body: Record<string, unknown>) =>
+    authed<LayoutTable>(`/organizer/tables/${tableId}`, { method: 'PATCH', body }),
+  deleteTable: (tableId: number) => authed<{ ok: true }>(`/organizer/tables/${tableId}`, { method: 'DELETE' }),
+
+  // Standing area (FR-080) — the fan-zone substitute. Positions are generated server-side inside the
+  // drawn shape, as ordinary seats of type `standing`; a shape too small to hold the count is refused
+  // rather than quietly generating fewer.
+  addStandingArea: (layoutId: number, body: Record<string, unknown>) =>
+    authed<{ created: number; layout: Layout }>(`/organizer/layouts/${layoutId}/standing-area`, {
+      method: 'POST',
+      body,
+    }),
 
   // Floor plan — a background layer only; it never moves a seat (FR-020, FR-024).
   uploadPlan: async (id: number, file: File): Promise<LayoutFloorPlan> => {

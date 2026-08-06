@@ -4,7 +4,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Layout, LayoutElement, LayoutSeat } from "@/shared/catalog/seatmap";
+import type { Layout, LayoutElement, LayoutSeat, ShapePoint } from "@/shared/catalog/seatmap";
 import { type ValidationIssue, validateLayout } from "@/shared/catalog/seatmap-validate";
 import { layoutApi, organizerApi } from "../../services/catalogClient";
 import {
@@ -21,6 +21,8 @@ import {
   snap,
 } from "./layoutOps";
 import ElementPalette from "./ElementPalette";
+import SectionStylePanel from "./SectionStylePanel";
+import TablePalette, { type TableDraft } from "./TablePalette";
 import FloorPlanPanel from "./FloorPlanPanel";
 import ValidationPanel from "./ValidationPanel";
 import { useLayoutHistory } from "./useLayoutHistory";
@@ -114,7 +116,13 @@ export default function LayoutEditor({
           x: s.x,
           y: s.y,
         })),
-        sections: draft.sections.map((s) => ({ id: s.id ?? 0, name: s.name })),
+        sections: draft.sections.map((s) => ({
+          id: s.id ?? 0,
+          name: s.name,
+          color: s.color,
+          seatSizeMultiplier: s.seatSizeMultiplier,
+        })),
+        elements: draft.elements.map((e) => ({ kind: e.kind, x: e.x, y: e.y, points: e.points })),
       }),
     );
   }, [draft]);
@@ -131,6 +139,65 @@ export default function LayoutEditor({
     (fn: (seats: LayoutSeat[]) => LayoutSeat[]) => commit((d) => ({ ...d, seats: fn(d.seats) })),
     [commit],
   );
+
+  /**
+   * Placing a table calls the server: it generates the seats, enforces the ceilings and the name
+   * collision, and refuses if any seat is already sold or held. The editor then reloads, because the
+   * authoritative seat positions came from that call — not from anything the canvas guessed.
+   */
+  const addTable = async (t: TableDraft) => {
+    if (!layout) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await layoutApi.addTable(layout.id, t as unknown as Record<string, unknown>);
+      const fresh = await layoutApi.get(layout.id);
+      setLayout(fresh);
+      reset({ sections: fresh.sections, seats: fresh.seats, elements: fresh.elements });
+      setStatus(`Đã thêm ${t.name}.`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * A standing area, like a table, is generated on the SERVER: it writes real seats, so the seat
+   * ceiling, the polygon rules and the "area too small" refusal all belong where the data is. The
+   * editor reloads afterwards rather than guessing the generated positions.
+   */
+  const addStandingArea = async (a: {
+    sectionId: number;
+    rowLabel: string;
+    count: number;
+    points: ShapePoint[];
+  }) => {
+    if (!layout) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { created } = await layoutApi.addStandingArea(
+        layout.id,
+        a as unknown as Record<string, unknown>,
+      );
+      const fresh = await layoutApi.get(layout.id);
+      setLayout(fresh);
+      reset({ sections: fresh.sections, seats: fresh.seats, elements: fresh.elements });
+      setStatus(`Đã tạo ${created} chỗ đứng.`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Section style is ordinary layout content — one commit, one undo step (FR-077). */
+  const setSectionStyle = (sectionId: number, patch: Partial<(typeof draft.sections)[number]>) =>
+    commit((d) => ({
+      ...d,
+      sections: d.sections.map((sec) => (sec.id === sectionId ? { ...sec, ...patch } : sec)),
+    }));
 
   const addElement = (el: LayoutElement) =>
     commit((d) => ({ ...d, elements: [...d.elements, el] }));
@@ -176,22 +243,31 @@ export default function LayoutEditor({
   }, [draft.seats.length, draft.elements.length, fitToContent]);
 
   /**
-   * A colour per SECTION. Seats have no tier while drafting — a tier is attached to a section when
-   * the layout is applied to a showtime — so the section is the design-time stand-in for "which
-   * price class is this", and the legend says so.
+   * A colour per SECTION, read from the section's STORED colour (FR-064) rather than derived from its
+   * position in the list. Order-derived colour re-coloured the whole map whenever a section was added
+   * or removed, and disagreed with the swatch the organizer had actually picked; the stored value is
+   * the one thing both the palette and the canvas can agree on.
+   *
+   * Seats have no tier while drafting — a tier attaches to a section when the layout is applied to a
+   * showtime — so the section stays the design-time stand-in for "which price class is this". This
+   * colour is editor-only: buyers see colour by PRICE, never by section.
    */
   const sectionPalette = useMemo(() => {
-    const colours = [
-      { fill: "fill-burgundy/45", stroke: "stroke-burgundy", swatch: "bg-burgundy" },
-      { fill: "fill-la-co/45", stroke: "stroke-la-co", swatch: "bg-la-co" },
-      { fill: "fill-cam-dat/45", stroke: "stroke-cam-dat", swatch: "bg-cam-dat" },
-      { fill: "fill-bubblegum/40", stroke: "stroke-bubblegum", swatch: "bg-bubblegum" },
-      { fill: "fill-beige-kem/35", stroke: "stroke-beige-kem", swatch: "bg-beige-kem" },
-    ];
-    const byId = new Map<number, (typeof colours)[number]>();
-    draft.sections.forEach((sec, i) => {
-      if (sec.id !== undefined) byId.set(sec.id, colours[i % colours.length]);
-    });
+    const byId = new Map<number, string>();
+    for (const sec of draft.sections) {
+      if (sec.id !== undefined && sec.color) byId.set(sec.id, sec.color);
+    }
+    return byId;
+  }, [draft.sections]);
+
+  /** Seat shape and size per section — the two style fields buyers DO see (FR-064). */
+  const sectionForm = useMemo(() => {
+    const byId = new Map<number, { shape: string; size: number }>();
+    for (const sec of draft.sections) {
+      if (sec.id !== undefined) {
+        byId.set(sec.id, { shape: sec.seatShape ?? "circle", size: sec.seatSizeMultiplier ?? 1 });
+      }
+    }
     return byId;
   }, [draft.sections]);
 
@@ -485,7 +561,8 @@ export default function LayoutEditor({
                 return (
                   <span key={sec.id ?? sec.name} className="flex items-center gap-1.5">
                     <span
-                      className={`inline-block h-3 w-3 rounded ${tone?.swatch ?? "bg-beige-kem/30"}`}
+                      className="inline-block h-3 w-3 rounded"
+                      style={{ backgroundColor: tone ?? "rgba(233,225,204,0.3)" }}
                     />
                     <span className="font-mono text-[11px] text-beige-kem/70">{sec.name}</span>
                   </span>
@@ -597,14 +674,21 @@ export default function LayoutEditor({
                 const sy = seat.y + (d?.dy ?? 0);
                 const tone =
                   seat.sectionId !== null ? sectionPalette.get(seat.sectionId) : undefined;
-                // Overlap and selection outrank the section colour: they are what needs acting on.
+                const form =
+                  seat.sectionId !== null ? sectionForm.get(seat.sectionId) : undefined;
+                // Overlap and selection outrank the section colour: they are what needs acting on, and
+                // an unusable map must read as unusable whatever the organizer styled it.
                 const skin = bad
                   ? "fill-bubblegum/50 stroke-bubblegum"
                   : isSel
                     ? "fill-burgundy/50 stroke-burgundy"
-                    : tone
-                      ? `${tone.fill} ${tone.stroke}`
-                      : "fill-transparent stroke-beige-kem/40";
+                    : "stroke-beige-kem/40";
+                const paint =
+                  bad || isSel || !tone ? undefined : { fill: tone, fillOpacity: 0.45, stroke: tone };
+                // The section's size multiplier, so the drawn seat matches the footprint the publish
+                // gate measures for overlap (FR-065).
+                const k = form?.size ?? 1;
+                const square = form?.shape === "square";
                 return (
                   <g
                     key={id}
@@ -623,27 +707,38 @@ export default function LayoutEditor({
                     }}
                   >
                     {/* A chair read from above: backrest behind, cushion in front. The whole glyph
-                        stays inside SEAT_DIAMETER so what you see is what the overlap rule measures. */}
+                        stays inside the seat's effective diameter, so what you see is what the overlap
+                        rule measures. A `square` section drops the backrest for a plain block. */}
+                    {!square && (
+                      <rect
+                        x={sx - 46 * k}
+                        y={sy - 48 * k}
+                        width={92 * k}
+                        height={26 * k}
+                        rx={10 * k}
+                        strokeWidth={6}
+                        className={skin}
+                        style={paint}
+                      />
+                    )}
                     <rect
-                      x={sx - 46}
-                      y={sy - 48}
-                      width={92}
-                      height={26}
-                      rx={10}
-                      strokeWidth={6}
-                      className={skin}
-                    />
-                    <rect
-                      x={sx - 40}
-                      y={sy - 18}
-                      width={80}
-                      height={58}
-                      rx={16}
+                      x={sx - 40 * k}
+                      y={sy - (square ? 40 : 18) * k}
+                      width={80 * k}
+                      height={(square ? 80 : 58) * k}
+                      rx={(square ? 8 : 16) * k}
                       strokeWidth={7}
                       className={skin}
+                      style={paint}
                     />
                     {/* Invisible hit area — a thin chair is hard to grab otherwise. */}
-                    <rect x={sx - 50} y={sy - 50} width={100} height={100} fill="transparent" />
+                    <rect
+                      x={sx - 50 * k}
+                      y={sy - 50 * k}
+                      width={100 * k}
+                      height={100 * k}
+                      fill="transparent"
+                    />
                   </g>
                 );
               })}
@@ -687,6 +782,15 @@ export default function LayoutEditor({
 
           <div className="space-y-4">
             <ValidationPanel issues={issues} />
+            <TablePalette
+              sections={draft.sections}
+              tables={layout?.tables ?? []}
+              onAddTable={addTable}
+              onAddElement={addElement}
+              onAddStandingArea={addStandingArea}
+              busy={busy}
+            />
+            <SectionStylePanel sections={draft.sections} onChange={setSectionStyle} />
             <ElementPalette onAdd={addElement} />
             <FloorPlanPanel
               layoutId={layout.id}

@@ -7,10 +7,15 @@ import {
   LAYOUT_MAX_ELEMENTS,
   LAYOUT_MAX_SEATS,
   LAYOUT_SPACE,
+  POLYGON_MAX_POINTS,
   SEAT_DIAMETER,
+  SEAT_SIZE_MAX_PCT,
+  SEAT_SIZE_MIN_PCT,
 } from '../../config.js';
 import { ImageRejected, deleteFloorPlan, processFloorPlan, saveFloorPlan } from './floorplan.js';
 import { uploadRateLimit, withUploadSlot } from './upload.throttle.js';
+import { createTable, deleteTable, tableLayoutId, updateTable } from './tables.js';
+import { createStandingArea } from './standing.js';
 import { err } from '../../http.js';
 import { requireOrganizer } from '../../middleware/authz.js';
 import { requireAuth } from '../../middleware/requireAuth.js';
@@ -53,6 +58,10 @@ const sectionSchema = z.object({
   id: z.number().int().optional(),
   name: z.string().trim().min(1).max(60),
   description: z.string().max(500).nullable().optional(),
+  // Visual style (FR-064). `color` is editor-only and never reaches the buyer map.
+  color: z.string().trim().max(32).nullable().optional(),
+  seatShape: z.enum(['circle', 'square']).optional(),
+  seatSizeMultiplier: z.number().min(SEAT_SIZE_MIN_PCT / 100).max(SEAT_SIZE_MAX_PCT / 100).optional(),
 });
 
 const seatSchema = z.object({
@@ -68,14 +77,37 @@ const seatSchema = z.object({
 
 const elementSchema = z.object({
   id: z.number().int().optional(),
-  kind: z.enum(['stage', 'aisle', 'door', 'bar', 'label', 'area']),
+  kind: z.enum([
+    'stage', 'aisle', 'door', 'bar', 'label', 'area',
+    // Hall outline and dividers (FR-057), then the facility icons (FR-061).
+    'boundary', 'divider',
+    'exit', 'restroom', 'food_drink', 'smoking', 'first_aid', 'lift_stairs', 'wheelchair',
+  ]),
   x: coord,
   y: coord,
   width: z.number().int().min(1).max(LAYOUT_SPACE),
   height: z.number().int().min(1).max(LAYOUT_SPACE),
   rotation,
   label: z.string().max(60).nullable(),
+  /** Ordered vertices for a boundary or divider; the count rule is a DOMAIN check (FR-059). */
+  points: z.array(z.object({ x: coord, y: coord })).max(POLYGON_MAX_POINTS).nullable().optional(),
 });
+
+const tableSchema = z.object({
+  sectionId: z.number().int().nullable(),
+  name: z.string().trim().min(1).max(40),
+  shape: z.enum(['round', 'rect']),
+  x: coord,
+  y: coord,
+  width: z.number().int().min(1).max(LAYOUT_SPACE),
+  height: z.number().int().min(1).max(LAYOUT_SPACE),
+  rotation,
+  // Bounds are a DOMAIN rule so the refusal names the limit rather than a generic 400 — but a
+  // non-integer or absurd value is still a schema error.
+  seatCount: z.number().int().min(0).max(999),
+  sideCounts: z.array(z.number().int().min(0)).length(4).nullable().optional(),
+});
+const updateTableSchema = tableSchema.partial().refine((v) => Object.keys(v).length > 0, { message: 'empty' });
 
 const createLayoutSchema = z.object({ name: z.string().trim().min(1).max(80) });
 
@@ -96,6 +128,17 @@ const generateSeatsSchema = z.object({
   rowLabel: z.string().trim().min(1).max(8),
   count: z.number().int().min(1).max(200),
   replaceExisting: z.boolean().optional(),
+});
+
+const standingAreaSchema = z.object({
+  sectionId: z.number().int(),
+  rowLabel: z.string().trim().min(1).max(8),
+  // 200 is the fan-zone size SC-026 names; the layout ceiling still applies on top, reported by the
+  // service as `409 seat_limit_reached` rather than shadowed by a generic 400 here.
+  count: z.number().int().min(1).max(500),
+  points: z
+    .array(z.object({ x: z.number().int().min(0), y: z.number().int().min(0) }))
+    .max(POLYGON_MAX_POINTS),
 });
 
 const cloneSchema = z.object({
@@ -374,5 +417,57 @@ seatmapRouter.post(
     const { targetVenueId, name } = req.body as z.infer<typeof cloneSchema>;
     const newId = await service.clone(req, sourceId, targetVenueId, name);
     res.status(201).json(await repo.getLayout(newId));
+  }),
+);
+
+// ---- standing areas (FR-080) ----------------------------------------------
+// The fan-zone substitute: ordinary seats of type `standing` inside a drawn shape, sold one at a time
+// by the unchanged 003/004 path. No mixed seated + GA showtime is created here, and none can be.
+
+seatmapRouter.post(
+  '/layouts/:id/standing-area',
+  validateBody(standingAreaSchema),
+  asyncH(async (req, res) => {
+    const layoutId = Number(req.params.id);
+    await service.assertLayoutOwner(req, layoutId);
+    const created = await createStandingArea(layoutId, req.body as z.infer<typeof standingAreaSchema>);
+    res.status(201).json({ created, layout: await repo.getLayout(layoutId) });
+  }),
+);
+
+// ---- tables (FR-047..FR-056) ----------------------------------------------
+// Ownership resolves through the layout, exactly as every other route here does (SEC-04, FR-079).
+
+seatmapRouter.post(
+  '/layouts/:id/tables',
+  validateBody(tableSchema),
+  asyncH(async (req, res) => {
+    const layoutId = Number(req.params.id);
+    await service.assertLayoutOwner(req, layoutId);
+    res.status(201).json(await createTable(layoutId, req.body as z.infer<typeof tableSchema>));
+  }),
+);
+
+seatmapRouter.patch(
+  '/tables/:id',
+  validateBody(updateTableSchema),
+  asyncH(async (req, res) => {
+    const tableId = Number(req.params.id);
+    const layoutId = await tableLayoutId(tableId);
+    if (layoutId === null) throw err.notFound('not_found', 'Không tìm thấy bàn.');
+    await service.assertLayoutOwner(req, layoutId);
+    res.json(await updateTable(tableId, req.body as z.infer<typeof updateTableSchema>));
+  }),
+);
+
+seatmapRouter.delete(
+  '/tables/:id',
+  asyncH(async (req, res) => {
+    const tableId = Number(req.params.id);
+    const layoutId = await tableLayoutId(tableId);
+    if (layoutId === null) throw err.notFound('not_found', 'Không tìm thấy bàn.');
+    await service.assertLayoutOwner(req, layoutId);
+    await deleteTable(tableId);
+    res.json({ ok: true });
   }),
 );

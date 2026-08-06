@@ -294,8 +294,28 @@ export async function refreshSnapshot(showtimeId: number, layoutId: number, db: 
               'elements', COALESCE((
                 SELECT jsonb_agg(jsonb_build_object(
                   'kind', e.kind, 'x', e.pos_x, 'y', e.pos_y,
-                  'width', e.width, 'height', e.height, 'rotation', e.rotation, 'label', e.label))
+                  'width', e.width, 'height', e.height, 'rotation', e.rotation, 'label', e.label,
+                  -- Shapes carry an ordered point list; every other kind stores null (FR-058).
+                  'points', e.points))
                   FROM layout_elements e WHERE e.layout_id = l.id), '[]'::jsonb),
+              -- Tables ride in the SAME snapshot as the elements (FR-081). The snapshot is what stops
+              -- a later layout edit reshaping a show that is already selling, and a table sits in the
+              -- same picture as the seats — reading it live would let tidying a venue silently change
+              -- a live map. Buyers need it so a seat labelled "Bàn 5 - Ghế 3" is drawn at its table.
+              'tables', COALESCE((
+                SELECT jsonb_agg(jsonb_build_object(
+                  'name', t.name, 'shape', t.shape, 'x', t.pos_x, 'y', t.pos_y,
+                  'width', t.width, 'height', t.height, 'rotation', t.rotation))
+                  FROM layout_tables t WHERE t.layout_id = l.id), '[]'::jsonb),
+              -- Section STYLE, keyed by name because that is the only section identity a
+              -- showtime_seats row carries. Shape and size are snapshotted with the geometry for the
+              -- same reason the geometry is: restyling a venue must not re-draw a show already selling.
+              -- Colour is deliberately NOT snapshotted — it never reaches a buyer (FR-064).
+              'sectionStyles', COALESCE((
+                SELECT jsonb_agg(jsonb_build_object(
+                  'name', sec.name, 'seatShape', sec.seat_shape,
+                  'seatSizeMultiplier', sec.seat_size_multiplier))
+                  FROM sections sec WHERE sec.layout_id = l.id), '[]'::jsonb),
               'planUrl', l.background_url,
               'planScale', round(l.background_scale * 1000),
               'planOffsetX', l.background_offset_x,

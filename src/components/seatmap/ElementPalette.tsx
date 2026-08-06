@@ -22,6 +22,23 @@ const KINDS: { kind: ElementKind; label: string; w: number; h: number }[] = [
   { kind: "label", label: "Nhãn chữ", w: 800, h: 250 },
 ];
 
+/**
+ * Facility icons (FR-061). Same rule as everything above: decoration, never inventory. They answer
+ * the questions a buyer actually asks while choosing a seat — "is there a toilet near this block?",
+ * "can I get a wheelchair to this row?" — so they are drawn on the buyer's map too (FR-062).
+ */
+const FACILITIES: { kind: ElementKind; label: string }[] = [
+  { kind: "exit", label: "Lối thoát hiểm" },
+  { kind: "restroom", label: "Nhà vệ sinh" },
+  { kind: "food_drink", label: "Đồ ăn & uống" },
+  { kind: "smoking", label: "Khu hút thuốc" },
+  { kind: "first_aid", label: "Sơ cứu" },
+  { kind: "lift_stairs", label: "Thang máy / bộ" },
+  { kind: "wheelchair", label: "Lối xe lăn" },
+];
+
+const FACILITY_SIZE = 350;
+
 const btn = "rounded-lg border-2 border-beige-kem px-2.5 py-1.5 text-xs font-bold text-beige-kem/80 transition hover:text-beige-kem";
 
 export default function ElementPalette({ onAdd }: { onAdd: (el: LayoutElement) => void }) {
@@ -52,6 +69,31 @@ export default function ElementPalette({ onAdd }: { onAdd: (el: LayoutElement) =
           </button>
         ))}
       </div>
+      <h4 className="mt-4 font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">
+        Tiện ích
+      </h4>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {FACILITIES.map((f) => (
+          <button
+            key={f.kind}
+            className={btn}
+            onClick={() =>
+              onAdd({
+                kind: f.kind,
+                x: 5000,
+                y: 5000,
+                width: FACILITY_SIZE,
+                height: FACILITY_SIZE,
+                rotation: 0,
+                label: f.label,
+              })
+            }
+          >
+            + {f.label}
+          </button>
+        ))}
+      </div>
+
       <input
         value={text}
         onChange={(e) => setText(e.target.value)}

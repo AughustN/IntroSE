@@ -111,7 +111,9 @@ describe('the other four checks (FR-030)', () => {
   it('reports clean for a valid layout', () => {
     const issues = validateLayout({
       seats: [seat(1, 1000, 1000, { seatNumber: 1 }), seat(2, 1200, 1000, { seatNumber: 2 })],
-      sections,
+      // A section must now carry a colour to publish (FR-066, hall-scheme amendment). The definition
+      // of "valid" genuinely changed, so the fixture does too.
+      sections: sections.map((s) => ({ ...s, color: '#4C9A6B' })),
       sectionsWithTier: [1],
     });
     expect(issues).toEqual([]);

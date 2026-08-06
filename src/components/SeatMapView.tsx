@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import type { SeatMap, SeatMapSeat } from "@/shared/catalog/types";
 import { catalogClient } from "../services/catalogClient";
 import SeatCanvas from "./seatmap/SeatCanvas";
+import TierLegend from "./seatmap/TierLegend";
 
 const seatColor: Record<string, string> = {
   available: "fill-transparent stroke-la-co/70",
@@ -73,12 +74,22 @@ export default function SeatMapView({ showtimeId }: { showtimeId: number }) {
         floorPlan={map.floorPlan}
         space={map.space}
         seatClass={(s) => seatColor[s.status] ?? ""}
+        // Colour carries PRICE; status still wins for anything not available (FR-067, FR-068).
+        seatFill={(s) =>
+          s.status === "available"
+            ? map.tierLegend?.find((t) => t.tierId === s.tierId)?.color
+            : undefined
+        }
+        tables={map.tables}
         seatLabel={label}
       />
-      <div className="mt-4 flex flex-wrap gap-4 font-mono text-[10px] text-beige-kem/50">
-        <span className="text-ink-soft">■ Còn trống</span>
-        <span className="text-ink-soft">■ Đang giữ</span>
-        <span className="text-beige-kem/30">■ Đã bán</span>
+      <div className="mt-4 space-y-2">
+        <TierLegend legend={map.tierLegend} />
+        <div className="flex flex-wrap gap-4 font-mono text-[10px] text-beige-kem/50">
+          <span className="text-ink-soft">■ Còn trống</span>
+          <span className="text-ink-soft">■ Đang giữ</span>
+          <span className="text-beige-kem/30">■ Đã bán</span>
+        </div>
       </div>
     </div>
   );

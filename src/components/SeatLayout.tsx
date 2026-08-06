@@ -10,6 +10,7 @@ import { catalogClient } from "../services/catalogClient";
 import { formatHoldClock } from "../services/holdSession";
 import { watchShowtime } from "../services/seatSocket";
 import SeatCanvas from "./seatmap/SeatCanvas";
+import TierLegend from "./seatmap/TierLegend";
 
 interface SeatLayoutProps {
   event: MovieEvent;
@@ -43,7 +44,9 @@ export default function SeatLayout({
   onProceedToCheckout,
 }: SeatLayoutProps) {
   const [seats, setSeats] = useState<SeatMapSeat[]>([]);
-  const [mapMeta, setMapMeta] = useState<Pick<SeatMap, "space" | "elements" | "floorPlan">>({});
+  const [mapMeta, setMapMeta] = useState<
+    Pick<SeatMap, "space" | "elements" | "floorPlan" | "tables" | "tierLegend">
+  >({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -61,7 +64,13 @@ export default function SeatLayout({
       // The static half of the map — coordinate space, decoration, background. It changes only when
       // the organizer edits the map, never on a hold, so it is kept apart from the seat statuses
       // that `seat:update` refreshes (feature 005, FR-041).
-      setMapMeta({ space: map.space, elements: map.elements, floorPlan: map.floorPlan });
+      setMapMeta({
+        space: map.space,
+        elements: map.elements,
+        floorPlan: map.floorPlan,
+        tables: map.tables,
+        tierLegend: map.tierLegend,
+      });
       setLoadError(null);
     } catch {
       setLoadError("Không tải được sơ đồ ghế. Vui lòng thử lại.");
@@ -208,8 +217,15 @@ export default function SeatLayout({
                 elements={mapMeta.elements}
                 floorPlan={mapMeta.floorPlan}
                 space={mapMeta.space}
+                tables={mapMeta.tables}
                 interactive={!busy}
                 seatClass={seatClasses}
+                // Same rule as the event page: colour is price, status still wins (FR-068, FR-069).
+                seatFill={(s) =>
+                  s.status === "available"
+                    ? mapMeta.tierLegend?.find((t) => t.tierId === s.tierId)?.color
+                    : undefined
+                }
                 seatLabel={statusTitle}
                 onSeatActivate={toggleSeatSelection}
               />
@@ -217,7 +233,10 @@ export default function SeatLayout({
           </div>
 
           {/* Legend */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8 pt-6 border-t border-beige-kem/25 w-full max-w-lg font-mono text-xs text-beige-kem/70">
+          <div className="mt-8 w-full max-w-lg">
+            <TierLegend legend={mapMeta.tierLegend} />
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-6 border-t border-beige-kem/25 w-full max-w-lg font-mono text-xs text-beige-kem/70">
             <div className="flex items-center gap-2">
               <span className="w-5 h-5 bg-transparent border-2 border-beige-kem rounded" />
               <span>Còn trống{tierPrices.length ? ` (${tierPrices.map(formatPrice).join(" / ")})` : ""}</span>

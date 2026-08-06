@@ -200,7 +200,11 @@ export async function defaultLayoutId(venueId: number, db: Db = pool): Promise<n
 export async function createSection(venueId: number, name: string, db: Db = pool): Promise<number> {
   const layoutId = await defaultLayoutId(venueId, db);
   const { rows } = await db.query(
-    `INSERT INTO sections (layout_id, name) VALUES ($1, $2) RETURNING id`,
+    // Default the colour by position: FR-066 blocks publishing without one, and this path predates
+    // the colour picker, so a section created here must not be born unpublishable.
+    `INSERT INTO sections (layout_id, name, color)
+     VALUES ($1, $2, (ARRAY['#4C9A6B','#3E7CB1','#C9762F','#9B4D8E','#B3453C'])[(SELECT count(*) FROM sections WHERE layout_id = $1)::int % 5 + 1])
+     RETURNING id`,
     [layoutId, name],
   );
   return rows[0].id;
