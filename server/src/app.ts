@@ -8,6 +8,7 @@ import { organizerRouter } from "./modules/catalog/organizer.routes.js";
 import { moderationRouter } from "./modules/catalog/moderation.routes.js";
 import { reservationsRouter } from "./modules/holds/reservations.routes.js";
 import { seatmapRouter } from "./modules/seatmap/seatmap.routes.js";
+import { studioRouter } from "./modules/studio/studio.routes.js";
 import { walletRouter } from "./modules/payments/wallet.routes.js";
 
 /** Build the Express app (no listen) so tests can drive it with supertest. */
@@ -30,6 +31,7 @@ export function createApp(): Express {
   app.use("/api", reservationsRouter);
   app.use("/api", walletRouter);
   app.use("/api/organizer", seatmapRouter);
+  app.use("/api/organizer", studioRouter);
   app.use("/api/organizer", organizerRouter);
   app.use("/api/admin", moderationRouter);
 

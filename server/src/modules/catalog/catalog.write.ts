@@ -1,10 +1,16 @@
-import type { Db } from '../../db/pool.js';
-import { pool, withTransaction } from '../../db/pool.js';
-import { generateUniqueSlug } from './slug.js';
+import type { Db } from "../../db/pool.js";
+import { pool, withTransaction } from "../../db/pool.js";
+import { generateUniqueSlug } from "./slug.js";
 
 /** The caller's approved organizer row id, or null (events bind to this — D-E). */
-export async function getApprovedOrganizerId(userId: number, db: Db = pool): Promise<number | null> {
-  const { rows } = await db.query(`SELECT id FROM organizers WHERE user_id = $1 AND status = 'approved' LIMIT 1`, [userId]);
+export async function getApprovedOrganizerId(
+  userId: number,
+  db: Db = pool,
+): Promise<number | null> {
+  const { rows } = await db.query(
+    `SELECT id FROM organizers WHERE user_id = $1 AND status = 'approved' LIMIT 1`,
+    [userId],
+  );
   return rows[0]?.id ?? null;
 }
 
@@ -16,26 +22,43 @@ export interface CreateEventInput {
   categoryCode: string;
   title: string;
   description: string;
-  eventType: 'general_admission' | 'seated';
+  eventType: "general_admission" | "seated";
   ageRestriction?: string;
   imageUrl?: string | null;
   refundPolicy?: string | null;
 }
 
-export async function createEvent(organizerId: number, input: CreateEventInput, db: Db = pool): Promise<{ id: number; slug: string }> {
+export async function createEvent(
+  organizerId: number,
+  input: CreateEventInput,
+  db: Db = pool,
+): Promise<{ id: number; slug: string }> {
   const slug = await generateUniqueSlug(input.title, db);
   const { rows } = await db.query(
     `INSERT INTO events (slug, organizer_id, category_id, title, description, event_type, age_restriction, image_url, refund_policy, status, moderation_status)
      VALUES ($1, $2, (SELECT id FROM event_categories WHERE code = $3), $4, $5, $6, $7, $8, $9, 'draft', 'pending_review')
      RETURNING id, slug`,
-    [slug, organizerId, input.categoryCode, input.title, input.description, input.eventType, input.ageRestriction ?? 'all', input.imageUrl ?? null, input.refundPolicy ?? null],
+    [
+      slug,
+      organizerId,
+      input.categoryCode,
+      input.title,
+      input.description,
+      input.eventType,
+      input.ageRestriction ?? "all",
+      input.imageUrl ?? null,
+      input.refundPolicy ?? null,
+    ],
   );
   return rows[0];
 }
 
 /** The user_id that owns an event (via its organizer row), or null if the event does not exist. */
 export async function eventOwnerUserId(eventId: number, db: Db = pool): Promise<number | null> {
-  const { rows } = await db.query(`SELECT o.user_id FROM events e JOIN organizers o ON o.id = e.organizer_id WHERE e.id = $1`, [eventId]);
+  const { rows } = await db.query(
+    `SELECT o.user_id FROM events e JOIN organizers o ON o.id = e.organizer_id WHERE e.id = $1`,
+    [eventId],
+  );
   return rows[0]?.user_id ?? null;
 }
 
@@ -53,7 +76,12 @@ export async function listMyEvents(userId: number, db: Db = pool) {
 /** Update editable fields; a material edit of an APPROVED event returns it to pending_review (D-C). Slug is never changed. */
 export async function updateEvent(
   eventId: number,
-  f: { title?: string; description?: string; imageUrl?: string | null; refundPolicy?: string | null },
+  f: {
+    title?: string;
+    description?: string;
+    imageUrl?: string | null;
+    refundPolicy?: string | null;
+  },
   db: Db = pool,
 ) {
   const { rows } = await db.query(
@@ -78,7 +106,10 @@ export async function publishEvent(eventId: number, db: Db = pool): Promise<bool
     [eventId],
   );
   if (ready.rows.length === 0) return false;
-  await db.query(`UPDATE events SET status = 'on_sale', moderation_status = 'pending_review', updated_at = now() WHERE id = $1`, [eventId]);
+  await db.query(
+    `UPDATE events SET status = 'on_sale', moderation_status = 'pending_review', updated_at = now() WHERE id = $1`,
+    [eventId],
+  );
   return true;
 }
 
@@ -88,7 +119,11 @@ export async function unpublishEvent(eventId: number, db: Db = pool): Promise<vo
 
 // ---- venues (US5, minimal — needed for showtimes) ----
 
-export async function createVenue(userId: number, v: { name: string; city: string; rawAddress: string; guide?: string | null }, db: Db = pool): Promise<number> {
+export async function createVenue(
+  userId: number,
+  v: { name: string; city: string; rawAddress: string; guide?: string | null },
+  db: Db = pool,
+): Promise<number> {
   const { rows } = await db.query(
     `INSERT INTO venues (created_by, name, city, raw_address, guide) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
     [userId, v.name, v.city, v.rawAddress, v.guide ?? null],
@@ -97,7 +132,12 @@ export async function createVenue(userId: number, v: { name: string; city: strin
 }
 
 export async function listMyVenues(userId: number, db: Db = pool) {
-  return (await db.query(`SELECT id, name, city, raw_address AS "rawAddress", guide FROM venues WHERE created_by = $1 ORDER BY id DESC`, [userId])).rows;
+  return (
+    await db.query(
+      `SELECT id, name, city, raw_address AS "rawAddress", guide FROM venues WHERE created_by = $1 ORDER BY id DESC`,
+      [userId],
+    )
+  ).rows;
 }
 
 export async function venueOwnerUserId(venueId: number, db: Db = pool): Promise<number | null> {
@@ -107,12 +147,34 @@ export async function venueOwnerUserId(venueId: number, db: Db = pool): Promise<
 
 export async function addShowtimeWithTiers(
   eventId: number,
-  input: { venueId: number; startsAt: string; tiers: { label: string; price: number; totalQuantity?: number | null }[] },
+  input: {
+    venueId: number;
+    startsAt: string;
+    tiers: { label: string; price: number; totalQuantity?: number | null }[];
+  },
 ): Promise<number> {
   return withTransaction(async (client) => {
-    const st = (await client.query(`INSERT INTO showtimes (event_id, venue_id, starts_at, status) VALUES ($1, $2, $3, 'on_sale') RETURNING id`, [eventId, input.venueId, input.startsAt])).rows[0].id;
+    // A SEATED showtime's capacity is the seat map, so its tiers carry NULL capacity — the schema
+    // says so ("NULL for seated") and UC-26 A4 refuses manual capacity there. Defaulting every tier
+    // to 100 wrote a phantom ceiling onto seated tiers, which then capped the map at 100 through the
+    // `sold + reserved <= total_quantity` CHECK regardless of how many seats were drawn (006 FR-005).
+    const { rows: ev } = await client.query<{ event_type: "general_admission" | "seated" }>(
+      `SELECT event_type FROM events WHERE id = $1`,
+      [eventId],
+    );
+    const seated = ev[0]?.event_type === "seated";
+
+    const st = (
+      await client.query(
+        `INSERT INTO showtimes (event_id, venue_id, starts_at, status) VALUES ($1, $2, $3, 'on_sale') RETURNING id`,
+        [eventId, input.venueId, input.startsAt],
+      )
+    ).rows[0].id;
     for (const t of input.tiers) {
-      await client.query(`INSERT INTO ticket_tiers (showtime_id, label, price_amount, total_quantity) VALUES ($1, $2, $3, $4)`, [st, t.label, t.price, t.totalQuantity ?? 100]);
+      await client.query(
+        `INSERT INTO ticket_tiers (showtime_id, label, price_amount, total_quantity) VALUES ($1, $2, $3, $4)`,
+        [st, t.label, t.price, seated ? null : (t.totalQuantity ?? 100)],
+      );
     }
     return st;
   });
@@ -137,13 +199,22 @@ export async function defaultLayoutId(venueId: number, db: Db = pool): Promise<n
 
 export async function createSection(venueId: number, name: string, db: Db = pool): Promise<number> {
   const layoutId = await defaultLayoutId(venueId, db);
-  const { rows } = await db.query(`INSERT INTO sections (layout_id, name) VALUES ($1, $2) RETURNING id`, [layoutId, name]);
+  const { rows } = await db.query(
+    `INSERT INTO sections (layout_id, name) VALUES ($1, $2) RETURNING id`,
+    [layoutId, name],
+  );
   return rows[0].id;
 }
 
 /** Bulk-add seats to a section: rowLabel-1 .. rowLabel-count. Returns how many were created.
  *  Seeds each seat a grid position — geometry is required, and the grid is what buyers already see. */
-export async function addSeats(venueId: number, sectionId: number, rowLabel: string, count: number, db: Db = pool): Promise<number> {
+export async function addSeats(
+  venueId: number,
+  sectionId: number,
+  rowLabel: string,
+  count: number,
+  db: Db = pool,
+): Promise<number> {
   const layoutId = await defaultLayoutId(venueId, db);
   const { rows: prior } = await db.query<{ max_y: number | null }>(
     `SELECT max(pos_y) AS max_y FROM seats WHERE layout_id = $1`,
@@ -172,7 +243,10 @@ export async function seatVenueOwnerUserId(seatId: number, db: Db = pool): Promi
 }
 
 export async function seatInLiveMap(seatId: number, db: Db = pool): Promise<boolean> {
-  return (await db.query(`SELECT 1 FROM showtime_seats WHERE seat_id = $1 LIMIT 1`, [seatId])).rows.length > 0;
+  return (
+    (await db.query(`SELECT 1 FROM showtime_seats WHERE seat_id = $1 LIMIT 1`, [seatId])).rows
+      .length > 0
+  );
 }
 
 export async function deleteSeat(seatId: number, db: Db = pool): Promise<void> {
@@ -181,10 +255,13 @@ export async function deleteSeat(seatId: number, db: Db = pool): Promise<void> {
 
 export interface ShowtimeInfo {
   venueId: number;
-  eventType: 'general_admission' | 'seated';
+  eventType: "general_admission" | "seated";
   ownerUserId: number;
 }
-export async function showtimeInfo(showtimeId: number, db: Db = pool): Promise<ShowtimeInfo | null> {
+export async function showtimeInfo(
+  showtimeId: number,
+  db: Db = pool,
+): Promise<ShowtimeInfo | null> {
   const { rows } = await db.query(
     `SELECT s.venue_id AS "venueId", e.event_type AS "eventType", o.user_id AS "ownerUserId"
        FROM showtimes s JOIN events e ON e.id = s.event_id JOIN organizers o ON o.id = e.organizer_id
@@ -213,13 +290,35 @@ export async function eventShowtimesManage(eventId: number, db: Db = pool) {
   const showtimes = (
     await db.query(
       `SELECT s.id, s.starts_at AS "startsAt", s.venue_id AS "venueId", v.name AS "venueName",
-              EXISTS (SELECT 1 FROM showtime_seats ss WHERE ss.showtime_id = s.id) AS "hasSeatMap"
+              EXISTS (SELECT 1 FROM showtime_seats ss WHERE ss.showtime_id = s.id) AS "hasSeatMap",
+              (SELECT count(*)::int FROM showtime_seats ss WHERE ss.showtime_id = s.id) AS "bookableSeats"
          FROM showtimes s JOIN venues v ON v.id = s.venue_id WHERE s.event_id = $1 ORDER BY s.starts_at`,
       [eventId],
     )
-  ).rows as { id: number; startsAt: string; venueId: number; venueName: string; hasSeatMap: boolean; tiers?: unknown; sections?: unknown }[];
+  ).rows as {
+    id: number;
+    startsAt: string;
+    venueId: number;
+    venueName: string;
+    hasSeatMap: boolean;
+    bookableSeats: number;
+    tiers?: unknown;
+    sections?: unknown;
+  }[];
   for (const st of showtimes) {
-    st.tiers = (await db.query(`SELECT id, label, price_amount::int AS price FROM ticket_tiers WHERE showtime_id = $1 ORDER BY price_amount`, [st.id])).rows;
+    // Deliberately the OPPOSITE of the buyer reads: archived tiers stay visible here, flagged, with
+    // their live inventory. "Hidden from buyers" and "hidden from everyone" are different rules, and
+    // conflating them would make restore unreachable from the console (006 FR-006, FR-009).
+    st.tiers = (
+      await db.query(
+        `SELECT id, label, price_amount::int AS price, total_quantity AS capacity,
+                sold_quantity AS sold, reserved_quantity AS held,
+                (archived_at IS NOT NULL) AS archived
+           FROM ticket_tiers WHERE showtime_id = $1
+          ORDER BY archived_at NULLS FIRST, price_amount`,
+        [st.id],
+      )
+    ).rows;
     st.sections = await listSections(st.venueId, db);
   }
   return showtimes;
@@ -236,12 +335,18 @@ export async function sectionsWithSeats(venueId: number, db: Db = pool): Promise
 }
 
 export async function tiersOfShowtime(showtimeId: number, db: Db = pool): Promise<number[]> {
-  const { rows } = await db.query<{ id: number }>(`SELECT id FROM ticket_tiers WHERE showtime_id = $1`, [showtimeId]);
+  const { rows } = await db.query<{ id: number }>(
+    `SELECT id FROM ticket_tiers WHERE showtime_id = $1`,
+    [showtimeId],
+  );
   return rows.map((r) => r.id);
 }
 
 export async function showtimeHasSeatMap(showtimeId: number, db: Db = pool): Promise<boolean> {
-  return (await db.query(`SELECT 1 FROM showtime_seats WHERE showtime_id = $1 LIMIT 1`, [showtimeId])).rows.length > 0;
+  return (
+    (await db.query(`SELECT 1 FROM showtime_seats WHERE showtime_id = $1 LIMIT 1`, [showtimeId]))
+      .rows.length > 0
+  );
 }
 
 /**
@@ -252,7 +357,10 @@ export async function showtimeHasSeatMap(showtimeId: number, db: Db = pool): Pro
  * `showtimes.layout_snapshot`. From here the showtime owns its map — a later layout edit reaches it
  * only through an explicit, previewed re-apply.
  */
-export async function generateSeatMap(showtimeId: number, sectionTiers: { sectionId: number; ticketTierId: number }[]): Promise<number> {
+export async function generateSeatMap(
+  showtimeId: number,
+  sectionTiers: { sectionId: number; ticketTierId: number }[],
+): Promise<number> {
   return withTransaction(async (client) => {
     let total = 0;
     let layoutId: number | null = null;
@@ -267,7 +375,10 @@ export async function generateSeatMap(showtimeId: number, sectionTiers: { sectio
       );
       total += res.rowCount ?? 0;
       if (layoutId === null) {
-        const { rows } = await client.query<{ layout_id: number }>(`SELECT layout_id FROM sections WHERE id = $1`, [sectionId]);
+        const { rows } = await client.query<{ layout_id: number }>(
+          `SELECT layout_id FROM sections WHERE id = $1`,
+          [sectionId],
+        );
         layoutId = rows[0]?.layout_id ?? null;
       }
     }
@@ -304,8 +415,16 @@ export async function eventExists(eventId: number, db: Db = pool): Promise<boole
   return (await db.query(`SELECT 1 FROM events WHERE id = $1`, [eventId])).rows.length > 0;
 }
 
-export async function setModeration(eventId: number, status: string, reviewNote: string | null, db: Db = pool): Promise<void> {
-  await db.query(`UPDATE events SET moderation_status = $2, review_note = COALESCE($3, review_note), updated_at = now() WHERE id = $1`, [eventId, status, reviewNote]);
+export async function setModeration(
+  eventId: number,
+  status: string,
+  reviewNote: string | null,
+  db: Db = pool,
+): Promise<void> {
+  await db.query(
+    `UPDATE events SET moderation_status = $2, review_note = COALESCE($3, review_note), updated_at = now() WHERE id = $1`,
+    [eventId, status, reviewNote],
+  );
 }
 
 export async function pendingReviewQueue(db: Db = pool) {
@@ -319,11 +438,15 @@ export async function pendingReviewQueue(db: Db = pool) {
 }
 
 /** Immutable admin audit record (SEC-09, reuse feature 001's audit_logs). */
-export async function writeAudit(actorUserId: number, action: string, eventId: number, detail: unknown, db: Db = pool): Promise<void> {
-  await db.query(`INSERT INTO audit_logs (actor_user_id, action, target_type, target_id, detail) VALUES ($1, $2, 'event', $3, $4)`, [
-    actorUserId,
-    action,
-    eventId,
-    JSON.stringify(detail ?? {}),
-  ]);
+export async function writeAudit(
+  actorUserId: number,
+  action: string,
+  eventId: number,
+  detail: unknown,
+  db: Db = pool,
+): Promise<void> {
+  await db.query(
+    `INSERT INTO audit_logs (actor_user_id, action, target_type, target_id, detail) VALUES ($1, $2, 'event', $3, $4)`,
+    [actorUserId, action, eventId, JSON.stringify(detail ?? {})],
+  );
 }

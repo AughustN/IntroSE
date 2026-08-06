@@ -48,6 +48,7 @@ export const config = {
 
   googleClientId: process.env.GOOGLE_CLIENT_ID ?? "", // gated (US3)
   resendApiKey: process.env.RESEND_API_KEY ?? "", // empty → ConsoleMailer
+  geminiApiKey: process.env.GEMINI_API_KEY ?? "", // empty → FakeListingModel (UC-22 degrades, never fails)
   mailFrom: process.env.MAIL_FROM ?? "TixHub <no-reply@tixhub.fit>",
 
   // VNPay is optional at boot so local catalog/hold development does not require gateway secrets.
@@ -137,3 +138,27 @@ export const FLOORPLAN_MAX_PX = ms("FLOORPLAN_MAX_PX", 4_000);
 export const UPLOAD_RATE_LIMIT = ms("UPLOAD_RATE_LIMIT", 10);
 export const UPLOAD_RATE_WINDOW_MS = ms("UPLOAD_RATE_WINDOW_MS", 60 * 1000);
 export const UPLOAD_CONCURRENCY = ms("UPLOAD_CONCURRENCY", 2);
+
+// ---- Organizer event studio (feature 006). Settings with defaults, not constants (UC-36).
+/** A showtime carries at most this many ACTIVE tiers — the layout rule established in 002 (FR-002). */
+export const MAX_TIERS_PER_SHOWTIME = ms("MAX_TIERS_PER_SHOWTIME", 4);
+
+// AI listing assistant (UC-22). The assistant is assistive and non-blocking: every one of these
+// bounds degrades it, none of them can fail a request the organizer needs (Principle III).
+/** Per-authenticated-user fairness limit (SEC-08). Counts EVERY request, cache hits included —
+ *  SEC-08's verification fires 11 identical calls and expects the 11th blocked, and eleven identical
+ *  calls are ten cache hits. The limit governs the endpoint; the cache governs the upstream call. */
+export const AI_RATE_LIMIT = ms("AI_RATE_LIMIT", 10);
+export const AI_RATE_WINDOW_MS = ms("AI_RATE_WINDOW_MS", 60 * 60 * 1000);
+/** Hard timeout on the model call; past it the assistant degrades to manual entry (PERF-05). */
+export const AI_TIMEOUT_MS = ms("AI_TIMEOUT_MS", 8_000);
+/** How long an identical request is served without another upstream call (SCAL-02). */
+export const AI_CACHE_TTL_MS = ms("AI_CACHE_TTL_MS", 24 * 60 * 60 * 1000);
+/** Bounded: the cache key derives from user input, so an unbounded map is a slow leak with a
+ *  user-controlled key in a process held under ~450 MB (PERF-07). */
+export const AI_CACHE_MAX_ENTRIES = ms("AI_CACHE_MAX_ENTRIES", 500);
+/** Platform-wide daily ceiling on upstream calls — the shared free-tier guard (SCAL-03). */
+export const AI_DAILY_QUOTA = ms("AI_DAILY_QUOTA", 200);
+/** Fewest comparable published events needed before a price is suggested at all. Below this the
+ *  suggestion is omitted rather than guessed — the price is the one factual number here (FR-033). */
+export const AI_MIN_COMPARABLES = ms("AI_MIN_COMPARABLES", 5);

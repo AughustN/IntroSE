@@ -35,3 +35,6 @@ Thumbs.db
 
 # Uploaded avatars (runtime, ADR 0004)
 uploads/
+
+# macOS Finder metadata
+.DS_Store

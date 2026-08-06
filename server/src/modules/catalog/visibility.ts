@@ -18,5 +18,6 @@ export const SHOWTIME_HAS_AVAILABILITY = `(
   OR
   (e.event_type = 'general_admission' AND EXISTS (
      SELECT 1 FROM ticket_tiers tt WHERE tt.showtime_id = s.id
+       AND tt.archived_at IS NULL
        AND (tt.total_quantity IS NULL OR tt.sold_quantity + tt.reserved_quantity < tt.total_quantity)))
 )`;

@@ -1159,6 +1159,7 @@ Group 02 · SoE
 - **A2 — Edit conflicts with sold tickets (e.g. reducing capacity below sold):** system restricts the change.
 - **A3 — Editing a published event's critical fields (date/venue):** system flags it and triggers change notifications.
 - **A4 — Organizer cancels:** changes discarded.
+- **A5 — Organizer deletes the event:** permitted only when it was **never approved**, carries no sold ticket and no live hold, and is not `flagged` or `removed`. "Never approved" is read from the audit trail, not from the current moderation state, because an event approved and then edited reads `pending_review` and would otherwise look deletable. The moderation-history condition is what stops deletion becoming a way to launder a rejection — erase the removed event, resubmit a clean copy. Taking a live event down remains unpublish (UC-24 A5) or cancellation with refunds (UC-25). *(Added by feature `006-organizer-studio`.)*
 
 **Postconditions**
 - **Success:** event updated; attendees notified if needed.
@@ -1196,7 +1197,7 @@ Group 02 · SoE
 - **A3 — Admin rejects the submission:** the event never becomes public; the organizer sees the rejection and its reason and may correct and resubmit (UC-34).
 - **A4 — Event later flagged or removed by admin moderation:** UC-34 pulls it from the catalog on the next request; it stays visible to its organizer with the reason.
 - **A5 — Organizer unpublishes:** the event disappears from the public catalog and is retained as a draft.
-- **A6 — Material edit after approval:** changing title, description, pricing, or showtimes returns the event to `pending_review` and pulls it from the catalog until re-approved — otherwise moderation could be bypassed by approving an empty shell and then editing it (UC-23).
+- **A6 — Material edit after approval:** **every** organizer edit to an approved event returns it to `pending_review` and pulls it from the catalog until re-approved. The rule is stated as an *exemption* list rather than an enumerated one, because an enumerated list is exactly what leaves the hole — the day a new editable field is added and nobody remembers to list it, the gate silently reopens. The **only** exempt changes are pure-inventory ones: a general-admission tier's capacity, and the per-seat block/unblock from UC-21. Without this, moderation is bypassable by approving an empty shell and then editing it (UC-23). *(Amended by feature `006-organizer-studio`, which widened this from the four fields it originally named — title, description, pricing, showtimes. A return to review removes the listing from discovery only: no hold is released, no ticket voided, and the on-sale state is untouched.)*
 
 **Postconditions**
 - **Success:** the event is on sale and awaiting review; it becomes public only on admin approval.
@@ -1271,7 +1272,8 @@ Group 02 · SoE
 **Alternative flows**
 - **A1 — Invalid price/capacity:** system flags and blocks save.
 - **A2 — Reducing capacity below sold count:** system restricts to ≥ sold.
-- **A3 — Deleting a type with sold tickets:** system blocks or archives instead of deleting.
+- **A3 — Deleting a type with sold tickets:** system **archives** it, never deletes. An archived tier is unpurchasable and hidden from buyers but stays resolvable, so existing orders and tickets still show their label and price; it does not count toward the four-tier layout limit, and it can be restored while fewer than four tiers are active. *(Pinned by feature `006-organizer-studio` — the original "blocks or archives" left the choice open.)*
+- **A5 — Deleting a type with live holds:** refused. Reserved quantity is hold state owned by UC-11, and deleting the tier under a reservation would corrupt it; the organizer archives instead. *(Added by feature `006-organizer-studio`; the reservation model post-dates this use case.)*
 - **A4 — Seated event:** capacity is derived from the seat map (UC-21); manual capacity is disabled.
 
 **Postconditions**

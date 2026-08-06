@@ -104,3 +104,88 @@ export interface EventListResponse {
   total: number;
   page: number;
 }
+
+// ---- Organizer event studio (feature 006) ----
+// Derived from src/specs/006-organizer-studio/contracts/studio.openapi.yaml. Defined once here and
+// imported by both sides, so a server change that breaks the console fails at compile time
+// (Principle VI). Money stays whole VND đồng throughout (STD-03).
+
+/** A tier as its organizer sees it: the row plus the live inventory a refusal will cite (FR-009). */
+export interface ManagedTier {
+  id: number;
+  label: string;
+  price: number; // VND integer
+  /** null for a seated tier — capacity comes from the seat map and is owned by feature 005 (FR-005). */
+  capacity: number | null;
+  sold: number;
+  held: number;
+  /** null when capacity is unbounded. Seated counts available showtime_seats. */
+  remaining: number | null;
+  archived: boolean;
+  archivedAt: string | null;
+}
+
+/**
+ * Every studio mutation reports whether it returned the event for review (FR-021), so the console can
+ * say what just happened instead of leaving the organizer to notice their event vanished from the
+ * catalog. Always false for a capacity-only change — the one exemption.
+ */
+export interface MutationModeration {
+  returnedToReview: boolean;
+}
+
+export interface TierMutationResult extends MutationModeration {
+  tier: ManagedTier;
+}
+
+/** Removal is delete-or-archive, decided by the server on live inventory (FR-006, FR-007). */
+export interface TierRemovalResult extends MutationModeration {
+  tier: ManagedTier | null; // null when the tier was deleted outright
+  outcome: 'deleted' | 'archived';
+}
+
+export interface ManagedTierList {
+  eventType: EventType;
+  tiers: ManagedTier[];
+}
+
+export interface ShowtimeMutationResult extends MutationModeration {
+  showtimeId: number;
+  startsAt: string;
+  venueId: number;
+}
+
+export type ModerationStatus = 'pending_review' | 'approved' | 'flagged' | 'removed';
+
+export interface EventMutationResult extends MutationModeration {
+  id: number;
+  slug: string;
+  title: string;
+  status: string;
+  moderation: ModerationStatus;
+}
+
+/** UC-22. Never authoritative and never persisted — only what the organizer accepts reaches the form. */
+export interface ListingSuggestion {
+  titles: string[];
+  description: string | null;
+  tags: string[];
+  /** Computed in SQL from comparable published events, never produced by the model (FR-033). */
+  price: number | null;
+  /** How many comparable events the price came from; null when no price was suggested. */
+  priceBasis: number | null;
+}
+
+export type ListingUnavailableReason = 'timeout' | 'error' | 'quota_exhausted';
+
+/**
+ * Degradation is a SUCCESSFUL response with `available: false`, never an error status, so the
+ * client's fallback is the ordinary rendering path and no consumer can accidentally treat a degraded
+ * assistant as a broken page (PERF-05, SCAL-03).
+ */
+export interface ListingResponse {
+  available: boolean;
+  cached?: boolean;
+  suggestion?: ListingSuggestion;
+  reason?: ListingUnavailableReason;
+}

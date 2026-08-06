@@ -30,6 +30,8 @@ export interface Route {
   eventSlug?: string;
   /** From `/tickets/:bookingId`. */
   bookingId?: string;
+  /** From `/organizer/events/:id` — which event the organizer console has open (feature 006). */
+  organizerEventId?: number;
 }
 
 /** Screens whose URL carries no parameter. Order is irrelevant; lookup goes both ways. */
@@ -70,9 +72,18 @@ export function isOverlayPath(pathname: string): boolean {
  */
 export function screenToPath(
   screen: Screen,
-  params: { eventSlug?: string | null; bookingId?: string | null } = {},
+  params: {
+    eventSlug?: string | null;
+    bookingId?: string | null;
+    organizerEventId?: number | null;
+  } = {},
 ): string {
   switch (screen) {
+    case "organizer":
+      // The console's second level is linkable; the list is the bare path (feature 006, FR-039).
+      return params.organizerEventId
+        ? `/organizer/events/${params.organizerEventId}`
+        : "/organizer";
     case "detail":
       return params.eventSlug ? `/events/${encodeURIComponent(params.eventSlug)}` : "/";
     case "seats":
@@ -110,6 +121,13 @@ export function pathToRoute(pathname: string): Route | null {
 
   if (segments[0] === "tickets" && segments[1] && segments.length === 2) {
     return { screen: "ticket", bookingId: segments[1] };
+  }
+
+  // `/organizer/events/:id` — one event open in the console. A non-numeric id is not a route, so it
+  // falls through to null and the caller sends it home rather than opening a nonsense event.
+  if (segments[0] === "organizer" && segments[1] === "events" && segments.length === 3) {
+    const id = Number(segments[2]);
+    if (Number.isInteger(id) && id > 0) return { screen: "organizer", organizerEventId: id };
   }
 
   return null;

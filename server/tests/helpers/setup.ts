@@ -2,6 +2,9 @@ import { afterAll, beforeEach } from "vitest";
 import { pool } from "../../src/db/pool.js";
 import { assertNotDemoBranch } from "../../src/db/guards.js";
 import { resetHoldRateLimit } from "../../src/modules/holds/holds.throttle.js";
+import { resetAuthThrottle } from "../../src/modules/auth/throttle.js";
+import { resetAiThrottle } from "../../src/modules/studio/ai/ai.throttle.js";
+import { setListingModelForTest } from "../../src/modules/studio/ai/listing.model.js";
 
 // Which database this suite truncates is decided in config.ts: under vitest, `config.databaseUrl`
 // resolves from TEST_DATABASE_URL and never falls back to DATABASE_URL. The guard below is the
@@ -23,6 +26,14 @@ beforeEach(async () => {
   // The hold throttle is process-wide in-memory state (FR-017) — clear it so a spam test cannot
   // poison the next case.
   resetHoldRateLimit();
+  // Same for the auth throttle: a suite that registers many users (an RBAC matrix over every
+  // endpoint) would otherwise hit the per-IP register limit and fail for the wrong reason. The
+  // throttle's own behaviour is still covered — auth/throttle.test.ts bursts within a single case.
+  resetAuthThrottle();
+  // The AI assistant's rate limit, suggestion cache and daily quota are process-wide too, and the
+  // model seam must not stay swapped to a failing fake for the next case.
+  resetAiThrottle();
+  setListingModelForTest(null);
 });
 
 afterAll(async () => {

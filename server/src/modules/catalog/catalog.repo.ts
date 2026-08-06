@@ -6,7 +6,9 @@ import { SHOWTIME_HAS_AVAILABILITY, UPCOMING_SHOWTIME, VISIBLE_JOIN, VISIBLE_WHE
 
 // Correlated subqueries reused in the list projection (event alias `e`).
 const EARLIEST = `(SELECT min(s.starts_at) FROM showtimes s WHERE ${UPCOMING_SHOWTIME})`;
-const START_PRICE = `(SELECT min(tt.price_amount) FROM ticket_tiers tt JOIN showtimes s2 ON s2.id = tt.showtime_id WHERE s2.event_id = e.id)`;
+// Archived tiers are retired: never priced, never offered, never counted (006 FR-006).
+const ACTIVE_TIER = `tt.archived_at IS NULL`;
+const START_PRICE = `(SELECT min(tt.price_amount) FROM ticket_tiers tt JOIN showtimes s2 ON s2.id = tt.showtime_id WHERE s2.event_id = e.id AND ${ACTIVE_TIER})`;
 const CITY = `(SELECT v.city FROM showtimes s3 JOIN venues v ON v.id = s3.venue_id WHERE s3.event_id = e.id ORDER BY s3.starts_at LIMIT 1)`;
 const HAS_UPCOMING = `EXISTS (SELECT 1 FROM showtimes s WHERE ${UPCOMING_SHOWTIME})`;
 const HAS_AVAILABLE = `EXISTS (SELECT 1 FROM showtimes s WHERE ${UPCOMING_SHOWTIME} AND ${SHOWTIME_HAS_AVAILABILITY})`;
@@ -124,7 +126,7 @@ export async function getEventDetail(slug: string, db: Db = pool): Promise<Event
   const tiersRes = await db.query<{ label: string; price: string }>(
     `SELECT tt.label, min(tt.price_amount)::text AS price
        FROM ticket_tiers tt JOIN showtimes s ON s.id = tt.showtime_id
-      WHERE s.event_id = $1 GROUP BY tt.label ORDER BY min(tt.price_amount)`,
+      WHERE s.event_id = $1 AND tt.archived_at IS NULL GROUP BY tt.label ORDER BY min(tt.price_amount)`,
     [r.id],
   );
   const tiers: Tier[] = tiersRes.rows.map((t, i) => ({ id: i, label: t.label, price: Number(t.price), remaining: null }));
@@ -265,7 +267,7 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
     `SELECT id, label, price_amount::text AS price,
             CASE WHEN total_quantity IS NULL THEN NULL
                  ELSE (total_quantity - sold_quantity - reserved_quantity)::text END AS remaining
-       FROM ticket_tiers WHERE showtime_id = $1 ORDER BY price_amount`,
+       FROM ticket_tiers WHERE showtime_id = $1 AND archived_at IS NULL ORDER BY price_amount`,
     [showtimeId],
   );
   return {

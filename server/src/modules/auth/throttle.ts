@@ -21,6 +21,13 @@ export function allow(key: string, limit: number, windowMs: number): boolean {
   return true;
 }
 
+/** Test seam — the buckets are process-wide state, so cases must not leak into each other. Mirrors
+ *  `resetHoldRateLimit()`; a suite that legitimately registers many users (e.g. an RBAC matrix over
+ *  every endpoint) would otherwise trip the per-IP register limit and fail for the wrong reason. */
+export function resetAuthThrottle(): void {
+  buckets.clear();
+}
+
 /** Normalise a client IP to a throttle key: /32 for IPv4, /64 for IPv6 (R-5). */
 export function ipKey(ip: string | undefined): string {
   if (!ip) return 'unknown';

@@ -102,15 +102,10 @@ organizerRouter.post(
   }),
 );
 
-organizerRouter.patch(
-  '/events/:id',
-  validate(updateEventSchema),
-  asyncH(async (req, res) => {
-    const id = Number(req.params.id);
-    await assertEventOwner(req, id);
-    res.json(await updateEvent(id, req.body as z.infer<typeof updateEventSchema>));
-  }),
-);
+// PATCH /events/:id now lives in modules/studio (feature 006). It was widened beyond the four text
+// fields and had to become transactional with the UC-24 A6 re-moderation, so keeping a second handler
+// for the same resource would be exactly the contract drift Principle VI forbids. `studioRouter` is
+// mounted ahead of this router in app.ts.
 
 organizerRouter.post(
   '/events/:id/publish',

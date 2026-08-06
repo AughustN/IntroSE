@@ -42,6 +42,16 @@ export default defineConfig({
           branches: 60,
           statements: 60,
         },
+        // The organizer studio edits tiers with money already taken and carries the UC-24 A6
+        // moderation gate: capacity may never fall below sold + reserved, a sold tier is archived
+        // rather than deleted, and every material edit returns the event for review
+        // (006 SC-002/SC-003/SC-009, MAIN-03).
+        "server/src/modules/studio/**": {
+          lines: 60,
+          functions: 60,
+          branches: 60,
+          statements: 60,
+        },
       },
     },
   },

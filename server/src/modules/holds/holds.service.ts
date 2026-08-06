@@ -145,6 +145,13 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
     if (!tier || tier.showtime_id !== body.showtimeId) {
       throw err.unprocessable("invalid_selection", "Hạng vé không thuộc suất diễn này.");
     }
+    // An archived tier is retired (006 FR-006). Excluding it from the catalog read only makes it
+    // INVISIBLE — a stale tab or a replayed request still carries its id, and without this check the
+    // hold would succeed. "Unpurchasable" has to be enforced where purchases happen. Holds placed
+    // BEFORE the archive are untouched and still convert: this guards new holds only.
+    if (tier.archived_at !== null) {
+      throw err.unprocessable("tier_archived", "Hạng vé này đã ngừng bán.");
+    }
 
     const remaining = repo.tierRemaining(tier);
     if (remaining !== null && selection.quantity > remaining) {

@@ -29,6 +29,8 @@ export interface TierRow {
   total_quantity: number | null;
   sold_quantity: number;
   reserved_quantity: number;
+  /** Set once the organizer retires the tier (006 FR-006). An archived tier is unpurchasable. */
+  archived_at: Date | null;
 }
 
 export interface ReservationRow {
@@ -155,7 +157,7 @@ export async function syncSeatExpiry(
 
 export async function lockTier(client: pg.PoolClient, tierId: number): Promise<TierRow | null> {
   const { rows } = await client.query<TierRow>(
-    `SELECT id, showtime_id, price_amount, total_quantity, sold_quantity, reserved_quantity
+    `SELECT id, showtime_id, price_amount, total_quantity, sold_quantity, reserved_quantity, archived_at
        FROM ticket_tiers WHERE id = $1 FOR UPDATE`,
     [tierId],
   );

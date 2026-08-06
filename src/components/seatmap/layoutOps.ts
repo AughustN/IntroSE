@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { LayoutSeat } from "@/shared/catalog/seatmap";
+import type { LayoutElement, LayoutSeat } from "@/shared/catalog/seatmap";
 import { clampCoord, normaliseRotation } from "@/shared/catalog/seatmap-validate";
 
 /**
@@ -16,15 +16,49 @@ import { clampCoord, normaliseRotation } from "@/shared/catalog/seatmap-validate
 
 export const GRID = 50;
 
-export const snap = (v: number, enabled: boolean): number => (enabled ? Math.round(v / GRID) * GRID : Math.round(v));
+export const snap = (v: number, enabled: boolean): number =>
+  enabled ? Math.round(v / GRID) * GRID : Math.round(v);
 
 const isSelected = (s: LayoutSeat, ids: Set<number>) => s.id !== undefined && ids.has(s.id);
 
 /** Move a selection by a delta, clamped into the space (FR-014). */
-export function moveSeats(seats: LayoutSeat[], ids: Set<number>, dx: number, dy: number, grid: boolean): LayoutSeat[] {
+export function moveSeats(
+  seats: LayoutSeat[],
+  ids: Set<number>,
+  dx: number,
+  dy: number,
+  grid: boolean,
+): LayoutSeat[] {
   return seats.map((s) =>
-    isSelected(s, ids) ? { ...s, x: clampCoord(snap(s.x + dx, grid)), y: clampCoord(snap(s.y + dy, grid)) } : s,
+    isSelected(s, ids)
+      ? { ...s, x: clampCoord(snap(s.x + dx, grid)), y: clampCoord(snap(s.y + dy, grid)) }
+      : s,
   );
+}
+
+/**
+ * Move ONE non-sellable element by a delta, clamped into the space.
+ *
+ * Elements are identified by their index, not by `id`: an element the organizer just dropped from the
+ * palette has no id until the layout is saved, and it is precisely the just-dropped one they want to
+ * drag into place.
+ */
+export function moveElement(
+  elements: LayoutElement[],
+  index: number,
+  dx: number,
+  dy: number,
+  grid: boolean,
+): LayoutElement[] {
+  return elements.map((el, i) =>
+    i === index
+      ? { ...el, x: clampCoord(snap(el.x + dx, grid)), y: clampCoord(snap(el.y + dy, grid)) }
+      : el,
+  );
+}
+
+export function deleteElement(elements: LayoutElement[], index: number): LayoutElement[] {
+  return elements.filter((_, i) => i !== index);
 }
 
 export type AlignEdge = "left" | "right" | "top" | "bottom" | "centerX" | "centerY";
@@ -44,7 +78,11 @@ export function alignSeats(seats: LayoutSeat[], ids: Set<number>, edge: AlignEdg
   }[edge];
   const horizontal = edge === "left" || edge === "right" || edge === "centerX";
   return seats.map((s) =>
-    isSelected(s, ids) ? (horizontal ? { ...s, x: clampCoord(target) } : { ...s, y: clampCoord(target) }) : s,
+    isSelected(s, ids)
+      ? horizontal
+        ? { ...s, x: clampCoord(target) }
+        : { ...s, y: clampCoord(target) }
+      : s,
   );
 }
 
@@ -64,13 +102,17 @@ export function distributeSeats(seats: LayoutSeat[], ids: Set<number>): LayoutSe
   const moved = new Map<number, number>();
   ordered.forEach((s, i) => moved.set(s.id as number, clampCoord(start + i * stepSize)));
   return seats.map((s) =>
-    isSelected(s, ids) && moved.has(s.id as number) ? { ...s, [axis]: moved.get(s.id as number)! } : s,
+    isSelected(s, ids) && moved.has(s.id as number)
+      ? { ...s, [axis]: moved.get(s.id as number)! }
+      : s,
   );
 }
 
 /** Rotate seats in place — cosmetic, it never changes a seat's footprint (FR-008). */
 export function rotateSeats(seats: LayoutSeat[], ids: Set<number>, degrees: number): LayoutSeat[] {
-  return seats.map((s) => (isSelected(s, ids) ? { ...s, rotation: normaliseRotation(s.rotation + degrees) } : s));
+  return seats.map((s) =>
+    isSelected(s, ids) ? { ...s, rotation: normaliseRotation(s.rotation + degrees) } : s,
+  );
 }
 
 /**
