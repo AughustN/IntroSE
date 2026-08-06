@@ -181,7 +181,7 @@ export default function SeatMapBuilder({
                     Công cụ nhanh
                   </button>
                   <button className={btn} disabled={busy} onClick={() => openEditor(venueId)}>
-                    1. Thiết kế sơ đồ
+                    Thiết kế sơ đồ
                   </button>
                 </div>
               </div>
@@ -266,7 +266,7 @@ export default function SeatMapBuilder({
                           disabled={busy}
                           onClick={() => applyToShowtime(st)}
                         >
-                          2. Áp dụng sơ đồ cho suất này
+                          Áp dụng sơ đồ cho suất này
                         </button>
                       </div>
                     )}
