@@ -91,8 +91,17 @@ export async function getSeat(showtimeSeatId: number): Promise<{
   return rows[0];
 }
 
-/** Push a reservation's window (and its seats') into the past, as if the TTL had elapsed. */
-export async function expireReservation(reservationId: number, agoMs = 1000): Promise<void> {
+/**
+ * Push a reservation's window (and its seats') into the past, as if the TTL had elapsed.
+ *
+ * The offset must clear the clock skew between the app process and the database, not just be
+ * "in the past". Expiry is evaluated in BOTH places — Postgres `now()` in the sweep/predicates
+ * and JS `Date.now()` in `isHoldable`/`requireOwnedActive` — while `now()` here is the DB clock.
+ * Against a hosted Postgres (Neon) the two clocks differ by over a second, so a 1s backdate wrote
+ * a timestamp that was past for the DB but still future for JS, and the "already expired" cases
+ * failed intermittently. 60s is far beyond any plausible skew and still well inside the TTL.
+ */
+export async function expireReservation(reservationId: number, agoMs = 60_000): Promise<void> {
   await pool.query(
     `UPDATE reservations SET expires_at = now() - ($2::bigint * interval '1 millisecond') WHERE id = $1`,
     [reservationId, agoMs],

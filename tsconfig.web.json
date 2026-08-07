@@ -8,8 +8,10 @@
     "experimentalDecorators": true,
     "useDefineForClassFields": false,
     "types": ["vite/client"],
+    "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@shared/*": ["./shared/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "shared/**/*.ts", "vite.config.ts"],

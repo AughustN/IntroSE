@@ -28,6 +28,13 @@ export function ipKey(ip: string | undefined): string {
   return ip; // IPv4 /32
 }
 
+/** Test seam — the buckets are process-wide state, so cases must not leak into each other.
+ *  Every integration test registers users from the same loopback IP, so without this the
+ *  per-IP register window is shared by the whole file (mirrors resetHoldRateLimit). */
+export function resetAuthThrottle(): void {
+  buckets.clear();
+}
+
 /**
  * Progressive per-identifier delay (FR-048/049): the first few failures are free,
  * then each subsequent one is answered more slowly, capped. Applied EQUALLY to
