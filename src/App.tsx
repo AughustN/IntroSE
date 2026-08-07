@@ -53,6 +53,11 @@ import Header from "./components/Header";
 import HeroVideo from "./components/HeroVideo";
 import SeatLayout from "./components/SeatLayout";
 import TicketTicket from "./components/TicketTicket";
+import LegalPage from "./components/LegalPage";
+import aboutUsMd from "./content/legal/about-us.md?raw";
+import termsOfServiceMd from "./content/legal/terms-of-service.md?raw";
+import websiteTermsMd from "./content/legal/website-terms.md?raw";
+import refundPolicyMd from "./content/legal/refund-policy.md?raw";
 import { ArrowUp } from "lucide-react";
 
 type ThemeMode = "dark" | "light";
@@ -1097,9 +1102,9 @@ export default function App() {
           })
         }
         onBrowse={() => void leaveFlow(() => goTo("browse"))}
-        onViewGuide={() => void leaveFlow(() => goTo("guide"))}
-        onViewAbout={() => void leaveFlow(() => goTo("about"))}
-        onViewPolicy={() => void leaveFlow(() => goTo("policy"))}
+        onViewGuide={() => void leaveFlow(() => goTo("about-us"))}
+        onViewAbout={() => void leaveFlow(() => goTo("terms-of-service"))}
+        onViewPolicy={() => void leaveFlow(() => goTo("refund-policy"))}
         userName={userName}
         userEmail={userEmail}
         avatarUrl={avatarUrl}
@@ -1158,28 +1163,6 @@ export default function App() {
               }
             />
           </div>
-        )}
-
-        {activeScreen === "guide" && (
-          <InfoPage
-            title="Hướng dẫn"
-            lede="Các bước đặt vé, giữ chỗ, thanh toán bằng ví và nhận vé QR trên TixHub."
-            onBack={goHome}
-          />
-        )}
-        {activeScreen === "about" && (
-          <InfoPage
-            title="Giới thiệu"
-            lede="TixHub là sàn bán vé cho phim, âm nhạc và sân khấu."
-            onBack={goHome}
-          />
-        )}
-        {activeScreen === "policy" && (
-          <InfoPage
-            title="Chính sách"
-            lede="Điều khoản sử dụng, chính sách hoàn vé và xử lý dữ liệu cá nhân."
-            onBack={goHome}
-          />
         )}
 
         {activeScreen === "detail" && (
@@ -1299,6 +1282,19 @@ export default function App() {
           ))}
         {activeScreen === "organizer" && <OrganizerPanel onBack={goHome} />}
         {activeScreen === "moderation" && <AdminModeration onBack={goHome} />}
+
+        {activeScreen === "about-us" && (
+          <LegalPage title="Về chúng tôi" content={aboutUsMd} onBack={goHome} />
+        )}
+        {activeScreen === "terms-of-service" && (
+          <LegalPage title="Điều khoản sử dụng" content={termsOfServiceMd} onBack={goHome} />
+        )}
+        {activeScreen === "website-terms" && (
+          <LegalPage title="Điều khoản website" content={websiteTermsMd} onBack={goHome} />
+        )}
+        {activeScreen === "refund-policy" && (
+          <LegalPage title="Chính sách hoàn vé" content={refundPolicyMd} onBack={goHome} />
+        )}
       </main>
 
       {/*
@@ -1357,31 +1353,6 @@ export default function App() {
       )}
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </div>
-  );
-}
-
-/**
- * Shell for the three entries behind the nav's overflow menu.
- *
- * The routes and the chrome are real; the copy is not written yet. A guide, an about page and a
- * refund/privacy policy are things the operator has to say in their own words — a plausible-looking
- * draft of a policy is worse than an empty one, because it reads as a commitment nobody made.
- */
-function InfoPage({ title, lede, onBack }: { title: string; lede: string; onBack: () => void }) {
-  return (
-    <section className="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:px-8">
-      <button
-        onClick={onBack}
-        className="label-eyebrow text-ink-soft transition hover:text-beige-kem"
-      >
-        ← Trang chủ
-      </button>
-      <h1 className="mt-6 font-display text-5xl font-black text-beige-kem">{title}</h1>
-      <p className="mt-4 text-base leading-7 text-beige-kem/70">{lede}</p>
-      <p className="mt-10 rounded-2xl border-2 border-dashed border-beige-kem/40 px-5 py-8 text-center text-sm text-ink-soft">
-        Nội dung đang được biên soạn.
-      </p>
-    </section>
   );
 }
 

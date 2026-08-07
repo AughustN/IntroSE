@@ -35,9 +35,9 @@ const COLUMNS: ReadonlyArray<{ title: string; links: ReadonlyArray<[string, Scre
   {
     title: "Hỗ trợ",
     links: [
-      ["Hướng dẫn", "guide"],
-      ["Giới thiệu", "about"],
-      ["Chính sách", "policy"],
+      ["Về chúng tôi", "about-us"],
+      ["Điều khoản sử dụng", "terms-of-service"],
+      ["Chính sách hoàn vé", "refund-policy"],
     ],
   },
 ];
@@ -169,10 +169,10 @@ export default function Footer({ onNavigate, onSubscribe }: FooterProps) {
            */}
           <button
             type="button"
-            onClick={() => onNavigate("policy")}
+            onClick={() => onNavigate("website-terms")}
             className="text-left transition hover:text-beige-kem"
           >
-            Chính sách &amp; điều khoản
+            Điều khoản website
           </button>
         </div>
       </div>

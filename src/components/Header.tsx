@@ -397,9 +397,9 @@ export default function Header({
           {moreOpen && (
             <div className="absolute left-1/2 top-[calc(100%+12px)] w-52 -translate-x-1/2">
               <div role="menu" className="nav-surface nav-menu-card ticket-corners py-1">
-                <MenuRow label="Hướng dẫn" onClick={runCentre(onViewGuide)} />
-                <MenuRow label="Giới thiệu" onClick={runCentre(onViewAbout)} />
-                <MenuRow label="Chính sách" onClick={runCentre(onViewPolicy)} />
+                <MenuRow label="Về chúng tôi" onClick={runCentre(onViewGuide)} />
+                <MenuRow label="Điều khoản" onClick={runCentre(onViewAbout)} />
+                <MenuRow label="Hoàn vé" onClick={runCentre(onViewPolicy)} />
                 <div className="mx-4 my-1 h-px bg-beige-kem/25" />
                 <MenuRow
                   label={theme === "dark" ? "Giao diện sáng" : "Giao diện tối"}

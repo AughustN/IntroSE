@@ -16,10 +16,6 @@ export type Screen =
   | "home"
   /** The catalog on its own, without the landing hero in front of it. */
   | "browse"
-  /** Static copy: the three entries behind the nav's overflow menu. */
-  | "guide"
-  | "about"
-  | "policy"
   | "detail"
   | "seats"
   | "checkout"
@@ -28,7 +24,11 @@ export type Screen =
   | "wallet"
   | "admin"
   | "organizer"
-  | "moderation";
+  | "moderation"
+  | "about-us"
+  | "terms-of-service"
+  | "website-terms"
+  | "refund-policy";
 
 export interface Route {
   screen: Screen;
@@ -46,15 +46,16 @@ const STATIC_PATHS: ReadonlyArray<readonly [Screen, string]> = [
    * segment, so the bare path can never be mistaken for an event whose slug went missing.
    */
   ["browse", "/events"],
-  ["guide", "/huong-dan"],
-  ["about", "/gioi-thieu"],
-  ["policy", "/chinh-sach"],
   ["checkout", "/checkout"],
   ["history", "/bookings"],
   ["wallet", "/wallet"],
   ["admin", "/admin"],
   ["organizer", "/organizer"],
   ["moderation", "/moderation"],
+  ["about-us", "/about-us"],
+  ["terms-of-service", "/terms-of-service"],
+  ["website-terms", "/website-terms"],
+  ["refund-policy", "/refund-policy"],
 ];
 
 export const ACCOUNT_PATH = "/account";
