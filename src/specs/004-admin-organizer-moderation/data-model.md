@@ -24,7 +24,7 @@ Existing table from `0002_catalog.sql`.
 - Allowed admin transitions: `pending_review → approved`, `pending_review → removed`, `approved → flagged`, `approved|flagged → removed`.
 - Material organizer edits on approved events return them to `pending_review`.
 
-## New tables in `0004_admin_moderation.sql`
+## New tables in `0013_admin_moderation.sql`
 
 ### `content_reports`
 
@@ -128,4 +128,4 @@ Existing `audit_logs` from `0002_catalog.sql` remains the canonical audit table.
 
 ## Migration dependency note
 
-`0004_admin_moderation.sql` runs after auth/catalog and after any order/ticket/wallet ledger migration. If order/ticket/refund tables are not yet in the repository, migration creates only moderation metadata and the service integrates the canonical wallet/ticket tables when feature 004 checkout lands; no fake cash-refund path is added.
+`0013_admin_moderation.sql` runs after auth/catalog and after any order/ticket/wallet ledger migration. If order/ticket/refund tables are not yet in the repository, migration creates only moderation metadata and the service integrates the canonical wallet/ticket tables when feature 004 checkout lands; no fake cash-refund path is added.

@@ -13,7 +13,7 @@
 npm run db:migrate
 ```
 
-Confirm migration `0004_admin_moderation.sql` applies after existing migrations and that `audit_logs` trigger rejects both `UPDATE` and `DELETE`.
+Confirm migration `0013_admin_moderation.sql` applies after existing migrations and that `audit_logs` trigger rejects both `UPDATE` and `DELETE`.
 
 ## Run server and tests
 

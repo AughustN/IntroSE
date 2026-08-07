@@ -7,10 +7,10 @@
 ## Phase 1: DB Migration
 
 - [X] T001 Inspect `server/src/db/migrations/0001_auth.sql`, `server/src/db/migrations/0002_catalog.sql`, `server/src/db/migrations/0003_holds.sql`, and existing order/ticket/wallet migrations; identify canonical tables.
-- [X] T002 Create `server/src/db/migrations/0004_admin_moderation.sql` with `content_reports` and `moderation_actions`, constraints, indexes, and idempotency keys.
-- [X] T003 [P] Extend `audit_logs` in `server/src/db/migrations/0004_admin_moderation.sql` with outcome support and target indexes.
-- [X] T004 Add `audit_logs_immutable` trigger in `server/src/db/migrations/0004_admin_moderation.sql` rejecting UPDATE and DELETE.
-- [X] T005 [P] Add migration compatibility comments/guards in `server/src/db/migrations/0004_admin_moderation.sql`.
+- [X] T002 Create `server/src/db/migrations/0013_admin_moderation.sql` with `content_reports` and `moderation_actions`, constraints, indexes, and idempotency keys.
+- [X] T003 [P] Extend `audit_logs` in `server/src/db/migrations/0013_admin_moderation.sql` with outcome support and target indexes.
+- [X] T004 Add `audit_logs_immutable` trigger in `server/src/db/migrations/0013_admin_moderation.sql` rejecting UPDATE and DELETE.
+- [X] T005 [P] Add migration compatibility comments/guards in `server/src/db/migrations/0013_admin_moderation.sql`.
 
 ## Phase 2: Middleware & Helper
 

@@ -14,7 +14,7 @@ Extend existing TixHub auth/catalog schema and server modules with one transacti
 
 **Primary Dependencies**: Express 4, PostgreSQL via `pg`, Zod 3 for boundary validation, React 19, Vitest 2, Supertest 7
 
-**Storage**: PostgreSQL; existing migrations `0001_auth.sql` and `0002_catalog.sql`, new moderation migration `0004_admin_moderation.sql`; VND amounts are BIGINT integers
+**Storage**: PostgreSQL; existing migrations `0001_auth.sql` and `0002_catalog.sql`, new moderation migration `0013_admin_moderation.sql`; VND amounts are BIGINT integers
 
 **Testing**: Vitest integration tests with Supertest and PostgreSQL test database; TypeScript compiler in strict mode
 
@@ -59,7 +59,7 @@ specs/004-admin-organizer-moderation/
 
 ```text
 server/src/
-├── db/migrations/0004_admin_moderation.sql
+├── db/migrations/0013_admin_moderation.sql
 ├── middleware/authz.ts
 ├── modules/admin/
 │   ├── admin.routes.ts
