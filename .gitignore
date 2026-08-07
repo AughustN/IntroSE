@@ -26,3 +26,6 @@ coverage/
 
 # Uploaded avatars (runtime, ADR 0004)
 uploads/
+
+# Original font sources. The .woff2 the app loads lives in src/fonts/.
+/VNM Sans (3 fonts)/
