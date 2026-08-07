@@ -1,5 +1,5 @@
-import type { Server as HttpServer } from 'node:http';
-import { Server as IOServer } from 'socket.io';
+import type { Server as HttpServer } from "node:http";
+import { Server as IOServer } from "socket.io";
 import {
   SEAT_JOIN_EVENT,
   SEAT_LEAVE_EVENT,
@@ -7,8 +7,9 @@ import {
   type SeatRoomJoin,
   type SeatUpdate,
   showtimeRoom,
-} from '@shared/holds/types.js';
-import { familyHasLiveToken, verifyAccessToken } from '../modules/auth/sessions.js';
+} from "@shared/holds/types.js";
+import { familyHasLiveToken, verifyAccessToken } from "../modules/auth/sessions.js";
+import { config } from "../config.js";
 
 /**
  * The live seat channel (R-5). One room per showtime; the server broadcasts a `seat:update` after
@@ -26,7 +27,7 @@ let io: IOServer | null = null;
 
 export function attachIo(server: HttpServer): IOServer {
   io = new IOServer(server, {
-    // SPA and API are same-origin behind Nginx (ADR 0003), so no CORS allowance is needed.
+    cors: { origin: config.corsOrigins, credentials: true },
     serveClient: false,
   });
 
@@ -34,7 +35,7 @@ export function attachIo(server: HttpServer): IOServer {
     // Auth is optional: a valid token only tags the socket so a returning owner can be told which
     // holds are their own. An invalid one is not an error — it connects read-only.
     const token = socket.handshake.auth?.token;
-    if (typeof token === 'string' && token.length > 0) {
+    if (typeof token === "string" && token.length > 0) {
       try {
         const { userId, familyId } = verifyAccessToken(token);
         if (await familyHasLiveToken(familyId)) {
@@ -47,7 +48,7 @@ export function attachIo(server: HttpServer): IOServer {
     next();
   });
 
-  io.on('connection', (socket) => {
+  io.on("connection", (socket) => {
     socket.on(SEAT_JOIN_EVENT, (payload: SeatRoomJoin) => {
       const id = Number(payload?.showtimeId);
       if (Number.isInteger(id) && id > 0) void socket.join(showtimeRoom(id));

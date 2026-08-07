@@ -1,10 +1,11 @@
-// Public catalog data layer (no auth) + authed organizer/admin calls. Same-origin; /api proxied in dev.
+// Public catalog data layer plus authed organizer/admin calls.
 import type { EventDetail, EventListResponse, SeatMap, Showtime } from "@/shared/catalog/types";
 import { withAuthRetry } from "./authClient";
+import { apiUrl } from "./api";
 import { readApiError } from "./apiError";
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`/api${path}`, { headers: { Accept: "application/json" } });
+  const res = await fetch(apiUrl(`/api${path}`), { headers: { Accept: "application/json" } });
   if (!res.ok) {
     const e = await readApiError(res);
     throw new Error(e.message ?? `catalog ${res.status}`);
@@ -19,7 +20,7 @@ async function authed<T>(path: string, opts: { method?: string; body?: unknown }
     const headers: Record<string, string> = { Accept: "application/json" };
     if (opts.body !== undefined) headers["Content-Type"] = "application/json";
     if (token) headers.Authorization = `Bearer ${token}`;
-    return fetch(`/api${path}`, {
+    return fetch(apiUrl(`/api${path}`), {
       method: opts.method ?? "GET",
       headers,
       credentials: "include",

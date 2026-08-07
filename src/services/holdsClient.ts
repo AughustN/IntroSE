@@ -2,6 +2,7 @@
 // owner and there are no anonymous holds (FR-001) — so all of them go out with the access token.
 import type { HoldRequest, Reservation } from "@/shared/holds/types";
 import { withAuthRetry } from "./authClient";
+import { apiUrl } from "./api";
 import { readApiError } from "./apiError";
 
 /** A refusal the UI has to explain, carrying the server's stable machine code (SC-008). */
@@ -34,7 +35,7 @@ async function call<T>(path: string, opts: { method?: string; body?: unknown } =
     const headers: Record<string, string> = { Accept: "application/json" };
     if (opts.body !== undefined) headers["Content-Type"] = "application/json";
     if (token) headers.Authorization = `Bearer ${token}`;
-    return fetch(`/api${path}`, {
+    return fetch(apiUrl(`/api${path}`), {
       method: opts.method ?? "GET",
       headers,
       credentials: "include",
