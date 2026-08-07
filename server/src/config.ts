@@ -122,3 +122,22 @@ export const WALLET_BALANCE_CAP = ms("WALLET_BALANCE_CAP", 20_000_000);
 export const TOPUP_RECONCILE_AFTER_MS = ms("TOPUP_RECONCILE_AFTER_MS", 15 * 60 * 1000);
 /** How often that sweep runs. */
 export const TOPUP_SWEEP_INTERVAL_MS = ms("TOPUP_SWEEP_INTERVAL_MS", 5 * 60 * 1000);
+
+// ---- Seat map designer (feature 005). Settings with defaults, not hard-coded constants (UC-36).
+/** Layout coordinate space: 0–LAYOUT_SPACE integer units on each axis (FR-008). */
+export const LAYOUT_SPACE = ms("LAYOUT_SPACE", 10_000);
+/** Nominal seat size. Two seats overlap when their centres are closer than this (FR-008, FR-030a). */
+export const SEAT_DIAMETER = ms("SEAT_DIAMETER", 100);
+/** Ceilings — chosen to keep the editor and the buyer map inside PLAT-01 and PERF-02 (FR-007, FR-019). */
+export const LAYOUT_MAX_SEATS = ms("LAYOUT_MAX_SEATS", 2_000);
+export const LAYOUT_MAX_ELEMENTS = ms("LAYOUT_MAX_ELEMENTS", 200);
+export const VENUE_MAX_LAYOUTS = ms("VENUE_MAX_LAYOUTS", 20);
+/** Floor-plan upload bounds. Dimensions are checked before re-encoding, so a decompression bomb is
+ *  refused rather than allocated (FR-023). */
+export const FLOORPLAN_MAX_BYTES = ms("FLOORPLAN_MAX_BYTES", 5 * 1024 * 1024);
+export const FLOORPLAN_MAX_PX = ms("FLOORPLAN_MAX_PX", 4_000);
+/** Upload abuse bound: a rate limit for sustained abuse, a concurrency cap for the instantaneous
+ *  memory spike a 5 MB decode causes in a process bounded at ~450 MB (FR-023a, PERF-07). */
+export const UPLOAD_RATE_LIMIT = ms("UPLOAD_RATE_LIMIT", 10);
+export const UPLOAD_RATE_WINDOW_MS = ms("UPLOAD_RATE_WINDOW_MS", 60 * 1000);
+export const UPLOAD_CONCURRENCY = ms("UPLOAD_CONCURRENCY", 2);

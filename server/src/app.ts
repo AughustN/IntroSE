@@ -8,6 +8,7 @@ import { catalogPublicRouter } from "./modules/catalog/catalog.public.routes.js"
 import { organizerRouter } from "./modules/catalog/organizer.routes.js";
 import { adminRouter } from "./modules/admin/admin.routes.js";
 import { reservationsRouter } from "./modules/holds/reservations.routes.js";
+import { seatmapRouter } from "./modules/seatmap/seatmap.routes.js";
 import { walletRouter } from "./modules/payments/wallet.routes.js";
 
 /** Build the Express app (no listen) so tests can drive it with supertest. */
@@ -41,6 +42,7 @@ export function createApp(): Express {
   app.use("/api", catalogPublicRouter);
   app.use("/api", reservationsRouter);
   app.use("/api", walletRouter);
+  app.use("/api/organizer", seatmapRouter);
   app.use("/api/organizer", organizerRouter);
   // One router owns /api/admin.  supersedes the old catalog moderation router: it
   // serves every route that one did and adds organizers, reports and audit logs. Mounting both

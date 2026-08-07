@@ -230,7 +230,16 @@ organizerRouter.post(
     if (!info) throw err.notFound('not_found', 'Không tìm thấy suất chiếu.');
     assertOwn(req, info.ownerUserId);
     if (info.eventType !== 'seated') throw err.badRequest('validation_failed', 'Chỉ sự kiện có ghế mới tạo được sơ đồ ghế.');
-    if (await showtimeHasSeatMap(showtimeId)) throw err.conflict('seat_map_exists', 'Sơ đồ ghế đã được tạo cho suất này.');
+    // Feature 005 replaced the blanket `409 seat_map_exists` — a map that already exists is corrected
+    // through PUT /organizer/showtimes/:id/seat-map or a re-apply, each evaluated PER SEAT against
+    // live inventory (FR-027..FR-029). Generation itself still runs only once, because a second run
+    // would duplicate every bookable seat.
+    if (await showtimeHasSeatMap(showtimeId)) {
+      throw err.conflict(
+        'map_edit_refused',
+        'Suất này đã có sơ đồ ghế. Hãy chỉnh sửa sơ đồ hiện có hoặc áp dụng lại bố cục nguồn.',
+      );
+    }
 
     const { sectionTiers } = req.body as z.infer<typeof seatMapSchema>;
     const mappedSections = new Set(sectionTiers.map((m) => m.sectionId));

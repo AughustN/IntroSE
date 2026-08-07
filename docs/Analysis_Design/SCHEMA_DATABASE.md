@@ -499,7 +499,23 @@ CREATE TABLE venues (
 
 CREATE INDEX idx_venues_created_by ON venues(created_by);
 
--- ---------- SECTIONS ----------
+-- ---------- SECTIONS / SEATS ----------
+-- AMENDED 2026-08-05 (feature 005-seatmap-designer, migration 0007_seatmap.sql). The DDL below is the
+-- 0002 baseline; 0007 changes it as follows and is authoritative where the two disagree:
+--   * New `venue_layouts` (a venue owns several named layouts) and `layout_elements` (stage, aisle,
+--     door, bar, label — a separate table so decoration can never enter ticket inventory).
+--   * `sections` and `seats` are RE-PARENTED IN PLACE onto `layout_id` and lose `venue_id`. The rows
+--     are never recreated: `seats.id` is referenced by `showtime_seats` and therefore transitively by
+--     sold tickets.
+--   * `seats` gains `pos_x`, `pos_y` (integers, 0–10000) and `rotation` (0–359, cosmetic only).
+--   * `UNIQUE (venue_id, row_label, seat_number)` becomes `UNIQUE (section_id, row_label,
+--     seat_number)` — per-section, so two sections in one venue may both hold "row A seat 1".
+--   * `sections` uniqueness moves from `(venue_id, name)` to `(layout_id, name)`.
+--   * `showtimes` gains `layout_id` + `layout_snapshot` (JSONB: elements and background settings).
+--   * `showtime_seats` gains `pos_x`, `pos_y`, `rotation`, `row_label`, `seat_number`, `section_name` —
+--     the showtime's own SNAPSHOT of the layout. Identity is snapshotted as well as geometry, because
+--     editing a layout is never gated on inventory: without the copy, renaming a seat in the layout
+--     would silently relabel a ticket somebody already bought.
 CREATE TABLE sections (
   id BIGSERIAL PRIMARY KEY,
   venue_id BIGINT NOT NULL REFERENCES venues(id),
