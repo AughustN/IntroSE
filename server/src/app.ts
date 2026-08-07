@@ -40,8 +40,10 @@ export function createApp(): Express {
 
   app.use("/api", authRouter);
   app.use("/api", catalogPublicRouter);
-  app.use("/api", reservationsRouter);
   app.use("/api", walletRouter);
+  // `reservationsRouter` has a router-wide auth guard. Mount wallet first so the
+  // public, signature-verified VNPay IPN callback can reach its handler.
+  app.use("/api", reservationsRouter);
   app.use("/api/organizer", seatmapRouter);
   app.use("/api/organizer", organizerRouter);
   // One router owns /api/admin.  supersedes the old catalog moderation router: it
