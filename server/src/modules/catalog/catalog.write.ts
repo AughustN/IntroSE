@@ -222,33 +222,3 @@ export async function generateSeatMap(showtimeId: number, sectionTiers: { sectio
     return total;
   });
 }
-
-// ---- admin moderation (US6) ----
-
-export async function eventExists(eventId: number, db: Db = pool): Promise<boolean> {
-  return (await db.query(`SELECT 1 FROM events WHERE id = $1`, [eventId])).rows.length > 0;
-}
-
-export async function setModeration(eventId: number, status: string, reviewNote: string | null, db: Db = pool): Promise<void> {
-  await db.query(`UPDATE events SET moderation_status = $2, review_note = COALESCE($3, review_note), updated_at = now() WHERE id = $1`, [eventId, status, reviewNote]);
-}
-
-export async function pendingReviewQueue(db: Db = pool) {
-  return (
-    await db.query(
-      `SELECT e.id, e.slug, e.title, e.status, o.display_name AS "organizer"
-         FROM events e JOIN organizers o ON o.id = e.organizer_id
-        WHERE e.moderation_status = 'pending_review' ORDER BY e.created_at`,
-    )
-  ).rows;
-}
-
-/** Immutable admin audit record (SEC-09, reuse feature 001's audit_logs). */
-export async function writeAudit(actorUserId: number, action: string, eventId: number, detail: unknown, db: Db = pool): Promise<void> {
-  await db.query(`INSERT INTO audit_logs (actor_user_id, action, target_type, target_id, detail) VALUES ($1, $2, 'event', $3, $4)`, [
-    actorUserId,
-    action,
-    eventId,
-    JSON.stringify(detail ?? {}),
-  ]);
-}
