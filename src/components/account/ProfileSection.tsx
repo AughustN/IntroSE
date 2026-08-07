@@ -146,7 +146,7 @@ export default function ProfileSection({ me, onSaved, onError, onDirtyChange }: 
   return (
     <div className="space-y-4">
       {/* Summary: who this is, at a glance. The old screen never showed the email at all. */}
-      <section className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-5 shadow-hard shadow-black/20 sm:p-6">
+      <section className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-5 shadow-black/20 sm:p-6">
         <div className="flex flex-wrap items-center gap-5">
           <AvatarWithBadge
             url={shownAvatar}
@@ -155,7 +155,7 @@ export default function ProfileSection({ me, onSaved, onError, onDirtyChange }: 
             onPick={pickAvatar}
           />
           <div className="min-w-0 flex-1">
-            <p className="truncate font-display text-xl font-black text-beige-kem">
+            <p className="truncate font-display text-2xl font-black text-beige-kem">
               {me.nickname || me.email}
             </p>
             <p className="mt-1 text-sm text-beige-kem/70">{roleLabel(me)}</p>
@@ -169,7 +169,7 @@ export default function ProfileSection({ me, onSaved, onError, onDirtyChange }: 
           <div className="mt-4 border-t border-beige-kem/25 pt-3">
             {avatarMsg ? (
               <p role="alert" className="flex items-start gap-1.5 text-xs leading-5 text-beige-kem">
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-burgundy" aria-hidden />
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-burgundy-ink" aria-hidden />
                 {avatarMsg}
               </p>
             ) : (

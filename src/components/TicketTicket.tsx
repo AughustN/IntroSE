@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Booking } from "../types";
 import { formatEventDate } from "../services/formatDate";
+import { formatVnd } from "../services/currency";
 
 interface TicketTicketProps {
   booking: Booking;
@@ -11,12 +12,6 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
   const [copied, setCopied] = useState(false);
   const [resent, setResent] = useState(false);
 
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat("vi-VN", {
-      style: "currency",
-      currency: "VND",
-    }).format(price);
-  };
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(booking.id);
@@ -41,14 +36,14 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
         <div className="inline-flex items-center justify-center rounded-full border-2 border-beige-kem bg-la-co px-4 py-2 font-mono text-xs font-bold uppercase text-on-tint">
           Đã thanh toán
         </div>
-        <h2 className="font-display text-3xl font-black text-beige-kem tracking-tight">Đặt vé thành công</h2>
+        <h2 className="font-display text-4xl font-black text-beige-kem">Đặt vé thành công</h2>
         <p className="text-sm text-beige-kem/80 max-w-lg mx-auto leading-relaxed">
           Giao dịch mã số <span className="font-mono text-ink-soft font-bold">{booking.id}</span> đã được hạch toán qua {booking.paymentMethod}. Vé QR đã được gửi mock về <span className="text-ink-soft font-semibold">{booking.customerEmail}</span> và SMS {booking.customerPhone}.
         </p>
       </div>
 
       {/* Retro Perforated Ticket Coupon */}
-      <div className="bg-beige-kem border-4 border-xanh-pho rounded-2xl shadow-hard relative overflow-hidden text-xanh-pho max-w-2xl mx-auto">
+      <div className="bg-beige-kem border-4 border-xanh-pho rounded-2xl relative overflow-hidden text-xanh-pho max-w-2xl mx-auto">
         
         {/* Decorative Ticket Side Notch Circles */}
         <div className="absolute -left-4 top-1/2 -translate-y-1/2 w-8 h-8 bg-xanh-pho rounded-full z-10 border-r-4 border-xanh-pho" />
@@ -59,8 +54,8 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
           <div className="space-y-1">
             <span className="text-[9px] font-mono tracking-widest text-ink-soft uppercase font-bold">CINEMA VINTAGE STUB</span>
             <div className="flex items-baseline gap-1.5">
-              <h3 className="font-display font-black text-xl tracking-tighter">TIXHUB</h3>
-              <span className="text-[9px] font-mono bg-[#E0E2CA] text-burgundy px-1 py-0.2 rounded font-black">STUB</span>
+              <h3 className="font-display font-black text-2xl">TIXHUB</h3>
+              <span className="text-[9px] font-mono bg-[#E0E2CA] text-burgundy-ink px-1 py-0.2 rounded font-black">STUB</span>
             </div>
           </div>
 
@@ -79,11 +74,11 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
               <span className="text-[10px] font-mono font-semibold bg-bubblegum text-on-tint border-2 border-beige-kem px-2 py-0.5 rounded">
                 Rated: {booking.movie.ageRating}
               </span>
-              <h4 className="font-display font-black text-2xl tracking-tight text-burgundy leading-tight pt-1">
+              <h4 className="font-display font-black text-3xl text-burgundy-ink leading-tight pt-1">
                 {booking.movie.title}
               </h4>
               {booking.movie.originalTitle && (
-                <p className="text-xs font-mono text-burgundy/75">{booking.movie.originalTitle}</p>
+                <p className="text-xs font-mono text-burgundy-ink/75">{booking.movie.originalTitle}</p>
               )}
             </div>
 
@@ -115,7 +110,7 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
                 <span className="text-gray-500">
                   Số Ghế Đã Đặt
                 </span>
-                <span className="font-bold text-burgundy text-sm">
+                <span className="font-bold text-burgundy-ink text-sm">
                   {booking.selectedSeats.map((s) => s.id).join(", ")}
                 </span>
               </div>
@@ -124,19 +119,19 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
             <div className="space-y-2 pt-2.5 border-t border-gray-300 font-mono text-xs">
               <div className="flex justify-between">
                 <span className="text-gray-500">Tạm tính:</span>
-                <span className="font-bold text-xanh-pho">{formatPrice(booking.totalPrice)}</span>
+                <span className="font-bold text-xanh-pho">{formatVnd(booking.totalPrice)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Phí dịch vụ:</span>
-                <span className="font-bold text-xanh-pho">{formatPrice(booking.serviceFee)}</span>
+                <span className="font-bold text-xanh-pho">{formatVnd(booking.serviceFee)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Giảm giá:</span>
-                <span className="font-bold text-ink-soft">-{formatPrice(booking.discount)}</span>
+                <span className="font-bold text-ink-soft">-{formatVnd(booking.discount)}</span>
               </div>
               <div className="flex justify-between items-baseline border-t border-gray-300 pt-2">
                 <span className="text-gray-500">Tổng thanh toán:</span>
-                <span className="font-black text-burgundy text-lg">{formatPrice(booking.finalPrice)}</span>
+                <span className="font-black text-burgundy-ink text-lg">{formatVnd(booking.finalPrice)}</span>
               </div>
             </div>
           </div>
@@ -167,7 +162,7 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
             </div>
 
             <div className="text-center font-mono">
-              <p className="text-[9px] font-bold text-burgundy uppercase tracking-widest">VÉ VÀO CỬA QR</p>
+              <p className="text-[9px] font-bold text-burgundy-ink uppercase tracking-widest">VÉ VÀO CỬA QR</p>
               <p className="text-[8px] text-gray-500 mt-0.5">QR một lần / {booking.qrStatus === "unused" ? "Chưa check-in" : "Đã check-in"}</p>
             </div>
           </div>
@@ -214,7 +209,7 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
 
         <button
           onClick={handlePrint}
-          className="flex items-center px-6 py-2.5 bg-burgundy text-white rounded-lg hover:brightness-95 transition shadow-hard"
+          className="flex items-center px-6 py-2.5 bg-burgundy text-white rounded-lg hover:brightness-95 transition"
         >
           IN VÉ NÀY
         </button>

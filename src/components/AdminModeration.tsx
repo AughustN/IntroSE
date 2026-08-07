@@ -40,7 +40,7 @@ export default function AdminModeration({ onBack }: { onBack: () => void }) {
   return (
     <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8 text-beige-kem">
       <div className="flex items-center justify-between">
-        <h1 className="font-display text-3xl font-black">Kiểm duyệt sự kiện</h1>
+        <h1 className="font-display text-4xl font-black">Kiểm duyệt sự kiện</h1>
         <button onClick={onBack} className={ghost}>← Về trang chủ</button>
       </div>
       {notice && <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-xs text-on-tint">{notice}</div>}
@@ -54,7 +54,7 @@ export default function AdminModeration({ onBack }: { onBack: () => void }) {
           <div key={e.id} className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <div className="font-display text-lg font-bold">{e.title}</div>
+                <div className="font-display text-xl font-bold">{e.title}</div>
                 <div className="font-mono text-[11px] text-beige-kem/50">Tổ chức: {e.organizer} · {e.slug}</div>
               </div>
               <div className="flex gap-2">

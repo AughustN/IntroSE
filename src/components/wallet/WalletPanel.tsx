@@ -11,7 +11,8 @@ import {
   type WalletLimits,
   type WalletStatement,
 } from "../../services/walletClient";
-import TopUpSheet, { formatVnd } from "./TopUpSheet";
+import TopUpSheet from "./TopUpSheet";
+import { formatVnd } from "../../services/currency";
 
 const KIND_LABEL: Record<WalletEntry["kind"], string> = {
   topup: "Nạp tiền",
@@ -84,7 +85,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
         >
           Quay lại
         </button>
-        <h2 className="font-display text-2xl font-black text-beige-kem">Ví TixHub</h2>
+        <h2 className="font-display text-3xl font-black text-beige-kem">Ví TixHub</h2>
       </div>
 
       {loading && <p className="font-mono text-sm text-ink-soft">Đang tải ví...</p>}
@@ -103,9 +104,9 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
 
       {statement && limits && !loading && (
         <>
-          <section className="space-y-4 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 shadow-hard sm:p-8">
+          <section className="space-y-4 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 sm:p-8">
             <p className="font-mono text-xs uppercase text-ink-soft">Số dư khả dụng</p>
-            <p className="font-display text-4xl font-black text-burgundy">
+            <p className="font-display text-5xl font-black text-burgundy-ink">
               {formatVnd(statement.balanceAmount)}
             </p>
             <p className="font-mono text-[11px] leading-5 text-beige-kem/70">
@@ -116,7 +117,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
             {!showTopUp && (
               <button
                 onClick={() => setShowTopUp(true)}
-                className="rounded-xl bg-burgundy px-6 py-3 text-sm font-black text-white shadow-hard transition hover:brightness-95"
+                className="rounded-xl bg-burgundy px-6 py-3 text-sm font-black text-white transition hover:brightness-95"
               >
                 Nạp tiền
               </button>
@@ -133,7 +134,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
 
           {statement.pending.length > 0 && (
             <section className="space-y-3 rounded-2xl border-2 border-beige-kem bg-cam-dat p-5 text-on-tint">
-              <h3 className="font-display text-lg font-black">Đang chờ xác nhận</h3>
+              <h3 className="font-display text-xl font-black">Đang chờ xác nhận</h3>
               <p className="font-mono text-[11px] leading-5">
                 VNPay chưa báo về. Tiền chưa vào ví và cũng chưa mất — hệ thống tự đối soát lại sau
                 ít phút.
@@ -150,11 +151,11 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
           )}
 
           <section className="space-y-4">
-            <h3 className="font-display text-xl font-black text-beige-kem">Lịch sử giao dịch</h3>
+            <h3 className="font-display text-2xl font-black text-beige-kem">Lịch sử giao dịch</h3>
 
             {statement.entries.length === 0 ? (
               <div className="rounded-2xl border-2 border-dashed border-beige-kem/50 p-8 text-center">
-                <p className="font-display text-lg font-black text-beige-kem">
+                <p className="font-display text-xl font-black text-beige-kem">
                   Ví chưa có giao dịch
                 </p>
                 <p className="mx-auto mt-2 max-w-md font-mono text-xs leading-5 text-ink-soft">

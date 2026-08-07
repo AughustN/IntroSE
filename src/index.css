@@ -1,5 +1,50 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Fraunces:opsz,wght@9..144,400..700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+/* Only the mono face is remote now — VNM Sans covers text and headline, both self-hosted below. */
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
+
+/*
+ * VNM Sans — the whole type system, in two cuts from one superfamily.
+ *
+ * `Std` is the text face: wide, geometric, built to stay readable at 13–16px. `Display` is the
+ * headline face: condensed and much heavier, so it holds together at 2rem and above. Both carry
+ * full Vietnamese in upper and lower case, and both include `₫` (U+20AB), which the previous
+ * headline face did not.
+ */
+@font-face {
+  font-family: "VNM Sans Std";
+  src: url("./fonts/VNMSansStd-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/*
+ * Std ships as a single Regular, and this one is deliberately *not* widened to a range.
+ *
+ * Body copy leans on `font-semibold` and `font-bold` in dozens of places to separate a label from
+ * its value. Declaring 400 alone lets the browser synthesise those, which on a rounded geometric
+ * sans at label size is barely noticeable — whereas claiming the range would render every weight
+ * identically and flatten the hierarchy outright. The headline faces below take the opposite call,
+ * because a smeared synthetic bold at 3rem is impossible to miss. Drop in a real Std Bold and this
+ * comment stops being true.
+ */
+
+@font-face {
+  font-family: "VNM Sans Display";
+  src: url("./fonts/VNMSansDisplay-Regular.woff2") format("woff2");
+  font-weight: 100 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Extended to 900 so `font-black` headings resolve to the real Bold instead of a synthetic one. */
+@font-face {
+  font-family: "VNM Sans Display";
+  src: url("./fonts/VNMSansDisplay-Bold.woff2") format("woff2");
+  font-weight: 600 900;
+  font-style: normal;
+  font-display: swap;
+}
 
 /*
  * Token names are the pre-redesign ones (`xanh-pho`, `beige-kem`, …) so this palette swap stays a
@@ -11,33 +56,40 @@
  * properties so switching `data-theme` repaints at runtime.
  */
 @theme {
-  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Fraunces", ui-serif, Georgia, serif;
+  --font-sans: "VNM Sans Std", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "VNM Sans Display", "VNM Sans Std", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 
-  --color-xanh-pho: #FDF6EA;
-  --color-surface-2: #FFFCF5;
-  --color-beige-kem: #8A0C24;
-  --color-ink-soft: #B4566A;
-  --color-burgundy: #D93025;
-  --color-cam-dat: #F7A97C;
-  --color-la-co: #BFC0F2;
-  --color-bubblegum: #FBD0DC;
+  --color-xanh-pho: #fdf6ea;
+  --color-surface-2: #fffcf5;
+  --color-beige-kem: #8a0c24;
+  --color-ink-soft: #b4566a;
+  --color-burgundy: #d93025;
+  /*
+   * The same red, tuned for *type*.
+   *
+   * `--color-burgundy` is the fill: white sits on top of it, so it has to stay dark. As type on the
+   * page that same value measured 4.44:1 — just under the bar — and in dark mode it was worse. One
+   * token cannot satisfy both directions, because making it legible as text makes it too pale to
+   * carry white. So fills read `--color-burgundy` and text reads this.
+   */
+  --color-burgundy-ink: #d12a20;
+  --color-cam-dat: #f7a97c;
+  --color-la-co: #bfc0f2;
+  --color-bubblegum: #fbd0dc;
 
   /* Large fills. Identical to the tints in light mode, deep shades in dark — see below. */
-  --color-tomato-band: #D93025;
-  --color-bubblegum-band: #FBD0DC;
-  --color-periwinkle-band: #BFC0F2;
-  --color-peach-band: #F7A97C;
-
-  --color-hard-shadow: #8A0C24;
+  --color-tomato-band: #d93025;
+  --color-bubblegum-band: #fbd0dc;
+  --color-periwinkle-band: #bfc0f2;
+  --color-peach-band: #f7a97c;
 
   /*
    * Text sitting on a tint fill. Constant across modes: the tints stay light in dark mode while
    * `beige-kem` flips to cream, so `text-beige-kem` on a bubblegum chip is unreadable at night.
    * Anything filled bubblegum / periwinkle / peach uses this; tomato fills use white.
    */
-  --color-on-tint: #8A0C24;
+  --color-on-tint: #8a0c24;
 }
 
 html {
@@ -47,56 +99,117 @@ html {
 :root,
 :root[data-theme="light"] {
   color-scheme: light;
-  --color-xanh-pho: #FDF6EA;
-  --color-surface-2: #FFFCF5;
-  --color-beige-kem: #8A0C24;
-  --color-ink-soft: #B4566A;
-  --color-burgundy: #D93025;
-  --color-cam-dat: #F7A97C;
-  --color-la-co: #BFC0F2;
-  --color-bubblegum: #FBD0DC;
-  --color-tomato-band: #D93025;
-  --color-bubblegum-band: #FBD0DC;
-  --color-periwinkle-band: #BFC0F2;
-  --color-peach-band: #F7A97C;
-  --color-hard-shadow: #8A0C24;
-  --color-on-tint: #8A0C24;
+  --color-xanh-pho: #fdf6ea;
+  --color-surface-2: #fffcf5;
+  --color-beige-kem: #8a0c24;
+  --color-ink-soft: #b4566a;
+  --color-burgundy: #d93025;
+  --color-burgundy-ink: #d12a20;
+  --color-cam-dat: #f7a97c;
+  --color-la-co: #bfc0f2;
+  --color-bubblegum: #fbd0dc;
+  --color-tomato-band: #d93025;
+  --color-bubblegum-band: #fbd0dc;
+  --color-periwinkle-band: #bfc0f2;
+  --color-peach-band: #f7a97c;
+  --color-on-tint: #8a0c24;
+  /*
+   * Stable aliases for the two foreground roles. `beige-kem` and `ink-soft` get overridden locally
+   * by `.nav-over-hero`; these never are, so anything that has to keep the page's own ink inside
+   * that override — the ticket, the panel — can reach for them.
+   */
+  --color-ink: #8a0c24;
+  --color-ink-muted: #b4566a;
+  /*
+   * The nav floats with no border and no shadow, so its fill is the only thing separating it from
+   * the page. `surface-2` cannot do that job — at 1.03:1 against `xanh-pho` the box disappears —
+   * so the nav gets its own surface: a deep beige carrying cream type, exactly the arrangement
+   * dark mode already uses. The nav therefore reads the same in both themes and over the hero.
+   *
+   * `#957c65` was the beige asked for, and it lands in the dead zone of that hue: too dark for the
+   * maroon ink (2.48:1), too light for cream (3.65:1), and with no room left for a muted tier at
+   * all. Darkening the same hue to `#705a46` clears every one — surface 6.03, ink 6.03, muted 4.26.
+   */
+  --color-nav-surface: #705a46;
+  --color-nav-ink: #fdf6ea;
+  --color-nav-ink-muted: #e6cdbb;
 }
 
 /*
- * Dark keeps every role and every accent hue — only the large fills go deep. The bright tints
- * (bubblegum / periwinkle / peach) stay at their light values because they carry badges, strokes
- * and stickers in both modes; as full-bleed fills on a dark page they would blow out, which is what
- * the `-band` variants are for.
+ * Dark runs on true black, with the maroon promoted from background to accent.
+ *
+ * It used to be maroon all the way down — page `#260810`, cards `#35101b` — leaving barely a step
+ * between the two, so every surface read as the same brown wash. Dropping the page to `#000` frees
+ * that maroon to do what an accent does: mark the things that sit *on* the page.
+ *
+ * Every accent hue is otherwise unchanged. The bright tints (bubblegum / periwinkle / peach) keep
+ * their light values because they carry badges, strokes and stickers in both modes; only the
+ * full-bleed `-band` fills go deep, since the bright versions would blow out at that size.
  */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --color-xanh-pho: #260810;
-  --color-surface-2: #35101B;
-  --color-beige-kem: #FDF6EA;
-  --color-ink-soft: #D9A8B2;
-  --color-burgundy: #D93025;
-  --color-cam-dat: #F7A97C;
-  --color-la-co: #BFC0F2;
-  --color-bubblegum: #FBD0DC;
-  --color-tomato-band: #7A1710;
-  --color-bubblegum-band: #4A1526;
-  --color-periwinkle-band: #2E2A5C;
-  --color-peach-band: #5A2E1C;
-  --color-hard-shadow: rgb(0 0 0 / 0.55);
-  --color-on-tint: #8A0C24;
+  --color-xanh-pho: #000000;
+  /*
+   * Lifted from the old `#260810`, which measured 1.12:1 against black — a step too small to see,
+   * so every card would have dissolved into the page. `#3d0d1a` is the same hue at 1.30:1, which
+   * reads as a panel while staying dark enough that a grid of them is not a wall of maroon.
+   */
+  --color-surface-2: #3d0d1a;
+  --color-beige-kem: #fdf6ea;
+  --color-ink-soft: #d9a8b2;
+  --color-burgundy: #d93025;
+  /* Fills keep the darker red so white stays legible on them; only type gets the lift. */
+  --color-burgundy-ink: #ee6055;
+  --color-cam-dat: #f7a97c;
+  --color-la-co: #bfc0f2;
+  --color-bubblegum: #fbd0dc;
+  --color-tomato-band: #7a1710;
+  --color-bubblegum-band: #4a1526;
+  --color-periwinkle-band: #2e2a5c;
+  --color-peach-band: #5a2e1c;
+  --color-on-tint: #8a0c24;
+  --color-ink: #fdf6ea;
+  --color-ink-muted: #d9a8b2;
+  --color-nav-surface: #3d0d1a;
+  --color-nav-ink: #fdf6ea;
+  --color-nav-ink-muted: #d9a8b2;
+}
+
+/*
+ * The nav while it is floating over the hero. Every foreground in the bar is `text-beige-kem` or
+ * `text-ink-soft`, and both compile to `var()`, so redefining the two properties here flips the
+ * whole bar to white in one move — no per-element conditional classes.
+ *
+ * The ticket and its panel opt back out. They keep their own cream surface over the photo, and
+ * cream-on-cream is what white ink would give them.
+ */
+.nav-over-hero {
+  --color-beige-kem: #fff;
+  --color-ink-soft: rgb(255 255 255 / 0.72);
+}
+
+/*
+ * Every floating surface in the nav: the ticket, the centre pill, and the two panels that hang off
+ * them.
+ *
+ * It sets its own fill *and* its own two ink roles together, which is what lets it override
+ * `.nav-over-hero` without a more specific selector — that rule flips the bar's ink to white for
+ * the photo behind it, and these boxes need to opt back out because they carry their own dark fill.
+ * One class, so a box can never end up with the surface but not the type that goes on it.
+ */
+.nav-surface {
+  background-color: var(--color-nav-surface);
+  --color-beige-kem: var(--color-nav-ink);
+  --color-ink-soft: var(--color-nav-ink-muted);
 }
 
 body {
   background-color: var(--color-xanh-pho);
   color: var(--color-beige-kem);
   font-family: var(--font-sans);
-  transition: background-color 240ms ease, color 240ms ease;
-}
-
-/* Fraunces carries an optical-size axis; let it tighten itself as headings scale up. */
-:where(h1, h2, h3, h4) {
-  font-optical-sizing: auto;
+  transition:
+    background-color 240ms ease,
+    color 240ms ease;
 }
 
 button,
@@ -114,15 +227,473 @@ select:focus-visible {
 }
 
 /*
- * Shape language: flat offset shadows instead of blurred ones, so surfaces read as cut paper
- * stacked on the page rather than as glass floating above it.
+ * The nav's search field is the one exception. A text input always matches `:focus-visible`, so the
+ * ring fired the instant the field opened and drew a tomato rectangle inside the pill's own border
+ * — two outlines nested a few pixels apart. The caret is the focus indicator here, which is the
+ * standard affordance for a text field and the reason dropping the ring costs nothing.
  */
-@utility shadow-hard {
-  box-shadow: 4px 4px 0 var(--color-hard-shadow);
+.nav-search-input:focus-visible {
+  outline: none;
 }
 
-@utility shadow-hard-lg {
-  box-shadow: 7px 7px 0 var(--color-hard-shadow);
+/*
+ * ── The nav ticket ───────────────────────────────────────────────────────────────────────────
+ *
+ * A rebuild of the menu on siena.film/work: one printed ticket split by a perforation into a stub
+ * that carries the account and a square trigger that tears off. Everything animated here is a
+ * transform or an opacity, so the whole gesture stays on the compositor.
+ *
+ * The two curves are not interchangeable. `--ease-custom` is the slower settle the icon lines and
+ * the panel ride; `--ease-quint` is the snappier one under the hover fill. Both are near-flat by
+ * 60% of their duration, which is what lets a 1.1s animation still feel immediate.
+ */
+:root {
+  --ease-custom: cubic-bezier(0.19, 1, 0.22, 1);
+  --ease-quint: cubic-bezier(0.23, 1, 0.32, 1);
+  --menu-ticket-duration: 1.1s;
+  --menu-panel-duration: 0.9s;
+  /* Corner bite. Siena clips at 9/103 of a 103px button; the same ratio on a 66px one is ~6px. */
+  --ticket-radius: 6px;
+  /*
+   * The pair of bites where the perforation meets the top and bottom edges — the dent a ticket
+   * punch leaves at each end of a tear line. `--perf-x` parks them off-canvas by default, so a
+   * surface only grows them by opting in; a plain card keeps its four corners and nothing else.
+   */
+  --perf-radius: 5px;
+  --perf-x: -100px;
+}
+
+/*
+ * The ticket silhouette: four corners bitten inward by a quarter circle, the shape a punch leaves
+ * in a printed stub.
+ *
+ * Four single-quadrant gradients rather than one `clip-path`, because the radius has to stay in
+ * pixels. An objectBoundingBox path — what Siena uses, and what only has to work on their square
+ * button — would stretch the bite into an ellipse on anything that is not square, and both the
+ * ticket and its panel are wide.
+ */
+@utility ticket-corners {
+  mask:
+    radial-gradient(circle var(--ticket-radius) at 0 0, #000 98%, #0000),
+    radial-gradient(circle var(--ticket-radius) at 100% 0, #000 98%, #0000),
+    radial-gradient(circle var(--ticket-radius) at 0 100%, #000 98%, #0000),
+    radial-gradient(circle var(--ticket-radius) at 100% 100%, #000 98%, #0000),
+    radial-gradient(circle var(--perf-radius) at var(--perf-x) 0, #000 98%, #0000),
+    radial-gradient(circle var(--perf-radius) at var(--perf-x) 100%, #000 98%, #0000),
+    linear-gradient(#000, #000);
+  mask-composite: exclude, exclude, exclude, exclude, exclude, exclude, add;
+}
+
+/*
+ * No outline, like Siena's. The silhouette is carried entirely by the fill and the punched corners.
+ *
+ * That works over the hero, where a cream ticket sits on a dark still. It is weakest in light mode
+ * past the hero: `surface-2` on `xanh-pho` is 1.03:1, so the shape is effectively invisible against
+ * the page. If that needs solving, change the fill — do not put the border back, or the corner
+ * notches stop reading as notches.
+ */
+.menu-ticket-group {
+  display: flex;
+  align-items: stretch;
+}
+
+/*
+ * The perforation. A dashed rule short of full height, the way a real ticket leaves solid paper at
+ * each end of the tear so the stub does not fall off in your pocket.
+ *
+ * `--perf-x` lands the two edge bites on this line. It is only set from `md` up, because below that
+ * the stub is hidden and the group is a bare square with nothing to tear off. The offset is the
+ * stub's own width, with no border left to offset it.
+ */
+.menu-perf {
+  flex: none;
+  align-self: center;
+  width: 1px;
+  height: 78%;
+  border-right: 1px dashed var(--color-beige-kem);
+  opacity: 0.55;
+}
+
+@media (min-width: 768px) {
+  .menu-ticket-group {
+    --perf-x: 15rem;
+  }
+}
+
+/*
+ * The small floating cluster in the middle of the nav. Same punched-corner language as the ticket,
+ * scaled down — three controls divided by hairlines, nothing else.
+ */
+.nav-pill {
+  display: flex;
+  align-items: stretch;
+}
+
+.nav-pill-cell + .nav-pill-cell {
+  border-left: 1px solid color-mix(in srgb, var(--color-beige-kem) 35%, transparent);
+}
+
+/* ── Trigger ── */
+
+.menu-ticket {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  cursor: pointer;
+  background-color: var(--color-burgundy);
+}
+
+/*
+ * Hover fill. Grows from the bottom edge rather than fading, so the button reads as filling up.
+ * `all` rather than `transform` because the open state animates opacity through the same rule.
+ */
+.menu-ticket::before {
+  content: " ";
+  position: absolute;
+  inset: 0;
+  background-color: color-mix(in srgb, var(--color-burgundy) 62%, #000);
+  transform: scaleY(0);
+  transform-origin: bottom;
+  transition-property: all;
+  transition-duration: var(--menu-ticket-duration);
+  transition-timing-function: var(--ease-quint);
+}
+
+.menu-ticket:hover::before {
+  transform: scaleY(1);
+}
+
+/* Once the panel is open the fill has nothing left to promise, so it gets out of the way. */
+.menu-ticket[data-open="true"]::before {
+  opacity: 0;
+}
+
+/* The group's mask eats the focus outline, so the ring has to be drawn inside the shape. */
+.menu-ticket:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--color-xanh-pho);
+}
+
+/*
+ * The three bars are absolutely positioned and centred by the flex parent, not by `top`. That is
+ * what lets the resting offsets and the crossed state both be pure `transform` — there is no
+ * layout value anywhere in the animation.
+ */
+.menu-ticket-lines {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+.menu-ticket-line {
+  position: absolute;
+  width: 100%;
+  height: 2px;
+  background-color: #fff;
+  /* The minifier rewrites the `translate3d` resting offsets to `translateY`, which drops the
+   * implicit layer promotion; asking for it outright keeps all three bars off the paint path. */
+  will-change: transform;
+  transition-property: transform;
+  transition-duration: var(--menu-ticket-duration);
+  transition-timing-function: var(--ease-custom);
+}
+
+.menu-ticket-line:nth-child(1) {
+  transform: translate3d(0, -5px, 0);
+  transition-delay: 0s;
+}
+
+.menu-ticket-line:nth-child(2) {
+  transform: translateZ(0);
+  transition-delay: 0.05s;
+}
+
+.menu-ticket-line:nth-child(3) {
+  transform: translate3d(0, 5px, 0);
+  transition-delay: 0s;
+}
+
+/*
+ * Opening and closing are deliberately not mirror images. On the way in the middle bar vanishes
+ * first (0s) and the outer two rotate a beat later; on the way out the delays above put the middle
+ * bar back last. The cross therefore assembles and disassembles from the centre outward both ways.
+ */
+.menu-ticket[data-open="true"] .menu-ticket-line:nth-child(1) {
+  transform: translateZ(0) rotate(-45deg) scaleX(0.8);
+  transition-delay: 0.05s;
+}
+
+.menu-ticket[data-open="true"] .menu-ticket-line:nth-child(2) {
+  transform: translateZ(0) scaleX(0);
+  transition-delay: 0s;
+}
+
+.menu-ticket[data-open="true"] .menu-ticket-line:nth-child(3) {
+  transform: translateZ(0) rotate(45deg) scaleX(0.8);
+  transition-delay: 0.05s;
+}
+
+/* ── Stub ── */
+
+/* The rule between the identity row and the shortcut row, dashed to match the perforation. */
+.menu-stub-rule {
+  height: 1px;
+  border-bottom: 1px dashed var(--color-beige-kem);
+  opacity: 0.55;
+}
+
+/*
+ * Siena's metadata strip: three equal cells where only the middle one carries side rules, so two
+ * hairlines divide three cells without either edge picking up a stray border.
+ */
+.menu-stub-cell {
+  flex: 1;
+  min-width: 0;
+}
+
+.menu-stub-cell + .menu-stub-cell {
+  border-left: 1px solid color-mix(in srgb, var(--color-beige-kem) 35%, transparent);
+}
+
+/* ── Panel ── */
+
+/*
+ * `grid-template-rows: 0fr → 1fr` animates to the content's natural height without anyone having
+ * to measure it; the child clips so the row can be shorter than what it holds mid-transition.
+ */
+.menu-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--menu-panel-duration) var(--ease-custom);
+}
+
+.menu-panel[data-open="true"] {
+  grid-template-rows: 1fr;
+}
+
+.menu-panel > * {
+  overflow: hidden;
+}
+
+/*
+ * The tear line across the top of the panel — two dashed runs with a gap between them, so the eye
+ * reads a perforation that has already been torn rather than a plain divider.
+ */
+.menu-tear {
+  display: flex;
+}
+
+.menu-tear::before,
+.menu-tear::after {
+  content: "";
+  height: 1px;
+  border-bottom: 1px dashed var(--color-beige-kem);
+  opacity: 0.55;
+}
+
+/*
+ * Siena's two runs are 65% and 25% with `auto` on every margin the width override leaves alone.
+ * Three autos then share the ~10% that is left, which is what opens the gap in the middle and the
+ * shorter one at the right edge — the proportions only look right because they are not equal.
+ */
+.menu-tear::before {
+  flex: none;
+  width: 65%;
+  margin-left: 0.5rem;
+  margin-right: auto;
+}
+
+.menu-tear::after {
+  flex: none;
+  width: 25%;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/*
+ * Dividers inside the panel wipe in from the left instead of appearing, on the same stagger clock
+ * as the rows they separate.
+ */
+.menu-rule {
+  height: 1px;
+  background-color: color-mix(in srgb, var(--color-beige-kem) 30%, transparent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--menu-ticket-duration) var(--ease-custom);
+}
+
+.menu-panel[data-open="true"] .menu-rule {
+  transform: scaleX(1);
+  transition-delay: var(--menu-row-delay, 0s);
+}
+
+/*
+ * Row reveal. Each label starts pushed a row-and-a-half down behind its clipped parent and slides
+ * up when the panel opens, staggered by `--menu-row-delay`.
+ *
+ * The asymmetry is the whole trick: 0.8s in, 0.2s out. On close the delays are also zeroed, so the
+ * rows leave together in a fifth of the time they took to arrive and the panel never feels like it
+ * is dawdling on the way down.
+ */
+[data-a="y"] {
+  transform: translate3d(0, 150%, 0);
+  transition-property: transform;
+  transition-duration: 0.2s;
+  transition-timing-function: var(--ease-custom);
+}
+
+.menu-panel[data-open="true"] [data-a="y"] {
+  transform: translateZ(0);
+  transition-duration: 0.8s;
+  transition-delay: var(--menu-row-delay, 0s);
+}
+
+.menu-panel[data-open="false"] * {
+  transition-delay: 0s !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu-ticket::before,
+  .menu-ticket-line,
+  .menu-panel,
+  [data-a="y"] {
+    transition-duration: 1ms !important;
+    transition-delay: 0s !important;
+  }
+}
+
+/*
+ * ── Technical chrome ─────────────────────────────────────────────────────────────────────────
+ *
+ * Borrowed from doronsupply.com: the hairline furniture that frames a section without adding a
+ * box. Doron draws it in cool grey on black; here it is the page's own ink at 25%, so it reads as
+ * printed rule work on cream rather than as a HUD.
+ *
+ * Their bracketed labels and numbered category index are deliberately not carried over — the
+ * existing `label-eyebrow` covers that role already.
+ */
+
+/* Three stacked rules of unequal length. Sits above a section heading as a masthead device. */
+@utility hud-rule-stack {
+  height: 5px;
+  background-image:
+    linear-gradient(var(--color-beige-kem), var(--color-beige-kem)),
+    linear-gradient(var(--color-beige-kem), var(--color-beige-kem)),
+    linear-gradient(var(--color-beige-kem), var(--color-beige-kem));
+  background-size:
+    100% 1px,
+    62% 1px,
+    28% 1px;
+  background-position:
+    0 0,
+    0 2px,
+    0 4px;
+  background-repeat: no-repeat;
+  opacity: 0.25;
+}
+
+/*
+ * Registration marks: a short bracket at each of the four corners.
+ *
+ * Eight background gradients — one horizontal and one vertical arm per corner — rather than
+ * pseudo-elements. Verbose, but it is a single class on a single element, it leaves `::before` and
+ * `::after` free for whatever the component needs, and it composes with any `bg-*` utility because
+ * those set `background-color` while this only sets `background-image`.
+ */
+@utility hud-corners {
+  --hud-mark: color-mix(in srgb, var(--color-beige-kem) 45%, transparent);
+  --hud-arm: 12px;
+  background-image:
+    linear-gradient(var(--hud-mark), var(--hud-mark)),
+    linear-gradient(var(--hud-mark), var(--hud-mark)),
+    linear-gradient(var(--hud-mark), var(--hud-mark)),
+    linear-gradient(var(--hud-mark), var(--hud-mark)),
+    linear-gradient(var(--hud-mark), var(--hud-mark)),
+    linear-gradient(var(--hud-mark), var(--hud-mark)),
+    linear-gradient(var(--hud-mark), var(--hud-mark)),
+    linear-gradient(var(--hud-mark), var(--hud-mark));
+  background-size:
+    var(--hud-arm) 1px,
+    1px var(--hud-arm),
+    var(--hud-arm) 1px,
+    1px var(--hud-arm),
+    var(--hud-arm) 1px,
+    1px var(--hud-arm),
+    var(--hud-arm) 1px,
+    1px var(--hud-arm);
+  background-position:
+    left top,
+    left top,
+    right top,
+    right top,
+    left bottom,
+    left bottom,
+    right bottom,
+    right bottom;
+  background-repeat: no-repeat;
+}
+
+/* The small filled square Doron uses instead of a disc bullet. */
+@utility hud-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  flex: none;
+  background-color: currentColor;
+}
+
+/*
+ * ── The ticker ───────────────────────────────────────────────────────────────────────────────
+ *
+ * Doron's tutorial rail runs itself: eight cards on a loop, driven by Framer's Ticker component
+ * translating the list in JS. Same result here from CSS alone — the caller renders the set twice
+ * and the track travels exactly -50%, so the second copy is under the cursor at the moment the
+ * first finishes and the seam never shows.
+ *
+ * Hover does not pause it — the row is meant to keep running while you read it. Keyboard focus
+ * still does: tabbing onto a card that is sliding away means chasing the focus ring, and that is
+ * also the only remaining way to hold the row still.
+ */
+@keyframes ticker-run {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.ticker-track {
+  display: flex;
+  width: max-content;
+  animation: ticker-run var(--ticker-duration, 60s) linear infinite;
+}
+
+.ticker-viewport:focus-within .ticker-track {
+  animation-play-state: paused;
+}
+
+/*
+ * With the animation off the track is a dead 200%-wide row, so the viewport has to become a real
+ * scroller or half the cards are unreachable.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track {
+    animation: none;
+  }
+
+  .ticker-viewport {
+    overflow-x: auto;
+  }
+}
+
+/* A panel outlined in dashes rather than a solid stroke — lighter than `border-2`. */
+@utility hud-dashed {
+  border: 1px dashed color-mix(in srgb, var(--color-beige-kem) 45%, transparent);
 }
 
 /* Small labels — uppercase, letterspaced, never larger than the body text around them. */

@@ -63,12 +63,12 @@ export function InfoCard({
 }) {
   return (
     <section
-      className={`rounded-2xl border-2 bg-surface-2 p-5 shadow-hard sm:p-6 ${
+      className={`rounded-2xl border-2 bg-surface-2 p-5 sm:p-6 ${
         tone === "danger" ? "border-burgundy" : "border-beige-kem"
       }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-beige-kem/25 pb-4">
-        <h3 className="font-display text-lg font-bold text-ink-soft">{title}</h3>
+        <h3 className="font-display text-xl font-bold text-ink-soft">{title}</h3>
         {action}
       </div>
       <div className="pt-5">{children}</div>
@@ -138,7 +138,7 @@ export function FormField({
           role="alert"
           className="mt-1.5 flex items-start gap-1.5 text-xs leading-5 text-beige-kem"
         >
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-burgundy" aria-hidden />
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-burgundy-ink" aria-hidden />
           {error}
         </p>
       )}
@@ -190,7 +190,7 @@ export function AvatarWithBadge({
         className="absolute -bottom-1 -right-1 grid h-11 w-11 cursor-pointer place-items-center rounded-full text-beige-kem transition hover:text-ink-soft"
         title={busyLabel ?? "Đổi ảnh đại diện"}
       >
-        <span className="grid h-8 w-8 place-items-center rounded-full border-2 border-beige-kem bg-xanh-pho shadow-hard">
+        <span className="grid h-8 w-8 place-items-center rounded-full border-2 border-beige-kem bg-xanh-pho">
           <Camera className="h-4 w-4" aria-hidden />
         </span>
         <input

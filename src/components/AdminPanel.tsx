@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 import { Booking, MovieEvent } from "../types";
+import { formatVnd } from "../services/currency";
 
 interface AdminPanelProps {
   events: MovieEvent[];
@@ -29,12 +30,6 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
   const capacity = events.length * 84;
   const fillRate = capacity ? Math.round((soldSeats / capacity) * 100) : 0;
 
-  const formatPrice = (price: number) =>
-    new Intl.NumberFormat("vi-VN", {
-      style: "currency",
-      currency: "VND",
-      maximumFractionDigits: 0,
-    }).format(price);
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
@@ -46,7 +41,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
           Quay lại trang bán vé
         </button>
         <div className="text-left lg:text-right">
-          <h1 className="font-display text-3xl font-black text-beige-kem">Admin Console Mock</h1>
+          <h1 className="font-display text-4xl font-black text-beige-kem">Admin Console Mock</h1>
           <p className="mt-1 text-sm text-beige-kem/65">
             Frontend-only dashboard cho đội backend nối API và phân quyền sau.
           </p>
@@ -54,7 +49,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
-        <Metric label="Doanh thu mock" value={formatPrice(revenue)} />
+        <Metric label="Doanh thu mock" value={formatVnd(revenue)} />
         <Metric label="Đơn đã tạo" value={`${bookings.length}`} />
         <Metric label="Vé đã bán" value={`${soldSeats}`} />
         <Metric label="Tỷ lệ lấp đầy" value={`${fillRate}%`} />
@@ -131,17 +126,17 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                     <div key={booking.id} className="rounded-xl border-2 border-beige-kem bg-surface-2 p-4">
                       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                         <div>
-                          <p className="font-display text-lg font-bold text-beige-kem">{booking.movie.title}</p>
+                          <p className="font-display text-xl font-bold text-beige-kem">{booking.movie.title}</p>
                           <p className="font-mono text-xs text-ink-soft">{booking.id} / {booking.paymentMethod} / {booking.status}</p>
                         </div>
-                        <div className="font-display text-xl font-black text-burgundy">
-                          {formatPrice(booking.finalPrice || booking.totalPrice)}
+                        <div className="font-display text-2xl font-black text-burgundy-ink">
+                          {formatVnd(booking.finalPrice || booking.totalPrice)}
                         </div>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2 font-mono text-[11px] text-beige-kem/65">
                         <span className="rounded border-2 border-beige-kem px-2 py-1">Ghế {booking.selectedSeats.map((seat) => seat.id).join(", ")}</span>
                         <span className="rounded border-2 border-beige-kem px-2 py-1">Email {booking.customerEmail}</span>
-                        <span className="rounded border border-burgundy/30 px-2 py-1 text-burgundy">Hoàn tiền mock</span>
+                        <span className="rounded border border-burgundy/30 px-2 py-1 text-burgundy-ink">Hoàn tiền mock</span>
                       </div>
                     </div>
                   ))}
@@ -156,7 +151,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
               <div className="grid gap-4 md:grid-cols-3">
                 {["WEEKEND50", "FIRSTBOOK", "GROUP4"].map((code, index) => (
                   <div key={code} className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-5">
-                    <p className="font-display text-2xl font-black text-beige-kem">{code}</p>
+                    <p className="font-display text-3xl font-black text-beige-kem">{code}</p>
                     <p className="mt-2 text-sm text-beige-kem/65">
                       {index === 0 ? "Cuối tuần" : index === 1 ? "Khách mới" : "Nhóm bạn"}
                     </p>
@@ -187,7 +182,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                 <div className="flex items-center gap-3">
                   <span className="rounded-lg border-2 border-beige-kem bg-la-co px-3 py-2 font-mono text-xs font-black uppercase text-on-tint">QR</span>
                   <div>
-                    <p className="font-display text-xl font-black text-beige-kem">Mã {scanCode}</p>
+                    <p className="font-display text-2xl font-black text-beige-kem">Mã {scanCode}</p>
                     <p className="text-sm text-ink-soft">Mock result: hợp lệ nếu mã khớp booking id trong local history.</p>
                   </div>
                 </div>
@@ -199,7 +194,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
             <div className="space-y-5">
               <PanelTitle title="Báo cáo doanh thu, số vé bán, tỷ lệ lấp đầy" />
               <div className="grid gap-4 md:grid-cols-3">
-                <Metric label="GMV" value={formatPrice(revenue)} />
+                <Metric label="GMV" value={formatVnd(revenue)} />
                 <Metric label="Seats sold" value={`${soldSeats}`} />
                 <Metric label="Fill rate" value={`${fillRate}%`} />
               </div>
@@ -230,7 +225,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                   ["Đối tác", "Quản lý sự kiện và xem báo cáo của chính mình"],
                 ].map(([role, desc]) => (
                   <div key={role} className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-5">
-                    <p className="font-display text-xl font-black text-beige-kem">{role}</p>
+                    <p className="font-display text-2xl font-black text-beige-kem">{role}</p>
                     <p className="mt-2 text-sm leading-6 text-beige-kem/65">{desc}</p>
                   </div>
                 ))}
@@ -250,7 +245,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-5">
       <p className="font-mono text-xs uppercase text-beige-kem/50">{label}</p>
-      <p className="mt-2 font-display text-2xl font-black text-beige-kem">{value}</p>
+      <p className="mt-2 font-display text-3xl font-black text-beige-kem">{value}</p>
     </div>
   );
 }
@@ -258,7 +253,7 @@ function Metric({ label, value }: { label: string; value: string }) {
 function PanelTitle({ title }: { title: string }) {
   return (
     <div>
-      <h2 className="font-display text-2xl font-black text-beige-kem">{title}</h2>
+      <h2 className="font-display text-3xl font-black text-beige-kem">{title}</h2>
     </div>
   );
 }

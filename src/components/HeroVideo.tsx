@@ -12,6 +12,25 @@ interface HeroVideoProps {
   onBookNow: () => void;
 }
 
+/**
+ * Hero type size, chosen from how long the title actually is.
+ *
+ * A fixed size cannot serve both ends of this catalog. "Chuyện Ma Gần Nhà" is 22 characters and
+ * wants to be enormous; "Đêm Nhạc Indie: Những Thành Phố Mơ Màng" is 50 and at the same size runs
+ * to five or six lines — which pushes the description and the three buttons past the fold, on a
+ * section that is exactly one viewport tall.
+ *
+ * Stepping the size down as the title grows keeps the block at roughly two lines either way, so the
+ * buttons land in the same place no matter which event is featured.
+ */
+function titleSize(title: string): string {
+  const n = title.length;
+  if (n <= 20) return "text-6xl sm:text-8xl lg:text-9xl";
+  if (n <= 32) return "text-5xl sm:text-7xl lg:text-8xl";
+  if (n <= 44) return "text-4xl sm:text-6xl lg:text-7xl";
+  return "text-4xl sm:text-5xl lg:text-6xl";
+}
+
 export default function HeroVideo({ movie, onBookNow }: HeroVideoProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isMuted, setIsMuted] = useState(true);
@@ -51,7 +70,8 @@ export default function HeroVideo({ movie, onBookNow }: HeroVideoProps) {
       return;
     }
 
-    video.play()
+    video
+      .play()
       .then(() => {
         setIsPlaying(true);
         setShowPoster(false);
@@ -112,7 +132,9 @@ export default function HeroVideo({ movie, onBookNow }: HeroVideoProps) {
       <div className="absolute inset-0 z-[3] bg-gradient-to-t from-black/75 via-black/20 to-black/20" />
 
       <div className="relative z-10 flex min-h-[100dvh] items-center px-5 pt-24 sm:px-10 lg:px-[8%]">
-        <div className="max-w-[720px] translate-y-6 space-y-6">
+        {/* Wider only from `lg`, where the extra measure buys a long title a line. The description
+            keeps its own `max-w-xl`, so nothing else stretches with it. */}
+        <div className="max-w-[720px] translate-y-12 space-y-6 lg:max-w-[880px]">
           <div className="flex flex-wrap items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-white/80">
             <span className="border border-white/60 px-2.5 py-1 text-white">{movie.ageRating}</span>
             <span>{movie.duration} phút</span>
@@ -120,7 +142,18 @@ export default function HeroVideo({ movie, onBookNow }: HeroVideoProps) {
           </div>
 
           <div className="space-y-2">
-            <h1 className="font-display text-5xl font-black uppercase leading-[0.9] tracking-normal text-white sm:text-7xl lg:text-8xl">
+            {/*
+             * `line-clamp-3` is the backstop, not the mechanism — the sizing above should already
+             * keep every catalog title inside two lines. It exists so a title longer than anything
+             * seeded here cannot push the buttons off the bottom of the viewport; the full string
+             * stays on `title` either way.
+             */}
+            <h1
+              title={movie.title}
+              className={`line-clamp-3 font-display font-black uppercase leading-[0.9] tracking-normal text-white ${titleSize(
+                movie.title,
+              )}`}
+            >
               {movie.title}
             </h1>
             {movie.originalTitle && (

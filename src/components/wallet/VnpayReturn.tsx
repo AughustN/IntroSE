@@ -5,7 +5,8 @@
 
 import { useEffect, useState } from "react";
 import { walletClient, type Topup } from "../../services/walletClient";
-import { formatVnd, PENDING_TOPUP_KEY } from "./TopUpSheet";
+import { PENDING_TOPUP_KEY } from "./TopUpSheet";
+import { formatVnd } from "../../services/currency";
 
 /** How long to keep asking before saying "still pending" — the IPN usually lands in seconds. */
 const POLL_ATTEMPTS = 10;
@@ -75,8 +76,8 @@ export default function VnpayReturn({ onDone }: { onDone: (topup: Topup | null) 
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-xanh-pho/95 px-4">
-      <div className="w-full max-w-md space-y-5 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-8 shadow-hard">
-        <h2 className="font-display text-2xl font-black text-beige-kem">{heading}</h2>
+      <div className="w-full max-w-md space-y-5 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-8">
+        <h2 className="font-display text-3xl font-black text-beige-kem">{heading}</h2>
         <p className="font-mono text-xs leading-6 text-ink-soft">{body}</p>
 
         {topup?.status === "paid" && topup.reservationId !== null && (
@@ -89,7 +90,7 @@ export default function VnpayReturn({ onDone }: { onDone: (topup: Topup | null) 
         <button
           onClick={() => onDone(topup)}
           disabled={!settled}
-          className="w-full rounded-xl bg-burgundy px-6 py-3 text-sm font-black text-white shadow-hard transition hover:brightness-95 disabled:bg-surface-2 disabled:text-white/60"
+          className="w-full rounded-xl bg-burgundy px-6 py-3 text-sm font-black text-white transition hover:brightness-95 disabled:bg-surface-2 disabled:text-white/60"
         >
           {settled ? "Tiếp tục" : "Đang kiểm tra..."}
         </button>

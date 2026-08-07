@@ -130,10 +130,10 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 px-4">
-      <div className="w-full max-w-md rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 text-beige-kem shadow-hard">
+      <div className="w-full max-w-md rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 text-beige-kem">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="font-display text-2xl font-black">{mode === "login" ? "Đăng nhập" : "Đăng ký"}</h2>
+            <h2 className="font-display text-3xl font-black">{mode === "login" ? "Đăng nhập" : "Đăng ký"}</h2>
             <p className="mt-2 text-sm leading-6 text-beige-kem/65">
               {mode === "login"
                 ? "Đăng nhập bằng email hoặc số điện thoại để quản lý vé, wishlist và đơn hàng."

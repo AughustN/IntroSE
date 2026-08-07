@@ -9,6 +9,7 @@ import { MovieEvent, Seat } from "../types";
 import { catalogClient } from "../services/catalogClient";
 import { formatHoldClock } from "../services/holdSession";
 import { watchShowtime } from "../services/seatSocket";
+import { formatVnd } from "../services/currency";
 
 interface SeatLayoutProps {
   event: MovieEvent;
@@ -129,8 +130,6 @@ export default function SeatLayout({
     });
   };
 
-  const formatPrice = (price: number) =>
-    new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(price);
 
   const selectedSeatsList = heldSeats;
   const totalPrice = selectedSeatsList.reduce((sum, seat) => sum + seat.price, 0);
@@ -149,7 +148,7 @@ export default function SeatLayout({
   };
 
   const statusTitle = (seat: SeatMapSeat, mine: boolean): string => {
-    const price = formatPrice(seat.price);
+    const price = formatVnd(seat.price);
     if (mine) return `Ghế ${seat.row}${seat.number} — bạn đang giữ (${price})`;
     const label: Record<SeatStatus, string> = {
       available: "còn trống",
@@ -239,7 +238,7 @@ export default function SeatLayout({
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8 pt-6 border-t border-beige-kem/25 w-full max-w-lg font-mono text-xs text-beige-kem/70">
             <div className="flex items-center gap-2">
               <span className="w-5 h-5 bg-transparent border-2 border-beige-kem rounded" />
-              <span>Còn trống{tierPrices.length ? ` (${tierPrices.map(formatPrice).join(" / ")})` : ""}</span>
+              <span>Còn trống{tierPrices.length ? ` (${tierPrices.map((price) => formatVnd(price)).join(" / ")})` : ""}</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="w-5 h-5 bg-burgundy rounded" />
@@ -259,7 +258,7 @@ export default function SeatLayout({
         {/* Right column: the live selection */}
         <div className="lg:col-span-4 bg-xanh-pho border-2 border-beige-kem rounded-2xl p-6 space-y-6">
           <div className="space-y-1">
-            <h3 className="font-display font-bold text-lg text-beige-kem">Thông tin suất</h3>
+            <h3 className="font-display font-bold text-xl text-beige-kem">Thông tin suất</h3>
             <p className="text-xs text-ink-soft font-mono uppercase tracking-wider">{event.genre.join(" | ")}</p>
           </div>
 
@@ -298,7 +297,7 @@ export default function SeatLayout({
 
           {/* Selected seat list */}
           <div className="space-y-3 pt-4 border-t border-beige-kem/25">
-            <h4 className="font-display text-sm font-semibold text-beige-kem">Ghế ngồi đã chọn:</h4>
+            <h4 className="font-display text-base font-semibold text-beige-kem">Ghế ngồi đã chọn:</h4>
 
             {selectedSeatsList.length === 0 ? (
               <div className="py-6 text-center text-xs text-beige-kem/40 border border-dashed border-beige-kem/25 rounded-lg">
@@ -317,11 +316,11 @@ export default function SeatLayout({
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-beige-kem">{formatPrice(seat.price)}</span>
+                      <span className="font-bold text-beige-kem">{formatVnd(seat.price)}</span>
                       <button
                         onClick={() => onToggleSeat(seat)}
                         disabled={busy}
-                        className="font-mono text-[10px] uppercase text-stone-500 transition hover:text-burgundy disabled:opacity-40 cursor-pointer"
+                        className="font-mono text-[10px] uppercase text-stone-500 transition hover:text-burgundy-ink disabled:opacity-40 cursor-pointer"
                         title="Bỏ giữ ghế này"
                       >
                         Xóa
@@ -336,7 +335,7 @@ export default function SeatLayout({
           <div className="pt-4 border-t border-beige-kem/25 flex flex-col gap-1.5">
             <div className="flex justify-between items-baseline font-mono">
               <span className="text-xs text-beige-kem/60 uppercase">Tổng tiền phải trả:</span>
-              <span className="text-2xl font-black text-burgundy font-display">{formatPrice(totalPrice)}</span>
+              <span className="text-3xl font-black text-burgundy-ink font-display">{formatVnd(totalPrice)}</span>
             </div>
             <p className="text-[10px] text-right font-mono text-ink-soft tracking-wide">
               Đã bao gồm thuế giá trị gia tăng và phụ thu
@@ -346,7 +345,7 @@ export default function SeatLayout({
           <button
             onClick={onProceedToCheckout}
             disabled={selectedSeatsList.length === 0 || remainingMs <= 0 || busy}
-            className="w-full py-3.5 bg-burgundy hover:brightness-95 disabled:bg-surface-2 disabled:text-white/60 text-white hover:text-white font-bold rounded-xl transition shadow-hard hover:shadow-burgundy/30 cursor-pointer text-center text-sm"
+            className="w-full py-3.5 bg-burgundy hover:brightness-95 disabled:bg-surface-2 disabled:text-white/60 text-white hover:text-white font-bold rounded-xl transition hover:shadow-burgundy/30 cursor-pointer text-center text-sm"
           >
             TIẾP TỤC: ĐIỀN THÔNG TIN THÀNH VIÊN
           </button>

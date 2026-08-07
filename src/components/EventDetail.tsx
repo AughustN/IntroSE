@@ -11,6 +11,7 @@ import { formatEventDate } from "../services/formatDate";
 import { formatHoldClock } from "../services/holdSession";
 import { watchShowtime } from "../services/seatSocket";
 import SeatMapView from "./SeatMapView";
+import { formatVnd } from "../services/currency";
 
 export interface TierSelection {
   tierId: string;
@@ -294,13 +295,6 @@ export default function EventDetail({
       ? "Tiếp tục chọn ghế"
       : "Tiếp tục thanh toán";
 
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat("vi-VN", {
-      style: "currency",
-      currency: "VND",
-      maximumFractionDigits: 0,
-    }).format(price);
-  };
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
@@ -341,7 +335,7 @@ export default function EventDetail({
 
       <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-12">
         <aside className="space-y-6 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-5 lg:col-span-5">
-          <div className="relative aspect-[4/3] overflow-hidden rounded-2xl shadow-hard">
+          <div className="relative aspect-[4/3] overflow-hidden rounded-2xl">
             <img
               src={event.imageUrl}
               alt={event.title}
@@ -372,7 +366,7 @@ export default function EventDetail({
             </div>
 
             <div>
-              <h2 className="font-display text-3xl font-black leading-tight text-beige-kem sm:text-4xl">
+              <h2 className="font-display text-4xl font-black leading-tight text-beige-kem sm:text-5xl">
                 {event.title}
               </h2>
               {event.originalTitle && (
@@ -412,7 +406,7 @@ export default function EventDetail({
           {/* Step 01 — Chọn suất. Placed first so the on-screen order matches the flow the
               step indicator promises (Chọn suất → Chọn vé → Thanh toán). */}
           <section className="rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6">
-            <h3 className="mb-4 font-display text-lg font-black text-beige-kem">
+            <h3 className="mb-4 font-display text-xl font-black text-beige-kem">
               <span className="font-mono text-xs text-ink-soft">01 · </span>Chọn suất
             </h3>
             {slots.length === 0 ? (
@@ -450,7 +444,7 @@ export default function EventDetail({
 
           {isSeated && selectedSlot?.showtimeId !== null && selectedSlot && (
             <section className="rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6">
-              <h3 className="mb-1 font-display text-lg font-black text-beige-kem">
+              <h3 className="mb-1 font-display text-xl font-black text-beige-kem">
                 Tình trạng ghế
               </h3>
               <p className="mb-4 font-mono text-[11px] text-beige-kem/50">
@@ -462,7 +456,7 @@ export default function EventDetail({
 
           {/* Step 02 — Chọn vé (seat tiers for a seated event, quantity per tier for GA). */}
           <section className="rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6">
-            <h3 className="mb-1 font-display text-xl font-black text-beige-kem">
+            <h3 className="mb-1 font-display text-2xl font-black text-beige-kem">
               <span className="font-mono text-xs text-ink-soft">02 · </span>
               {isSeated ? "Hạng vé đang bán" : "Chọn số lượng vé"}
             </h3>
@@ -478,7 +472,7 @@ export default function EventDetail({
                      tile — no card border, no hover — so it never reads as a tappable button. */
                   <div key={tier.id} className="border-l-2 border-cam-dat/40 pl-3">
                     <div className="flex items-center gap-2">
-                      <span className="font-display text-base font-black text-beige-kem">
+                      <span className="font-display text-lg font-black text-beige-kem">
                         {tier.label}
                       </span>
                       {tier.badge && (
@@ -488,7 +482,7 @@ export default function EventDetail({
                       )}
                     </div>
                     <p className="mt-1 font-mono text-sm font-bold text-ink-soft">
-                      {formatPrice(tier.price)}
+                      {formatVnd(tier.price)}
                     </p>
                     {tier.description && (
                       <p className="mt-1 text-xs leading-5 text-beige-kem/62">{tier.description}</p>
@@ -507,7 +501,7 @@ export default function EventDetail({
                         className="flex flex-col rounded-xl border-2 border-beige-kem bg-surface-2 p-4"
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-display text-base font-black text-beige-kem">
+                          <span className="font-display text-lg font-black text-beige-kem">
                             {tier.label}
                           </span>
                           {tier.badge && (
@@ -517,7 +511,7 @@ export default function EventDetail({
                           )}
                         </div>
                         <p className="mt-2 font-mono text-sm font-bold text-ink-soft">
-                          {formatPrice(tier.price)}
+                          {formatVnd(tier.price)}
                         </p>
                         {tier.description && (
                           <p className="mt-2 text-xs leading-5 text-beige-kem/62">
@@ -584,7 +578,7 @@ export default function EventDetail({
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-1">
                 <p className="font-mono text-xs uppercase text-ink-soft">Suất bạn chọn</p>
-                <h4 className="font-display text-lg font-black text-beige-kem">
+                <h4 className="font-display text-xl font-black text-beige-kem">
                   {selectedSlot
                     ? `${formatEventDate(selectedSlot.date, true)} · ${selectedSlot.time} · ${selectedSlot.venue}`
                     : "Chưa chọn suất"}
@@ -595,7 +589,7 @@ export default function EventDetail({
                       ? "Chưa chọn vé"
                       : `${selection
                           .map((line) => `${line.quantity} × ${line.label}`)
-                          .join(" · ")} — ${formatPrice(totalPrice)}`}
+                          .join(" · ")} — ${formatVnd(totalPrice)}`}
                   </p>
                 )}
               </div>
@@ -603,7 +597,7 @@ export default function EventDetail({
                 <button
                   onClick={handlePrimaryAction}
                   disabled={bookingDisabled}
-                  className="inline-flex items-center justify-center rounded-xl bg-burgundy px-7 py-4 text-sm font-black text-white shadow-hard transition hover:brightness-95 disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-white/60"
+                  className="inline-flex items-center justify-center rounded-xl bg-burgundy px-7 py-4 text-sm font-black text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-white/60"
                 >
                   {primaryLabel}
                 </button>
@@ -618,7 +612,7 @@ export default function EventDetail({
 
           {relatedEvents.length > 0 && (
             <section className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-6">
-              <h3 className="mb-4 font-display text-xl font-black text-beige-kem">
+              <h3 className="mb-4 font-display text-2xl font-black text-beige-kem">
                 Gợi ý tương tự
               </h3>
               <div className="grid gap-3 md:grid-cols-3">
@@ -635,11 +629,11 @@ export default function EventDetail({
                       className="h-24 w-full object-cover transition duration-500 group-hover:scale-105"
                     />
                     <span className="block p-3">
-                      <span className="line-clamp-2 font-display text-sm font-bold text-beige-kem">
+                      <span className="line-clamp-2 font-display text-base font-bold text-beige-kem">
                         {related.title}
                       </span>
                       <span className="mt-1 block font-mono text-[11px] text-ink-soft">
-                        {formatPrice(related.price)}
+                        {formatVnd(related.price)}
                       </span>
                     </span>
                   </button>

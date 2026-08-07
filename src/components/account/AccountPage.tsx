@@ -262,7 +262,7 @@ export default function AccountPage({
         className="w-full px-4 py-5 sm:px-6 sm:py-7 lg:px-8"
       >
         <div className="flex items-center justify-between gap-4 border-b border-beige-kem/25 pb-4">
-          <h2 id="account-title" className="font-display text-2xl font-black sm:text-3xl">
+          <h2 id="account-title" className="font-display text-3xl font-black sm:text-4xl">
             Tài khoản
           </h2>
           <button
@@ -286,7 +286,7 @@ export default function AccountPage({
               role="alert"
               className="flex items-start gap-2 rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-xs leading-5 text-on-tint"
             >
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-burgundy" aria-hidden />
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-burgundy-ink" aria-hidden />
               {err}
             </div>
           )}
@@ -296,14 +296,14 @@ export default function AccountPage({
           {/* Menu selection for navigation: little typing, hard to get wrong (lecture, slide 14). */}
           <nav
             aria-label="Mục tài khoản"
-            className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-3 shadow-hard shadow-black/20 lg:sticky lg:top-10"
+            className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-3 shadow-black/20 lg:sticky lg:top-10"
           >
             {/*
               The overlay covers the site header, so the wordmark is what keeps the screen anchored
               to TixHub. Same treatment as the header, one size down.
             */}
             <div className="mb-3 border-b border-beige-kem/25 px-2 pb-3">
-              <p className="font-display text-xl font-black leading-none text-beige-kem">TixHub</p>
+              <p className="font-display text-2xl font-black leading-none text-beige-kem">TixHub</p>
               <p className="mt-1.5 text-[9px] font-semibold uppercase tracking-[0.22em] text-ink-soft">
                 Music / Stage / Film
               </p>

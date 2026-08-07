@@ -47,7 +47,7 @@ export default function ToastStack({ toasts, onDismiss }: ToastStackProps) {
           <div
             key={toast.id}
             role={toast.kind === "error" ? "alert" : "status"}
-            className={`pointer-events-auto flex items-start gap-3 overflow-hidden rounded-xl border ${tone.frame} p-3 pr-2 shadow-hard`}
+            className={`pointer-events-auto flex items-start gap-3 overflow-hidden rounded-xl border ${tone.frame} p-3 pr-2`}
           >
             <span className={`mt-0.5 h-full w-1 shrink-0 self-stretch rounded-full ${tone.accent}`} />
 

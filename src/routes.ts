@@ -14,6 +14,12 @@
 
 export type Screen =
   | "home"
+  /** The catalog on its own, without the landing hero in front of it. */
+  | "browse"
+  /** Static copy: the three entries behind the nav's overflow menu. */
+  | "guide"
+  | "about"
+  | "policy"
   | "detail"
   | "seats"
   | "checkout"
@@ -35,6 +41,14 @@ export interface Route {
 /** Screens whose URL carries no parameter. Order is irrelevant; lookup goes both ways. */
 const STATIC_PATHS: ReadonlyArray<readonly [Screen, string]> = [
   ["home", "/"],
+  /*
+   * `/events` is matched here, before the `events/:slug` branch below. That branch needs a second
+   * segment, so the bare path can never be mistaken for an event whose slug went missing.
+   */
+  ["browse", "/events"],
+  ["guide", "/huong-dan"],
+  ["about", "/gioi-thieu"],
+  ["policy", "/chinh-sach"],
   ["checkout", "/checkout"],
   ["history", "/bookings"],
   ["wallet", "/wallet"],
