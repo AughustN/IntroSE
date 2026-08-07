@@ -22,7 +22,11 @@ export type Screen =
   | "wallet"
   | "admin"
   | "organizer"
-  | "moderation";
+  | "moderation"
+  | "about-us"
+  | "terms-of-service"
+  | "website-terms"
+  | "refund-policy";
 
 export interface Route {
   screen: Screen;
@@ -41,6 +45,10 @@ const STATIC_PATHS: ReadonlyArray<readonly [Screen, string]> = [
   ["admin", "/admin"],
   ["organizer", "/organizer"],
   ["moderation", "/moderation"],
+  ["about-us", "/about-us"],
+  ["terms-of-service", "/terms-of-service"],
+  ["website-terms", "/website-terms"],
+  ["refund-policy", "/refund-policy"],
 ];
 
 export const ACCOUNT_PATH = "/account";

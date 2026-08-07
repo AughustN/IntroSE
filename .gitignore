@@ -10,6 +10,8 @@
 
 # Claude
 .claude/
+.agents/
+.gemini/
 
 # Spec Kit local state (regenerable, machine-specific)
 src/.specify/feature.json

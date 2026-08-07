@@ -50,6 +50,12 @@ import Header from "./components/Header";
 import HeroVideo from "./components/HeroVideo";
 import SeatLayout from "./components/SeatLayout";
 import TicketTicket from "./components/TicketTicket";
+import Footer from "./components/Footer";
+import LegalPage from "./components/LegalPage";
+import aboutUsMd from "./content/legal/about-us.md?raw";
+import termsOfServiceMd from "./content/legal/terms-of-service.md?raw";
+import websiteTermsMd from "./content/legal/website-terms.md?raw";
+import refundPolicyMd from "./content/legal/refund-policy.md?raw";
 import { ArrowUp } from "lucide-react";
 
 type ThemeMode = "dark" | "light";
@@ -1225,34 +1231,22 @@ export default function App() {
         {activeScreen === "wallet" && <WalletPanel onBack={goHome} />}
         {activeScreen === "organizer" && <OrganizerPanel onBack={goHome} />}
         {activeScreen === "moderation" && <AdminModeration onBack={goHome} />}
+
+        {activeScreen === "about-us" && (
+          <LegalPage title="Về chúng tôi" content={aboutUsMd} onBack={goHome} />
+        )}
+        {activeScreen === "terms-of-service" && (
+          <LegalPage title="Điều khoản sử dụng" content={termsOfServiceMd} onBack={goHome} />
+        )}
+        {activeScreen === "website-terms" && (
+          <LegalPage title="Điều khoản website" content={websiteTermsMd} onBack={goHome} />
+        )}
+        {activeScreen === "refund-policy" && (
+          <LegalPage title="Chính sách hoàn vé" content={refundPolicyMd} onBack={goHome} />
+        )}
       </main>
 
-      <footer className="border-t border-beige-kem/25 bg-xanh-pho px-4 py-12 font-mono text-xs sm:px-6 lg:px-8">
-        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-6 md:flex-row">
-          <div className="space-y-1 text-center md:text-left">
-            <h5 className="font-display text-sm font-bold tracking-normal text-beige-kem">
-              TIXHUB FRONTEND MVP
-            </h5>
-            <p className="text-[10px] text-ink-soft">
-              Mock data cho vé ca nhạc, hòa nhạc, kịch và phim
-            </p>
-          </div>
-
-          <div className="flex flex-wrap justify-center gap-6 text-beige-kem/60">
-            <span className="cursor-pointer transition hover:text-ink-soft">
-              Chính sách hoàn vé
-            </span>
-            <span className="cursor-pointer transition hover:text-ink-soft">
-              Điều khoản sử dụng
-            </span>
-            <span className="cursor-pointer transition hover:text-ink-soft">Hỗ trợ email/SMS</span>
-          </div>
-
-          <p className="text-center text-[10px] text-beige-kem/40 md:text-right">
-            © 2026 TixHub Mock. Frontend only.
-          </p>
-        </div>
-      </footer>
+      <Footer onNavigate={(path) => navigate(path)} />
 
       <button
         onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
