@@ -721,7 +721,7 @@ export default function App() {
         onLoginClick={() => (userName ? setShowAccountModal(true) : setShowAuthModal(true))}
         onAdminClick={() =>
           leaveFlow(() => {
-            setActiveScreen("moderation");
+            setActiveScreen("admin");
             window.scrollTo({ top: 0, behavior: "smooth" });
           })
         }

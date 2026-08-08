@@ -53,3 +53,42 @@ export interface AuditLog {
   detail: Record<string, unknown> | null;
   createdAt: string;
 }
+
+export interface AdminCategory {
+  id: number;
+  code: string;
+  labelVi: string;
+  labelEn: string | null;
+}
+
+export interface FeaturedEvent {
+  eventId: number;
+  displayOrder: number;
+  slug: string;
+  title: string;
+  imageUrl: string | null;
+}
+
+export interface FeaturedEventInput {
+  eventId: number;
+  displayOrder: number;
+}
+
+export interface SystemSettings {
+  seat_hold_ttl_minutes: number;
+  topup_grace_minutes: number;
+  absolute_ceiling_minutes: number;
+  max_tickets_per_buyer: number;
+  wallet_topup_min: number;
+  wallet_topup_max: number;
+  wallet_balance_ceiling: number;
+  ai_features_enabled: boolean;
+}
+
+export type SystemSettingKey = keyof SystemSettings;
+
+export interface AdminValidationError {
+  error: string;
+  message: string;
+  fields?: Record<string, string>;
+}
