@@ -1060,9 +1060,24 @@ export default function App() {
   };
 
   /** Clears everything this browser remembers about the signed-in account. */
+  /**
+   * Signing out has to drop the per-account caches too, not just the identity. They key on nothing
+   * but the browser, and the mount effect reads them back unconditionally — so leaving them behind
+   * shows the next account to sign in on this machine the previous one's tickets and wishlist.
+   */
   const clearSignedInState = () => {
     setIsSignedIn(false);
     applyIdentity(null);
+    setBookingsHistory([]);
+    setWishlistedIds([]);
+    try {
+      localStorage.removeItem(BOOKINGS_CACHE_KEY);
+      LEGACY_BOOKINGS_CACHE_KEYS.forEach((key) => localStorage.removeItem(key));
+      localStorage.removeItem(WISHLIST_CACHE_KEY);
+      localStorage.removeItem(LEGACY_WISHLIST_CACHE_KEY);
+    } catch (err) {
+      console.error("Failed to clear cached account data on sign-out:", err);
+    }
   };
 
   const handleLogout = async () => {
@@ -1095,9 +1110,9 @@ export default function App() {
         onViewWallet={() => void leaveFlow(() => goTo("wallet"))}
         onHomeClick={goHome}
         onLoginClick={() => (userName ? navigate(ACCOUNT_PATH) : setShowAuthModal(true))}
-        onAdminClick={() =>
+        onOrganizerClick={() =>
           leaveFlow(() => {
-            goTo("moderation");
+            goTo("organizer");
             window.scrollTo({ top: 0, behavior: "smooth" });
           })
         }
@@ -1113,7 +1128,14 @@ export default function App() {
         onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
       />
 
-      <main className="w-full max-w-full flex-grow overflow-x-hidden">
+      {/*
+        `overflow-x-clip`, not `overflow-x-hidden`. Both stop a stray wide child from producing a
+        horizontal scrollbar, but `hidden` also makes this element a scroll container — and a scroll
+        container here is the scrollport every `position: sticky` descendant measures itself
+        against. The hero's sticky stage therefore never engaged. `clip` refuses scrolling outright,
+        so it clips without capturing the page's scroll.
+      */}
+      <main className="w-full max-w-full flex-grow overflow-x-clip">
         {activeScreen === "home" && (
           <>
             <HeroVideo

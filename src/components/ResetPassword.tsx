@@ -76,7 +76,7 @@ export default function ResetPassword({ token }: { token: string }) {
             >
               {busy ? "Đang xử lý…" : "Đặt lại mật khẩu"}
             </button>
-            <a href="/" className="block text-center font-mono text-[11px] text-beige-kem/60 transition hover:text-ink-soft">
+            <a href="/" className="block text-center font-mono text-[13px] text-beige-kem/60 transition hover:text-ink-soft">
               Quay lại
             </a>
           </form>

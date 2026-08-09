@@ -109,7 +109,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
             <p className="font-display text-5xl font-black text-burgundy-ink">
               {formatVnd(statement.balanceAmount)}
             </p>
-            <p className="font-mono text-[11px] leading-5 text-beige-kem/70">
+            <p className="font-mono text-[13px] leading-5 text-beige-kem/70">
               Mỗi lần nạp {formatVnd(limits.min)} – {formatVnd(limits.max)} · số dư tối đa{" "}
               {formatVnd(limits.balanceCap)}. Tiền vào ví bằng cách nạp qua VNPay, ra khỏi ví dưới
               dạng vé. Hoàn vé trả tiền về lại ví, không rút ra tiền mặt.
@@ -135,7 +135,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
           {statement.pending.length > 0 && (
             <section className="space-y-3 rounded-2xl border-2 border-beige-kem bg-cam-dat p-5 text-on-tint">
               <h3 className="font-display text-xl font-black">Đang chờ xác nhận</h3>
-              <p className="font-mono text-[11px] leading-5">
+              <p className="font-mono text-[13px] leading-5">
                 VNPay chưa báo về. Tiền chưa vào ví và cũng chưa mất — hệ thống tự đối soát lại sau
                 ít phút.
               </p>
@@ -166,7 +166,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
             ) : (
               <div className="overflow-x-auto rounded-2xl border-2 border-beige-kem">
                 <table className="w-full min-w-[34rem] border-collapse text-left">
-                  <thead className="bg-surface-2 font-mono text-[11px] uppercase text-ink-soft">
+                  <thead className="bg-surface-2 font-mono text-[13px] uppercase text-ink-soft">
                     <tr>
                       <th className="px-4 py-3">Thời điểm</th>
                       <th className="px-4 py-3">Loại</th>
@@ -183,7 +183,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
                         <td className="px-4 py-3">
                           {KIND_LABEL[entry.kind]}
                           {entry.eventTitle && (
-                            <span className="block text-[11px] text-ink-soft">
+                            <span className="block text-[13px] text-ink-soft">
                               {entry.eventTitle}
                             </span>
                           )}

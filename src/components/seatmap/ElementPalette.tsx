@@ -42,7 +42,7 @@ export default function ElementPalette({ onAdd }: { onAdd: (el: LayoutElement) =
   return (
     <div className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
       <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">Chi tiết không bán</h3>
-      <p className="mt-1 text-[11px] leading-4 text-beige-kem/50">
+      <p className="mt-1 text-[13px] leading-4 text-beige-kem/50">
         Không bao giờ trở thành vé: không giữ, không bán, không tính vào sức chứa.
       </p>
       <div className="mt-3 flex flex-wrap gap-2">

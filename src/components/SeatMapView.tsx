@@ -75,7 +75,7 @@ export default function SeatMapView({ showtimeId }: { showtimeId: number }) {
         seatClass={(s) => seatColor[s.status] ?? ""}
         seatLabel={label}
       />
-      <div className="mt-4 flex flex-wrap gap-4 font-mono text-[10px] text-beige-kem/50">
+      <div className="mt-4 flex flex-wrap gap-4 font-mono text-[12px] text-beige-kem/50">
         <span className="text-ink-soft">■ Còn trống</span>
         <span className="text-ink-soft">■ Đang giữ</span>
         <span className="text-beige-kem/30">■ Đã bán</span>

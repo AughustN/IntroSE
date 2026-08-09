@@ -174,7 +174,7 @@ export default function ProfileSection({ me, onSaved, onError, onDirtyChange }: 
               </p>
             ) : (
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="font-mono text-[11px] text-ink-soft">Ảnh mới chưa được lưu.</p>
+                <p className="font-mono text-[13px] text-ink-soft">Ảnh mới chưa được lưu.</p>
                 <div className="flex gap-2">
                   <button
                     type="button"
@@ -265,7 +265,7 @@ export default function ProfileSection({ me, onSaved, onError, onDirtyChange }: 
 
               <Field label="Email" value={me.email} />
             </FieldGrid>
-            <p className="mt-5 border-t border-beige-kem/25 pt-4 font-mono text-[11px] leading-5 text-beige-kem/70">
+            <p className="mt-5 border-t border-beige-kem/25 pt-4 font-mono text-[13px] leading-5 text-beige-kem/70">
               Email, hình thức đăng nhập, quyền và trạng thái tài khoản không thể tự đổi ở đây.
             </p>
             {/* Submitting with Enter should work, but the visible commit lives in the card header. */}

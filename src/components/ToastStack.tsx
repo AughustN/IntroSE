@@ -52,7 +52,7 @@ export default function ToastStack({ toasts, onDismiss }: ToastStackProps) {
             <span className={`mt-0.5 h-full w-1 shrink-0 self-stretch rounded-full ${tone.accent}`} />
 
             <div className="min-w-0 flex-1">
-              <p className="font-mono text-[10px] uppercase tracking-wider text-beige-kem/45">{tone.label}</p>
+              <p className="font-mono text-[12px] uppercase tracking-wider text-beige-kem/45">{tone.label}</p>
               <p className="mt-1 text-sm leading-5 text-beige-kem">{toast.text}</p>
             </div>
 

@@ -222,7 +222,7 @@ export default function CheckoutForm({
                     <span className="font-mono font-bold">{formatVnd(shortfall.shortfall)}</span> để
                     hoàn tất đơn này.
                   </p>
-                  <p className="font-mono text-[11px] leading-5">
+                  <p className="font-mono text-[13px] leading-5">
                     Chưa có gì được tạo ra: chưa có đơn hàng, chưa trừ tiền, chưa xuất vé. Chỗ bạn
                     giữ vẫn chạy theo đồng hồ cũ; bắt đầu nạp tiền sẽ gia hạn thêm một lần duy nhất.
                   </p>
@@ -328,12 +328,12 @@ export default function CheckoutForm({
                 {formatVnd(finalPrice)}
               </span>
             </div>
-            <div className="mt-4 rounded-xl border-2 border-beige-kem bg-la-co p-3 text-[11px] leading-5 text-on-tint">
+            <div className="mt-4 rounded-xl border-2 border-beige-kem bg-la-co p-3 text-[13px] leading-5 text-on-tint">
               <span>
                 Ví, đơn hàng và mã vé được tạo trong một giao dịch khi thanh toán thành công.
               </span>
             </div>
-            <div className="mt-3 rounded-xl border-2 border-beige-kem bg-cam-dat p-3 text-[11px] leading-5 text-on-tint">
+            <div className="mt-3 rounded-xl border-2 border-beige-kem bg-cam-dat p-3 text-[13px] leading-5 text-on-tint">
               <span>
                 Vé sẽ xuất hiện trong Vé của tôi, có thể in/tải lại/gửi lại email ở màn vé.
               </span>

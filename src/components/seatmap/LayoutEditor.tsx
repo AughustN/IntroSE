@@ -180,7 +180,7 @@ export default function LayoutEditor({ layoutId, onClose }: { layoutId: number; 
 
         {cloning && (
           <div className="rounded-xl border-2 border-beige-kem bg-surface-2 p-3">
-            <p className="mb-2 font-mono text-[11px] text-beige-kem/60">
+            <p className="mb-2 font-mono text-[13px] text-beige-kem/60">
               Nhân bản sang một địa điểm khác của bạn. Bản sao là bản nháp độc lập — không mang theo vé
               đã bán hay lượt giữ nào.
             </p>
@@ -213,7 +213,7 @@ export default function LayoutEditor({ layoutId, onClose }: { layoutId: number; 
 
         {/* Selection tools. Disabled until a selection exists so the affordance is honest. */}
         <div className="flex flex-wrap items-center gap-2 rounded-xl border-2 border-beige-kem/40 p-3">
-          <span className="font-mono text-[11px] text-beige-kem/60">Đã chọn {selectedCount} ghế</span>
+          <span className="font-mono text-[13px] text-beige-kem/60">Đã chọn {selectedCount} ghế</span>
           {(["left", "centerX", "right", "top", "centerY", "bottom"] as AlignEdge[]).map((edge) => (
             <button key={edge} disabled={selectedCount < 2} className={btn} onClick={() => op((s) => alignSeats(s, selected, edge))}>
               {edge}

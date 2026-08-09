@@ -97,10 +97,10 @@ export default function ShowtimeMapPanel({
 
       {preview && (
         <div className="rounded-xl border-2 border-beige-kem/40 p-3">
-          <p className="font-mono text-[11px] text-beige-kem/60">
+          <p className="font-mono text-[13px] text-beige-kem/60">
             {preview.changes.length} thay đổi · {preview.refusals.length} bị từ chối
           </p>
-          <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-[11px] text-beige-kem/80">
+          <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-[13px] text-beige-kem/80">
             {preview.changes.map((c, i) => (
               <li key={`c${i}`}>
                 <span className="font-bold">{KIND_LABEL[c.kind] ?? c.kind}</span> — {c.seatLabel}
@@ -113,7 +113,7 @@ export default function ShowtimeMapPanel({
             ))}
           </ul>
           {!preview.wouldSucceed && (
-            <p className="mt-2 text-[11px] text-beige-kem/60">
+            <p className="mt-2 text-[13px] text-beige-kem/60">
               Không thể áp dụng khi còn ghế bị từ chối — sơ đồ sẽ được giữ nguyên.
             </p>
           )}
@@ -121,7 +121,7 @@ export default function ShowtimeMapPanel({
       )}
 
       {/* --- Block / unblock and marquee tier assignment (FR-033, FR-034) --- */}
-      <label className="block font-mono text-[10px] text-beige-kem/60">
+      <label className="block font-mono text-[12px] text-beige-kem/60">
         Mã ghế đã chọn (cách nhau bằng dấu phẩy)
         <input
           value={selectionText}
@@ -159,7 +159,7 @@ export default function ShowtimeMapPanel({
         </button>
       </div>
 
-      <p className="text-[10px] leading-4 text-beige-kem/45">
+      <p className="text-[12px] leading-4 text-beige-kem/45">
         Ghế đã bán chỉ đổi được vị trí hiển thị; ghế đang được khách giữ thì không đổi được gì cho tới
         khi lượt giữ hết hạn. Mọi thay đổi bị từ chối sẽ giữ nguyên toàn bộ sơ đồ.
       </p>

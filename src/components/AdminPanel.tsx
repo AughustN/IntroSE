@@ -240,7 +240,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                           {event.dates.length} ngày / {event.times.length} giờ
                         </td>
                         <td className="py-4 pr-4">
-                          <span className="rounded-full border border-cam-dat/30 bg-cam-dat/10 px-2.5 py-1 font-mono text-[10px] uppercase text-cam-dat">
+                          <span className="rounded-full border border-cam-dat/30 bg-cam-dat/10 px-2.5 py-1 font-mono text-[12px] uppercase text-cam-dat">
                             {event.status}
                           </span>
                         </td>
@@ -280,7 +280,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                           {formatVnd(booking.finalPrice || booking.totalPrice)}
                         </div>
                       </div>
-                      <div className="mt-3 flex flex-wrap gap-2 font-mono text-[11px] text-beige-kem/65">
+                      <div className="mt-3 flex flex-wrap gap-2 font-mono text-[13px] text-beige-kem/65">
                         <span className="rounded border border-beige-kem/10 px-2 py-1">
                           Ghế {booking.selectedSeats.map((seat) => seat.id).join(", ")}
                         </span>
@@ -373,7 +373,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                         className="w-full rounded-t-xl bg-cam-dat"
                         style={{ height: `${height}%` }}
                       />
-                      <span className="font-mono text-[10px] text-beige-kem/45">D{index + 1}</span>
+                      <span className="font-mono text-[12px] text-beige-kem/45">D{index + 1}</span>
                     </div>
                   ))}
                 </div>
