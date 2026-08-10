@@ -4,6 +4,7 @@ import { config } from "./config.js";
 import { startHoldSweep } from "./modules/holds/sweep.js";
 import { startTopupReconciliation } from "./modules/payments/reconcile.js";
 import { attachIo } from "./realtime/io.js";
+import { startNotificationWorker } from "./modules/notifications/notifications.service.js";
 
 // Express is wrapped in a bare http.Server so Socket.IO can share the same port and origin (R-5);
 // tests keep driving `createApp()` directly through supertest.
@@ -19,4 +20,6 @@ server.listen(config.port, () => {
   // A lost IPN must not leave someone's money reading as pending forever (UC-40 A5).
   startTopupReconciliation();
   console.log("top-up reconciliation started");
+  startNotificationWorker();
+  console.warn("notification delivery worker started");
 });

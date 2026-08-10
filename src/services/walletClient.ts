@@ -129,4 +129,6 @@ export const walletClient = {
 
   checkout: (reservationId: number): Promise<CheckoutOrder> =>
     call("/checkout", { method: "POST", body: { reservationId } }),
+  resendTicket: (orderId: number): Promise<{ ok: true }> =>
+    call(`/orders/${orderId}/resend`, { method: "POST" }),
 };

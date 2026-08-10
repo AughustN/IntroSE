@@ -10,6 +10,7 @@ import { adminRouter } from "./modules/admin/admin.routes.js";
 import { reservationsRouter } from "./modules/holds/reservations.routes.js";
 import { seatmapRouter } from "./modules/seatmap/seatmap.routes.js";
 import { walletRouter } from "./modules/payments/wallet.routes.js";
+import { notificationRouter } from "./modules/notifications/notifications.routes.js";
 
 /** Build the Express app (no listen) so tests can drive it with supertest. */
 export function createApp(): Express {
@@ -41,6 +42,7 @@ export function createApp(): Express {
   app.use("/api", authRouter);
   app.use("/api", catalogPublicRouter);
   app.use("/api", walletRouter);
+  app.use("/api", notificationRouter);
   // `reservationsRouter` has a router-wide auth guard. Mount wallet first so the
   // public, signature-verified VNPay IPN callback can reach its handler.
   app.use("/api", reservationsRouter);

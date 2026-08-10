@@ -4,6 +4,10 @@ import type { Db } from "../../db/pool.js";
 import { pool, withTransaction } from "../../db/pool.js";
 import { err } from "../../http.js";
 import { broadcastSeatUpdate } from "../../realtime/io.js";
+import {
+  processPendingNotifications,
+  queueOrderConfirmation,
+} from "../notifications/notifications.service.js";
 
 export interface WalletView {
   balanceAmount: number;
@@ -513,6 +517,7 @@ export async function checkout(userId: number, reservationId: number): Promise<O
          FROM ticket_tiers WHERE id = ANY($1::bigint[])`,
       [tierIds],
     );
+    await queueOrderConfirmation(client, order.id);
     return { order: orderView, soldSeatIds, tiers: tiers.rows };
   });
   if (outcome.soldSeatIds.length > 0) {
@@ -527,6 +532,7 @@ export async function checkout(userId: number, reservationId: number): Promise<O
       tier: { ticketTierId: tier.id, remaining: tier.remaining },
     });
   }
+  void processPendingNotifications();
   return outcome.order;
 }
 

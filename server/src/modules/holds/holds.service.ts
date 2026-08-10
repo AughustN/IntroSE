@@ -4,6 +4,7 @@ import { err } from "../../http.js";
 import { broadcastSeatUpdate } from "../../realtime/io.js";
 import { getSettings } from "../admin/settings.service.js";
 import * as repo from "./holds.repo.js";
+import { notifyWaitlistForShowtime } from "../notifications/notifications.service.js";
 
 /**
  * Seat holds (feature 003). Every path here obeys four rules:
@@ -22,7 +23,8 @@ export interface HoldResult {
   created: boolean;
 }
 
-const ttlFrom = (createdAt: Date, minutes: number): Date => new Date(createdAt.getTime() + minutes * 60 * 1000);
+const ttlFrom = (createdAt: Date, minutes: number): Date =>
+  new Date(createdAt.getTime() + minutes * 60 * 1000);
 
 /** Load the caller's reservation as the API returns it. */
 async function view(reservationId: number): Promise<Reservation> {
@@ -124,7 +126,12 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
       }
 
       if (!reservation) {
-        reservation = await repo.createReservation(client, userId, body.showtimeId, ttlFrom(now, settings.seat_hold_ttl_minutes));
+        reservation = await repo.createReservation(
+          client,
+          userId,
+          body.showtimeId,
+          ttlFrom(now, settings.seat_hold_ttl_minutes),
+        );
       }
 
       const freshIds = fresh.map((s) => s.id);
@@ -159,7 +166,12 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
     }
 
     if (!reservation) {
-      reservation = await repo.createReservation(client, userId, body.showtimeId, ttlFrom(now, settings.seat_hold_ttl_minutes));
+      reservation = await repo.createReservation(
+        client,
+        userId,
+        body.showtimeId,
+        ttlFrom(now, settings.seat_hold_ttl_minutes),
+      );
     }
     await repo.bumpReserved(client, tier.id, selection.quantity);
     await repo.upsertGaItem(client, reservation.id, tier.id, selection.quantity, tier.price_amount);
@@ -255,7 +267,7 @@ export async function releaseEverything(
   reservation: repo.ReservationRow,
   status: "cancelled" | "expired",
 ): Promise<SeatUpdate[]> {
-  return withTransaction(async (client) => {
+  const updates = await withTransaction(async (client) => {
     const locked = await repo.findReservation(client, reservation.id, true);
     if (!locked || locked.status !== "active") return []; // someone got there first (or 004 converted it)
 
@@ -286,6 +298,8 @@ export async function releaseEverything(
     }
     return updates;
   });
+  if (updates.length > 0) await notifyWaitlistForShowtime(reservation.showtime_id);
+  return updates;
 }
 
 // ---- One-time top-up grace (FR-010) ---------------------------------------
