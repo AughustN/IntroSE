@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { MoreHorizontal, Search, Ticket, X } from "lucide-react";
+import { MoonStar, MoreHorizontal, Search, Sun, Ticket, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { DEFAULT_AVATAR_FG, avatarColor } from "../services/defaultAvatar";
 import { useDismiss } from "../hooks/useDismiss";
@@ -166,9 +166,38 @@ function StubCell({ label, onClick }: { label: string; onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="menu-stub-cell truncate px-1 text-[9px] font-bold uppercase tracking-[0.1em] text-ink-soft transition hover:text-beige-kem"
+      className="menu-stub-cell truncate px-1 text-[13px] font-bold uppercase tracking-[0.1em] text-ink-soft transition hover:text-beige-kem"
     >
       {label}
+    </button>
+  );
+}
+
+/**
+ * The one stub cell that is a symbol rather than a word.
+ *
+ * It keeps `menu-stub-cell` so it still takes an equal share of the stub and still draws the
+ * hairline that separates it from its neighbour. `title` and `aria-label` carry the name the other
+ * cells print, since a sun on its own does not say which way it is about to switch.
+ */
+function StubIconCell({
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  icon: typeof Search;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className="menu-stub-cell is-icon grid place-items-center px-2.5 text-ink-soft transition hover:text-beige-kem"
+    >
+      <Icon className="h-[15px] w-[15px]" strokeWidth={2} />
     </button>
   );
 }
@@ -187,7 +216,7 @@ function PanelLink({
     <button
       type="button"
       onClick={onClick}
-      className="overflow-clip px-1 py-1 text-left text-[11px] font-bold uppercase tracking-[0.14em] text-ink-soft transition-colors hover:text-beige-kem"
+      className="overflow-clip px-1 py-1 text-left text-[13px] font-bold uppercase tracking-[0.14em] text-ink-soft transition-colors hover:text-beige-kem"
     >
       <span data-a="y" style={rowDelay(LINK_DELAY(index))} className="block">
         {label}
@@ -205,7 +234,8 @@ interface HeaderProps {
   onViewWallet: () => void;
   onHomeClick: () => void;
   onLoginClick: () => void;
-  onAdminClick: () => void;
+  /** The organiser's own event list, `/organizer`. */
+  onOrganizerClick: () => void;
   /** The catalog on its own page, `/events`. */
   onBrowse: () => void;
   onViewGuide: () => void;
@@ -235,7 +265,7 @@ export default function Header({
   onViewWallet,
   onHomeClick,
   onLoginClick,
-  onAdminClick,
+  onOrganizerClick,
   onBrowse,
   onViewGuide,
   onViewAbout,
@@ -328,7 +358,7 @@ export default function Header({
           <span className="block font-display text-3xl font-black tracking-normal text-beige-kem sm:text-4xl">
             TixHub
           </span>
-          <span className="mt-0.5 hidden text-[9px] font-semibold uppercase tracking-[0.22em] text-ink-soft sm:block">
+          <span className="mt-0.5 hidden text-[13px] font-semibold uppercase tracking-[0.22em] text-ink-soft sm:block">
             Music / Stage / Film
           </span>
         </button>
@@ -400,11 +430,6 @@ export default function Header({
                 <MenuRow label="Về chúng tôi" onClick={runCentre(onViewGuide)} />
                 <MenuRow label="Điều khoản" onClick={runCentre(onViewAbout)} />
                 <MenuRow label="Hoàn vé" onClick={runCentre(onViewPolicy)} />
-                <div className="mx-4 my-1 h-px bg-beige-kem/25" />
-                <MenuRow
-                  label={theme === "dark" ? "Giao diện sáng" : "Giao diện tối"}
-                  onClick={runCentre(onToggleTheme)}
-                />
               </div>
             </div>
           )}
@@ -418,9 +443,19 @@ export default function Header({
              */}
             <div className="nav-surface menu-ticket-group ticket-corners h-[66px]">
               <div className="hidden w-60 flex-col justify-center gap-1 px-3 md:flex">
+                {/*
+                  Signed in, the identity line is the way to your own page — the face and the name
+                  are what a reader already reads as "me", so making them the control removes a step
+                  and a duplicate label. Signed out there is nobody to open, so "Khách" stays inert.
+                */}
                 <div className="flex items-center gap-2">
                   {userName ? (
-                    <>
+                    <button
+                      type="button"
+                      onClick={run(onLoginClick)}
+                      title="Tài khoản"
+                      className="flex min-w-0 items-center gap-2 text-left transition hover:opacity-70"
+                    >
                       <AccountAvatar
                         userName={userName}
                         userEmail={userEmail}
@@ -430,7 +465,7 @@ export default function Header({
                       <span className="truncate text-[13px] font-bold uppercase tracking-[0.04em] text-beige-kem">
                         {userName}
                       </span>
-                    </>
+                    </button>
                   ) : (
                     <span className="label-eyebrow text-ink-soft">Khách</span>
                   )}
@@ -438,17 +473,31 @@ export default function Header({
 
                 <div className="menu-stub-rule" />
 
+                {/*
+                  The theme switch lives here in both states, not only where "Tài khoản" used to be,
+                  because it is now the only one on the page — the overflow menu's row is gone. The
+                  account page itself is still reachable from the panel below.
+                */}
                 <div className="flex items-center">
                   {userName ? (
                     <>
                       <StubCell label="Vé" onClick={run(onViewHistory)} />
                       <StubCell label="Ví" onClick={run(onViewWallet)} />
-                      <StubCell label="Tài khoản" onClick={run(onLoginClick)} />
+                      <StubIconCell
+                        icon={theme === "dark" ? Sun : MoonStar}
+                        label={theme === "dark" ? "Giao diện sáng" : "Giao diện tối"}
+                        onClick={onToggleTheme}
+                      />
                     </>
                   ) : (
                     <>
                       <StubCell label="Vé" onClick={run(onViewHistory)} />
                       <StubCell label="Đăng nhập" onClick={run(onLoginClick)} />
+                      <StubIconCell
+                        icon={theme === "dark" ? Sun : MoonStar}
+                        label={theme === "dark" ? "Giao diện sáng" : "Giao diện tối"}
+                        onClick={onToggleTheme}
+                      />
                     </>
                   )}
                 </div>
@@ -531,7 +580,11 @@ export default function Header({
                       <>
                         <PanelLink label="Ví TixHub" index={1} onClick={run(onViewWallet)} />
                         <PanelLink label="Tài khoản" index={2} onClick={run(onLoginClick)} />
-                        <PanelLink label="Trang quản trị" index={3} onClick={run(onAdminClick)} />
+                        <PanelLink
+                          label="Quản lý sự kiện"
+                          index={3}
+                          onClick={run(onOrganizerClick)}
+                        />
                       </>
                     ) : (
                       <PanelLink label="Đăng nhập" index={1} onClick={run(onLoginClick)} />

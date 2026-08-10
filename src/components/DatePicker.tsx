@@ -259,7 +259,7 @@ export default function DatePicker({ label, value, available, onChange }: DatePi
               {WEEKDAYS.map((w) => (
                 <span
                   key={w}
-                  className="grid h-6 place-items-center font-mono text-[10px] text-ink-soft"
+                  className="grid h-6 place-items-center font-mono text-[12px] text-ink-soft"
                 >
                   {w}
                 </span>
@@ -307,7 +307,7 @@ export default function DatePicker({ label, value, available, onChange }: DatePi
               })}
             </div>
 
-            <p className="mt-3 px-4 font-mono text-[10px] leading-4 text-ink-soft">
+            <p className="mt-3 px-4 font-mono text-[12px] leading-4 text-ink-soft">
               {anchor
                 ? "Chọn ngày thứ hai để lấy cả khoảng."
                 : "Bấm một ngày, rồi bấm ngày nữa để chọn khoảng."}

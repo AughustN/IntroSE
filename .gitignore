@@ -25,8 +25,9 @@ src/.specify/integrations/
 # Junction at the repo root pointing at src/.specify (lets Claude Code load
 # speckit skills from g:\IntroSE). Machine-local, not a real directory.
 /.specify
-# Assembled submission bundle (a copy of the repo — regenerable)
+# Assembled submission bundles (a copy of the repo — regenerable)
 PA3-Group02/
+PA4-Group02/
 
 node_modules/
 dist/

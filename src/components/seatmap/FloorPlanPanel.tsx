@@ -65,35 +65,35 @@ export default function FloorPlanPanel({
           const file = e.target.files?.[0];
           if (file) void run(() => layoutApi.uploadPlan(layoutId, file));
         }}
-        className="mt-2 w-full text-[11px] text-beige-kem/70"
+        className="mt-2 w-full text-[13px] text-beige-kem/70"
       />
 
-      {error && <p className="mt-2 text-[11px] text-on-tint">{error}</p>}
+      {error && <p className="mt-2 text-[13px] text-on-tint">{error}</p>}
 
       {plan.url && (
         <>
-          <label className="mt-3 block font-mono text-[10px] text-beige-kem/60">
+          <label className="mt-3 block font-mono text-[12px] text-beige-kem/60">
             Tỉ lệ {plan.scale}‰
             <input type="range" min={100} max={3000} step={50} value={plan.scale} disabled={busy}
               onChange={(e) => align({ scale: Number(e.target.value) })} className="w-full" />
           </label>
-          <label className="block font-mono text-[10px] text-beige-kem/60">
+          <label className="block font-mono text-[12px] text-beige-kem/60">
             Lệch ngang {plan.offsetX}
             <input type="range" min={-5000} max={5000} step={50} value={plan.offsetX} disabled={busy}
               onChange={(e) => align({ offsetX: Number(e.target.value) })} className="w-full" />
           </label>
-          <label className="block font-mono text-[10px] text-beige-kem/60">
+          <label className="block font-mono text-[12px] text-beige-kem/60">
             Lệch dọc {plan.offsetY}
             <input type="range" min={-5000} max={5000} step={50} value={plan.offsetY} disabled={busy}
               onChange={(e) => align({ offsetY: Number(e.target.value) })} className="w-full" />
           </label>
-          <label className="block font-mono text-[10px] text-beige-kem/60">
+          <label className="block font-mono text-[12px] text-beige-kem/60">
             Độ mờ {plan.opacity}%
             <input type="range" min={0} max={100} step={5} value={plan.opacity} disabled={busy}
               onChange={(e) => align({ opacity: Number(e.target.value) })} className="w-full" />
           </label>
 
-          <label className="mt-3 flex items-center gap-2 text-[11px] text-beige-kem/80">
+          <label className="mt-3 flex items-center gap-2 text-[13px] text-beige-kem/80">
             <input type="checkbox" checked={plan.visibleToBuyers} disabled={busy}
               onChange={(e) => align({ visibleToBuyers: e.target.checked })} />
             Cho người mua xem bản vẽ
@@ -101,7 +101,7 @@ export default function FloorPlanPanel({
 
           {/* Said plainly at upload time rather than discovered later: the toggle governs display,
               not reachability. The file sits at an unguessable URL with no access check (FR-026a). */}
-          <p className="mt-2 text-[10px] leading-4 text-beige-kem/45">
+          <p className="mt-2 text-[12px] leading-4 text-beige-kem/45">
             Ảnh được lưu ở một đường dẫn ngẫu nhiên. Bất kỳ ai có đường dẫn đều mở được, kể cả khi tuỳ
             chọn trên đang tắt — tuỳ chọn chỉ quyết định việc hiển thị trên sơ đồ.
           </p>

@@ -123,7 +123,7 @@ export default function SeatMapBuilder({
               </span>
               <div className="flex items-center gap-2">
                 {st.hasSeatMap && (
-                  <span className="rounded-lg border-2 border-beige-kem bg-la-co px-2 py-0.5 font-mono text-[10px] text-on-tint">
+                  <span className="rounded-lg border-2 border-beige-kem bg-la-co px-2 py-0.5 font-mono text-[12px] text-on-tint">
                     Đã có sơ đồ ghế
                   </span>
                 )}
@@ -212,7 +212,7 @@ export default function SeatMapBuilder({
                         <div key={s.id} className="flex items-center gap-3">
                           <span className="w-40 text-sm">
                             {s.name}{" "}
-                            <span className="font-mono text-[10px] text-beige-kem/40">
+                            <span className="font-mono text-[12px] text-beige-kem/40">
                               ({s.seatCount} ghế)
                             </span>
                           </span>

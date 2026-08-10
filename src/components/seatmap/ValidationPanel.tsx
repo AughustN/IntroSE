@@ -34,10 +34,10 @@ export default function ValidationPanel({ issues }: { issues: ValidationIssue[] 
             {/* Message is plain text from the shared validator — React escapes it (SEC-07). */}
             <span className="font-bold">{issue.message}</span>
             {issue.seatIds && issue.seatIds.length > 0 && (
-              <span className="ml-1 font-mono text-[10px] text-beige-kem/50">(ghế #{issue.seatIds.join(", #")})</span>
+              <span className="ml-1 font-mono text-[12px] text-beige-kem/50">(ghế #{issue.seatIds.join(", #")})</span>
             )}
             {issue.sectionIds && issue.sectionIds.length > 0 && (
-              <span className="ml-1 font-mono text-[10px] text-beige-kem/50">(khu vực #{issue.sectionIds.join(", #")})</span>
+              <span className="ml-1 font-mono text-[12px] text-beige-kem/50">(khu vực #{issue.sectionIds.join(", #")})</span>
             )}
           </li>
         ))}

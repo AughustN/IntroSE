@@ -8,6 +8,13 @@ Principle VI).
 
 ### Identity & roles
 
+**Account**:
+The single registered identity a person signs in as — the thing Attendee/Organizer/Admin are
+capabilities *of*. One account, one set of credentials, one wallet. The table backing it is named
+`users` for historical reasons; the word "user" is not the domain term and should not spread from the
+schema into prose, API shapes, or UI copy.
+_Avoid_: user, profile (a profile is the editable subset of an account).
+
 **Nickname**:
 The display handle a user chooses and the UI shows (e.g. "Anh"). Not a legal name. The single
 canonical name for this field from the database column through the API to the UI.

@@ -267,7 +267,7 @@ export default function AccountPage({
           </h2>
           <button
             onClick={requestClose}
-            className="grid h-10 place-items-center rounded-xl border-2 border-beige-kem px-4 font-mono text-[11px] font-bold uppercase text-beige-kem/80 transition hover:text-beige-kem"
+            className="grid h-10 place-items-center rounded-xl border-2 border-beige-kem px-4 font-mono text-[13px] font-bold uppercase text-beige-kem/80 transition hover:text-beige-kem"
           >
             ← Quay lại
           </button>
@@ -304,7 +304,7 @@ export default function AccountPage({
             */}
             <div className="mb-3 border-b border-beige-kem/25 px-2 pb-3">
               <p className="font-display text-2xl font-black leading-none text-beige-kem">TixHub</p>
-              <p className="mt-1.5 text-[9px] font-semibold uppercase tracking-[0.22em] text-ink-soft">
+              <p className="mt-1.5 text-[13px] font-semibold uppercase tracking-[0.22em] text-ink-soft">
                 Music / Stage / Film
               </p>
             </div>
@@ -363,7 +363,7 @@ export default function AccountPage({
                   <p className="truncate text-xs font-bold text-beige-kem">
                     {me?.nickname || me?.email || "Đang tải…"}
                   </p>
-                  <p className="truncate font-mono text-[10px] text-beige-kem/70">
+                  <p className="truncate font-mono text-[12px] text-beige-kem/70">
                     {me?.email ?? "…"}
                   </p>
                 </div>

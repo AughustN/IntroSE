@@ -55,7 +55,7 @@ function Chip({ label, active, onClick }: { label: string; active: boolean; onCl
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.1em] transition ${
+      className={`px-3 py-1.5 font-mono text-[13px] uppercase tracking-[0.1em] transition ${
         active
           ? "bg-beige-kem text-xanh-pho"
           : "text-ink-soft hover:bg-bubblegum/40 hover:text-beige-kem"
@@ -97,7 +97,7 @@ export default function EventFilters({
               onClick={() => onCategoryChange(cat.id)}
             />
           ))}
-          <span className="ml-auto font-mono text-[11px] text-ink-soft">
+          <span className="ml-auto font-mono text-[13px] text-ink-soft">
             Đã lưu {wishlistCount}
           </span>
         </div>

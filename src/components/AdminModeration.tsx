@@ -55,7 +55,7 @@ export default function AdminModeration({ onBack }: { onBack: () => void }) {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="font-display text-xl font-bold">{e.title}</div>
-                <div className="font-mono text-[11px] text-beige-kem/50">Tổ chức: {e.organizer} · {e.slug}</div>
+                <div className="font-mono text-[13px] text-beige-kem/50">Tổ chức: {e.organizer} · {e.slug}</div>
               </div>
               <div className="flex gap-2">
                 <button

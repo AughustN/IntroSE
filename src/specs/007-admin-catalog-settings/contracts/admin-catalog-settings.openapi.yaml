@@ -1,0 +1,229 @@
+openapi: 3.0.3
+info:
+  title: TixHub Admin Catalog and Settings API
+  version: 1.0.0
+  description: Admin-only category, homepage curation, and operating settings contract.
+servers:
+  - url: /api/admin
+security:
+  - cookieAuth: []
+tags:
+  - name: Categories
+  - name: Homepage
+  - name: Settings
+paths:
+  /categories:
+    get:
+      tags: [Categories]
+      summary: List event categories
+      responses:
+        '200':
+          description: Categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Category'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Categories]
+      summary: Create category
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CategoryInput' }
+      responses:
+        '201':
+          description: Created category
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /categories/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      tags: [Categories]
+      summary: Rename category
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CategoryInput' }
+      responses:
+        '200':
+          description: Updated category
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Categories]
+      summary: Delete unused category
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /homepage/featured:
+    get:
+      tags: [Homepage]
+      summary: List featured events in display order
+      responses:
+        '200':
+          description: Featured events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FeaturedEvent'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [Homepage]
+      summary: Replace featured event list and order atomically
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [events]
+              properties:
+                events:
+                  type: array
+                  maxItems: 50
+                  items: { $ref: '#/components/schemas/FeaturedEventInput' }
+      responses:
+        '200':
+          description: Current featured list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/FeaturedEvent' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /settings:
+    get:
+      tags: [Settings]
+      summary: Read effective operating settings
+      responses:
+        '200':
+          description: Effective settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [Settings]
+      summary: Replace operating settings atomically
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SystemSettings' }
+      responses:
+        '200':
+          description: Updated effective settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemSettings' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: tix_refresh
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+  schemas:
+    Category:
+      type: object
+      required: [id, code, labelVi, labelEn]
+      properties:
+        id: { type: integer }
+        code: { type: string }
+        labelVi: { type: string }
+        labelEn: { type: string, nullable: true }
+    CategoryInput:
+      type: object
+      required: [labelVi]
+      additionalProperties: false
+      properties:
+        labelVi: { type: string, minLength: 1, maxLength: 120 }
+        labelEn: { type: string, maxLength: 120, nullable: true }
+    FeaturedEvent:
+      type: object
+      required: [eventId, displayOrder, slug, title, imageUrl]
+      properties:
+        eventId: { type: integer }
+        displayOrder: { type: integer, minimum: 0 }
+        slug: { type: string }
+        title: { type: string }
+        imageUrl: { type: string, nullable: true }
+    FeaturedEventInput:
+      type: object
+      required: [eventId, displayOrder]
+      additionalProperties: false
+      properties:
+        eventId: { type: integer, minimum: 1 }
+        displayOrder: { type: integer, minimum: 0 }
+    SystemSettings:
+      type: object
+      required: [seat_hold_ttl_minutes, topup_grace_minutes, absolute_ceiling_minutes, max_tickets_per_buyer, wallet_topup_min, wallet_topup_max, wallet_balance_ceiling, ai_features_enabled]
+      additionalProperties: false
+      properties:
+        seat_hold_ttl_minutes: { type: integer, minimum: 1, maximum: 30, default: 7 }
+        topup_grace_minutes: { type: integer, minimum: 1, maximum: 15, default: 7 }
+        absolute_ceiling_minutes: { type: integer, minimum: 2, maximum: 30, default: 14 }
+        max_tickets_per_buyer: { type: integer, minimum: 1, maximum: 50, default: 8 }
+        wallet_topup_min: { type: integer, minimum: 0, default: 5000 }
+        wallet_topup_max: { type: integer, minimum: 0, default: 10000000 }
+        wallet_balance_ceiling: { type: integer, minimum: 0, default: 20000000 }
+        ai_features_enabled: { type: boolean, default: true }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        message: { type: string }
+        fields: { type: object, additionalProperties: true }
+  responses:
+    Unauthorized:
+      description: Authentication required
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Forbidden:
+      description: Admin role required
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    ValidationError:
+      description: Request validation failed
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Conflict:
+      description: State or uniqueness conflict
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    NotFound:
+      description: Resource not found
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }

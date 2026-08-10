@@ -91,7 +91,7 @@ export default function BookingHistory({
                 </div>
 
                 <div className="flex items-baseline md:flex-col md:items-end justify-between border-t md:border-t-0 border-beige-kem/25 pt-3 md:pt-0">
-                  <span className="text-[10px] font-mono text-ink-soft uppercase tracking-wider block">Tổng tiền</span>
+                  <span className="text-[12px] font-mono text-ink-soft uppercase tracking-wider block">Tổng tiền</span>
                   <span className="font-display text-lg font-bold text-beige-kem font-mono mt-0.5">
                     {formatVnd(b.finalPrice || b.totalPrice)}
                   </span>

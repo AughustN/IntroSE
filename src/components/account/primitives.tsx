@@ -94,7 +94,7 @@ export function Field({
   const empty = value === null || value === undefined || value === "";
   return (
     <div className={full ? "sm:col-span-2 lg:col-span-3" : undefined}>
-      <p className="font-mono text-[11px] uppercase tracking-wide text-beige-kem/70">{label}</p>
+      <p className="font-mono text-[13px] uppercase tracking-wide text-beige-kem/70">{label}</p>
       <div
         className={`mt-1.5 break-words text-[15px] font-medium ${empty ? "text-beige-kem/70" : "text-beige-kem"}`}
       >
@@ -124,13 +124,13 @@ export function FormField({
     <div className={full ? "sm:col-span-2 lg:col-span-3" : undefined}>
       <label
         htmlFor={htmlFor}
-        className="block font-mono text-[11px] uppercase tracking-wide text-beige-kem/70"
+        className="block font-mono text-[13px] uppercase tracking-wide text-beige-kem/70"
       >
         {label}
       </label>
       <div className="mt-1.5">{children}</div>
       {hint && !error && (
-        <p className="mt-1.5 font-mono text-[11px] leading-5 text-beige-kem/70">{hint}</p>
+        <p className="mt-1.5 font-mono text-[13px] leading-5 text-beige-kem/70">{hint}</p>
       )}
       {error && (
         <p
@@ -227,7 +227,7 @@ export function Badge({
         : "border-beige-kem/25 bg-surface-2 text-beige-kem/80";
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[11px] font-bold uppercase ${toneClass}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[13px] font-bold uppercase ${toneClass}`}
     >
       {icon}
       {children}

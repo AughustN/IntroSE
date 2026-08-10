@@ -180,7 +180,7 @@ export default function SeatLayout({
       </div>
 
       {loadError && (
-        <div className="rounded-xl border-2 border-beige-kem bg-bubblegum px-4 py-3 font-mono text-[11px] leading-5 text-on-tint">
+        <div className="rounded-xl border-2 border-beige-kem bg-bubblegum px-4 py-3 font-mono text-[13px] leading-5 text-on-tint">
           {loadError}
         </div>
       )}
@@ -189,7 +189,7 @@ export default function SeatLayout({
         {/* Left column: the real seat map for this showtime */}
         <div className="lg:col-span-8 bg-xanh-pho border-2 border-beige-kem rounded-2xl p-6 sm:p-10 flex flex-col items-center">
           <div className="relative w-full max-w-lg mb-12 text-center">
-            <h4 className="text-[10px] font-mono tracking-widest text-ink-soft uppercase mb-2">
+            <h4 className="text-[12px] font-mono tracking-widest text-ink-soft uppercase mb-2">
               SÂN KHẤU
             </h4>
             <div className="relative h-4 bg-gradient-to-t from-beige-kem/40 to-transparent border-t-2 border-beige-kem/75 rounded-[100%] filter blur-[1px]" />
@@ -321,7 +321,7 @@ export default function SeatLayout({
                       <button
                         onClick={() => onToggleSeat(seat)}
                         disabled={busy}
-                        className="font-mono text-[10px] uppercase text-stone-500 transition hover:text-burgundy-ink disabled:opacity-40 cursor-pointer"
+                        className="font-mono text-[12px] uppercase text-stone-500 transition hover:text-burgundy-ink disabled:opacity-40 cursor-pointer"
                         title="Bỏ giữ ghế này"
                       >
                         Xóa
@@ -340,7 +340,7 @@ export default function SeatLayout({
                 {formatVnd(totalPrice)}
               </span>
             </div>
-            <p className="text-[10px] text-right font-mono text-ink-soft tracking-wide">
+            <p className="text-[12px] text-right font-mono text-ink-soft tracking-wide">
               Đã bao gồm thuế giá trị gia tăng và phụ thu
             </p>
           </div>

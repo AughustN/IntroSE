@@ -142,7 +142,7 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
           </div>
           <button
             onClick={onClose}
-            className="grid h-10 place-items-center rounded-xl border-2 border-beige-kem px-3 font-mono text-[11px] font-bold uppercase text-beige-kem/70 transition hover:text-beige-kem"
+            className="grid h-10 place-items-center rounded-xl border-2 border-beige-kem px-3 font-mono text-[13px] font-bold uppercase text-beige-kem/70 transition hover:text-beige-kem"
             title="Đóng"
           >
             Đóng
@@ -221,14 +221,14 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
             <button
               type="button"
               onClick={handleForgot}
-              className="block w-full text-center font-mono text-[11px] text-beige-kem/60 transition hover:text-ink-soft"
+              className="block w-full text-center font-mono text-[13px] text-beige-kem/60 transition hover:text-ink-soft"
             >
               Quên mật khẩu?
             </button>
           )}
         </form>
 
-        <div className="my-5 flex items-center gap-3 text-[10px] uppercase tracking-normal text-ink-soft">
+        <div className="my-5 flex items-center gap-3 text-[12px] uppercase tracking-normal text-ink-soft">
           <span className="h-px flex-1 bg-beige-kem/30" />
           Hoặc
           <span className="h-px flex-1 bg-beige-kem/30" />

@@ -345,7 +345,7 @@ export default function EventDetail({
             <div className="absolute inset-0 bg-gradient-to-t from-xanh-pho/90 via-transparent to-transparent" />
             <button
               onClick={() => onToggleWishlist(event.id)}
-              className="absolute right-4 top-4 inline-flex h-10 items-center justify-center rounded-full border border-white/25 bg-black/35 px-3 text-[10px] font-bold uppercase text-white transition hover:bg-white hover:text-xanh-pho"
+              className="absolute right-4 top-4 inline-flex h-10 items-center justify-center rounded-full border border-white/25 bg-black/35 px-3 text-[12px] font-bold uppercase text-white transition hover:bg-white hover:text-xanh-pho"
               title="Wishlist hoặc nhắc lịch"
             >
               {isWishlisted ? "Đã lưu" : "Lưu"}
@@ -431,7 +431,7 @@ export default function EventDetail({
                       <span className="block font-mono text-sm font-bold">
                         {formatEventDate(slot.date, true)} · {slot.time}
                       </span>
-                      <span className="mt-0.5 block font-mono text-[11px] opacity-70">
+                      <span className="mt-0.5 block font-mono text-[13px] opacity-70">
                         {slot.venue}
                         {slot.soldOut ? " · Hết vé" : ""}
                       </span>
@@ -447,7 +447,7 @@ export default function EventDetail({
               <h3 className="mb-1 font-display text-xl font-black text-beige-kem">
                 Tình trạng ghế
               </h3>
-              <p className="mb-4 font-mono text-[11px] text-beige-kem/50">
+              <p className="mb-4 font-mono text-[13px] text-beige-kem/50">
                 Xem trước chỗ còn trống của suất đã chọn. Chọn ghế ở bước sau.
               </p>
               <SeatMapView showtimeId={selectedSlot.showtimeId} />
@@ -460,7 +460,7 @@ export default function EventDetail({
               <span className="font-mono text-xs text-ink-soft">02 · </span>
               {isSeated ? "Hạng vé đang bán" : "Chọn số lượng vé"}
             </h3>
-            <p className="mb-4 font-mono text-[11px] text-beige-kem/50">
+            <p className="mb-4 font-mono text-[13px] text-beige-kem/50">
               {isSeated
                 ? "Sự kiện có ghế ngồi — giá theo hạng ghế, chọn vị trí ở bước sau."
                 : "Sự kiện vé tự do, không có sơ đồ ghế. Chọn số lượng cho từng hạng vé."}
@@ -476,7 +476,7 @@ export default function EventDetail({
                         {tier.label}
                       </span>
                       {tier.badge && (
-                        <span className="rounded-full border-2 border-beige-kem bg-cam-dat px-2 py-0.5 font-mono text-[10px] font-bold text-on-tint">
+                        <span className="rounded-full border-2 border-beige-kem bg-cam-dat px-2 py-0.5 font-mono text-[12px] font-bold text-on-tint">
                           {tier.badge}
                         </span>
                       )}
@@ -505,7 +505,7 @@ export default function EventDetail({
                             {tier.label}
                           </span>
                           {tier.badge && (
-                            <span className="rounded-full border-2 border-beige-kem bg-cam-dat px-2 py-0.5 font-mono text-[10px] font-bold text-on-tint">
+                            <span className="rounded-full border-2 border-beige-kem bg-cam-dat px-2 py-0.5 font-mono text-[12px] font-bold text-on-tint">
                               {tier.badge}
                             </span>
                           )}
@@ -518,7 +518,7 @@ export default function EventDetail({
                             {tier.description}
                           </p>
                         )}
-                        <p className="mt-2 font-mono text-[11px] text-beige-kem/55">
+                        <p className="mt-2 font-mono text-[13px] text-beige-kem/55">
                           {remainingOf(tier) === null || remainingOf(tier) === undefined
                             ? "Còn vé"
                             : soldOut
@@ -602,7 +602,7 @@ export default function EventDetail({
                   {primaryLabel}
                 </button>
                 {!isSignedIn && !eventUnavailable && (
-                  <p className="font-mono text-[11px] text-beige-kem/50">
+                  <p className="font-mono text-[13px] text-beige-kem/50">
                     {isSeated ? "Cần đăng nhập để chọn ghế" : "Cần đăng nhập để thanh toán"}
                   </p>
                 )}
@@ -632,7 +632,7 @@ export default function EventDetail({
                       <span className="line-clamp-2 font-display text-base font-bold text-beige-kem">
                         {related.title}
                       </span>
-                      <span className="mt-1 block font-mono text-[11px] text-ink-soft">
+                      <span className="mt-1 block font-mono text-[13px] text-ink-soft">
                         {formatVnd(related.price)}
                       </span>
                     </span>

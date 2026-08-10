@@ -138,7 +138,7 @@ export default function Footer({ onNavigate, onSubscribe }: FooterProps) {
               </div>
             </form>
 
-            {!onSubscribe && <p className="mt-2 font-mono text-[11px] text-ink-soft">Sắp mở.</p>}
+            {!onSubscribe && <p className="mt-2 font-mono text-[13px] text-ink-soft">Sắp mở.</p>}
           </div>
         </div>
 
@@ -160,7 +160,7 @@ export default function Footer({ onNavigate, onSubscribe }: FooterProps) {
           </button>
         </div>
 
-        <div className="mt-10 flex flex-col gap-3 border-t border-beige-kem/25 pt-6 font-mono text-[11px] text-ink-soft sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-10 flex flex-col gap-3 border-t border-beige-kem/25 pt-6 font-mono text-[13px] text-ink-soft sm:flex-row sm:items-center sm:justify-between">
           <p>© 2026 TixHub</p>
           {/*
            * One legal link, not Doron's four. Privacy, terms, disclaimer and refunds all live on

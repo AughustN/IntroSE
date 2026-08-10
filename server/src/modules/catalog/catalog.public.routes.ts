@@ -1,6 +1,6 @@
 import { type NextFunction, type Request, type Response, Router } from 'express';
 import { err } from '../../http.js';
-import { getEventDetail, getSeatMap, getShowtimes, listEvents } from './catalog.repo.js';
+import { getEventDetail, getSeatMap, getShowtimes, listEvents, listFeaturedEvents } from './catalog.repo.js';
 
 // Public catalog reads — no auth. Every query composes the live visibility predicate (R-1).
 export const catalogPublicRouter = Router();
@@ -15,6 +15,9 @@ const num = (v: unknown): number | undefined => {
   return Number.isFinite(n) ? n : undefined;
 };
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+
+// GET /api/events/featured
+catalogPublicRouter.get('/events/featured', asyncH(async (_req, res) => { res.json(await listFeaturedEvents()); }));
 
 // GET /api/events (US1)
 catalogPublicRouter.get(

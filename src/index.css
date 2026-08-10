@@ -1,5 +1,4 @@
-/* Only the mono face is remote now — VNM Sans covers text and headline, both self-hosted below. */
-@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+/* Nothing is remote: VNM Sans covers text, headline and the ex-mono role, all self-hosted below. */
 @import "tailwindcss";
 
 /*
@@ -58,7 +57,30 @@
 @theme {
   --font-sans: "VNM Sans Std", ui-sans-serif, system-ui, sans-serif;
   --font-display: "VNM Sans Display", "VNM Sans Std", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", monospace;
+  /*
+   * `font-mono` is no longer a second typeface — it is VNM Sans Std, same as body copy.
+   *
+   * The class is kept because ~35 files use it to mark the *role* (meta lines, ids, dates, prices)
+   * rather than to ask for a monospaced face. Renaming all of them buys nothing; repointing the
+   * token keeps one type system on the page. The `tabular-nums` rule below restores the only
+   * property those call sites actually depended on — digits that line up in a column.
+   */
+  --font-mono: "VNM Sans Std", ui-sans-serif, system-ui, sans-serif;
+
+  /*
+   * The bottom of the type scale, raised.
+   *
+   * `text-xs` is on 140 elements — meta rows, table cells, form hints, button labels — and at
+   * Tailwind's 12px it was the size people were squinting at. 13px is the smallest this face stays
+   * comfortable at, and moving the token rather than the call sites means the whole small tier
+   * lifts together instead of drifting apart one edit at a time.
+   *
+   * `--text-sm` moves with it so the two do not collapse into the same size.
+   */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.15rem;
+  --text-sm: 0.9375rem;
+  --text-sm--line-height: 1.4rem;
 
   --color-xanh-pho: #fdf6ea;
   --color-surface-2: #fffcf5;
@@ -212,6 +234,13 @@ body {
     color 240ms ease;
 }
 
+/*
+ * Unlayered, so this shorthand currently outranks Tailwind's utilities: `text-xs`, `font-black`,
+ * `leading-*` and `font-mono` written on a `<button>` are overridden here, and every control
+ * inherits `body`'s 16px/400 instead. Moving the rule into `@layer base` restores the utilities,
+ * but that resizes every button in the app at once — so it is left as-is deliberately, since the
+ * current look was tuned with this in effect.
+ */
 button,
 input,
 select {
@@ -450,9 +479,23 @@ select:focus-visible {
  * Siena's metadata strip: three equal cells where only the middle one carries side rules, so two
  * hairlines divide three cells without either edge picking up a stray border.
  */
+/*
+ * `1 1 auto`, not `1` — the latter is `1 1 0%`, which hands every cell an identical share no matter
+ * what is written in it. That is fine for "Vé / Ví" and wrong the moment a two-word label shares the
+ * row: "Đăng nhập" got the same third as "Vé" and ellipsised. Sizing from content first and
+ * distributing only the slack lets each label ask for what it needs.
+ */
 .menu-stub-cell {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
+}
+
+/*
+ * The symbol cell takes only the width of its glyph instead of an equal third. An icon needs no
+ * measure, and the share it would otherwise claim is what pushed "Đăng nhập" into an ellipsis.
+ */
+.menu-stub-cell.is-icon {
+  flex: none;
 }
 
 .menu-stub-cell + .menu-stub-cell {
@@ -696,9 +739,39 @@ select:focus-visible {
   border: 1px dashed color-mix(in srgb, var(--color-beige-kem) 45%, transparent);
 }
 
-/* Small labels — uppercase, letterspaced, never larger than the body text around them. */
+/*
+ * Both rules are unlayered, so they win over Tailwind's layered utilities without `!important`.
+ *
+ * `tabular-nums` keeps countdowns, seat numbers and prices from reflowing digit by digit now that
+ * the ex-mono role is set in a proportional face.
+ *
+ * The weight cap exists because Std ships Regular only. Asking for 700 on it does not select a
+ * bolder face — the browser smears the Regular outline instead, and on a rounded geometric sans at
+ * 11–13px that thickens the Vietnamese diacritics until they close up against the letter. 500 sits
+ * under the synthesis threshold, so these lines render as clean Regular. Real bold on this face
+ * needs a real VNM Sans Std Bold; drop one in and this rule can go.
+ */
+.font-mono {
+  font-variant-numeric: tabular-nums;
+}
+
+.font-mono.font-bold,
+.font-mono.font-semibold {
+  font-weight: 500;
+}
+
+/*
+ * Small labels — uppercase, letterspaced, never larger than the body text around them.
+ *
+ * Set in Display rather than Std: at 700 this is the one small-text role that has a real bold to
+ * resolve to (Display carries 600–900), so it stays crisp where a Std label would be synthesised.
+ * Display is the condensed cut, which is a second win here — eyebrows sit in the narrowest columns
+ * on the page, and letterspacing at 0.16em is exactly what eats that width back.
+ */
 @utility label-eyebrow {
-  font-size: 11px;
+  font-family: var(--font-display);
+  /* 11px was under the floor for a condensed face carrying 0.16em of letterspacing. */
+  font-size: 12px;
   font-weight: 700;
   line-height: 1.2;
   text-transform: uppercase;

@@ -52,10 +52,10 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
         {/* Part A: Ticket Header */}
         <div className="bg-burgundy text-white p-6 flex justify-between items-center border-b-4 border-dashed border-xanh-pho">
           <div className="space-y-1">
-            <span className="text-[9px] font-mono tracking-widest text-ink-soft uppercase font-bold">CINEMA VINTAGE STUB</span>
+            <span className="text-[13px] font-mono tracking-widest text-ink-soft uppercase font-bold">CINEMA VINTAGE STUB</span>
             <div className="flex items-baseline gap-1.5">
               <h3 className="font-display font-black text-2xl">TIXHUB</h3>
-              <span className="text-[9px] font-mono bg-[#E0E2CA] text-burgundy-ink px-1 py-0.2 rounded font-black">STUB</span>
+              <span className="text-[13px] font-mono bg-[#E0E2CA] text-burgundy-ink px-1 py-0.2 rounded font-black">STUB</span>
             </div>
           </div>
 
@@ -71,7 +71,7 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
           {/* Main info columns (8 cols) */}
           <div className="md:col-span-8 space-y-5">
             <div className="space-y-1">
-              <span className="text-[10px] font-mono font-semibold bg-bubblegum text-on-tint border-2 border-beige-kem px-2 py-0.5 rounded">
+              <span className="text-[12px] font-mono font-semibold bg-bubblegum text-on-tint border-2 border-beige-kem px-2 py-0.5 rounded">
                 Rated: {booking.movie.ageRating}
               </span>
               <h4 className="font-display font-black text-3xl text-burgundy-ink leading-tight pt-1">
@@ -162,8 +162,8 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
             </div>
 
             <div className="text-center font-mono">
-              <p className="text-[9px] font-bold text-burgundy-ink uppercase tracking-widest">VÉ VÀO CỬA QR</p>
-              <p className="text-[8px] text-gray-500 mt-0.5">QR một lần / {booking.qrStatus === "unused" ? "Chưa check-in" : "Đã check-in"}</p>
+              <p className="text-[13px] font-bold text-burgundy-ink uppercase tracking-widest">VÉ VÀO CỬA QR</p>
+              <p className="text-[12px] text-gray-500 mt-0.5">QR một lần / {booking.qrStatus === "unused" ? "Chưa check-in" : "Đã check-in"}</p>
             </div>
           </div>
 
@@ -171,7 +171,7 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
 
         {/* Part C: Stylized printable barcode footer */}
         <div className="bg-beige-kem border-t-2 border-dashed border-xanh-pho/35 px-6 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex flex-col items-start gap-1 font-mono text-[10px] text-gray-500 leading-none">
+          <div className="flex flex-col items-start gap-1 font-mono text-[12px] text-gray-500 leading-none">
             <span>RẠP: {booking.movie.location}</span>
             <span>THỜI GIAN ĐẶT: {booking.bookingTime}</span>
             <span>TRẠNG THÁI: {booking.status.toUpperCase()} / {booking.deliveryChannel.toUpperCase()}</span>
