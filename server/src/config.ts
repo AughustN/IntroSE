@@ -18,6 +18,11 @@ function normalizeDbUrl(url: string): string {
   return url.replace(/([?&])channel_binding=[^&]*/i, "").replace(/[?&]$/, "");
 }
 
+const openaiBaseUrl = (process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/+$/, "");
+const defaultOpenaiChatUrl = openaiBaseUrl.endsWith("/chat/completions")
+  ? openaiBaseUrl
+  : `${openaiBaseUrl}/chat/completions`;
+
 /**
  * The project runs against three Neon branches, one per job:
  *
@@ -53,6 +58,11 @@ export const config = {
   googleClientId: process.env.GOOGLE_CLIENT_ID ?? "", // gated (US3)
   resendApiKey: process.env.RESEND_API_KEY ?? "", // empty → ConsoleMailer
   mailFrom: process.env.MAIL_FROM ?? "TixHub <no-reply@tixhub.fit>",
+
+  // AI is optional: the request path falls back to database-ranked events when no provider is set.
+  openaiApiKey: process.env.OPENAI_API_KEY ?? "",
+  openaiChatUrl: process.env.OPENAI_CHAT_URL?.trim() || defaultOpenaiChatUrl,
+  openaiModel: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
 
   // VNPay is optional at boot so local catalog/hold development does not require gateway secrets.
   vnpayTmnCode: process.env.VNPAY_TMN_CODE ?? "",
@@ -104,6 +114,10 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   wallet_balance_ceiling: 20_000_000,
   ai_features_enabled: true,
 } as const;
+
+export const AI_REQUEST_LIMIT = 10;
+export const AI_CACHE_TTL_MS = 60 * 60 * 1000;
+export const AI_REQUEST_TIMEOUT_MS = 60_000;
 
 // The env-derived constants below remain for process-only consumers (the sweep, throttles, startup
 // checks) that run outside a request and so have no SettingService cache to read. Request paths —

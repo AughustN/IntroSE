@@ -12,6 +12,7 @@ import { formatHoldClock } from "../services/holdSession";
 import { watchShowtime } from "../services/seatSocket";
 import SeatMapView from "./SeatMapView";
 import { formatVnd } from "../services/currency";
+import { aiClient } from "../services/aiClient";
 
 export interface TierSelection {
   tierId: string;
@@ -92,6 +93,10 @@ export default function EventDetail({
   holdRemainingMs = 0,
 }: EventDetailProps) {
   const isSeated = event.eventType === "seated";
+
+  useEffect(() => {
+    if (isSignedIn) void aiClient.recordView(event.id).catch(() => {});
+  }, [event.id, isSignedIn]);
 
   /**
    * The tiers of the selected showtime, with their real `ticket_tiers.id`.

@@ -17,6 +17,7 @@ import type { Me } from "@/shared/auth/types";
 import type { EventDetail as CatalogEventDetail, Showtime } from "@/shared/catalog/types";
 import { authClient } from "./services/authClient";
 import { catalogClient } from "./services/catalogClient";
+import { aiClient } from "./services/aiClient";
 import { cardToMovie, detailToMovie } from "./services/catalogAdapter";
 import { applyEventSeo, clearEventSeo } from "./services/seo";
 import { matchesDateFilter, type DateFilter } from "./services/dateFilter";
@@ -41,6 +42,7 @@ import WalletPanel from "./components/wallet/WalletPanel";
 import VnpayReturn from "./components/wallet/VnpayReturn";
 import { useHoldCountdown } from "./hooks/useHoldCountdown";
 import BookingHistory from "./components/BookingHistory";
+import AIRecommendationPanel from "./components/AIRecommendationPanel";
 import ToastStack, { type ToastKind, type ToastMessage } from "./components/ToastStack";
 import ConfirmDialog, { type ConfirmRequest } from "./components/ConfirmDialog";
 import CheckoutForm from "./components/CheckoutForm";
@@ -272,6 +274,11 @@ export default function App() {
     cacheValue(AVATAR_CACHE_KEY, user?.avatarUrl ?? null);
     cacheValue(EMAIL_CACHE_KEY, user?.email ?? null);
   }, []);
+
+  useEffect(() => {
+    if (!isSignedIn) return;
+    void aiClient.bookmarks().then(setWishlistedIds).catch(() => {});
+  }, [isSignedIn]);
 
   const dismissToast = useCallback((id: number) => {
     setToasts((current) => current.filter((toast) => toast.id !== id));
@@ -770,22 +777,26 @@ export default function App() {
     }
   };
 
-  const handleToggleWishlist = (eventId: string) => {
-    setWishlistedIds((current) => {
-      const next = current.includes(eventId)
-        ? current.filter((id) => id !== eventId)
-        : [...current, eventId];
-
-      try {
-        localStorage.setItem(WISHLIST_CACHE_KEY, JSON.stringify(next));
-      } catch (err) {
-        console.error("Failed to save wishlist:", err);
-      }
-
-      return next;
-    });
+  const handleToggleWishlist = async (eventId: string) => {
+    if (!isSignedIn) {
+      pushToast("warning", "Đăng nhập để lưu sự kiện và nhận gợi ý cá nhân hóa.");
+      return;
+    }
+    try {
+      const { saved } = await aiClient.bookmark(eventId);
+      setWishlistedIds((current) => {
+        const next = saved ? (current.includes(eventId) ? current : [...current, eventId]) : current.filter((id) => id !== eventId);
+        try {
+          localStorage.setItem(WISHLIST_CACHE_KEY, JSON.stringify(next));
+        } catch (err) {
+          console.error("Failed to save wishlist:", err);
+        }
+        return next;
+      });
+    } catch (error) {
+      pushToast("error", error instanceof Error ? error.message : "Không thể lưu sự kiện.");
+    }
   };
-
   const handleSelectEventForTrailer = (movie: MovieEvent) => {
     setHeroMovie(movie);
     const heroSection = document.getElementById("hero-trailer-section");
@@ -1170,6 +1181,8 @@ export default function App() {
               onAvailabilityChange={(value) => void goHomeAfterFilter(() => setAvailability(value))}
               wishlistCount={wishlistedIds.length}
             />
+
+            <AIRecommendationPanel signedIn={isSignedIn} />
 
             <EventGrid
               events={filteredEvents}
