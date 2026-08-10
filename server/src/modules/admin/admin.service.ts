@@ -2,7 +2,56 @@ import { err } from '../../http.js';
 import type { Db } from '../../db/pool.js';
 import { withTransaction } from '../../db/pool.js';
 import { insertAudit } from './audit.js';
-import { eventQueue, insertNotification, lockEvent, lockOrganizer, organizerQueue, reportQueue, resolveReport, updateEvent, updateOrganizer } from './admin.repo.js';
+import { eventQueue, insertNotification, listCategories, listFeatured, deleteCategory, insertCategory, lockEvent, lockOrganizer, organizerQueue, reportQueue, replaceFeatured, resolveReport, updateCategory, updateEvent, updateOrganizer } from './admin.repo.js';
+
+const categoryCode = (label: string) => `custom_${label.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'category'}_${Date.now()}`;
+
+export const categories = () => listCategories();
+
+export async function createCategory(actorUserId: number, labelVi: string, labelEn: string | null) {
+  return withTransaction(async (db) => {
+    try {
+      const result = await insertCategory(labelVi.trim(), labelEn?.trim() || null, categoryCode(labelVi), db);
+      await insertAudit(db, { actorUserId, action: 'category_created', targetType: 'event_category', targetId: result.id, outcome: 'applied', detail: { labelVi, labelEn } });
+      return result;
+    } catch (error) {
+      if ((error as { code?: string }).code === '23505') throw err.conflict('category_conflict', 'Danh mục đã tồn tại.');
+      throw error;
+    }
+  });
+}
+
+export async function renameCategory(actorUserId: number, id: number, labelVi: string, labelEn: string | null) {
+  return withTransaction(async (db) => {
+    try {
+      const result = await updateCategory(id, labelVi.trim(), labelEn?.trim() || null, db);
+      if (!result) throw err.notFound('not_found');
+      await insertAudit(db, { actorUserId, action: 'category_renamed', targetType: 'event_category', targetId: id, outcome: 'applied', detail: { labelVi, labelEn } });
+      return result;
+    } catch (error) {
+      if ((error as { code?: string }).code === '23505') throw err.conflict('category_conflict', 'Danh mục đã tồn tại.');
+      throw error;
+    }
+  });
+}
+
+export async function removeCategory(actorUserId: number, id: number) {
+  return withTransaction(async (db) => {
+    const result = await deleteCategory(id, db);
+    if (!result) throw err.conflict('category_in_use', 'Không thể xóa danh mục đang có sự kiện.');
+    await insertAudit(db, { actorUserId, action: 'category_deleted', targetType: 'event_category', targetId: id, outcome: 'applied' });
+  });
+}
+
+export const featured = () => listFeatured();
+
+export async function replaceFeaturedEvents(actorUserId: number, events: Array<{ eventId: number; displayOrder: number }>) {
+  return withTransaction(async (db) => {
+    const result = await replaceFeatured(events, db);
+    await insertAudit(db, { actorUserId, action: 'featured_events_replaced', targetType: 'featured_events', targetId: null, outcome: 'applied', detail: { events } });
+    return result;
+  });
+}
 
 export async function queue() {
   return withTransaction(async (db) => ({ organizers: await organizerQueue(db), events: await eventQueue(db), reports: await reportQueue(db) }));

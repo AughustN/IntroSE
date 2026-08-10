@@ -92,6 +92,22 @@ export async function listEvents(f: EventFilters, db: Db = pool): Promise<{ even
   return { events: rows.rows.map(toCard), total: Number(totalRes.rows[0]?.c ?? 0), page };
 }
 
+/** Public homepage curation. Hidden events disappear immediately through the live visibility predicate. */
+export async function listFeaturedEvents(db: Db = pool): Promise<EventCard[]> {
+  const { rows } = await db.query<Row>(
+    `SELECT e.id, e.slug, e.title, e.image_url, ec.code AS category,
+            ${EARLIEST} AS earliest_showtime, ${START_PRICE} AS starting_price, ${CITY} AS city,
+            ${HAS_UPCOMING} AS has_upcoming, ${HAS_AVAILABLE} AS has_available
+       FROM featured_events f
+       JOIN events e ON e.id = f.event_id
+       ${VISIBLE_JOIN}
+       JOIN event_categories ec ON ec.id = e.category_id
+      WHERE ${VISIBLE_WHERE}
+      ORDER BY f.display_order, f.event_id`,
+  );
+  return rows.map(toCard);
+}
+
 /** Public event detail by stable slug (US2). Null if not visible (never leaks drafts). */
 export async function getEventDetail(slug: string, db: Db = pool): Promise<EventDetail | null> {
   const res = await db.query<Row & {

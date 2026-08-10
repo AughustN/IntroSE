@@ -1,5 +1,6 @@
 import type { Db } from '../../db/pool.js';
 import { pool } from '../../db/pool.js';
+import { err } from '../../http.js';
 
 export async function organizerQueue(db: Db = pool) {
   return (await db.query(`SELECT id, user_id AS "userId", display_name AS "displayName", description, status, review_note AS "reviewNote", applied_at AS "appliedAt" FROM organizers WHERE status IN ('pending', 'approved', 'suspended') ORDER BY applied_at`)).rows;
@@ -43,4 +44,43 @@ export async function insertNotification(db: Db, n: { recipientUserId: number; k
 export async function resolveReport(id: number, status: string, reason: string | null, adminId: number, db: Db) {
   const { rows } = await db.query(`UPDATE content_reports SET status = $2, resolution_note = $3, resolved_by = $4, resolved_at = now() WHERE id = $1 AND status = 'open' RETURNING id, target_type, target_id`, [id, status, reason, adminId]);
   return rows[0] ?? null;
+}
+
+export async function listCategories(db: Db = pool) {
+  const { rows } = await db.query(`SELECT id, code, label_vi AS "labelVi", label_en AS "labelEn" FROM event_categories ORDER BY label_vi, id`);
+  return rows;
+}
+
+export async function insertCategory(labelVi: string, labelEn: string | null, code: string, db: Db) {
+  const { rows } = await db.query(`INSERT INTO event_categories (code, label_vi, label_en) VALUES ($1, $2, $3) RETURNING id, code, label_vi AS "labelVi", label_en AS "labelEn"`, [code, labelVi, labelEn]);
+  return rows[0];
+}
+
+export async function updateCategory(id: number, labelVi: string, labelEn: string | null, db: Db) {
+  const { rows } = await db.query(`UPDATE event_categories SET label_vi = $2, label_en = $3 WHERE id = $1 RETURNING id, code, label_vi AS "labelVi", label_en AS "labelEn"`, [id, labelVi, labelEn]);
+  return rows[0] ?? null;
+}
+
+export async function deleteCategory(id: number, db: Db) {
+  const used = await db.query(`SELECT 1 FROM events WHERE category_id = $1 LIMIT 1`, [id]);
+  if (used.rowCount) return false;
+  const result = await db.query(`DELETE FROM event_categories WHERE id = $1`, [id]);
+  return result.rowCount === 1;
+}
+
+export async function listFeatured(db: Db = pool) {
+  const { rows } = await db.query(`SELECT f.event_id AS "eventId", f.display_order AS "displayOrder", e.slug, e.title, e.image_url AS "imageUrl" FROM featured_events f JOIN events e ON e.id = f.event_id ORDER BY f.display_order, f.event_id`);
+  return rows;
+}
+
+export async function replaceFeatured(events: Array<{ eventId: number; displayOrder: number }>, db: Db) {
+  const ids = events.map((entry) => entry.eventId);
+  if (new Set(ids).size !== ids.length || new Set(events.map((entry) => entry.displayOrder)).size !== events.length) throw err.conflict('featured_conflict');
+  if (ids.length) {
+    const result = await db.query(`SELECT e.id FROM events e JOIN organizers o ON o.id = e.organizer_id WHERE e.id = ANY($1::bigint[]) AND e.status = 'on_sale' AND e.moderation_status = 'approved' AND o.status = 'approved' FOR UPDATE`, [ids]);
+    if (result.rowCount !== ids.length) throw err.conflict('featured_unavailable', 'Sự kiện không còn đủ điều kiện nổi bật.');
+  }
+  await db.query('DELETE FROM featured_events');
+  for (const entry of events) await db.query('INSERT INTO featured_events (event_id, display_order) VALUES ($1, $2)', [entry.eventId, entry.displayOrder]);
+  return listFeatured(db);
 }

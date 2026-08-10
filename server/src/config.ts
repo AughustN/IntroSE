@@ -90,14 +90,33 @@ const ms = (name: string, fallback: number): number => {
   return Number.isFinite(v) && v > 0 ? v : fallback;
 };
 
+/**
+ * Seeded defaults for the `system_settings` table (feature 007). SettingService is the runtime
+ * source of truth for anything an admin can adjust; these are the values it falls back to.
+ */
+export const DEFAULT_SYSTEM_SETTINGS = {
+  seat_hold_ttl_minutes: 7,
+  topup_grace_minutes: 7,
+  absolute_ceiling_minutes: 14,
+  max_tickets_per_buyer: 8,
+  wallet_topup_min: 5_000,
+  wallet_topup_max: 10_000_000,
+  wallet_balance_ceiling: 20_000_000,
+  ai_features_enabled: true,
+} as const;
+
+// The env-derived constants below remain for process-only consumers (the sweep, throttles, startup
+// checks) that run outside a request and so have no SettingService cache to read. Request paths —
+// holds, top-ups — must read SettingService, not these.
+
 /** Hold window from the reservation's first hold (Vision REL-02, FR-006). */
-export const HOLD_TTL_MS = ms("HOLD_TTL_MS", 7 * 60 * 1000);
+export const HOLD_TTL_MS = ms("HOLD_TTL_MS", DEFAULT_SYSTEM_SETTINGS.seat_hold_ttl_minutes * 60 * 1000);
 /** One-time grace granted when a wallet top-up carries the reservation (FR-010, schema D2 amendment). */
-export const HOLD_GRACE_MS = ms("HOLD_GRACE_MS", 7 * 60 * 1000);
+export const HOLD_GRACE_MS = ms("HOLD_GRACE_MS", DEFAULT_SYSTEM_SETTINGS.topup_grace_minutes * 60 * 1000);
 /** Absolute ceiling measured from `reservations.created_at` — the window can never exceed it. */
-export const HOLD_ABSOLUTE_MS = ms("HOLD_ABSOLUTE_MS", 14 * 60 * 1000);
+export const HOLD_ABSOLUTE_MS = ms("HOLD_ABSOLUTE_MS", DEFAULT_SYSTEM_SETTINGS.absolute_ceiling_minutes * 60 * 1000);
 /** Tickets one attendee may hold at once for one showtime: seats (seated) or quantity (GA) (FR-016). */
-export const SEAT_CAP = ms("SEAT_CAP", 8);
+export const SEAT_CAP = ms("SEAT_CAP", DEFAULT_SYSTEM_SETTINGS.max_tickets_per_buyer);
 /** How often the release sweep runs. Expiry is exact; the sweep is what acts on it (REL-02). */
 export const HOLD_SWEEP_INTERVAL_MS = ms("HOLD_SWEEP_INTERVAL_MS", 60 * 1000);
 /** Hold/release requests allowed per user per window — anti hold-spam (FR-017). */

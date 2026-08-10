@@ -1,8 +1,8 @@
 import type { HoldRequest, Reservation, SeatUpdate } from "@shared/holds/types.js";
-import { HOLD_ABSOLUTE_MS, HOLD_GRACE_MS, HOLD_TTL_MS, SEAT_CAP } from "../../config.js";
 import { pool, withTransaction } from "../../db/pool.js";
 import { err } from "../../http.js";
 import { broadcastSeatUpdate } from "../../realtime/io.js";
+import { getSettings } from "../admin/settings.service.js";
 import * as repo from "./holds.repo.js";
 
 /**
@@ -22,7 +22,7 @@ export interface HoldResult {
   created: boolean;
 }
 
-const ttlFrom = (createdAt: Date): Date => new Date(createdAt.getTime() + HOLD_TTL_MS);
+const ttlFrom = (createdAt: Date, minutes: number): Date => new Date(createdAt.getTime() + minutes * 60 * 1000);
 
 /** Load the caller's reservation as the API returns it. */
 async function view(reservationId: number): Promise<Reservation> {
@@ -70,6 +70,7 @@ async function requireSellableShowtime(showtimeId: number): Promise<repo.Showtim
 
 export async function hold(userId: number, body: HoldRequest): Promise<HoldResult> {
   const selection = assertSelection(body);
+  const settings = await getSettings();
   const showtime = await requireSellableShowtime(body.showtimeId);
 
   if (selection.kind === "seated" && showtime.eventType !== "seated") {
@@ -115,15 +116,15 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
         }
       }
 
-      if (held + fresh.length > SEAT_CAP) {
+      if (held + fresh.length > settings.max_tickets_per_buyer) {
         throw err.unprocessable(
           "cap_exceeded",
-          `Mỗi tài khoản chỉ giữ tối đa ${SEAT_CAP} vé cho một suất diễn.`,
+          `Mỗi tài khoản chỉ giữ tối đa ${settings.max_tickets_per_buyer} vé cho một suất diễn.`,
         );
       }
 
       if (!reservation) {
-        reservation = await repo.createReservation(client, userId, body.showtimeId, ttlFrom(now));
+        reservation = await repo.createReservation(client, userId, body.showtimeId, ttlFrom(now, settings.seat_hold_ttl_minutes));
       }
 
       const freshIds = fresh.map((s) => s.id);
@@ -150,15 +151,15 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
     if (remaining !== null && selection.quantity > remaining) {
       throw err.unprocessable("insufficient_stock", "Không đủ vé còn lại cho hạng vé này.");
     }
-    if (held + selection.quantity > SEAT_CAP) {
+    if (held + selection.quantity > settings.max_tickets_per_buyer) {
       throw err.unprocessable(
         "cap_exceeded",
-        `Mỗi tài khoản chỉ giữ tối đa ${SEAT_CAP} vé cho một suất diễn.`,
+        `Mỗi tài khoản chỉ giữ tối đa ${settings.max_tickets_per_buyer} vé cho một suất diễn.`,
       );
     }
 
     if (!reservation) {
-      reservation = await repo.createReservation(client, userId, body.showtimeId, ttlFrom(now));
+      reservation = await repo.createReservation(client, userId, body.showtimeId, ttlFrom(now, settings.seat_hold_ttl_minutes));
     }
     await repo.bumpReserved(client, tier.id, selection.quantity);
     await repo.upsertGaItem(client, reservation.id, tier.id, selection.quantity, tier.price_amount);
@@ -296,13 +297,14 @@ export async function releaseEverything(
  */
 export async function extendOnce(userId: number, reservationId: number): Promise<Reservation> {
   const reservation = await requireOwnedActive(userId, reservationId);
+  const settings = await getSettings();
 
   const extended = await withTransaction(async (client) => {
     const row = await repo.extendReservationOnce(
       client,
       reservation.id,
-      HOLD_GRACE_MS,
-      HOLD_ABSOLUTE_MS,
+      settings.topup_grace_minutes * 60 * 1000,
+      settings.absolute_ceiling_minutes * 60 * 1000,
     );
     if (row) await repo.syncSeatExpiry(client, row.id, row.expires_at);
     return row;
