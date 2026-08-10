@@ -15,7 +15,12 @@ image from their device, and the app runs on a single self-managed VPS (ADR 0003
   at Google registration (a trusted CDN over https).
 - **Storage = the VPS local disk**, served as static files by Nginx. Because the app is self-hosted this
   is just disk + a static route — **not** a new external integration, so it does not touch the
-  two-integration cap. The stored `avatar_url` is `https://tixhub.fit/uploads/avatars/<uuid>.webp`.
+  two-integration cap. `avatar_url` is stored **root-relative** (`/uploads/avatars/<uuid>.webp`) and the
+  SPA prefixes it with the API origin at render time (`apiAssetUrl`, `src/services/api.ts`).
+  <!-- Amended 2026-08-05: originally specified as the absolute `https://tixhub.fit/uploads/...`. The
+       SPA and API are now split origins (ADR 0003 amendment), so the served URL is
+       `https://api.tixhub.fit/uploads/avatars/<uuid>.webp`. Storing the path relative is what keeps a
+       host change from requiring a data migration. -->
 - **Upload safety (mandatory)**: accept only raster `jpeg`/`png`/`webp`; **reject SVG** (embedded script
   → XSS on a same-origin host); verify the type by **magic bytes**, not `Content-Type`/extension; cap
   size at ~2 MB; **re-encode via `sharp`** to strip EXIF and any embedded payload; store under a

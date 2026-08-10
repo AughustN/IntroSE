@@ -52,7 +52,7 @@ function Stepper({ current }: { current: 0 | 1 | 2 }) {
           <li key={label} className="flex flex-1 items-center gap-2">
             <span
               aria-current={active ? "step" : undefined}
-              className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border font-mono text-[11px] font-bold ${
+              className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border font-mono text-[13px] font-bold ${
                 done
                   ? "border-la-co bg-la-co text-on-tint"
                   : active
@@ -63,7 +63,7 @@ function Stepper({ current }: { current: 0 | 1 | 2 }) {
               {done ? <Check className="h-3 w-3" aria-hidden /> : i + 1}
             </span>
             <span
-              className={`truncate font-mono text-[11px] uppercase ${
+              className={`truncate font-mono text-[13px] uppercase ${
                 active ? "text-beige-kem" : "text-beige-kem/70"
               }`}
             >

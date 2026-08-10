@@ -66,8 +66,15 @@ export type HoldErrorCode =
  */
 export interface SeatUpdate {
   showtimeId: number;
-  /** Seated: the seats whose status changed. */
-  seats?: { showtimeSeatId: number; status: SeatStatus }[];
+  /**
+   * Seated: the seats whose status changed.
+   *
+   * `tier`/`price` are set ONLY when an organizer retiers a live seat (feature 005, FR-035). Both are
+   * optional and no hold path ever sets them, so a client that ignores them behaves exactly as it did
+   * before — which is why this does not breach FR-041. Geometry is never broadcast: it is static for
+   * the life of a map and belongs to the once-per-page map read.
+   */
+  seats?: { showtimeSeatId: number; status: SeatStatus; tier?: string; price?: number }[];
   /** General admission: the tier whose remaining changed. */
   tier?: { ticketTierId: number; remaining: number | null };
 }

@@ -4,6 +4,7 @@
  */
 
 import { FormEvent, useEffect, useState } from "react";
+import Select from "./Select";
 import { EVENT_CATEGORIES, MyEvent, MyVenue, organizerApi } from "../services/catalogClient";
 import SeatMapBuilder from "./SeatMapBuilder";
 
@@ -11,8 +12,10 @@ const input =
   "h-11 w-full rounded-xl border-2 border-beige-kem bg-surface-2 px-4 text-sm text-beige-kem outline-none focus:border-burgundy";
 const label = "mb-1.5 block font-mono text-xs text-beige-kem/70";
 const card = "rounded-2xl border-2 border-beige-kem bg-surface-2 p-5";
-const btn = "rounded-xl bg-burgundy px-4 py-2.5 text-sm font-black text-white transition hover:brightness-95 disabled:opacity-60";
-const ghost = "rounded-xl border-2 border-beige-kem px-3 py-2 text-xs font-bold text-beige-kem/80 transition";
+const btn =
+  "rounded-xl bg-burgundy px-4 py-2.5 text-sm font-black text-white transition hover:brightness-95 disabled:opacity-60";
+const ghost =
+  "rounded-xl border-2 border-beige-kem px-3 py-2 text-xs font-bold text-beige-kem/80 transition";
 
 const badge = (m: string) => {
   const map: Record<string, string> = {
@@ -21,8 +24,17 @@ const badge = (m: string) => {
     removed: "text-beige-kem/60 border-beige-kem/25 bg-surface-2",
     flagged: "text-on-tint border-beige-kem bg-cam-dat",
   };
-  const text: Record<string, string> = { pending_review: "Chờ duyệt", approved: "Đã duyệt", removed: "Đã gỡ/từ chối", flagged: "Bị gắn cờ" };
-  return <span className={`rounded-lg border px-2 py-0.5 font-mono text-[10px] ${map[m] ?? ""}`}>{text[m] ?? m}</span>;
+  const text: Record<string, string> = {
+    pending_review: "Chờ duyệt",
+    approved: "Đã duyệt",
+    removed: "Đã gỡ/từ chối",
+    flagged: "Bị gắn cờ",
+  };
+  return (
+    <span className={`rounded-lg border px-2 py-0.5 font-mono text-[12px] ${map[m] ?? ""}`}>
+      {text[m] ?? m}
+    </span>
+  );
 };
 
 export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
@@ -47,7 +59,9 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
   const [openEvent, setOpenEvent] = useState<number | null>(null);
   const [stVenue, setStVenue] = useState<number | "">("");
   const [stDate, setStDate] = useState("");
-  const [stTiers, setStTiers] = useState<{ label: string; price: string }[]>([{ label: "Thường", price: "100000" }]);
+  const [stTiers, setStTiers] = useState<{ label: string; price: string }[]>([
+    { label: "Thường", price: "100000" },
+  ]);
 
   const MAX_TIERS = 4;
   const setTierField = (index: number, field: "label" | "price", value: string) =>
@@ -125,57 +139,106 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
   return (
     <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-8 text-beige-kem">
       <div className="flex items-center justify-between">
-        <h1 className="font-display text-3xl font-black">Quản lý sự kiện</h1>
-        <button onClick={onBack} className={ghost}>← Về trang chủ</button>
+        <h1 className="font-display text-4xl font-black">Quản lý sự kiện</h1>
+        <button onClick={onBack} className={ghost}>
+          ← Về trang chủ
+        </button>
       </div>
-      {notice && <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-xs text-on-tint">{notice}</div>}
-      {err && <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-xs">{err}</div>}
+      {notice && (
+        <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-xs text-on-tint">
+          {notice}
+        </div>
+      )}
+      {err && (
+        <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-xs">{err}</div>
+      )}
 
       <form onSubmit={createEvent} className={card}>
-        <h2 className="mb-3 font-display text-lg font-bold">Tạo sự kiện</h2>
+        <h2 className="mb-3 font-display text-xl font-bold">Tạo sự kiện</h2>
         <label className="block">
           <span className={label}>Tiêu đề</span>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} required className={input} />
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            required
+            className={input}
+          />
         </label>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <label className="block">
+          <div className="block">
             <span className={label}>Danh mục</span>
-            <select value={categoryCode} onChange={(e) => setCategoryCode(e.target.value)} className={input}>
-              {EVENT_CATEGORIES.map((c) => (
-                <option key={c.code} value={c.code} className="bg-xanh-pho">{c.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="block">
+            <Select
+              triggerClassName={input}
+              value={categoryCode}
+              onChange={setCategoryCode}
+              options={EVENT_CATEGORIES.map((c) => ({ value: c.code, label: c.label }))}
+            />
+          </div>
+          <div className="block">
             <span className={label}>Loại sự kiện</span>
-            <select value={eventType} onChange={(e) => setEventType(e.target.value as "general_admission" | "seated")} className={input}>
-              <option value="general_admission" className="bg-xanh-pho">Vé tự do (GA)</option>
-              <option value="seated" className="bg-xanh-pho">Có ghế ngồi</option>
-            </select>
-          </label>
+            <Select
+              triggerClassName={input}
+              value={eventType}
+              onChange={(v) => setEventType(v as "general_admission" | "seated")}
+              options={[
+                { value: "general_admission", label: "Vé tự do (GA)" },
+                { value: "seated", label: "Có ghế ngồi" },
+              ]}
+            />
+          </div>
         </div>
         <label className="mt-3 block">
           <span className={label}>Mô tả</span>
-          <textarea value={description} onChange={(e) => setDescription(e.target.value)} required rows={3} className={`${input} h-auto py-2.5`} />
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            required
+            rows={3}
+            className={`${input} h-auto py-2.5`}
+          />
         </label>
-        <button type="submit" className={`${btn} mt-4`}>Tạo bản nháp</button>
+        <button type="submit" className={`${btn} mt-4`}>
+          Tạo bản nháp
+        </button>
       </form>
 
       <form onSubmit={createVenue} className={card}>
-        <h2 className="mb-3 font-display text-lg font-bold">Địa điểm của tôi</h2>
+        <h2 className="mb-3 font-display text-xl font-bold">Địa điểm của tôi</h2>
         <div className="grid gap-3 sm:grid-cols-3">
-          <input value={vName} onChange={(e) => setVName(e.target.value)} placeholder="Tên địa điểm" required className={input} />
-          <input value={vCity} onChange={(e) => setVCity(e.target.value)} placeholder="Thành phố" required className={input} />
-          <input value={vAddr} onChange={(e) => setVAddr(e.target.value)} placeholder="Địa chỉ" required className={input} />
+          <input
+            value={vName}
+            onChange={(e) => setVName(e.target.value)}
+            placeholder="Tên địa điểm"
+            required
+            className={input}
+          />
+          <input
+            value={vCity}
+            onChange={(e) => setVCity(e.target.value)}
+            placeholder="Thành phố"
+            required
+            className={input}
+          />
+          <input
+            value={vAddr}
+            onChange={(e) => setVAddr(e.target.value)}
+            placeholder="Địa chỉ"
+            required
+            className={input}
+          />
         </div>
-        <button type="submit" className={`${btn} mt-4`}>Thêm địa điểm</button>
+        <button type="submit" className={`${btn} mt-4`}>
+          Thêm địa điểm
+        </button>
         {venues.length > 0 && (
-          <p className="mt-3 font-mono text-[11px] text-beige-kem/50">{venues.map((v) => `${v.name} (${v.city})`).join(" · ")}</p>
+          <p className="mt-3 font-mono text-[13px] text-beige-kem/50">
+            {venues.map((v) => `${v.name} (${v.city})`).join(" · ")}
+          </p>
         )}
       </form>
 
       <div className={card}>
-        <h2 className="mb-3 font-display text-lg font-bold">Sự kiện của tôi ({events.length})</h2>
+        <h2 className="mb-3 font-display text-xl font-bold">Sự kiện của tôi ({events.length})</h2>
         <div className="space-y-3">
           {events.length === 0 && <p className="text-sm text-beige-kem/60">Chưa có sự kiện nào.</p>}
           {events.map((ev) => (
@@ -183,33 +246,57 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <span className="font-bold">{ev.title}</span>
-                  <span className="ml-2 font-mono text-[10px] text-beige-kem/40">{ev.status}</span>
+                  <span className="ml-2 font-mono text-[12px] text-beige-kem/40">{ev.status}</span>
                   <span className="ml-2">{badge(ev.moderation)}</span>
-                  {ev.reviewNote && <span className="ml-2 text-[11px] text-burgundy">({ev.reviewNote})</span>}
+                  {ev.reviewNote && (
+                    <span className="ml-2 text-[13px] text-burgundy-ink">({ev.reviewNote})</span>
+                  )}
                 </div>
                 <div className="flex gap-2">
-                  <button className={ghost} onClick={() => setOpenEvent(openEvent === ev.id ? null : ev.id)}>Thêm suất</button>
+                  <button
+                    className={ghost}
+                    onClick={() => setOpenEvent(openEvent === ev.id ? null : ev.id)}
+                  >
+                    Thêm suất
+                  </button>
                   {ev.eventType === "seated" && (
-                    <button className={ghost} onClick={() => setSeatMapEventId(ev.id)}>Sơ đồ ghế</button>
+                    <button className={ghost} onClick={() => setSeatMapEventId(ev.id)}>
+                      Sơ đồ ghế
+                    </button>
                   )}
-                  <button className={btn} onClick={() => wrap(() => organizerApi.publish(ev.id).then(() => {}), "Đã gửi duyệt.")}>Gửi duyệt</button>
+                  <button
+                    className={btn}
+                    onClick={() =>
+                      wrap(() => organizerApi.publish(ev.id).then(() => {}), "Đã gửi duyệt.")
+                    }
+                  >
+                    Gửi duyệt
+                  </button>
                 </div>
               </div>
               {openEvent === ev.id && (
                 <div className="mt-3 space-y-3 border-t border-beige-kem/25 pt-3">
                   <div className="grid gap-2 sm:grid-cols-2">
-                    <select value={stVenue} onChange={(e) => setStVenue(Number(e.target.value) || "")} className={input}>
-                      <option value="" className="bg-xanh-pho">Chọn địa điểm</option>
-                      {venues.map((v) => (
-                        <option key={v.id} value={v.id} className="bg-xanh-pho">{v.name}</option>
-                      ))}
-                    </select>
-                    <input type="datetime-local" value={stDate} onChange={(e) => setStDate(e.target.value)} className={input} />
+                    <Select
+                      triggerClassName={input}
+                      placeholder="Chọn địa điểm"
+                      value={String(stVenue)}
+                      onChange={(v) => setStVenue(Number(v) || "")}
+                      options={venues.map((v) => ({ value: String(v.id), label: v.name }))}
+                    />
+                    <input
+                      type="datetime-local"
+                      value={stDate}
+                      onChange={(e) => setStDate(e.target.value)}
+                      className={input}
+                    />
                   </div>
 
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className={label}>Hạng vé ({stTiers.length}/{MAX_TIERS})</span>
+                      <span className={label}>
+                        Hạng vé ({stTiers.length}/{MAX_TIERS})
+                      </span>
                       <button
                         type="button"
                         onClick={addTierRow}
@@ -247,17 +334,27 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
                     ))}
                   </div>
 
-                  <button className={btn} onClick={() => addShowtime(ev.id)}>Thêm suất</button>
+                  <button className={btn} onClick={() => addShowtime(ev.id)}>
+                    Thêm suất
+                  </button>
                 </div>
               )}
             </div>
           ))}
         </div>
-        <p className="mt-4 font-mono text-[11px] text-beige-kem/45">Sự kiện chỉ hiển thị công khai sau khi admin duyệt.</p>
+        <p className="mt-4 font-mono text-[13px] text-beige-kem/45">
+          Sự kiện chỉ hiển thị công khai sau khi admin duyệt.
+        </p>
       </div>
 
       {seatMapEventId && (
-        <SeatMapBuilder eventId={seatMapEventId} onClose={() => { setSeatMapEventId(null); reload(); }} />
+        <SeatMapBuilder
+          eventId={seatMapEventId}
+          onClose={() => {
+            setSeatMapEventId(null);
+            reload();
+          }}
+        />
       )}
     </div>
   );

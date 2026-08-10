@@ -39,6 +39,10 @@ export const config = {
   isTest,
   port: Number(process.env.PORT ?? 4000),
   appUrl: process.env.APP_URL ?? "http://localhost:3000",
+  corsOrigins: (process.env.CORS_ORIGINS ?? "https://tixhub.fit,http://localhost:3000")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
 
   databaseUrl: normalizeDbUrl(required(isTest ? "TEST_DATABASE_URL" : "DATABASE_URL")),
   /** Empty until the demo branch URL is filled in. Only ever compared against, never connected to. */
@@ -86,14 +90,33 @@ const ms = (name: string, fallback: number): number => {
   return Number.isFinite(v) && v > 0 ? v : fallback;
 };
 
+/**
+ * Seeded defaults for the `system_settings` table (feature 007). SettingService is the runtime
+ * source of truth for anything an admin can adjust; these are the values it falls back to.
+ */
+export const DEFAULT_SYSTEM_SETTINGS = {
+  seat_hold_ttl_minutes: 7,
+  topup_grace_minutes: 7,
+  absolute_ceiling_minutes: 14,
+  max_tickets_per_buyer: 8,
+  wallet_topup_min: 5_000,
+  wallet_topup_max: 10_000_000,
+  wallet_balance_ceiling: 20_000_000,
+  ai_features_enabled: true,
+} as const;
+
+// The env-derived constants below remain for process-only consumers (the sweep, throttles, startup
+// checks) that run outside a request and so have no SettingService cache to read. Request paths —
+// holds, top-ups — must read SettingService, not these.
+
 /** Hold window from the reservation's first hold (Vision REL-02, FR-006). */
-export const HOLD_TTL_MS = ms("HOLD_TTL_MS", 7 * 60 * 1000);
+export const HOLD_TTL_MS = ms("HOLD_TTL_MS", DEFAULT_SYSTEM_SETTINGS.seat_hold_ttl_minutes * 60 * 1000);
 /** One-time grace granted when a wallet top-up carries the reservation (FR-010, schema D2 amendment). */
-export const HOLD_GRACE_MS = ms("HOLD_GRACE_MS", 7 * 60 * 1000);
+export const HOLD_GRACE_MS = ms("HOLD_GRACE_MS", DEFAULT_SYSTEM_SETTINGS.topup_grace_minutes * 60 * 1000);
 /** Absolute ceiling measured from `reservations.created_at` — the window can never exceed it. */
-export const HOLD_ABSOLUTE_MS = ms("HOLD_ABSOLUTE_MS", 14 * 60 * 1000);
+export const HOLD_ABSOLUTE_MS = ms("HOLD_ABSOLUTE_MS", DEFAULT_SYSTEM_SETTINGS.absolute_ceiling_minutes * 60 * 1000);
 /** Tickets one attendee may hold at once for one showtime: seats (seated) or quantity (GA) (FR-016). */
-export const SEAT_CAP = ms("SEAT_CAP", 8);
+export const SEAT_CAP = ms("SEAT_CAP", DEFAULT_SYSTEM_SETTINGS.max_tickets_per_buyer);
 /** How often the release sweep runs. Expiry is exact; the sweep is what acts on it (REL-02). */
 export const HOLD_SWEEP_INTERVAL_MS = ms("HOLD_SWEEP_INTERVAL_MS", 60 * 1000);
 /** Hold/release requests allowed per user per window — anti hold-spam (FR-017). */
@@ -118,3 +141,22 @@ export const WALLET_BALANCE_CAP = ms("WALLET_BALANCE_CAP", 20_000_000);
 export const TOPUP_RECONCILE_AFTER_MS = ms("TOPUP_RECONCILE_AFTER_MS", 15 * 60 * 1000);
 /** How often that sweep runs. */
 export const TOPUP_SWEEP_INTERVAL_MS = ms("TOPUP_SWEEP_INTERVAL_MS", 5 * 60 * 1000);
+
+// ---- Seat map designer (feature 005). Settings with defaults, not hard-coded constants (UC-36).
+/** Layout coordinate space: 0–LAYOUT_SPACE integer units on each axis (FR-008). */
+export const LAYOUT_SPACE = ms("LAYOUT_SPACE", 10_000);
+/** Nominal seat size. Two seats overlap when their centres are closer than this (FR-008, FR-030a). */
+export const SEAT_DIAMETER = ms("SEAT_DIAMETER", 100);
+/** Ceilings — chosen to keep the editor and the buyer map inside PLAT-01 and PERF-02 (FR-007, FR-019). */
+export const LAYOUT_MAX_SEATS = ms("LAYOUT_MAX_SEATS", 2_000);
+export const LAYOUT_MAX_ELEMENTS = ms("LAYOUT_MAX_ELEMENTS", 200);
+export const VENUE_MAX_LAYOUTS = ms("VENUE_MAX_LAYOUTS", 20);
+/** Floor-plan upload bounds. Dimensions are checked before re-encoding, so a decompression bomb is
+ *  refused rather than allocated (FR-023). */
+export const FLOORPLAN_MAX_BYTES = ms("FLOORPLAN_MAX_BYTES", 5 * 1024 * 1024);
+export const FLOORPLAN_MAX_PX = ms("FLOORPLAN_MAX_PX", 4_000);
+/** Upload abuse bound: a rate limit for sustained abuse, a concurrency cap for the instantaneous
+ *  memory spike a 5 MB decode causes in a process bounded at ~450 MB (FR-023a, PERF-07). */
+export const UPLOAD_RATE_LIMIT = ms("UPLOAD_RATE_LIMIT", 10);
+export const UPLOAD_RATE_WINDOW_MS = ms("UPLOAD_RATE_WINDOW_MS", 60 * 1000);
+export const UPLOAD_CONCURRENCY = ms("UPLOAD_CONCURRENCY", 2);

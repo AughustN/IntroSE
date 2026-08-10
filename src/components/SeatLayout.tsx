@@ -9,6 +9,8 @@ import { MovieEvent, Seat } from "../types";
 import { catalogClient } from "../services/catalogClient";
 import { formatHoldClock } from "../services/holdSession";
 import { watchShowtime } from "../services/seatSocket";
+import SeatCanvas from "./seatmap/SeatCanvas";
+import { formatVnd } from "../services/currency";
 
 interface SeatLayoutProps {
   event: MovieEvent;
@@ -42,11 +44,15 @@ export default function SeatLayout({
   onProceedToCheckout,
 }: SeatLayoutProps) {
   const [seats, setSeats] = useState<SeatMapSeat[]>([]);
+  const [mapMeta, setMapMeta] = useState<Pick<SeatMap, "space" | "elements" | "floorPlan">>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const heldByMe = useMemo(
-    () => new Set(heldSeats.map((seat) => seat.showtimeSeatId).filter((id): id is number => id !== undefined)),
+    () =>
+      new Set(
+        heldSeats.map((seat) => seat.showtimeSeatId).filter((id): id is number => id !== undefined),
+      ),
     [heldSeats],
   );
 
@@ -56,6 +62,10 @@ export default function SeatLayout({
     try {
       const map: SeatMap = await catalogClient.getSeatMap(showtimeId);
       setSeats(map.seats ?? []);
+      // The static half of the map — coordinate space, decoration, background. It changes only when
+      // the organizer edits the map, never on a hold, so it is kept apart from the seat statuses
+      // that `seat:update` refreshes (feature 005, FR-041).
+      setMapMeta({ space: map.space, elements: map.elements, floorPlan: map.floorPlan });
       setLoadError(null);
     } catch {
       setLoadError("Không tải được sơ đồ ghế. Vui lòng thử lại.");
@@ -102,18 +112,8 @@ export default function SeatLayout({
     previousHeldCount.current = heldCount;
   }, [heldCount, loadMap]);
 
-  const rows = useMemo(() => {
-    const grouped = new Map<string, SeatMapSeat[]>();
-    for (const seat of seats) {
-      const list = grouped.get(seat.row) ?? [];
-      list.push(seat);
-      grouped.set(seat.row, list);
-    }
-    return [...grouped.entries()].map(([row, rowSeats]) => ({
-      row,
-      seats: [...rowSeats].sort((a, b) => a.number - b.number),
-    }));
-  }, [seats]);
+  // Seats arrive already ordered section → row → number, which is both the draw order and the tab
+  // order (feature 005, FR-039a). The old row-grouping is gone: geometry decides placement now.
 
   const toggleSeatSelection = (seat: SeatMapSeat) => {
     const mine = heldByMe.has(seat.id);
@@ -129,35 +129,32 @@ export default function SeatLayout({
     });
   };
 
-  const formatPrice = (price: number) =>
-    new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(price);
-
   const selectedSeatsList = heldSeats;
   const totalPrice = selectedSeatsList.reduce((sum, seat) => sum + seat.price, 0);
   const holdTimeLabel = formatHoldClock(remainingMs);
   const tierPrices = [...new Set(seats.map((s) => s.price))].sort((a, b) => a - b);
 
-  const seatClasses = (seat: SeatMapSeat, mine: boolean): string => {
-    const base =
-      "w-8 h-8 rounded-md border font-mono text-[10px] font-bold transition-all relative flex items-center justify-center select-none ";
-    if (mine) return `${base} cursor-pointer bg-burgundy border-burgundy text-white shadow-inner`;
+  const seatClasses = (seat: SeatMapSeat): string => {
+    if (heldByMe.has(seat.id)) return "fill-burgundy stroke-burgundy";
     if (seat.status === "sold" || seat.status === "blocked")
-      return `${base} cursor-not-allowed bg-stone-800 border-stone-800 text-stone-600`;
-    if (seat.status === "held")
-      return `${base} cursor-not-allowed bg-stone-700/60 border-stone-700 text-stone-400`;
-    return `${base} cursor-pointer bg-transparent border-beige-kem/25 text-beige-kem/80 hover:border-burgundy hover:text-white`;
+      return "fill-stone-800 stroke-stone-800";
+    if (seat.status === "held") return "fill-stone-700/60 stroke-stone-700";
+    return "fill-transparent stroke-beige-kem/40 hover:stroke-burgundy";
   };
 
-  const statusTitle = (seat: SeatMapSeat, mine: boolean): string => {
-    const price = formatPrice(seat.price);
-    if (mine) return `Ghế ${seat.row}${seat.number} — bạn đang giữ (${price})`;
+  /** What a screen reader announces. Section, row, seat, status, price — enough to choose a seat
+   *  without seeing the map (FR-039a). */
+  const statusTitle = (seat: SeatMapSeat): string => {
+    const price = formatVnd(seat.price);
+    const where = `${seat.section ? `${seat.section}, ` : ""}hàng ${seat.row}, ghế ${seat.number}`;
+    if (heldByMe.has(seat.id)) return `${where} — bạn đang giữ (${price})`;
     const label: Record<SeatStatus, string> = {
       available: "còn trống",
       held: "người khác đang giữ",
       sold: "đã bán",
       blocked: "không mở bán",
     };
-    return `Ghế ${seat.row}${seat.number} — ${label[seat.status]} (${price})`;
+    return `${where} — ${label[seat.status]} (${price})`;
   };
 
   return (
@@ -183,7 +180,7 @@ export default function SeatLayout({
       </div>
 
       {loadError && (
-        <div className="rounded-xl border-2 border-beige-kem bg-bubblegum px-4 py-3 font-mono text-[11px] leading-5 text-on-tint">
+        <div className="rounded-xl border-2 border-beige-kem bg-bubblegum px-4 py-3 font-mono text-[13px] leading-5 text-on-tint">
           {loadError}
         </div>
       )}
@@ -192,46 +189,36 @@ export default function SeatLayout({
         {/* Left column: the real seat map for this showtime */}
         <div className="lg:col-span-8 bg-xanh-pho border-2 border-beige-kem rounded-2xl p-6 sm:p-10 flex flex-col items-center">
           <div className="relative w-full max-w-lg mb-12 text-center">
-            <h4 className="text-[10px] font-mono tracking-widest text-ink-soft uppercase mb-2">SÂN KHẤU</h4>
+            <h4 className="text-[12px] font-mono tracking-widest text-ink-soft uppercase mb-2">
+              SÂN KHẤU
+            </h4>
             <div className="relative h-4 bg-gradient-to-t from-beige-kem/40 to-transparent border-t-2 border-beige-kem/75 rounded-[100%] filter blur-[1px]" />
             <div className="absolute inset-x-0 -bottom-8 h-20 bg-gradient-to-b from-beige-kem/10 to-transparent pointer-events-none" />
           </div>
 
-          <div className="w-full overflow-x-auto pb-4 no-scrollbar">
+          {/* The map, drawn from coordinates through the shared canvas — the same surface the event
+              page's preview uses, with zoom and pan (feature 005, FR-038/FR-039). The hold path
+              below is untouched: geometry changed where a seat is drawn, not how it is held. */}
+          <div className="w-full pb-4">
             {loading ? (
-              <p className="py-10 text-center font-mono text-xs text-beige-kem/50">Đang tải sơ đồ ghế…</p>
-            ) : rows.length === 0 ? (
+              <p className="py-10 text-center font-mono text-xs text-beige-kem/50">
+                Đang tải sơ đồ ghế…
+              </p>
+            ) : seats.length === 0 ? (
               <p className="py-10 text-center font-mono text-xs text-beige-kem/50">
                 Suất diễn này chưa có sơ đồ ghế.
               </p>
             ) : (
-              <div className="min-w-[500px] flex flex-col gap-3 items-center">
-                {rows.map(({ row, seats: rowSeats }) => (
-                  <div key={row} className="flex items-center gap-4">
-                    <span className="w-5 text-center font-mono font-bold text-xs text-ink-soft">{row}</span>
-
-                    <div className="flex items-center gap-2">
-                      {rowSeats.map((seat) => {
-                        const mine = heldByMe.has(seat.id);
-                        return (
-                          <button
-                            key={seat.id}
-                            id={`seat-${seat.id}`}
-                            disabled={busy || (!mine && seat.status !== "available")}
-                            onClick={() => toggleSeatSelection(seat)}
-                            className={seatClasses(seat, mine)}
-                            title={statusTitle(seat, mine)}
-                          >
-                            <span className="z-10">{seat.number}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <span className="w-5 text-center font-mono font-bold text-xs text-ink-soft">{row}</span>
-                  </div>
-                ))}
-              </div>
+              <SeatCanvas
+                seats={seats}
+                elements={mapMeta.elements}
+                floorPlan={mapMeta.floorPlan}
+                space={mapMeta.space}
+                interactive={!busy}
+                seatClass={seatClasses}
+                seatLabel={statusTitle}
+                onSeatActivate={toggleSeatSelection}
+              />
             )}
           </div>
 
@@ -239,7 +226,9 @@ export default function SeatLayout({
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8 pt-6 border-t border-beige-kem/25 w-full max-w-lg font-mono text-xs text-beige-kem/70">
             <div className="flex items-center gap-2">
               <span className="w-5 h-5 bg-transparent border-2 border-beige-kem rounded" />
-              <span>Còn trống{tierPrices.length ? ` (${tierPrices.map(formatPrice).join(" / ")})` : ""}</span>
+              <span>
+                Còn trống{tierPrices.length ? ` (${tierPrices.map(formatVnd).join(" / ")})` : ""}
+              </span>
             </div>
             <div className="flex items-center gap-2">
               <span className="w-5 h-5 bg-burgundy rounded" />
@@ -259,28 +248,34 @@ export default function SeatLayout({
         {/* Right column: the live selection */}
         <div className="lg:col-span-4 bg-xanh-pho border-2 border-beige-kem rounded-2xl p-6 space-y-6">
           <div className="space-y-1">
-            <h3 className="font-display font-bold text-lg text-beige-kem">Thông tin suất</h3>
-            <p className="text-xs text-ink-soft font-mono uppercase tracking-wider">{event.genre.join(" | ")}</p>
+            <h3 className="font-display font-bold text-xl text-beige-kem">Thông tin suất</h3>
+            <p className="text-xs text-ink-soft font-mono uppercase tracking-wider">
+              {event.genre.join(" | ")}
+            </p>
           </div>
 
           <div className="rounded-xl border-2 border-beige-kem bg-cam-dat p-4 font-mono text-xs text-on-tint/75">
             <div className="flex items-center justify-between gap-3">
-              <span className="inline-flex items-center font-bold text-ink-soft">Giữ ghế tạm thời</span>
+              <span className="inline-flex items-center font-bold text-ink-soft">
+                Giữ ghế tạm thời
+              </span>
               <span className="text-base font-black text-beige-kem">
                 {selectedSeatsList.length ? holdTimeLabel : "--:--"}
               </span>
             </div>
             <p className="mt-2 leading-5">
-              Ghế được giữ ngay khi bạn bấm chọn, và chỉ mình bạn giữ. Đồng hồ chạy từ ghế đầu tiên và
-              giữ nguyên trong suốt quy trình (chọn suất → chọn ghế → thanh toán); thêm hoặc bớt ghế
-              không cộng thêm thời gian. Hết giờ, ghế tự trả lại cho người khác.
+              Ghế được giữ ngay khi bạn bấm chọn, và chỉ mình bạn giữ. Đồng hồ chạy từ ghế đầu tiên
+              và giữ nguyên trong suốt quy trình (chọn suất → chọn ghế → thanh toán); thêm hoặc bớt
+              ghế không cộng thêm thời gian. Hết giờ, ghế tự trả lại cho người khác.
             </p>
           </div>
 
           <div className="space-y-3 pt-4 border-t border-beige-kem/25 text-sm">
             <div className="flex justify-between font-mono">
               <span className="text-beige-kem/60">Tên tác phẩm:</span>
-              <span className="font-bold text-beige-kem shrink-0 max-w-[180px] text-right truncate">{event.title}</span>
+              <span className="font-bold text-beige-kem shrink-0 max-w-[180px] text-right truncate">
+                {event.title}
+              </span>
             </div>
             <div className="flex justify-between font-mono">
               <span className="text-beige-kem/60">Suất:</span>
@@ -290,7 +285,10 @@ export default function SeatLayout({
             </div>
             <div className="flex justify-between font-mono">
               <span className="text-beige-kem/60">Địa điểm:</span>
-              <span className="font-bold text-beige-kem text-right max-w-[200px] truncate" title={event.location}>
+              <span
+                className="font-bold text-beige-kem text-right max-w-[200px] truncate"
+                title={event.location}
+              >
                 {event.venueName || event.location}
               </span>
             </div>
@@ -298,7 +296,9 @@ export default function SeatLayout({
 
           {/* Selected seat list */}
           <div className="space-y-3 pt-4 border-t border-beige-kem/25">
-            <h4 className="font-display text-sm font-semibold text-beige-kem">Ghế ngồi đã chọn:</h4>
+            <h4 className="font-display text-base font-semibold text-beige-kem">
+              Ghế ngồi đã chọn:
+            </h4>
 
             {selectedSeatsList.length === 0 ? (
               <div className="py-6 text-center text-xs text-beige-kem/40 border border-dashed border-beige-kem/25 rounded-lg">
@@ -317,11 +317,11 @@ export default function SeatLayout({
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-beige-kem">{formatPrice(seat.price)}</span>
+                      <span className="font-bold text-beige-kem">{formatVnd(seat.price)}</span>
                       <button
                         onClick={() => onToggleSeat(seat)}
                         disabled={busy}
-                        className="font-mono text-[10px] uppercase text-stone-500 transition hover:text-burgundy disabled:opacity-40 cursor-pointer"
+                        className="font-mono text-[12px] uppercase text-stone-500 transition hover:text-burgundy-ink disabled:opacity-40 cursor-pointer"
                         title="Bỏ giữ ghế này"
                       >
                         Xóa
@@ -336,9 +336,11 @@ export default function SeatLayout({
           <div className="pt-4 border-t border-beige-kem/25 flex flex-col gap-1.5">
             <div className="flex justify-between items-baseline font-mono">
               <span className="text-xs text-beige-kem/60 uppercase">Tổng tiền phải trả:</span>
-              <span className="text-2xl font-black text-burgundy font-display">{formatPrice(totalPrice)}</span>
+              <span className="text-3xl font-black text-burgundy-ink font-display">
+                {formatVnd(totalPrice)}
+              </span>
             </div>
-            <p className="text-[10px] text-right font-mono text-ink-soft tracking-wide">
+            <p className="text-[12px] text-right font-mono text-ink-soft tracking-wide">
               Đã bao gồm thuế giá trị gia tăng và phụ thu
             </p>
           </div>
@@ -346,7 +348,7 @@ export default function SeatLayout({
           <button
             onClick={onProceedToCheckout}
             disabled={selectedSeatsList.length === 0 || remainingMs <= 0 || busy}
-            className="w-full py-3.5 bg-burgundy hover:brightness-95 disabled:bg-surface-2 disabled:text-white/60 text-white hover:text-white font-bold rounded-xl transition shadow-hard hover:shadow-burgundy/30 cursor-pointer text-center text-sm"
+            className="w-full py-3.5 bg-burgundy hover:brightness-95 disabled:bg-surface-2 disabled:text-white/60 text-white hover:text-white font-bold rounded-xl transition hover:shadow-burgundy/30 cursor-pointer text-center text-sm"
           >
             TIẾP TỤC: ĐIỀN THÔNG TIN THÀNH VIÊN
           </button>

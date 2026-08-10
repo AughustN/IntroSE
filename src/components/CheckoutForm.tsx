@@ -8,7 +8,8 @@ import { CheckoutPayload, MovieEvent, Seat } from "../types";
 import { formatEventDate } from "../services/formatDate";
 import { formatHoldClock } from "../services/holdSession";
 import { walletClient, type WalletLimits } from "../services/walletClient";
-import TopUpSheet, { formatVnd } from "./wallet/TopUpSheet";
+import TopUpSheet from "./wallet/TopUpSheet";
+import { formatVnd } from "../services/currency";
 
 interface CheckoutFormProps {
   event: MovieEvent;
@@ -113,13 +114,6 @@ export default function CheckoutForm({
     }
   };
 
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat("vi-VN", {
-      style: "currency",
-      currency: "VND",
-      maximumFractionDigits: 0,
-    }).format(price);
-  };
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
@@ -151,7 +145,7 @@ export default function CheckoutForm({
       <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-12">
         <section className="space-y-6 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 sm:p-8 lg:col-span-7">
           <div>
-            <h3 className="font-display text-2xl font-black text-beige-kem">
+            <h3 className="font-display text-3xl font-black text-beige-kem">
               Thông tin người nhận vé
             </h3>
             <p className="mt-2 text-sm text-ink-soft">
@@ -200,7 +194,7 @@ export default function CheckoutForm({
             </div>
 
             <div className="space-y-3 border-t border-beige-kem/25 pt-6">
-              <h4 className="font-display text-lg font-black text-beige-kem">Thanh toán bằng ví</h4>
+              <h4 className="font-display text-xl font-black text-beige-kem">Thanh toán bằng ví</h4>
 
               <div className="rounded-xl border border-burgundy bg-bubblegum p-4">
                 <span className="block font-mono text-sm font-bold text-beige-kem">
@@ -224,11 +218,11 @@ export default function CheckoutForm({
               {shortfall && !showTopUp && (
                 <div className="space-y-3 rounded-xl border-2 border-beige-kem bg-bubblegum p-4 text-sm text-on-tint">
                   <p>
-                    <span className="font-bold text-burgundy">Số dư không đủ.</span> Cần nạp thêm{" "}
+                    <span className="font-bold text-burgundy-ink">Số dư không đủ.</span> Cần nạp thêm{" "}
                     <span className="font-mono font-bold">{formatVnd(shortfall.shortfall)}</span> để
                     hoàn tất đơn này.
                   </p>
-                  <p className="font-mono text-[11px] leading-5">
+                  <p className="font-mono text-[13px] leading-5">
                     Chưa có gì được tạo ra: chưa có đơn hàng, chưa trừ tiền, chưa xuất vé. Chỗ bạn
                     giữ vẫn chạy theo đồng hồ cũ; bắt đầu nạp tiền sẽ gia hạn thêm một lần duy nhất.
                   </p>
@@ -272,7 +266,7 @@ export default function CheckoutForm({
             <button
               type="submit"
               disabled={!name || !email || !phone || !agreeTerms || submitting}
-              className="w-full rounded-xl bg-burgundy px-6 py-4 text-sm font-black text-white shadow-hard transition hover:brightness-95 disabled:bg-surface-2 disabled:text-white/60"
+              className="w-full rounded-xl bg-burgundy px-6 py-4 text-sm font-black text-white transition hover:brightness-95 disabled:bg-surface-2 disabled:text-white/60"
             >
               {submitting ? "Đang thanh toán..." : "Trừ tiền từ ví và xuất vé QR"}
             </button>
@@ -281,7 +275,7 @@ export default function CheckoutForm({
 
         <aside className="space-y-6 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 lg:col-span-5">
           <div>
-            <h4 className="font-display text-xl font-black text-beige-kem">Tóm tắt đơn hàng</h4>
+            <h4 className="font-display text-2xl font-black text-beige-kem">Tóm tắt đơn hàng</h4>
             <p className="mt-1 font-mono text-xs uppercase text-ink-soft">
               Hiển thị phí trước khi thanh toán
             </p>
@@ -292,10 +286,10 @@ export default function CheckoutForm({
               src={event.imageUrl}
               alt={event.title}
               referrerPolicy="no-referrer"
-              className="h-24 w-20 rounded-xl object-cover border-2 border-beige-kem shadow-hard"
+              className="h-24 w-20 rounded-xl object-cover border-2 border-beige-kem"
             />
             <div className="min-w-0 flex-1">
-              <h5 className="line-clamp-2 font-display text-lg font-black text-beige-kem">
+              <h5 className="line-clamp-2 font-display text-xl font-black text-beige-kem">
                 {event.title}
               </h5>
               <p className="mt-1 font-mono text-xs text-ink-soft">{event.venueName}</p>
@@ -323,23 +317,23 @@ export default function CheckoutForm({
             </div>
             <div className="flex justify-between gap-4">
               <span>Tạm tính</span>
-              <span>{formatPrice(totalPrice)}</span>
+              <span>{formatVnd(totalPrice)}</span>
             </div>
           </div>
 
           <div className="border-t border-beige-kem/25 pt-5">
             <div className="flex items-baseline justify-between gap-4">
               <span className="font-mono text-xs uppercase text-beige-kem/60">Cần thanh toán</span>
-              <span className="font-display text-3xl font-black text-burgundy">
-                {formatPrice(finalPrice)}
+              <span className="font-display text-4xl font-black text-burgundy-ink">
+                {formatVnd(finalPrice)}
               </span>
             </div>
-            <div className="mt-4 rounded-xl border-2 border-beige-kem bg-la-co p-3 text-[11px] leading-5 text-on-tint">
+            <div className="mt-4 rounded-xl border-2 border-beige-kem bg-la-co p-3 text-[13px] leading-5 text-on-tint">
               <span>
                 Ví, đơn hàng và mã vé được tạo trong một giao dịch khi thanh toán thành công.
               </span>
             </div>
-            <div className="mt-3 rounded-xl border-2 border-beige-kem bg-cam-dat p-3 text-[11px] leading-5 text-on-tint">
+            <div className="mt-3 rounded-xl border-2 border-beige-kem bg-cam-dat p-3 text-[13px] leading-5 text-on-tint">
               <span>
                 Vé sẽ xuất hiện trong Vé của tôi, có thể in/tải lại/gửi lại email ở màn vé.
               </span>

@@ -10,19 +10,37 @@
 
 # Claude
 .claude/
+.agents/
+
+# IDEs
+.vscode/
+.idea/
+.gemini/
 
 # Spec Kit local state (regenerable, machine-specific)
 src/.specify/feature.json
 src/.specify/init-options.json
 src/.specify/integration.json
 src/.specify/integrations/
-# Assembled submission bundle (a copy of the repo — regenerable)
+# Junction at the repo root pointing at src/.specify (lets Claude Code load
+# speckit skills from g:\IntroSE). Machine-local, not a real directory.
+/.specify
+# Assembled submission bundles (a copy of the repo — regenerable)
 PA3-Group02/
+PA4-Group02/
 
 node_modules/
 dist/
 build/
 coverage/
+*.log
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
 
 # Uploaded avatars (runtime, ADR 0004)
 uploads/
+
+# Original font sources. The .woff2 the app loads lives in src/fonts/.
+/VNM Sans (3 fonts)/
