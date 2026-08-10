@@ -1,7 +1,11 @@
-import { useState } from "react";
+import html2canvas from "html2canvas";
+import { Check, Copy, Download, Home, Printer, Send } from "lucide-react";
+import QRCode from "qrcode";
+import { useEffect, useRef, useState } from "react";
 import { Booking } from "../types";
 import { formatEventDate } from "../services/formatDate";
 import { formatVnd } from "../services/currency";
+import { walletClient } from "../services/walletClient";
 
 interface TicketTicketProps {
   booking: Booking;
@@ -11,26 +15,88 @@ interface TicketTicketProps {
 export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps) {
   const [copied, setCopied] = useState(false);
   const [resent, setResent] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendError, setResendError] = useState<string | null>(null);
+  const [qrImage, setQrImage] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const ticketRef = useRef<HTMLDivElement>(null);
+  const ticketCode = booking.qrPayload;
 
+  useEffect(() => {
+    let current = true;
+    void QRCode.toDataURL(ticketCode, {
+      width: 480,
+      margin: 2,
+      errorCorrectionLevel: "M",
+      color: { dark: "#12312f", light: "#E0E2CA" },
+    }).then((url) => {
+      if (current) setQrImage(url);
+    });
+    return () => {
+      current = false;
+    };
+  }, [ticketCode]);
 
   const handleCopyCode = () => {
-    navigator.clipboard.writeText(booking.id);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    void navigator.clipboard.writeText(ticketCode).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
   };
 
   const handlePrint = () => {
-    window.print();
+    const ticket = ticketRef.current;
+    if (!ticket) return;
+    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+      .map((node) => node.outerHTML)
+      .join("");
+    const printWindow = window.open("", "_blank", "width=900,height=700");
+    if (!printWindow) return;
+    printWindow.document.write(
+      `<!doctype html><html><head><title>Vé TixHub</title>${styles}<style>@page{margin:12mm}body{margin:0;background:#fff}.print-ticket{max-width:760px!important;margin:0 auto!important;box-shadow:none!important}.print-ticket *{-webkit-print-color-adjust:exact;print-color-adjust:exact}</style></head><body><main class="print-ticket">${ticket.outerHTML}</main><script>window.addEventListener('load', () => { window.print(); window.onafterprint = () => window.close(); });</script></body></html>`,
+    );
+    printWindow.document.close();
   };
 
-  const handleResend = () => {
-    setResent(true);
-    setTimeout(() => setResent(false), 2500);
+  const handleDownload = async () => {
+    const ticket = ticketRef.current;
+    if (!ticket || downloading) return;
+    setDownloading(true);
+    try {
+      const canvas = await html2canvas(ticket, {
+        backgroundColor: "#E0E2CA",
+        scale: 2,
+        useCORS: true,
+      });
+      const link = document.createElement("a");
+      link.download = `tixhub-ticket-${ticketCode}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    const orderId = Number(booking.id);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      setResendError("Không xác định được đơn vé để gửi lại.");
+      return;
+    }
+    setResending(true);
+    setResendError(null);
+    try {
+      await walletClient.resendTicket(orderId);
+      setResent(true);
+    } catch (error) {
+      setResendError(error instanceof Error ? error.message : "Không thể gửi lại vé.");
+    } finally {
+      setResending(false);
+    }
   };
 
   return (
     <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto space-y-8 animate-fade-in">
-      
       {/* Success Banner */}
       <div className="text-center space-y-3">
         <div className="inline-flex items-center justify-center rounded-full border-2 border-beige-kem bg-la-co px-4 py-2 font-mono text-xs font-bold uppercase text-on-tint">
@@ -38,13 +104,17 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
         </div>
         <h2 className="font-display text-4xl font-black text-beige-kem">Đặt vé thành công</h2>
         <p className="text-sm text-beige-kem/80 max-w-lg mx-auto leading-relaxed">
-          Giao dịch mã số <span className="font-mono text-ink-soft font-bold">{booking.id}</span> đã được hạch toán qua {booking.paymentMethod}. Vé QR đã được gửi mock về <span className="text-ink-soft font-semibold">{booking.customerEmail}</span> và SMS {booking.customerPhone}.
+          Giao dịch mã số <span className="font-mono text-ink-soft font-bold">{booking.id}</span> đã
+          được hạch toán qua {booking.paymentMethod}. Vé QR đã được xếp hàng gửi về{" "}
+          <span className="text-ink-soft font-semibold">{booking.customerEmail}</span>.
         </p>
       </div>
 
       {/* Retro Perforated Ticket Coupon */}
-      <div className="bg-beige-kem border-4 border-xanh-pho rounded-2xl relative overflow-hidden text-xanh-pho max-w-2xl mx-auto">
-        
+      <div
+        ref={ticketRef}
+        className="bg-beige-kem border-4 border-xanh-pho rounded-2xl relative overflow-hidden text-xanh-pho max-w-2xl mx-auto"
+      >
         {/* Decorative Ticket Side Notch Circles */}
         <div className="absolute -left-4 top-1/2 -translate-y-1/2 w-8 h-8 bg-xanh-pho rounded-full z-10 border-r-4 border-xanh-pho" />
         <div className="absolute -right-4 top-1/2 -translate-y-1/2 w-8 h-8 bg-xanh-pho rounded-full z-10 border-l-4 border-xanh-pho" />
@@ -52,22 +122,25 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
         {/* Part A: Ticket Header */}
         <div className="bg-burgundy text-white p-6 flex justify-between items-center border-b-4 border-dashed border-xanh-pho">
           <div className="space-y-1">
-            <span className="text-[13px] font-mono tracking-widest text-ink-soft uppercase font-bold">CINEMA VINTAGE STUB</span>
+            <span className="text-[13px] font-mono tracking-widest text-ink-soft uppercase font-bold">
+              VÉ ĐIỆN TỬ TIXHUB
+            </span>
             <div className="flex items-baseline gap-1.5">
               <h3 className="font-display font-black text-2xl">TIXHUB</h3>
-              <span className="text-[13px] font-mono bg-[#E0E2CA] text-burgundy-ink px-1 py-0.2 rounded font-black">STUB</span>
+              <span className="text-[13px] font-mono bg-[#E0E2CA] text-burgundy-ink px-1 py-0.5 rounded font-black">
+                QR PASS
+              </span>
             </div>
           </div>
 
           <div className="text-right font-mono text-xs">
             <p className="opacity-75">Mã Vé</p>
-            <p className="font-bold text-ink-soft text-sm">{booking.id}</p>
+            <p className="font-bold text-ink-soft text-sm break-all max-w-40">{ticketCode}</p>
           </div>
         </div>
 
         {/* Part B: Ticket Content Body */}
         <div className="p-6 md:p-8 grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
-          
           {/* Main info columns (8 cols) */}
           <div className="md:col-span-8 space-y-5">
             <div className="space-y-1">
@@ -78,38 +151,37 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
                 {booking.movie.title}
               </h4>
               {booking.movie.originalTitle && (
-                <p className="text-xs font-mono text-burgundy-ink/75">{booking.movie.originalTitle}</p>
+                <p className="text-xs font-mono text-burgundy-ink/75">
+                  {booking.movie.originalTitle}
+                </p>
               )}
             </div>
 
             <div className="grid grid-cols-2 gap-4 font-mono text-xs">
               <div className="space-y-1">
-                <span className="text-gray-500">
-                  Ngày chiếu
+                <span className="text-gray-500">Ngày chiếu</span>
+                <span className="font-bold text-xanh-pho">
+                  {formatEventDate(booking.selectedDate, true)}
                 </span>
-                <span className="font-bold text-xanh-pho">{formatEventDate(booking.selectedDate, true)}</span>
               </div>
               <div className="space-y-1">
-                <span className="text-gray-500">
-                  Giờ chiếu
-                </span>
+                <span className="text-gray-500">Giờ chiếu</span>
                 <span className="font-bold text-xanh-pho">{booking.selectedTime}</span>
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4 font-mono text-xs pt-1">
               <div className="space-y-1">
-                <span className="text-gray-500">
-                  Khán giả
-                </span>
-                <span className="font-bold text-xanh-pho truncate block max-w-[170px]" title={booking.customerName}>
+                <span className="text-gray-500">Khán giả</span>
+                <span
+                  className="font-bold text-xanh-pho truncate block max-w-[170px]"
+                  title={booking.customerName}
+                >
                   {booking.customerName}
                 </span>
               </div>
               <div className="space-y-1">
-                <span className="text-gray-500">
-                  Số Ghế Đã Đặt
-                </span>
+                <span className="text-gray-500">Số Ghế Đã Đặt</span>
                 <span className="font-bold text-burgundy-ink text-sm">
                   {booking.selectedSeats.map((s) => s.id).join(", ")}
                 </span>
@@ -131,42 +203,36 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
               </div>
               <div className="flex justify-between items-baseline border-t border-gray-300 pt-2">
                 <span className="text-gray-500">Tổng thanh toán:</span>
-                <span className="font-black text-burgundy-ink text-lg">{formatVnd(booking.finalPrice)}</span>
+                <span className="font-black text-burgundy-ink text-lg">
+                  {formatVnd(booking.finalPrice)}
+                </span>
               </div>
             </div>
           </div>
 
           {/* QR Scan Column (4 cols) */}
           <div className="md:col-span-4 flex flex-col items-center justify-center p-4 bg-xanh-pho border border-xanh-pho/15 rounded-xl space-y-3">
-            
-            {/* Elegant SVG custom QR code code */}
             <div className="w-28 h-28 bg-xanh-pho p-2 rounded-lg shadow-inner flex items-center justify-center">
-              <svg viewBox="0 0 100 100" className="w-full h-full text-beige-kem" fill="currentColor">
-                {/* Simulated vintage QR Code pixels grid */}
-                <rect x="5" y="5" width="20" height="20" />
-                <rect x="10" y="10" width="10" height="10" fill="#E0E2CA" />
-                <rect x="75" y="5" width="20" height="20" />
-                <rect x="80" y="10" width="10" height="10" fill="#E0E2CA" />
-                <rect x="5" y="75" width="20" height="20" />
-                <rect x="10" y="80" width="10" height="10" fill="#E0E2CA" />
-                {/* Noise blocks */}
-                <rect x="35" y="15" width="10" height="5" />
-                <rect x="40" y="30" width="20" height="10" />
-                <rect x="15" y="45" width="5" height="15" />
-                <rect x="30" y="55" width="15" height="15" />
-                <rect x="65" y="45" width="10" height="25" />
-                <rect x="55" y="75" width="15" height="5" />
-                <rect x="75" y="80" width="15" height="15" />
-                <rect x="35" y="85" width="10" height="10" />
-              </svg>
+              {qrImage ? (
+                <img
+                  src={qrImage}
+                  alt={`QR ticket ${ticketCode}`}
+                  className="w-full h-full rounded bg-beige-kem"
+                />
+              ) : (
+                <span className="text-xs text-beige-kem">Đang tạo QR</span>
+              )}
             </div>
 
             <div className="text-center font-mono">
-              <p className="text-[13px] font-bold text-burgundy-ink uppercase tracking-widest">VÉ VÀO CỬA QR</p>
-              <p className="text-[12px] text-gray-500 mt-0.5">QR một lần / {booking.qrStatus === "unused" ? "Chưa check-in" : "Đã check-in"}</p>
+              <p className="text-[13px] font-bold text-burgundy-ink uppercase tracking-widest">
+                VÉ VÀO CỬA QR
+              </p>
+              <p className="text-[12px] text-gray-500 mt-0.5">
+                QR một lần / {booking.qrStatus === "unused" ? "Chưa check-in" : "Đã check-in"}
+              </p>
             </div>
           </div>
-
         </div>
 
         {/* Part C: Stylized printable barcode footer */}
@@ -174,21 +240,20 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
           <div className="flex flex-col items-start gap-1 font-mono text-[12px] text-gray-500 leading-none">
             <span>RẠP: {booking.movie.location}</span>
             <span>THỜI GIAN ĐẶT: {booking.bookingTime}</span>
-            <span>TRẠNG THÁI: {booking.status.toUpperCase()} / {booking.deliveryChannel.toUpperCase()}</span>
+            <span>
+              TRẠNG THÁI: {booking.status.toUpperCase()} / {booking.deliveryChannel.toUpperCase()}
+            </span>
           </div>
 
           {/* Barcode representation lines */}
           <div className="h-8 flex gap-[1.5px] items-center overflow-hidden">
-            {[2,1,4,1,2,3,1,2,4,1,3,1,2,1,4,1,2,2,3,1,4,1,2,3,1,2,4,1].map((w, idx) => (
-              <span
-                key={idx}
-                className="bg-xanh-pho h-full"
-                style={{ width: `${w}px` }}
-              />
+            {[
+              2, 1, 4, 1, 2, 3, 1, 2, 4, 1, 3, 1, 2, 1, 4, 1, 2, 2, 3, 1, 4, 1, 2, 3, 1, 2, 4, 1,
+            ].map((w, idx) => (
+              <span key={idx} className="bg-xanh-pho h-full" style={{ width: `${w}px` }} />
             ))}
           </div>
         </div>
-
       </div>
 
       {/* Action list */}
@@ -197,6 +262,7 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
           onClick={onHomeClick}
           className="flex items-center px-5 py-2.5 bg-xanh-pho border-2 border-beige-kem hover:border-beige-kem/60 text-beige-kem rounded-lg transition"
         >
+          <Home className="h-4 w-4" aria-hidden />
           VỀ TRANG CHỦ
         </button>
 
@@ -204,6 +270,11 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
           onClick={handleCopyCode}
           className="flex items-center px-5 py-2.5 bg-xanh-pho border-2 border-beige-kem hover:border-beige-kem/60 text-beige-kem rounded-lg transition"
         >
+          {copied ? (
+            <Check className="h-4 w-4" aria-hidden />
+          ) : (
+            <Copy className="h-4 w-4" aria-hidden />
+          )}
           {copied ? "ĐÃ SAO CHÉP" : "SAO CHÉP MÃ VÉ"}
         </button>
 
@@ -211,28 +282,33 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
           onClick={handlePrint}
           className="flex items-center px-6 py-2.5 bg-burgundy text-white rounded-lg hover:brightness-95 transition"
         >
+          <Printer className="h-4 w-4" aria-hidden />
           IN VÉ NÀY
         </button>
 
         <button
-          onClick={handlePrint}
+          onClick={handleDownload}
+          disabled={downloading}
           className="flex items-center px-5 py-2.5 bg-xanh-pho border-2 border-beige-kem hover:border-beige-kem/60 text-beige-kem rounded-lg transition"
         >
-          TẢI VÉ
+          <Download className="h-4 w-4" aria-hidden />
+          {downloading ? "ĐANG TẢI..." : "TẢI VÉ"}
         </button>
 
         <button
           onClick={handleResend}
+          disabled={resending}
           className="flex items-center px-5 py-2.5 bg-xanh-pho border border-la-co/25 hover:border-burgundy text-ink-soft rounded-lg transition"
         >
-          {resent ? "ĐÃ GỬI LẠI" : "GỬI LẠI EMAIL/SMS"}
+          <Send className="h-4 w-4" aria-hidden />
+          {resending ? "ĐANG GỬI..." : resent ? "ĐÃ XẾP HÀNG GỬI" : "GỬI LẠI EMAIL"}
         </button>
       </div>
+      {resendError && <p className="text-center text-sm text-burgundy">{resendError}</p>}
 
       <div className="mx-auto max-w-2xl rounded-xl border-2 border-beige-kem bg-la-co p-4 text-xs leading-6 text-on-tint">
-        Đây là vé frontend mock. Backend sau này cần khóa QR theo trạng thái một lần, ghi log check-in và cho phép gửi lại email/SMS từ lịch sử đơn hàng.
+        Vé đã được lưu trong Vé của tôi. Bạn có thể gửi lại email tối đa 3 lần trong mỗi giờ.
       </div>
-
     </div>
   );
 }
