@@ -66,30 +66,51 @@ async function seedSeatedEvent(orgId: number, userId: number): Promise<void> {
     )
   ).rows[0].id;
 
-  // Physical layout: sections, then seats unique within the venue by (row, number).
+  // Physical layout (feature 005): the venue owns a named LAYOUT; sections and seats belong to it,
+  // and seats are unique by (section, row, number). Every seat carries a position in the layout's
+  // 0–10000 space — the grid below is the same one the migration seeds legacy seats onto.
+  const layoutId = (
+    await pool.query(
+      `INSERT INTO venue_layouts (venue_id, name, status) VALUES ($1, 'Sơ đồ mặc định', 'ready') RETURNING id`,
+      [venueId],
+    )
+  ).rows[0].id;
+
   const seatIdsBySection = new Map<string, number[]>();
+  let rowIndex = 0;
   for (const section of SECTIONS) {
     const sectionId = (
-      await pool.query(`INSERT INTO sections (venue_id, name) VALUES ($1, $2) RETURNING id`, [
-        venueId,
+      await pool.query(`INSERT INTO sections (layout_id, name) VALUES ($1, $2) RETURNING id`, [
+        layoutId,
         section.name,
       ])
     ).rows[0].id;
 
     const ids: number[] = [];
     for (const row of section.rows) {
+      const posY = 1200 + rowIndex * 150;
+      const startX = Math.round(5000 - ((section.perRow - 1) * 150) / 2);
       for (let n = 1; n <= section.perRow; n++) {
         const seatId = (
           await pool.query(
-            `INSERT INTO seats (venue_id, section_id, row_label, seat_number) VALUES ($1, $2, $3, $4) RETURNING id`,
-            [venueId, sectionId, row, n],
+            `INSERT INTO seats (layout_id, section_id, row_label, seat_number, pos_x, pos_y)
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+            [layoutId, sectionId, row, n, Math.min(10000, startX + (n - 1) * 150), posY],
           )
         ).rows[0].id;
         ids.push(seatId);
       }
+      rowIndex += 1;
     }
     seatIdsBySection.set(section.name, ids);
   }
+
+  // A stage so the seeded map reads like a room rather than a grid of buttons (FR-016).
+  await pool.query(
+    `INSERT INTO layout_elements (layout_id, kind, pos_x, pos_y, width, height, rotation, label)
+     VALUES ($1, 'stage', 5000, 600, 3000, 400, 0, 'Sân khấu')`,
+    [layoutId],
+  );
 
   const slug = await generateUniqueSlug("Đêm Nhạc Trịnh Công Sơn");
   const eventId = (

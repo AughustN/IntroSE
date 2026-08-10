@@ -58,9 +58,9 @@ export default function ConfirmDialog({
         aria-labelledby="confirm-title"
         aria-describedby="confirm-message"
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 shadow-hard"
+        className="w-full max-w-md rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6"
       >
-        <h2 id="confirm-title" className="font-display text-xl font-black text-beige-kem">
+        <h2 id="confirm-title" className="font-display text-2xl font-black text-beige-kem">
           {title}
         </h2>
         <p id="confirm-message" className="mt-3 whitespace-pre-line text-sm leading-6 text-beige-kem/70">

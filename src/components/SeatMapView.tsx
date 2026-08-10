@@ -3,19 +3,31 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useMemo, useState } from "react";
-import type { SeatMap } from "@/shared/catalog/types";
+import { useEffect, useState } from "react";
+import type { SeatMap, SeatMapSeat } from "@/shared/catalog/types";
 import { catalogClient } from "../services/catalogClient";
+import SeatCanvas from "./seatmap/SeatCanvas";
 
 const seatColor: Record<string, string> = {
-  available: "border-la-co/60 text-ink-soft",
-  held: "border-cam-dat/60 text-ink-soft",
-  sold: "border-beige-kem/25 text-beige-kem/30",
-  blocked: "border-beige-kem/25 text-beige-kem/30",
+  available: "fill-transparent stroke-la-co/70",
+  held: "fill-transparent stroke-cam-dat/70",
+  sold: "fill-beige-kem/10 stroke-beige-kem/25",
+  blocked: "fill-beige-kem/10 stroke-beige-kem/25",
+};
+
+const statusText: Record<string, string> = {
+  available: "còn trống",
+  held: "đang giữ",
+  sold: "đã bán",
+  blocked: "không bán",
 };
 
 /**
  * Read-only seat availability for one showtime, straight from the catalog API.
+ *
+ * Renders from the layout's COORDINATES (feature 005) through the shared SeatCanvas — the same
+ * surface the seat-selection screen uses, so the two can never disagree about where a seat is. The
+ * old row-grouped flex layout is gone: every venue used to look identical regardless of its shape.
  *
  * Seated events only: a general-admission showtime has no seats, and its remaining quantity is
  * shown on the ticket-tier cards instead. Selecting or holding a seat is the seat-holds feature —
@@ -38,20 +50,6 @@ export default function SeatMapView({ showtimeId }: { showtimeId: number }) {
     };
   }, [showtimeId]);
 
-  const rows = useMemo(() => {
-    if (map?.eventType !== "seated" || !map.seats) return [];
-    const byRow = new Map<string, typeof map.seats>();
-    for (const s of map.seats) {
-      const list = byRow.get(s.row) ?? [];
-      list.push(s);
-      byRow.set(s.row, list);
-    }
-    return [...byRow.entries()].map(([row, seats]) => ({
-      row,
-      seats: seats.sort((a, b) => a.number - b.number),
-    }));
-  }, [map]);
-
   if (err) {
     return (
       <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-xs text-on-tint">
@@ -63,28 +61,21 @@ export default function SeatMapView({ showtimeId }: { showtimeId: number }) {
   if (!map) return <p className="text-sm text-beige-kem/60">Đang tải sơ đồ ghế…</p>;
   if (map.eventType !== "seated") return null;
 
+  const seats = map.seats ?? [];
+  const label = (s: SeatMapSeat) =>
+    `${s.section ? `${s.section}, ` : ""}hàng ${s.row}, ghế ${s.number} — ${s.tier} · ${s.price.toLocaleString("vi-VN")}đ · ${statusText[s.status] ?? s.status}`;
+
   return (
     <div className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-5">
-      <div className="mb-4 rounded-lg bg-surface-2 py-1 text-center font-mono text-[10px] uppercase tracking-widest text-beige-kem/50">
-        Sân khấu
-      </div>
-      <div className="space-y-2 overflow-x-auto">
-        {rows.map(({ row, seats }) => (
-          <div key={row} className="flex items-center justify-center gap-1.5">
-            <span className="w-6 shrink-0 text-right font-mono text-[10px] text-beige-kem/40">{row}</span>
-            {seats.map((s) => (
-              <span
-                key={s.id}
-                title={`${s.row}${s.number} · ${s.tier} · ${s.price.toLocaleString("vi-VN")}đ · ${s.status}`}
-                className={`grid h-7 w-7 shrink-0 place-items-center rounded-md border text-[10px] font-bold ${seatColor[s.status] ?? ""}`}
-              >
-                {s.number}
-              </span>
-            ))}
-          </div>
-        ))}
-      </div>
-      <div className="mt-4 flex flex-wrap gap-4 font-mono text-[10px] text-beige-kem/50">
+      <SeatCanvas
+        seats={seats}
+        elements={map.elements}
+        floorPlan={map.floorPlan}
+        space={map.space}
+        seatClass={(s) => seatColor[s.status] ?? ""}
+        seatLabel={label}
+      />
+      <div className="mt-4 flex flex-wrap gap-4 font-mono text-[12px] text-beige-kem/50">
         <span className="text-ink-soft">■ Còn trống</span>
         <span className="text-ink-soft">■ Đang giữ</span>
         <span className="text-beige-kem/30">■ Đã bán</span>

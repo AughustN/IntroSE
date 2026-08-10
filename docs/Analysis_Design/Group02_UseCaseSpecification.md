@@ -1068,18 +1068,25 @@ Group 02 · SoE
 **Preconditions**
 - Organizer is creating/editing a Seated event (UC-20/UC-23).
 
+> **Amended (feature `005-seatmap-designer`).** The designer is now a real authoring canvas over a
+> **layout** layer, and A2/A4 — left open by 002 — are closed by the per-seat rules in step 6.
+
 **Basic flow**
 1. Organizer opens the seat-map designer for one of **their own** venues — a venue belongs to the organizer that created it and is used only in that organizer's events.
-2. Organizer defines the venue's sections and its seats (row label, number, seat type); each seat is unique within the venue by row and number.
-3. System validates the layout (no duplicate seats, non-zero capacity).
-4. Organizer generates the **showtime's** seat map, assigning each section a price tier: exactly one bookable seat per physical seat, each starting `available` and carrying its tier's price.
+2. Organizer picks or creates a named **layout** of that venue (a venue owns several: standing concert, seated theatre, U-shaped workshop). Sections and seats belong to the layout, not to the venue.
+3. Organizer seeds seats with the Section / Row / Count generator, then refines them by hand on a canvas: place, drag, multi-select, align, distribute, rotate, curve a row along an arc, delete. Every seat carries a **position and rotation**; undo/redo and a saveable draft are available. Optionally the organizer uploads a floor-plan image to trace over — a **background layer only**, which never creates a seat and never determines a seat's status.
+4. Organizer adds non-sellable elements — stage, aisles, doors, bar, free text labels — stored apart from seats so they can never enter ticket inventory.
+5. System validates the layout in one pass and blocks publishing while any of these remain: overlapping seats, duplicate labels within a section, a seat belonging to no section, a section with seats but no tier, zero capacity. Each is reported with the seats or sections at fault. Seat labels are unique **within their section**, not within the venue.
+6. Organizer generates the **showtime's** seat map, assigning each section a price tier: exactly one bookable seat per physical seat, each starting `available` and carrying its tier's price. Generation **snapshots** the layout onto the showtime — from then on the showtime owns its map, and a later layout edit reaches it only through an explicit, previewed re-apply.
 
 **Alternative flows**
-- **A1 — Invalid layout (duplicate/overlapping seats):** system flags and blocks save.
-- **A2 — Organizer edits an existing map with sold seats:** system restricts changes that would affect already-sold seats.
+- **A1 — Invalid layout (duplicate/overlapping seats):** system flags every problem in one pass and blocks publishing.
+- **A2 — Organizer edits an existing map with sold seats:** *(closed by 005)* the edit is evaluated **per seat** against live inventory rather than refused wholesale. A `sold` seat may have only its **position and rotation** changed — never its label, section, tier, or existence. Any refused seat rejects the **whole** edit and the map is left exactly as it was.
 - **A3 — Organizer cancels:** map reverts to last saved.
-- **A4 — Deleting a seat that is part of a live seat map:** refused, to protect inventory integrity.
-- **A5 — Another organizer's venue:** refused; venues are not shared, so the same physical place may legitimately be entered by more than one organizer.
+- **A4 — Deleting a seat that is part of a live seat map:** *(closed by 005)* refused only when the seat is `sold` or under a **live hold**; an `available` or `blocked` seat may be freely deleted. A held seat is never released to make room for an organizer's edit — the organizer retries once the hold lapses.
+- **A5 — Another organizer's venue:** refused; venues are not shared, so the same physical place may legitimately be entered by more than one organizer. Layouts, seats, uploads and clones follow the same ownership rule, enforced on the server.
+- **A6 — Organizer blocks a seat on a live map:** an `available` seat can be blocked (broken seat, technical seat, comp) and unblocked; blocking a `held` or `sold` seat is refused.
+- **A7 — Stale save:** two organizer sessions editing one layout — the second save is refused and the organizer reloads, so neither silently overwrites the other.
 
 **Postconditions**
 - **Success:** a valid seat map exists for the showtime, one bookable seat per physical seat.

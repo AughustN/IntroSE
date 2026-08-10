@@ -33,8 +33,8 @@ export default function ResetPassword({ token }: { token: string }) {
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-xanh-pho px-4 text-beige-kem">
-      <div className="w-full max-w-md rounded-2xl border-2 border-beige-kem bg-surface-2 p-6 shadow-hard">
-        <h1 className="font-display text-2xl font-black">Đặt lại mật khẩu</h1>
+      <div className="w-full max-w-md rounded-2xl border-2 border-beige-kem bg-surface-2 p-6">
+        <h1 className="font-display text-3xl font-black">Đặt lại mật khẩu</h1>
 
         {done ? (
           <>
@@ -76,7 +76,7 @@ export default function ResetPassword({ token }: { token: string }) {
             >
               {busy ? "Đang xử lý…" : "Đặt lại mật khẩu"}
             </button>
-            <a href="/" className="block text-center font-mono text-[11px] text-beige-kem/60 transition hover:text-ink-soft">
+            <a href="/" className="block text-center font-mono text-[13px] text-beige-kem/60 transition hover:text-ink-soft">
               Quay lại
             </a>
           </form>

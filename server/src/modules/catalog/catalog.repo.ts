@@ -1,4 +1,5 @@
-import type { EventCard, EventDetail, SeatMap, Showtime, Tier } from '@shared/catalog/types.js';
+import type { EventCard, EventDetail, SeatMap, SeatMapElement, Showtime, Tier } from '@shared/catalog/types.js';
+import { LAYOUT_SPACE, SEAT_DIAMETER } from '../../config.js';
 import type { Db } from '../../db/pool.js';
 import { pool } from '../../db/pool.js';
 import { SHOWTIME_HAS_AVAILABILITY, UPCOMING_SHOWTIME, VISIBLE_JOIN, VISIBLE_WHERE } from './visibility.js';
@@ -91,6 +92,22 @@ export async function listEvents(f: EventFilters, db: Db = pool): Promise<{ even
   return { events: rows.rows.map(toCard), total: Number(totalRes.rows[0]?.c ?? 0), page };
 }
 
+/** Public homepage curation. Hidden events disappear immediately through the live visibility predicate. */
+export async function listFeaturedEvents(db: Db = pool): Promise<EventCard[]> {
+  const { rows } = await db.query<Row>(
+    `SELECT e.id, e.slug, e.title, e.image_url, ec.code AS category,
+            ${EARLIEST} AS earliest_showtime, ${START_PRICE} AS starting_price, ${CITY} AS city,
+            ${HAS_UPCOMING} AS has_upcoming, ${HAS_AVAILABLE} AS has_available
+       FROM featured_events f
+       JOIN events e ON e.id = f.event_id
+       ${VISIBLE_JOIN}
+       JOIN event_categories ec ON ec.id = e.category_id
+      WHERE ${VISIBLE_WHERE}
+      ORDER BY f.display_order, f.event_id`,
+  );
+  return rows.map(toCard);
+}
+
 /** Public event detail by stable slug (US2). Null if not visible (never leaks drafts). */
 export async function getEventDetail(slug: string, db: Db = pool): Promise<EventDetail | null> {
   const res = await db.query<Row & {
@@ -175,6 +192,18 @@ export async function getShowtimes(eventId: number, db: Db = pool): Promise<Show
   }));
 }
 
+/** The decoration half of a showtime's layout snapshot (feature 005, FR-005). Display only — nothing
+ *  here is ever inventory, and the floor plan never determines a seat's status (Principle I). */
+interface SeatMapSnapshot {
+  elements: SeatMapElement[];
+  planUrl: string | null;
+  planScale: number;
+  planOffsetX: number;
+  planOffsetY: number;
+  planOpacity: number;
+  planVisibleToBuyers: boolean;
+}
+
 /** Read-only seat map (seated) or tier availability (GA) for a showtime (US3). Null if not visible. */
 export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<SeatMap | null> {
   const evRes = await db.query<{ event_type: 'general_admission' | 'seated' }>(
@@ -186,25 +215,65 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
   if (!ev) return null;
 
   if (ev.event_type === 'seated') {
-    const seats = await db.query<{ id: number; row_label: string; seat_number: number; label: string; price: string; status: 'available' | 'held' | 'sold' | 'blocked' }>(
-      `SELECT ss.id, se.row_label, se.seat_number, tt.label, tt.price_amount::text AS price, ss.status
+    // Geometry comes off `showtime_seats` — the showtime's own SNAPSHOT of the layout, on the row this
+    // query already reads, so coordinates cost no extra join (feature 005, research R-2).
+    // Ordered section → row → number: that ordering is the buyer map's tab order and is part of the
+    // contract, not an implementation detail of either renderer (FR-039a).
+    const seats = await db.query<{
+      id: number;
+      row_label: string;
+      seat_number: number;
+      label: string;
+      price: string;
+      status: 'available' | 'held' | 'sold' | 'blocked';
+      pos_x: number | null;
+      pos_y: number | null;
+      rotation: number;
+      section: string | null;
+    }>(
+      `SELECT ss.id, ss.row_label, ss.seat_number, tt.label, tt.price_amount::text AS price, ss.status,
+              ss.pos_x, ss.pos_y, ss.rotation, ss.section_name AS section
          FROM showtime_seats ss
-         JOIN seats se ON se.id = ss.seat_id
          JOIN ticket_tiers tt ON tt.id = ss.ticket_tier_id
         WHERE ss.showtime_id = $1
-        ORDER BY se.row_label, se.seat_number`,
+        ORDER BY ss.section_name NULLS FIRST, ss.row_label, ss.seat_number`,
       [showtimeId],
     );
+
+    const snap = await db.query<{ layout_snapshot: SeatMapSnapshot | null }>(
+      `SELECT layout_snapshot FROM showtimes WHERE id = $1`,
+      [showtimeId],
+    );
+    const s = snap.rows[0]?.layout_snapshot ?? null;
+
     return {
       eventType: 'seated',
-      seats: seats.rows.map((s) => ({
-        id: s.id,
-        row: s.row_label,
-        number: s.seat_number,
-        tier: s.label,
-        price: Number(s.price),
-        status: s.status as 'available' | 'held' | 'sold' | 'blocked',
+      space: { width: LAYOUT_SPACE, height: LAYOUT_SPACE, seatDiameter: SEAT_DIAMETER },
+      seats: seats.rows.map((r) => ({
+        id: r.id,
+        row: r.row_label,
+        number: r.seat_number,
+        tier: r.label,
+        price: Number(r.price),
+        status: r.status,
+        x: r.pos_x ?? 0,
+        y: r.pos_y ?? 0,
+        rotation: r.rotation,
+        section: r.section,
       })),
+      elements: s?.elements ?? [],
+      // Omitted entirely unless the organizer made the plan buyer-visible (FR-026). The toggle governs
+      // display; the file itself is unguessable rather than access-controlled (FR-026a).
+      floorPlan:
+        s?.planUrl && s.planVisibleToBuyers
+          ? {
+              url: s.planUrl,
+              scale: s.planScale,
+              offsetX: s.planOffsetX,
+              offsetY: s.planOffsetY,
+              opacity: s.planOpacity,
+            }
+          : null,
     };
   }
 

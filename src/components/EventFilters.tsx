@@ -3,13 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { formatEventDate } from "../services/formatDate";
+import { formatVnd } from "../services/currency";
+import Select from "./Select";
+import DatePicker from "./DatePicker";
+import type { DateFilter } from "../services/dateFilter";
 
 interface EventFiltersProps {
   activeCategory: string;
   onCategoryChange: (category: string) => void;
-  activeDate: string;
-  onDateChange: (date: string) => void;
+  activeDate: DateFilter;
+  onDateChange: (date: DateFilter) => void;
   activeCity: string;
   onCityChange: (city: string) => void;
   maxPrice: number;
@@ -34,6 +37,35 @@ const categories = [
 
 const cityOptions = ["all", "TP.HCM", "Hà Nội", "Đà Nẵng"];
 
+const availabilityOptions = [
+  ["all", "Mọi trạng thái"],
+  ["available", "Còn vé"],
+  ["low", "Sắp hết"],
+  ["sold_out", "Hết vé"],
+  ["cancelled", "Đã hủy"],
+] as const;
+
+/**
+ * A filter chip. Flat and square — selection is carried by fill, not by a border or a shadow, so a
+ * row of these reads as one ruled strip rather than a row of separate objects.
+ */
+function Chip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`px-3 py-1.5 font-mono text-[13px] uppercase tracking-[0.1em] transition ${
+        active
+          ? "bg-beige-kem text-xanh-pho"
+          : "text-ink-soft hover:bg-bubblegum/40 hover:text-beige-kem"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
 export default function EventFilters({
   activeCategory,
   onCategoryChange,
@@ -48,79 +80,60 @@ export default function EventFilters({
   wishlistCount,
   dateOptions,
 }: EventFiltersProps) {
-  const formatPrice = (price: number) =>
-    new Intl.NumberFormat("vi-VN", {
-      style: "currency",
-      currency: "VND",
-      maximumFractionDigits: 0,
-    }).format(price);
-
   return (
-    <section className="border-b border-beige-kem/25 bg-xanh-pho px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-[92rem]">
-        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="font-mono text-[11px] font-bold uppercase tracking-normal text-ink-soft">
-              Bộ lọc nhanh
-            </p>
-            <h2 className="font-display text-xl font-black text-beige-kem">
-              Tìm đúng suất diễn trước khi chọn vé
-            </h2>
-          </div>
-          <p className="font-mono text-xs text-beige-kem/55">
-            Lọc theo ngày, thành phố, giá và trạng thái vé
-          </p>
+    <section className="border-y border-beige-kem/25 bg-xanh-pho px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl">
+        {/*
+         * Categories on their own rule, the four remaining controls on the next. Doron separates
+         * its "shop by type" row from the rest the same way — one decision per line.
+         */}
+        <div className="flex flex-wrap items-center gap-x-1 gap-y-2 border-b border-beige-kem/25 pb-4">
+          <span className="label-eyebrow mr-3 text-ink-soft">Loại</span>
+          {categories.map((cat) => (
+            <Chip
+              key={cat.id}
+              label={cat.label}
+              active={activeCategory === cat.id}
+              onClick={() => onCategoryChange(cat.id)}
+            />
+          ))}
+          <span className="ml-auto font-mono text-[13px] text-ink-soft">
+            Đã lưu {wishlistCount}
+          </span>
         </div>
 
-        <div className="grid gap-3 rounded-2xl border-2 border-beige-kem bg-surface-2 p-3 shadow-hard shadow-black/10 lg:grid-cols-12">
-          <div className="flex min-w-0 flex-wrap items-center gap-1 rounded-xl border-2 border-beige-kem bg-xanh-pho p-1 lg:col-span-4">
-            {categories.map((cat) => (
-              <button
-                key={cat.id}
-                onClick={() => onCategoryChange(cat.id)}
-                className={`h-9 min-w-fit rounded-lg px-3 text-xs font-bold transition ${
-                  activeCategory === cat.id
-                    ? "bg-beige-kem text-xanh-pho"
-                    : "text-beige-kem/72 hover:bg-surface-2 hover:text-beige-kem"
-                }`}
-              >
-                {cat.label}
-              </button>
-            ))}
-          </div>
+        <div className="grid gap-6 pt-5 sm:grid-cols-2 lg:grid-cols-4">
+          <DatePicker
+            label="Ngày"
+            value={activeDate}
+            available={dateOptions}
+            onChange={onDateChange}
+          />
 
-          <label className="block lg:col-span-2">
-            <select
-              value={activeDate}
-              onChange={(e) => onDateChange(e.target.value)}
-              className="h-11 w-full appearance-none rounded-xl border-2 border-beige-kem bg-xanh-pho px-4 text-xs font-bold text-beige-kem outline-none focus:border-burgundy"
-            >
-              {["all", ...dateOptions].map((date) => (
-                <option key={date} value={date} className="bg-xanh-pho">
-                  {date === "all" ? "Mọi ngày" : formatEventDate(date, true)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <Select
+            label="Thành phố"
+            value={activeCity}
+            onChange={onCityChange}
+            options={cityOptions.map((city) => ({
+              value: city,
+              label: city === "all" ? "Mọi thành phố" : city,
+            }))}
+          />
 
-          <label className="block lg:col-span-2">
-            <select
-              value={activeCity}
-              onChange={(e) => onCityChange(e.target.value)}
-              className="h-11 w-full appearance-none rounded-xl border-2 border-beige-kem bg-xanh-pho px-4 text-xs font-bold text-beige-kem outline-none focus:border-burgundy"
-            >
-              {cityOptions.map((city) => (
-                <option key={city} value={city} className="bg-xanh-pho">
-                  {city === "all" ? "Mọi thành phố" : city}
-                </option>
-              ))}
-            </select>
-          </label>
+          <Select
+            label="Trạng thái"
+            value={availability}
+            onChange={onAvailabilityChange}
+            options={availabilityOptions.map(([value, label]) => ({ value, label }))}
+          />
 
-          <label className="rounded-xl border-2 border-beige-kem bg-xanh-pho px-3 py-2 lg:col-span-2">
-            <span className="flex items-center justify-between text-[10px] font-bold uppercase text-beige-kem/60">
+          {/* The only control whose current value is not readable from the control itself. */}
+          <label className="flex min-w-0 flex-col gap-1.5">
+            <span className="label-eyebrow flex items-baseline justify-between gap-2 text-ink-soft">
               <span>Giá tối đa</span>
-              <span className="text-ink-soft">{formatPrice(maxPrice)}</span>
+              <span className="font-mono normal-case tracking-normal text-beige-kem">
+                {formatVnd(maxPrice)}
+              </span>
             </span>
             <input
               type="range"
@@ -129,26 +142,9 @@ export default function EventFilters({
               step={50000}
               value={maxPrice}
               onChange={(e) => onMaxPriceChange(Number(e.target.value))}
-              className="mt-2 w-full accent-cam-dat"
+              className="mt-1.5 w-full accent-burgundy"
             />
           </label>
-
-          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 lg:col-span-2">
-            <select
-              value={availability}
-              onChange={(e) => onAvailabilityChange(e.target.value)}
-              className="h-11 rounded-xl border-2 border-beige-kem bg-xanh-pho px-3 text-xs font-bold text-beige-kem outline-none focus:border-burgundy"
-            >
-              <option value="all" className="bg-xanh-pho">Mọi trạng thái</option>
-              <option value="available" className="bg-xanh-pho">Còn vé</option>
-              <option value="low" className="bg-xanh-pho">Sắp hết</option>
-              <option value="sold_out" className="bg-xanh-pho">Hết vé</option>
-              <option value="cancelled" className="bg-xanh-pho">Đã hủy</option>
-            </select>
-            <span className="inline-flex h-11 items-center rounded-xl border-2 border-beige-kem bg-bubblegum px-3 text-xs font-bold text-on-tint">
-              Lưu {wishlistCount}
-            </span>
-          </div>
         </div>
       </div>
     </section>

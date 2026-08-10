@@ -1,5 +1,6 @@
 import { withAuthRetry } from "./authClient";
 import { apiUrl } from "./api";
+import { readApiError } from "./apiError";
 
 export interface CheckoutOrder {
   id: number;
@@ -86,18 +87,15 @@ async function call<T>(path: string, opts: { method?: string; body?: unknown } =
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
     });
   });
-  const body = (await res.json().catch(() => ({}))) as {
-    error?: string;
-    message?: string;
-    details?: Record<string, number | string>;
-  };
-  if (!res.ok)
+  if (!res.ok) {
+    const err = await readApiError(res);
     throw new WalletError(
-      body.error ?? "wallet_request_failed",
-      body.message ?? "Không thực hiện được thao tác ví.",
-      body.details,
+      err.code === "error" ? "wallet_request_failed" : err.code,
+      err.message ?? "Không thực hiện được thao tác ví.",
+      err.details,
     );
-  return body as T;
+  }
+  return (await res.json().catch(() => ({}))) as T;
 }
 
 export const walletClient = {

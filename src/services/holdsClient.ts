@@ -3,6 +3,7 @@
 import type { HoldRequest, Reservation } from "@/shared/holds/types";
 import { withAuthRetry } from "./authClient";
 import { apiUrl } from "./api";
+import { readApiError } from "./apiError";
 
 /** A refusal the UI has to explain, carrying the server's stable machine code (SC-008). */
 export class HoldError extends Error {
@@ -43,11 +44,10 @@ async function call<T>(path: string, opts: { method?: string; body?: unknown } =
   });
 
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
-    const code = body.error ?? "error";
+    const err = await readApiError(res);
     throw new HoldError(
-      code,
-      body.message ?? MESSAGES[code] ?? "Không thể thực hiện thao tác.",
+      err.code,
+      err.message ?? MESSAGES[err.code] ?? "Không thể thực hiện thao tác.",
       res.status,
     );
   }

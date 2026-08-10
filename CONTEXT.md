@@ -8,6 +8,13 @@ Principle VI).
 
 ### Identity & roles
 
+**Account**:
+The single registered identity a person signs in as — the thing Attendee/Organizer/Admin are
+capabilities *of*. One account, one set of credentials, one wallet. The table backing it is named
+`users` for historical reasons; the word "user" is not the domain term and should not spread from the
+schema into prose, API shapes, or UI copy.
+_Avoid_: user, profile (a profile is the editable subset of an account).
+
 **Nickname**:
 The display handle a user chooses and the UI shows (e.g. "Anh"). Not a legal name. The single
 canonical name for this field from the database column through the API to the UI.
@@ -87,12 +94,17 @@ A price class within a Showtime (label + whole-đồng price; for general admiss
 sold/reserved counts).
 _Avoid_: ticket type, price band, category (that's the event classification).
 
-**Venue / Seat / Showtime seat**:
-**Venue** = a reusable physical place (name, city, address) holding **Seats** (row, number, type,
-unique within the venue). A **Showtime seat** is one bookable instance of a physical seat for a seated
-Showtime, carrying a tier and a status (available / held / sold / blocked). Read-only in the catalog;
-the holds feature transitions it.
-_Avoid_: room/hall (say Venue); slot (say Showtime seat).
+**Venue / Layout / Seat / Showtime seat**:
+**Venue** = a reusable physical place (name, city, address). A **Layout** is one named arrangement of
+that venue ("Nhạc hội đứng", "Kịch có ghế ngồi"); a venue owns several, which is how one place hosts
+differently-shaped events without being duplicated. **Seats** (row, number, type, position, rotation)
+belong to a Layout, and are **unique within their Section**, not within the venue — so two sections may
+both hold a "row A seat 1". A **Showtime seat** is one bookable instance of a physical seat for a seated
+Showtime, carrying a tier and a status (available / held / sold / blocked). A seated Showtime picks one
+Layout and **snapshots** it when generating its Showtime seats: from then on the Showtime owns its map,
+and a later Layout edit reaches it only through an explicit re-apply.
+_Avoid_: room/hall (say Venue); slot (say Showtime seat); floor plan (that's the optional background
+image, which never owns geometry — say Layout).
 
 **Sold out**:
 A derived state — an Event/Showtime is sold out because its inventory (seats or tier quantities) is

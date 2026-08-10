@@ -97,14 +97,29 @@ export async function seedSeatedEventWithMap(): Promise<{ eventId: number; slug:
   const org = await seedOrganizer(await seedUser());
   const venueOwner = await seedUser();
   const venue = await seedVenue(venueOwner);
-  const sec = (await pool.query(`INSERT INTO sections (venue_id, name) VALUES ($1, 'Khu A') RETURNING id`, [venue])).rows[0].id;
+  // Sections and seats belong to a LAYOUT, not the venue (feature 005, FR-002).
+  const layout = (
+    await pool.query(`INSERT INTO venue_layouts (venue_id, name, status) VALUES ($1, 'Sơ đồ mặc định', 'ready') RETURNING id`, [venue])
+  ).rows[0].id;
+  const sec = (await pool.query(`INSERT INTO sections (layout_id, name) VALUES ($1, 'Khu A') RETURNING id`, [layout])).rows[0].id;
   const ev = await seedEvent({ organizerId: org, eventType: 'seated' });
   const st = await seedShowtime(ev.id, venue);
   const tier = await seedTier(st, { label: 'VIP', price: 500000, total: null });
   const seatCount = 6;
   for (let i = 1; i <= seatCount; i++) {
-    const seat = (await pool.query(`INSERT INTO seats (venue_id, section_id, row_label, seat_number) VALUES ($1, $2, 'A', $3) RETURNING id`, [venue, sec, i])).rows[0].id;
-    await pool.query(`INSERT INTO showtime_seats (showtime_id, seat_id, ticket_tier_id, status) VALUES ($1, $2, $3, 'available')`, [st, seat, tier]);
+    const x = 5000 + (i - 1) * 150;
+    const seat = (
+      await pool.query(
+        `INSERT INTO seats (layout_id, section_id, row_label, seat_number, pos_x, pos_y) VALUES ($1, $2, 'A', $3, $4, 1200) RETURNING id`,
+        [layout, sec, i, x],
+      )
+    ).rows[0].id;
+    // The showtime snapshots the layout: geometry AND displayed identity (FR-005).
+    await pool.query(
+      `INSERT INTO showtime_seats (showtime_id, seat_id, ticket_tier_id, status, pos_x, pos_y, rotation, row_label, seat_number, section_name)
+       VALUES ($1, $2, $3, 'available', $4, 1200, 0, 'A', $5, 'Khu A')`,
+      [st, seat, tier, x, i],
+    );
   }
   return { eventId: ev.id, slug: ev.slug, showtimeId: st, seatCount };
 }

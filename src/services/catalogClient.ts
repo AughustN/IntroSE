@@ -1,11 +1,23 @@
 // Public catalog data layer plus authed organizer/admin calls.
 import type { EventDetail, EventListResponse, SeatMap, Showtime } from "@/shared/catalog/types";
+import type {
+  ApplyPreview,
+  Layout,
+  LayoutFloorPlan,
+  LayoutSummary,
+  SaveLayoutRequest,
+  ValidateResponse,
+} from "@/shared/catalog/seatmap";
 import { withAuthRetry } from "./authClient";
 import { apiUrl } from "./api";
+import { readApiError } from "./apiError";
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(apiUrl(`/api${path}`), { headers: { Accept: "application/json" } });
-  if (!res.ok) throw new Error(`catalog ${res.status}`);
+  if (!res.ok) {
+    const e = await readApiError(res);
+    throw new Error(e.message ?? `catalog ${res.status}`);
+  }
   return (await res.json()) as T;
 }
 
@@ -24,8 +36,8 @@ async function authed<T>(path: string, opts: { method?: string; body?: unknown }
     });
   });
   if (!res.ok) {
-    const e = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
-    throw new Error(e.message ?? e.error ?? `error ${res.status}`);
+    const e = await readApiError(res);
+    throw new Error(e.message ?? e.code);
   }
   return (res.status === 204 ? undefined : await res.json()) as T;
 }
@@ -109,6 +121,81 @@ export const organizerApi = {
     b: { venueId: number; startsAt: string; tiers: { label: string; price: number }[] },
   ) =>
     authed<{ id: number }>(`/organizer/events/${eventId}/showtimes`, { method: "POST", body: b }),
+};
+
+// ---- Seat map designer (feature 005) ----
+// Derived from specs/005-seatmap-designer/contracts/seatmap.openapi.yaml. Layout shapes come from the
+// shared contract, so a server change that breaks this fails at compile time (Principle VI).
+export const layoutApi = {
+  list: (venueId: number) =>
+    authed<{ layouts: LayoutSummary[] }>(`/organizer/venues/${venueId}/layouts`),
+  create: (venueId: number, name: string) =>
+    authed<Layout>(`/organizer/venues/${venueId}/layouts`, { method: "POST", body: { name } }),
+  get: (id: number) => authed<Layout>(`/organizer/layouts/${id}`),
+  /** Full-document save. `version` must be the one you loaded — a stale value is refused (FR-015). */
+  save: (id: number, body: SaveLayoutRequest) =>
+    authed<Layout>(`/organizer/layouts/${id}`, { method: "PUT", body }),
+  remove: (id: number) => authed<void>(`/organizer/layouts/${id}`, { method: "DELETE" }),
+  generateSeats: (
+    id: number,
+    b: { sectionId: number; rowLabel: string; count: number; replaceExisting?: boolean },
+  ) =>
+    authed<{ created: number; layout: Layout }>(`/organizer/layouts/${id}/generate-seats`, {
+      method: "POST",
+      body: b,
+    }),
+  validate: (id: number) =>
+    authed<ValidateResponse>(`/organizer/layouts/${id}/validate`, { method: "POST" }),
+  publish: (id: number) => authed<Layout>(`/organizer/layouts/${id}/publish`, { method: "POST" }),
+  clone: (id: number, b: { targetVenueId: number; name: string }) =>
+    authed<Layout>(`/organizer/layouts/${id}/clone`, { method: "POST", body: b }),
+
+  // Floor plan — a background layer only; it never moves a seat (FR-020, FR-024).
+  uploadPlan: async (id: number, file: File): Promise<LayoutFloorPlan> => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await withAuthRetry((token) =>
+      fetch(`/api/organizer/layouts/${id}/floorplan`, {
+        method: "POST",
+        headers: token
+          ? { Authorization: `Bearer ${token}`, Accept: "application/json" }
+          : { Accept: "application/json" },
+        credentials: "include",
+        body: form,
+      }),
+    );
+    if (!res.ok) {
+      const e = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+      throw new Error(e.message ?? e.error ?? `error ${res.status}`);
+    }
+    return (await res.json()) as LayoutFloorPlan;
+  },
+  alignPlan: (id: number, b: Omit<LayoutFloorPlan, "url">) =>
+    authed<LayoutFloorPlan>(`/organizer/layouts/${id}/floorplan`, { method: "PATCH", body: b }),
+  removePlan: (id: number) =>
+    authed<void>(`/organizer/layouts/${id}/floorplan`, { method: "DELETE" }),
+
+  // Showtime map — the only inventory-aware calls (FR-027..FR-029, FR-033..FR-035).
+  reapplyPreview: (showtimeId: number) =>
+    authed<ApplyPreview>(`/organizer/showtimes/${showtimeId}/seat-map/reapply`, {
+      method: "POST",
+      body: { dryRun: true },
+    }),
+  reapply: (showtimeId: number) =>
+    authed<ApplyPreview>(`/organizer/showtimes/${showtimeId}/seat-map/reapply`, {
+      method: "POST",
+      body: { dryRun: false },
+    }),
+  blockSeats: (showtimeId: number, showtimeSeatIds: number[], blocked: boolean) =>
+    authed<{ changed: unknown[] }>(`/organizer/showtimes/${showtimeId}/seats/block`, {
+      method: "POST",
+      body: { showtimeSeatIds, blocked },
+    }),
+  assignTier: (showtimeId: number, showtimeSeatIds: number[], ticketTierId: number) =>
+    authed<{ updated: number }>(`/organizer/showtimes/${showtimeId}/seats/tier`, {
+      method: "POST",
+      body: { showtimeSeatIds, ticketTierId },
+    }),
 };
 
 export const adminApi = {

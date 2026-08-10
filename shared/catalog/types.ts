@@ -50,14 +50,53 @@ export interface SeatMapSeat {
   row: string;
   number: number;
   tier: string;
-  price: number;
+  price: number; // whole VND
   status: SeatStatus;
+  // Geometry (feature 005). Integer units in the layout's 0–10000 space; rotation is cosmetic and
+  // never affects a seat's footprint or its overlap behaviour (FR-008).
+  x: number;
+  y: number;
+  rotation: number;
+  /** Section name — drives the accessible label and the tab order (FR-039a). */
+  section: string | null;
+}
+
+/** Non-sellable decoration (feature 005). Never inventory: it cannot be held, sold, or priced (FR-017). */
+export interface SeatMapElement {
+  kind: 'stage' | 'aisle' | 'door' | 'bar' | 'label' | 'area';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  /** Rendered as literal text, never as markup (FR-018). */
+  label: string | null;
+}
+
+/** Background layer only. Holds no seat and no status (FR-020). */
+export interface SeatMapFloorPlan {
+  url: string;
+  scale: number; // per-mille of the coordinate space
+  offsetX: number;
+  offsetY: number;
+  opacity: number; // 0–100
+}
+
+export interface SeatMapSpace {
+  width: number;
+  height: number;
+  seatDiameter: number;
 }
 
 export interface SeatMap {
   eventType: EventType;
-  seats?: SeatMapSeat[]; // seated
+  seats?: SeatMapSeat[]; // seated — ordered section → row → number (the tab-order guarantee)
   tiers?: Tier[]; // general admission
+  // Seated only (feature 005).
+  space?: SeatMapSpace;
+  elements?: SeatMapElement[];
+  /** Present ONLY when the organizer made the plan buyer-visible (FR-026). */
+  floorPlan?: SeatMapFloorPlan | null;
 }
 
 export interface EventListResponse {

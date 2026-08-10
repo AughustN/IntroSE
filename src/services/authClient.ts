@@ -12,6 +12,7 @@ import type {
   UpdateMeBody,
 } from "@/shared/auth/types";
 import { apiAssetUrl, apiUrl } from "./api";
+import { readApiError } from "./apiError";
 
 /** Mirrors `OrganizerApplication` as GET /api/organizers/me returns it (newest first). */
 export interface OrganizerApplicationView {
@@ -68,12 +69,11 @@ function normalizeMe(user: Me): Me {
 }
 
 async function parse<T>(res: Response): Promise<T> {
-  const data = res.status === 204 ? null : await res.json().catch(() => null);
   if (!res.ok) {
-    const err = (data ?? {}) as { error?: string; message?: string };
-    throw new ApiClientError(res.status, err.error ?? "error", err.message);
+    const err = await readApiError(res);
+    throw new ApiClientError(res.status, err.code, err.message);
   }
-  return data as T;
+  return (res.status === 204 ? null : await res.json().catch(() => null)) as T;
 }
 
 // ---- single-flight refresh (R-12: one in-flight /refresh; concurrent callers await it) ----

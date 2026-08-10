@@ -130,10 +130,10 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 px-4">
-      <div className="w-full max-w-md rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 text-beige-kem shadow-hard">
+      <div className="w-full max-w-md rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 text-beige-kem">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="font-display text-2xl font-black">{mode === "login" ? "Đăng nhập" : "Đăng ký"}</h2>
+            <h2 className="font-display text-3xl font-black">{mode === "login" ? "Đăng nhập" : "Đăng ký"}</h2>
             <p className="mt-2 text-sm leading-6 text-beige-kem/65">
               {mode === "login"
                 ? "Đăng nhập bằng email hoặc số điện thoại để quản lý vé, wishlist và đơn hàng."
@@ -142,7 +142,7 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
           </div>
           <button
             onClick={onClose}
-            className="grid h-10 place-items-center rounded-xl border-2 border-beige-kem px-3 font-mono text-[11px] font-bold uppercase text-beige-kem/70 transition hover:text-beige-kem"
+            className="grid h-10 place-items-center rounded-xl border-2 border-beige-kem px-3 font-mono text-[13px] font-bold uppercase text-beige-kem/70 transition hover:text-beige-kem"
             title="Đóng"
           >
             Đóng
@@ -221,14 +221,14 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
             <button
               type="button"
               onClick={handleForgot}
-              className="block w-full text-center font-mono text-[11px] text-beige-kem/60 transition hover:text-ink-soft"
+              className="block w-full text-center font-mono text-[13px] text-beige-kem/60 transition hover:text-ink-soft"
             >
               Quên mật khẩu?
             </button>
           )}
         </form>
 
-        <div className="my-5 flex items-center gap-3 text-[10px] uppercase tracking-normal text-ink-soft">
+        <div className="my-5 flex items-center gap-3 text-[12px] uppercase tracking-normal text-ink-soft">
           <span className="h-px flex-1 bg-beige-kem/30" />
           Hoặc
           <span className="h-px flex-1 bg-beige-kem/30" />

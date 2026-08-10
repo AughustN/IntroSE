@@ -19,6 +19,7 @@ import { authClient } from "./services/authClient";
 import { catalogClient } from "./services/catalogClient";
 import { cardToMovie, detailToMovie } from "./services/catalogAdapter";
 import { applyEventSeo, clearEventSeo } from "./services/seo";
+import { matchesDateFilter, type DateFilter } from "./services/dateFilter";
 import {
   ACCOUNT_PATH,
   isOverlayPath,
@@ -46,10 +47,17 @@ import CheckoutForm from "./components/CheckoutForm";
 import EventDetail, { TierSelection } from "./components/EventDetail";
 import EventFilters from "./components/EventFilters";
 import EventGrid from "./components/EventGrid";
+import EventTicker from "./components/EventTicker";
+import Footer from "./components/Footer";
 import Header from "./components/Header";
 import HeroVideo from "./components/HeroVideo";
 import SeatLayout from "./components/SeatLayout";
 import TicketTicket from "./components/TicketTicket";
+import LegalPage from "./components/LegalPage";
+import aboutUsMd from "./content/legal/about-us.md?raw";
+import termsOfServiceMd from "./content/legal/terms-of-service.md?raw";
+import websiteTermsMd from "./content/legal/website-terms.md?raw";
+import refundPolicyMd from "./content/legal/refund-policy.md?raw";
 import { ArrowUp } from "lucide-react";
 
 type ThemeMode = "dark" | "light";
@@ -149,7 +157,7 @@ export default function App() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
-  const [activeDate, setActiveDate] = useState("all");
+  const [activeDate, setActiveDate] = useState<DateFilter>(null);
   const [activeCity, setActiveCity] = useState("all");
   const [maxPrice, setMaxPrice] = useState(1500000);
   const [availability, setAvailability] = useState("all");
@@ -184,6 +192,8 @@ export default function App() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [userName, setUserName] = useState("");
   const [isSignedIn, setIsSignedIn] = useState(false);
+  /** Whether `authClient.restore()` has answered yet. See the restore effect below. */
+  const [authReady, setAuthReady] = useState(false);
   /**
    * What the visitor was trying to do when we stopped them to sign in. Browsing, picking a showtime
    * and choosing seats are all open to guests; only the step that creates an order needs an
@@ -549,7 +559,11 @@ export default function App() {
         setIsSignedIn(Boolean(user));
         applyIdentity(user);
       })
-      .catch(() => {});
+      .catch(() => {})
+      // Even a failed restore is an answer. Screens that require an identity must be able to tell
+      // "not signed in" from "not known yet", or a reload of /wallet flashes a sign-in prompt at
+      // someone who is already signed in.
+      .finally(() => setAuthReady(true));
   }, [applyIdentity]);
 
   // Load the real catalog (replaces the mock browse source). Maps API cards → MovieEvent.
@@ -617,7 +631,7 @@ export default function App() {
 
       const matchesSearch = !normalizedQuery || searchBlob.includes(normalizedQuery);
       const matchesCategory = activeCategory === "all" || movie.category === activeCategory;
-      const matchesDate = activeDate === "all" || movie.dates.includes(activeDate);
+      const matchesDate = matchesDateFilter(movie.dates, activeDate);
       const matchesCity = activeCity === "all" || movie.city === activeCity;
       const matchesPrice = movie.price <= maxPrice;
       const matchesAvailability = availability === "all" || movie.status === availability;
@@ -712,7 +726,8 @@ export default function App() {
   const goHomeAfterFilter = async (update: () => void) => {
     // The filter itself always applies; only the jump back to the catalog leaves the flow.
     update();
-    if (activeScreen === "home") return;
+    // Both catalog screens show the grid the filter acts on, so neither needs to be left.
+    if (activeScreen === "home" || activeScreen === "browse") return;
     if (hold && inFlow) {
       if (exitDeclinedRef.current) return;
       if (!(await confirmLeaveFlow())) {
@@ -1045,9 +1060,24 @@ export default function App() {
   };
 
   /** Clears everything this browser remembers about the signed-in account. */
+  /**
+   * Signing out has to drop the per-account caches too, not just the identity. They key on nothing
+   * but the browser, and the mount effect reads them back unconditionally — so leaving them behind
+   * shows the next account to sign in on this machine the previous one's tickets and wishlist.
+   */
   const clearSignedInState = () => {
     setIsSignedIn(false);
     applyIdentity(null);
+    setBookingsHistory([]);
+    setWishlistedIds([]);
+    try {
+      localStorage.removeItem(BOOKINGS_CACHE_KEY);
+      LEGACY_BOOKINGS_CACHE_KEYS.forEach((key) => localStorage.removeItem(key));
+      localStorage.removeItem(WISHLIST_CACHE_KEY);
+      localStorage.removeItem(LEGACY_WISHLIST_CACHE_KEY);
+    } catch (err) {
+      console.error("Failed to clear cached account data on sign-out:", err);
+    }
   };
 
   const handleLogout = async () => {
@@ -1074,31 +1104,58 @@ export default function App() {
       <Header
         searchQuery={searchQuery}
         onSearchChange={(value) => void goHomeAfterFilter(() => setSearchQuery(value))}
+        activeCategory={activeCategory}
+        onCategoryChange={(value) => void goHomeAfterFilter(() => setActiveCategory(value))}
         onViewHistory={() => void leaveFlow(() => goTo("history"))}
         onViewWallet={() => void leaveFlow(() => goTo("wallet"))}
         onHomeClick={goHome}
         onLoginClick={() => (userName ? navigate(ACCOUNT_PATH) : setShowAuthModal(true))}
-        onAdminClick={() =>
+        onOrganizerClick={() =>
           leaveFlow(() => {
-            goTo("moderation");
+            goTo("organizer");
             window.scrollTo({ top: 0, behavior: "smooth" });
           })
         }
+        onBrowse={() => void leaveFlow(() => goTo("browse"))}
+        onViewGuide={() => void leaveFlow(() => goTo("about-us"))}
+        onViewAbout={() => void leaveFlow(() => goTo("terms-of-service"))}
+        onViewPolicy={() => void leaveFlow(() => goTo("refund-policy"))}
         userName={userName}
         userEmail={userEmail}
         avatarUrl={avatarUrl}
+        overlay={activeScreen === "home"}
         theme={theme}
         onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
       />
 
-      <main className="w-full max-w-full flex-grow overflow-x-hidden">
+      {/*
+        `overflow-x-clip`, not `overflow-x-hidden`. Both stop a stray wide child from producing a
+        horizontal scrollbar, but `hidden` also makes this element a scroll container — and a scroll
+        container here is the scrollport every `position: sticky` descendant measures itself
+        against. The hero's sticky stage therefore never engaged. `clip` refuses scrolling outright,
+        so it clips without capturing the page's scroll.
+      */}
+      <main className="w-full max-w-full flex-grow overflow-x-clip">
         {activeScreen === "home" && (
-          <div className="space-y-4">
+          <>
             <HeroVideo
               movie={heroMovie}
               onBookNow={() => void handleStartBookingInput(heroMovie)}
             />
+            <EventTicker
+              events={events}
+              onSelect={(movie) => void handleStartBookingInput(movie)}
+              onViewAll={() => void leaveFlow(() => goTo("browse"))}
+            />
+          </>
+        )}
 
+        {/*
+         * The catalog is the same on both screens. `/` leads with the hero and the venue list;
+         * `/events` is the grid on its own, which is what the nav's ticket icon wants.
+         */}
+        {(activeScreen === "home" || activeScreen === "browse") && (
+          <div className="space-y-4">
             <EventFilters
               activeCategory={activeCategory}
               onCategoryChange={(value) => void goHomeAfterFilter(() => setActiveCategory(value))}
@@ -1121,24 +1178,12 @@ export default function App() {
               onBookNow={(movie) => void handleStartBookingInput(movie)}
               wishlistedIds={wishlistedIds}
               onToggleWishlist={handleToggleWishlist}
+              // Offered on the landing page only. `/events` is where the link would go, so on that
+              // screen it would point at itself.
+              onViewAll={
+                activeScreen === "home" ? () => void leaveFlow(() => goTo("browse")) : undefined
+              }
             />
-
-            <section className="border-t border-beige-kem/25 bg-xanh-pho px-4 py-20 sm:px-6 lg:px-8">
-              <div className="mx-auto grid max-w-7xl grid-flow-dense grid-cols-1 gap-5 md:grid-cols-3">
-                <TrustCard
-                  title="Wishlist và nhắc lịch"
-                  text="Lưu sự kiện yêu thích, nhắc gần ngày diễn và xử lý case hết vé bằng dữ liệu local mock."
-                />
-                <TrustCard
-                  title="Email/SMS xác nhận"
-                  text="Sau thanh toán, vé QR có thể in, tải lại hoặc gửi lại qua email/SMS ở màn vé."
-                />
-                <TrustCard
-                  title="QR một lần"
-                  text="UI thể hiện trạng thái QR unused/checked-in để backend triển khai khóa vé thật."
-                />
-              </div>
-            </section>
           </div>
         )}
 
@@ -1222,41 +1267,74 @@ export default function App() {
           <AdminPanel events={SAMPLE_MOVIES} bookings={bookingsHistory} onBack={goHome} />
         )}
 
-        {activeScreen === "wallet" && <WalletPanel onBack={goHome} />}
+        {/*
+         * The wallet is the one screen with nothing to show a stranger. Without this guard its own
+         * fetch 401s and the panel reports "Không tải được ví." over a retry button that can never
+         * succeed — a dead end that reads as a broken page rather than as a locked one.
+         */}
+        {activeScreen === "wallet" &&
+          (!authReady ? (
+            <p className="mx-auto max-w-4xl px-4 py-16 font-mono text-sm text-ink-soft sm:px-6 lg:px-8">
+              Đang kiểm tra phiên đăng nhập…
+            </p>
+          ) : isSignedIn ? (
+            <WalletPanel onBack={goHome} />
+          ) : (
+            <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6 lg:px-8">
+              <h2 className="font-display text-3xl font-black text-beige-kem">Ví TixHub</h2>
+              <p className="mt-3 text-sm leading-6 text-beige-kem/70">
+                Ví gắn với tài khoản của bạn. Đăng nhập để xem số dư và lịch sử giao dịch.
+              </p>
+              <div className="mt-6 flex flex-wrap items-center gap-6">
+                <button
+                  onClick={() => runSignedIn(() => goTo("wallet"))}
+                  className="label-eyebrow inline-flex items-center gap-2 text-beige-kem transition hover:text-burgundy-ink"
+                >
+                  Đăng nhập
+                  <span aria-hidden="true">&gt;</span>
+                </button>
+                <button
+                  onClick={goHome}
+                  className="label-eyebrow text-ink-soft transition hover:text-beige-kem"
+                >
+                  Về trang chủ
+                </button>
+              </div>
+            </div>
+          ))}
         {activeScreen === "organizer" && <OrganizerPanel onBack={goHome} />}
         {activeScreen === "moderation" && <AdminModeration onBack={goHome} />}
+
+        {activeScreen === "about-us" && (
+          <LegalPage title="Về chúng tôi" content={aboutUsMd} onBack={goHome} />
+        )}
+        {activeScreen === "terms-of-service" && (
+          <LegalPage title="Điều khoản sử dụng" content={termsOfServiceMd} onBack={goHome} />
+        )}
+        {activeScreen === "website-terms" && (
+          <LegalPage title="Điều khoản website" content={websiteTermsMd} onBack={goHome} />
+        )}
+        {activeScreen === "refund-policy" && (
+          <LegalPage title="Chính sách hoàn vé" content={refundPolicyMd} onBack={goHome} />
+        )}
       </main>
 
-      <footer className="border-t border-beige-kem/25 bg-xanh-pho px-4 py-12 font-mono text-xs sm:px-6 lg:px-8">
-        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-6 md:flex-row">
-          <div className="space-y-1 text-center md:text-left">
-            <h5 className="font-display text-sm font-bold tracking-normal text-beige-kem">
-              TIXHUB FRONTEND MVP
-            </h5>
-            <p className="text-[10px] text-ink-soft">
-              Mock data cho vé ca nhạc, hòa nhạc, kịch và phim
-            </p>
-          </div>
-
-          <div className="flex flex-wrap justify-center gap-6 text-beige-kem/60">
-            <span className="cursor-pointer transition hover:text-ink-soft">
-              Chính sách hoàn vé
-            </span>
-            <span className="cursor-pointer transition hover:text-ink-soft">
-              Điều khoản sử dụng
-            </span>
-            <span className="cursor-pointer transition hover:text-ink-soft">Hỗ trợ email/SMS</span>
-          </div>
-
-          <p className="text-center text-[10px] text-beige-kem/40 md:text-right">
-            © 2026 TixHub Mock. Frontend only.
-          </p>
-        </div>
-      </footer>
+      {/*
+       * `wallet` needs an identity, so a guest clicking it in the footer gets the sign-in prompt
+       * and is carried through to the wallet afterwards — rather than landing on a screen that can
+       * only report a failure.
+       */}
+      <Footer
+        onNavigate={(screen) =>
+          void leaveFlow(() =>
+            screen === "wallet" ? runSignedIn(() => goTo(screen)) : goTo(screen),
+          )
+        }
+      />
 
       <button
         onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-        className="fixed bottom-6 right-6 z-30 grid h-12 w-12 place-items-center rounded-xl border border-cam-dat/20 bg-burgundy text-white shadow-hard transition-all hover:scale-105 hover:brightness-95"
+        className="fixed bottom-6 right-6 z-30 grid h-12 w-12 place-items-center rounded-xl border border-cam-dat/20 bg-burgundy text-white transition-all hover:scale-105 hover:brightness-95"
         aria-label="Cuộn lên đầu trang"
         title="Cuộn lên đầu trang"
       >
@@ -1296,15 +1374,6 @@ export default function App() {
         />
       )}
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
-    </div>
-  );
-}
-
-function TrustCard({ title, text }: { title: string; text: string }) {
-  return (
-    <div className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-6">
-      <h4 className="font-display text-lg font-black text-beige-kem">{title}</h4>
-      <p className="mt-2 text-sm leading-6 text-beige-kem/65">{text}</p>
     </div>
   );
 }
