@@ -6,6 +6,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import Select from "./Select";
 import { EVENT_CATEGORIES, MyEvent, MyVenue, organizerApi } from "../services/catalogClient";
+import { aiClient, type ListingSuggestion } from "../services/aiClient";
 import SeatMapBuilder from "./SeatMapBuilder";
 
 const input =
@@ -48,6 +49,9 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
   const [categoryCode, setCategoryCode] = useState("music");
   const [eventType, setEventType] = useState<"general_admission" | "seated">("general_admission");
   const [description, setDescription] = useState("");
+  const [aiBrief, setAiBrief] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiSuggestion, setAiSuggestion] = useState<ListingSuggestion | null>(null);
   const [seatMapEventId, setSeatMapEventId] = useState<number | null>(null);
 
   // create-venue form
@@ -136,6 +140,31 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
     }, "Đã thêm suất chiếu + hạng vé.");
   };
 
+  const askListingAssistant = async () => {
+    if (!aiBrief.trim()) return;
+    setAiBusy(true);
+    setErr(null);
+    try {
+      const result = await aiClient.eventAssistant({ brief: aiBrief.trim(), category: categoryCode, eventType });
+      setAiSuggestion(result.suggestion);
+      if (result.message) setNotice(result.message);
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : "Không thể tạo gợi ý AI.");
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const applyListingSuggestion = () => {
+    if (!aiSuggestion) return;
+    setTitle(aiSuggestion.title);
+    setDescription(aiSuggestion.description);
+    if (aiSuggestion.ticketPriceSuggestions.length) {
+      setStTiers(aiSuggestion.ticketPriceSuggestions.slice(0, MAX_TIERS).map((tier) => ({ label: tier.name, price: String(tier.price) })));
+    }
+    setNotice("Đã áp dụng gợi ý AI. Hãy kiểm tra và chỉnh sửa trước khi tạo sự kiện.");
+  };
+
   return (
     <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-8 text-beige-kem">
       <div className="flex items-center justify-between">
@@ -199,6 +228,19 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
             className={`${input} h-auto py-2.5`}
           />
         </label>
+        <div className="mt-3 border border-beige-kem/30 p-3">
+          <label className="block">
+            <span className={label}>Trợ lý AI: mô tả ý tưởng</span>
+            <textarea value={aiBrief} onChange={(event) => setAiBrief(event.target.value)} maxLength={3000} rows={2} placeholder="Ví dụ: đêm EDM ngoài trời cho sinh viên, 500 người, tối thứ 7" className={`${input} h-auto py-2.5`} />
+          </label>
+          <button type="button" onClick={() => void askListingAssistant()} disabled={aiBusy || !aiBrief.trim()} className={`${ghost} mt-2 disabled:opacity-60`}>{aiBusy ? "Đang tạo gợi ý" : "Tạo gợi ý AI"}</button>
+          {aiSuggestion && <div className="mt-3 border-t border-beige-kem/25 pt-3 text-sm">
+            <p className="font-bold">{aiSuggestion.title}</p>
+            <p className="mt-1 whitespace-pre-wrap text-beige-kem/75">{aiSuggestion.description}</p>
+            <p className="mt-2 text-xs text-beige-kem/65">{aiSuggestion.tags.join(" · ")}</p>
+            <button type="button" onClick={applyListingSuggestion} className={`${btn} mt-3`}>Áp dụng vào form</button>
+          </div>}
+        </div>
         <button type="submit" className={`${btn} mt-4`}>
           Tạo bản nháp
         </button>

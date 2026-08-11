@@ -21,6 +21,7 @@ import {
   type SummaryLine,
 } from "./booking/BookingChrome";
 import { formatVnd } from "../services/currency";
+import { aiClient } from "../services/aiClient";
 
 export interface TierSelection {
   tierId: string;
@@ -107,6 +108,10 @@ export default function EventDetail({
   holdRemainingMs,
 }: EventDetailProps) {
   const isSeated = event.eventType === "seated";
+
+  useEffect(() => {
+    if (isSignedIn) void aiClient.recordView(event.id).catch(() => {});
+  }, [event.id, isSignedIn]);
 
   /**
    * The tiers of the selected showtime, with their real `ticket_tiers.id`.
