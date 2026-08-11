@@ -58,14 +58,18 @@
   --font-sans: "VNM Sans Std", ui-sans-serif, system-ui, sans-serif;
   --font-display: "VNM Sans Display", "VNM Sans Std", ui-sans-serif, system-ui, sans-serif;
   /*
-   * `font-mono` is no longer a second typeface — it is VNM Sans Std, same as body copy.
+   * `font-meta`, not `font-meta`.
    *
-   * The class is kept because ~35 files use it to mark the *role* (meta lines, ids, dates, prices)
-   * rather than to ask for a monospaced face. Renaming all of them buys nothing; repointing the
-   * token keeps one type system on the page. The `tabular-nums` rule below restores the only
-   * property those call sites actually depended on — digits that line up in a column.
+   * There is no monospaced face in this product and there has not been one for a while — the token
+   * pointed at VNM Sans Std, the same family as body copy, so `font-meta` on 160 elements changed
+   * nothing about how they rendered. Keeping the name meant the codebase read as if it had three
+   * typefaces when it has two, and every reader had to discover the lie for themselves.
+   *
+   * The name it has now says what the class is actually for: the *role* those call sites were
+   * marking — meta lines, ids, dates, prices — set in the body face with `tabular-nums` (below) so
+   * digits still line up in a column, which is the one property they really depended on.
    */
-  --font-mono: "VNM Sans Std", ui-sans-serif, system-ui, sans-serif;
+  --font-meta: "VNM Sans Std", ui-sans-serif, system-ui, sans-serif;
 
   /*
    * The bottom of the type scale, raised.
@@ -236,7 +240,7 @@ body {
 
 /*
  * Unlayered, so this shorthand currently outranks Tailwind's utilities: `text-xs`, `font-black`,
- * `leading-*` and `font-mono` written on a `<button>` are overridden here, and every control
+ * `leading-*` and `font-meta` written on a `<button>` are overridden here, and every control
  * inherits `body`'s 16px/400 instead. Moving the rule into `@layer base` restores the utilities,
  * but that resizes every button in the app at once — so it is left as-is deliberately, since the
  * current look was tuned with this in effect.
@@ -751,12 +755,12 @@ select:focus-visible {
  * under the synthesis threshold, so these lines render as clean Regular. Real bold on this face
  * needs a real VNM Sans Std Bold; drop one in and this rule can go.
  */
-.font-mono {
+.font-meta {
   font-variant-numeric: tabular-nums;
 }
 
-.font-mono.font-bold,
-.font-mono.font-semibold {
+.font-meta.font-bold,
+.font-meta.font-semibold {
   font-weight: 500;
 }
 
@@ -768,14 +772,130 @@ select:focus-visible {
  * Display is the condensed cut, which is a second win here — eyebrows sit in the narrowest columns
  * on the page, and letterspacing at 0.16em is exactly what eats that width back.
  */
+/*
+ * The type scale, in one place.
+ *
+ * The app had grown eighteen distinct sizes — 12, 13, 14, 15, 16, 17, 18, 20, 21, 24, 30, 36, 48,
+ * 60, 72, 96 and two stray `rem` values — four of which appeared once or twice each. That is not a
+ * scale, it is drift: a size chosen per component rather than per role, so two labels doing the
+ * same job on two screens differed by a pixel and the page read as unsettled.
+ *
+ * Seven steps replace them, named for what they are for. Nothing sits below 14px: the old floor of
+ * 12px was under the comfortable reading minimum for a UI, and it was the single most-used size in
+ * the product (151 call sites). Raising the floor pushed every other step up with it, so the
+ * relationships between them are the ones the design already had.
+ *
+ * The hero trailer's type is deliberately outside this scale — it is set as a fraction of the
+ * viewport and answers to the picture behind it, not to the page's rhythm.
+ */
+@theme {
+  --text-eyebrow: 14px;
+  --text-meta: 15px;
+  --text-body: 17px;
+  --text-lede: 20px;
+  --text-title-s: 24px;
+  --text-title-m: 32px;
+  --text-title-l: 50px;
+}
+
 @utility label-eyebrow {
   font-family: var(--font-display);
-  /* 11px was under the floor for a condensed face carrying 0.16em of letterspacing. */
-  font-size: 12px;
+  /* The scale's floor. 11px, then 12px, were both under it for a condensed face at 0.16em. */
+  font-size: var(--text-eyebrow);
   font-weight: 700;
   line-height: 1.2;
   text-transform: uppercase;
   letter-spacing: 0.16em;
+}
+
+/*
+ * The price slider, cut down to the filter bar's hairline.
+ *
+ * `accent-color` was doing this before and could not. It repaints the platform widget, so what sat
+ * in the row was a chunky OS track with a fat thumb — the one heavy object in a bar otherwise built
+ * entirely from 1px rules, and the reason that cell looked bolted on. This throws the widget away
+ * and draws a 2px rule with a small disc on it, so the control matches the underlines beside it.
+ *
+ * The filled part is a gradient on the track rather than `::-moz-range-progress`, because WebKit has
+ * no equivalent element — a gradient hard-stopped at `--range-fill` is the only way to get the same
+ * two-tone rule in both engines. React writes that percentage; CSS cannot read a range's value.
+ *
+ * The element keeps a 16px height while the rule is 2px: that difference is the pointer target, and
+ * dropping it would leave a two-pixel-tall thing to hit.
+ */
+@utility filter-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 16px;
+  background: transparent;
+  cursor: pointer;
+
+  &::-webkit-slider-runnable-track {
+    height: 2px;
+    border-radius: 999px;
+    background: linear-gradient(
+      to right,
+      var(--color-burgundy) 0 var(--range-fill, 0%),
+      color-mix(in srgb, var(--color-beige-kem) 28%, transparent) var(--range-fill, 0%) 100%
+    );
+  }
+
+  /* `margin-top` centres the disc on the rule by hand — WebKit aligns a thumb to the track's top. */
+  &::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 13px;
+    width: 13px;
+    margin-top: -5.5px;
+    border-radius: 999px;
+    background: var(--color-burgundy);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-burgundy) 22%, transparent);
+    transition: box-shadow 160ms ease;
+  }
+
+  &::-moz-range-track {
+    height: 2px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-beige-kem) 28%, transparent);
+  }
+
+  &::-moz-range-progress {
+    height: 2px;
+    border-radius: 999px;
+    background: var(--color-burgundy);
+  }
+
+  &::-moz-range-thumb {
+    height: 13px;
+    width: 13px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--color-burgundy);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-burgundy) 22%, transparent);
+    transition: box-shadow 160ms ease;
+  }
+
+  /* A halo on hover and focus, so the disc grows without the rule under it shifting. */
+  &:hover::-webkit-slider-thumb {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-burgundy) 22%, transparent);
+  }
+
+  &:hover::-moz-range-thumb {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-burgundy) 22%, transparent);
+  }
+
+  &:focus-visible {
+    outline: none;
+  }
+
+  &:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-burgundy) 38%, transparent);
+  }
+
+  &:focus-visible::-moz-range-thumb {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-burgundy) 38%, transparent);
+  }
 }
 
 ::-webkit-scrollbar {

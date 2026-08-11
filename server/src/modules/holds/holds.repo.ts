@@ -291,6 +291,49 @@ export async function removeSeatItems(
 }
 
 /** GA lines collapse onto one row per tier, so a reservation holds one quantity per tier. */
+/**
+ * Take quantity back off a general-admission line, deleting it when it reaches zero.
+ *
+ * The counterpart to `upsertGaItem`, which only ever adds. Without it a buyer could raise a GA
+ * quantity but never lower it, and the only way down would be cancelling the whole reservation —
+ * which starts a new one with a fresh window and turns the stepper into a way to hold a tier
+ * indefinitely (FR-006).
+ *
+ * Returns how much was actually removed, which is capped at what the line holds: a stale client
+ * asking to drop 3 from a line of 2 gives back 2, never a negative reserved count.
+ */
+export async function reduceGaItem(
+  client: pg.PoolClient,
+  reservationId: number,
+  tierId: number,
+  quantity: number,
+): Promise<number> {
+  const { rows } = await client.query<{ quantity: number }>(
+    `SELECT quantity FROM reservation_items
+      WHERE reservation_id = $1 AND ticket_tier_id = $2 AND showtime_seat_id IS NULL
+      FOR UPDATE`,
+    [reservationId, tierId],
+  );
+  const held = rows[0]?.quantity ?? 0;
+  const removed = Math.min(held, quantity);
+  if (removed === 0) return 0;
+
+  if (removed === held) {
+    await client.query(
+      `DELETE FROM reservation_items
+        WHERE reservation_id = $1 AND ticket_tier_id = $2 AND showtime_seat_id IS NULL`,
+      [reservationId, tierId],
+    );
+  } else {
+    await client.query(
+      `UPDATE reservation_items SET quantity = quantity - $3
+        WHERE reservation_id = $1 AND ticket_tier_id = $2 AND showtime_seat_id IS NULL`,
+      [reservationId, tierId, removed],
+    );
+  }
+  return removed;
+}
+
 export async function upsertGaItem(
   client: pg.PoolClient,
   reservationId: number,

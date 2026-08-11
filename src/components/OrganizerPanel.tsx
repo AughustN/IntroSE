@@ -9,13 +9,13 @@ import { EVENT_CATEGORIES, MyEvent, MyVenue, organizerApi } from "../services/ca
 import SeatMapBuilder from "./SeatMapBuilder";
 
 const input =
-  "h-11 w-full rounded-xl border-2 border-beige-kem bg-surface-2 px-4 text-sm text-beige-kem outline-none focus:border-burgundy";
-const label = "mb-1.5 block font-mono text-xs text-beige-kem/70";
+  "h-11 w-full rounded-xl border-2 border-beige-kem bg-surface-2 px-4 text-body text-beige-kem outline-none focus:border-burgundy";
+const label = "mb-1.5 block font-meta text-eyebrow text-beige-kem/70";
 const card = "rounded-2xl border-2 border-beige-kem bg-surface-2 p-5";
 const btn =
-  "rounded-xl bg-burgundy px-4 py-2.5 text-sm font-black text-white transition hover:brightness-95 disabled:opacity-60";
+  "rounded-xl bg-burgundy px-4 py-2.5 text-body font-black text-white transition hover:brightness-95 disabled:opacity-60";
 const ghost =
-  "rounded-xl border-2 border-beige-kem px-3 py-2 text-xs font-bold text-beige-kem/80 transition";
+  "rounded-xl border-2 border-beige-kem px-3 py-2 text-eyebrow font-bold text-beige-kem/80 transition";
 
 const badge = (m: string) => {
   const map: Record<string, string> = {
@@ -31,7 +31,7 @@ const badge = (m: string) => {
     flagged: "Bị gắn cờ",
   };
   return (
-    <span className={`rounded-lg border px-2 py-0.5 font-mono text-[12px] ${map[m] ?? ""}`}>
+    <span className={`rounded-lg border px-2 py-0.5 font-meta text-eyebrow ${map[m] ?? ""}`}>
       {text[m] ?? m}
     </span>
   );
@@ -139,22 +139,24 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
   return (
     <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-8 text-beige-kem">
       <div className="flex items-center justify-between">
-        <h1 className="font-display text-4xl font-black">Quản lý sự kiện</h1>
+        <h1 className="font-display text-title-l font-black">Quản lý sự kiện</h1>
         <button onClick={onBack} className={ghost}>
           ← Về trang chủ
         </button>
       </div>
       {notice && (
-        <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-xs text-on-tint">
+        <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-eyebrow text-on-tint">
           {notice}
         </div>
       )}
       {err && (
-        <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-xs">{err}</div>
+        <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-eyebrow">
+          {err}
+        </div>
       )}
 
       <form onSubmit={createEvent} className={card}>
-        <h2 className="mb-3 font-display text-xl font-bold">Tạo sự kiện</h2>
+        <h2 className="mb-3 font-display text-title-s font-bold">Tạo sự kiện</h2>
         <label className="block">
           <span className={label}>Tiêu đề</span>
           <input
@@ -203,7 +205,7 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
       </form>
 
       <form onSubmit={createVenue} className={card}>
-        <h2 className="mb-3 font-display text-xl font-bold">Địa điểm của tôi</h2>
+        <h2 className="mb-3 font-display text-title-s font-bold">Địa điểm của tôi</h2>
         <div className="grid gap-3 sm:grid-cols-3">
           <input
             value={vName}
@@ -231,25 +233,29 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
           Thêm địa điểm
         </button>
         {venues.length > 0 && (
-          <p className="mt-3 font-mono text-[13px] text-beige-kem/50">
+          <p className="mt-3 font-meta text-meta text-beige-kem/50">
             {venues.map((v) => `${v.name} (${v.city})`).join(" · ")}
           </p>
         )}
       </form>
 
       <div className={card}>
-        <h2 className="mb-3 font-display text-xl font-bold">Sự kiện của tôi ({events.length})</h2>
+        <h2 className="mb-3 font-display text-title-s font-bold">
+          Sự kiện của tôi ({events.length})
+        </h2>
         <div className="space-y-3">
-          {events.length === 0 && <p className="text-sm text-beige-kem/60">Chưa có sự kiện nào.</p>}
+          {events.length === 0 && (
+            <p className="text-body text-beige-kem/60">Chưa có sự kiện nào.</p>
+          )}
           {events.map((ev) => (
             <div key={ev.id} className="rounded-xl border-2 border-beige-kem p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <span className="font-bold">{ev.title}</span>
-                  <span className="ml-2 font-mono text-[12px] text-beige-kem/40">{ev.status}</span>
+                  <span className="ml-2 font-meta text-eyebrow text-beige-kem/40">{ev.status}</span>
                   <span className="ml-2">{badge(ev.moderation)}</span>
                   {ev.reviewNote && (
-                    <span className="ml-2 text-[13px] text-burgundy-ink">({ev.reviewNote})</span>
+                    <span className="ml-2 text-meta text-burgundy-ink">({ev.reviewNote})</span>
                   )}
                 </div>
                 <div className="flex gap-2">
@@ -342,7 +348,7 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
             </div>
           ))}
         </div>
-        <p className="mt-4 font-mono text-[13px] text-beige-kem/45">
+        <p className="mt-4 font-meta text-meta text-beige-kem/45">
           Sự kiện chỉ hiển thị công khai sau khi admin duyệt.
         </p>
       </div>

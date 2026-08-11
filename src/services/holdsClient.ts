@@ -75,6 +75,24 @@ export const holdsClient = {
     });
   },
 
+  /**
+   * General admission's release: give quantity back to a tier.
+   *
+   * Separate from `release` because a GA line has no seat to name — the reservation holds a count
+   * against a tier, not rows. Like the seated path it leaves the window alone (FR-006), so a buyer
+   * stepping a quantity up and down cannot keep renewing their claim on the stock.
+   */
+  releaseQuantity(
+    reservationId: number,
+    ticketTierId: number,
+    quantity: number,
+  ): Promise<Reservation> {
+    return call<Reservation>(`/reservations/${reservationId}`, {
+      method: "PATCH",
+      body: { removeQuantity: { ticketTierId, quantity } },
+    });
+  },
+
   /** Release everything this reservation holds at once (FR-014). */
   cancel(reservationId: number): Promise<void> {
     return call<void>(`/reservations/${reservationId}`, { method: "DELETE" });

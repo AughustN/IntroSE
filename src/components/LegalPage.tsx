@@ -21,40 +21,38 @@ export default function LegalPage({ title, content, onBack }: LegalPageProps) {
           {onBack && (
             <button
               onClick={onBack}
-              className="inline-flex items-center gap-2 text-xs font-medium text-beige-kem/70 transition hover:text-beige-kem"
+              className="inline-flex items-center gap-2 text-eyebrow font-medium text-beige-kem/70 transition hover:text-beige-kem"
             >
               <ArrowLeft className="h-4 w-4" />
               Quay lại Trang chủ
             </button>
           )}
-          <h1 className="font-display text-2xl font-black tracking-tight text-beige-kem sm:text-3xl lg:text-4xl">
+          <h1 className="font-display text-title-m font-black tracking-tight text-beige-kem sm:text-title-m lg:text-title-l">
             {title}
           </h1>
         </div>
 
         {/* Formatted Document Body */}
-        <article className="prose prose-invert max-w-none space-y-4 font-sans text-sm leading-relaxed text-beige-kem/85 sm:text-base">
+        <article className="prose prose-invert max-w-none space-y-4 font-sans text-body leading-relaxed text-beige-kem/85 sm:text-body">
           <ReactMarkdown
             components={{
               h1: ({ children }) => (
-                <h1 className="mt-8 mb-4 font-display text-xl font-bold text-beige-kem sm:text-2xl">
+                <h1 className="mt-8 mb-4 font-display text-title-s font-bold text-beige-kem sm:text-title-m">
                   {children}
                 </h1>
               ),
               h2: ({ children }) => (
-                <h2 className="mt-6 mb-3 font-display text-lg font-bold text-beige-kem sm:text-xl">
+                <h2 className="mt-6 mb-3 font-display text-lede font-bold text-beige-kem sm:text-title-s">
                   {children}
                 </h2>
               ),
               h3: ({ children }) => (
-                <h3 className="mt-4 mb-2 font-display text-base font-semibold text-beige-kem sm:text-lg">
+                <h3 className="mt-4 mb-2 font-display text-body font-semibold text-beige-kem sm:text-lede">
                   {children}
                 </h3>
               ),
               p: ({ children }) => <p className="mb-4 leading-relaxed">{children}</p>,
-              ul: ({ children }) => (
-                <ul className="mb-4 list-disc pl-6 space-y-1">{children}</ul>
-              ),
+              ul: ({ children }) => <ul className="mb-4 list-disc pl-6 space-y-1">{children}</ul>,
               ol: ({ children }) => (
                 <ol className="mb-4 list-decimal pl-6 space-y-1">{children}</ol>
               ),

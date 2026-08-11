@@ -41,10 +41,10 @@ function TickerCard({ event, onSelect }: { event: MovieEvent; onSelect: () => vo
           fill="currentColor"
         />
         <div className="min-w-0">
-          <p className="line-clamp-2 font-display text-lg font-bold leading-tight text-beige-kem">
+          <p className="line-clamp-2 font-display text-lede font-bold leading-tight text-beige-kem">
             {event.title}
           </p>
-          <p className="mt-1 truncate font-mono text-[13px] uppercase tracking-[0.1em] text-ink-soft">
+          <p className="mt-1 truncate font-meta text-meta uppercase tracking-[0.1em] text-ink-soft">
             {[event.dates[0] && formatEventDate(event.dates[0]), formatVnd(event.price)]
               .filter(Boolean)
               .join(" · ")}

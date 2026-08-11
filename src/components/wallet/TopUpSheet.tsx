@@ -98,8 +98,8 @@ export default function TopUpSheet({
   return (
     <div className="space-y-5 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6">
       <div>
-        <h4 className="font-display text-2xl font-black text-beige-kem">Nạp tiền vào ví</h4>
-        <p className="mt-1 font-mono text-xs text-ink-soft">
+        <h4 className="font-display text-title-m font-black text-beige-kem">Nạp tiền vào ví</h4>
+        <p className="mt-1 font-meta text-eyebrow text-ink-soft">
           Số dư hiện tại {formatVnd(balance)} · tối đa {formatVnd(limits.balanceCap)}
         </p>
       </div>
@@ -111,7 +111,7 @@ export default function TopUpSheet({
             type="button"
             onClick={() => pick(preset)}
             disabled={preset > headroom}
-            className={`rounded-xl border-2 px-3 py-3 font-mono text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-35 ${
+            className={`rounded-xl border-2 px-3 py-3 font-meta text-eyebrow font-bold transition disabled:cursor-not-allowed disabled:opacity-35 ${
               amount === preset && !custom
                 ? "border-beige-kem bg-cam-dat text-on-tint"
                 : "border-beige-kem/60 text-beige-kem hover:border-beige-kem"
@@ -123,7 +123,7 @@ export default function TopUpSheet({
       </div>
 
       <div className="space-y-1.5">
-        <label htmlFor="topup-custom" className="block font-mono text-xs text-beige-kem/75">
+        <label htmlFor="topup-custom" className="block font-meta text-eyebrow text-beige-kem/75">
           Hoặc nhập số tiền khác
         </label>
         <input
@@ -132,17 +132,17 @@ export default function TopUpSheet({
           placeholder={`${limits.min.toLocaleString("vi-VN")} – ${limits.max.toLocaleString("vi-VN")}`}
           value={custom ? Number(custom).toLocaleString("vi-VN") : ""}
           onChange={(e) => handleCustom(e.target.value)}
-          className="h-11 w-full rounded-xl border-2 border-beige-kem bg-surface-2 px-4 text-sm text-beige-kem outline-none transition focus:border-burgundy"
+          className="h-11 w-full rounded-xl border-2 border-beige-kem bg-surface-2 px-4 text-body text-beige-kem outline-none transition focus:border-burgundy"
         />
       </div>
 
       {(problem || error) && (
-        <p className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 font-mono text-xs leading-5 text-on-tint">
+        <p className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 font-meta text-eyebrow leading-5 text-on-tint">
           {error || problem}
         </p>
       )}
 
-      <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-[13px] leading-5 text-on-tint">
+      <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-meta leading-5 text-on-tint">
         Bạn sẽ được chuyển sang VNPay. Ví chỉ được cộng tiền khi VNPay xác nhận về máy chủ, nên số
         dư có thể cập nhật chậm vài giây sau khi quay lại.
         {reservationId !== undefined && " Chỗ bạn đang giữ được gia hạn một lần cho lần nạp này."}
@@ -153,7 +153,7 @@ export default function TopUpSheet({
           type="button"
           onClick={handleSubmit}
           disabled={Boolean(problem) || busy}
-          className="rounded-xl bg-burgundy px-6 py-3 text-sm font-black text-white transition hover:brightness-95 disabled:bg-surface-2 disabled:text-white/60"
+          className="rounded-xl bg-burgundy px-6 py-3 text-body font-black text-white transition hover:brightness-95 disabled:bg-surface-2 disabled:text-white/60"
         >
           {busy ? "Đang chuyển..." : `Nạp ${formatVnd(amount || 0)}`}
         </button>
@@ -161,7 +161,7 @@ export default function TopUpSheet({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-xl border-2 border-beige-kem px-6 py-3 text-sm font-bold text-beige-kem transition hover:bg-surface-2"
+            className="rounded-xl border-2 border-beige-kem px-6 py-3 text-body font-bold text-beige-kem transition hover:bg-surface-2"
           >
             Để sau
           </button>

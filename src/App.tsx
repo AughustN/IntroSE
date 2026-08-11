@@ -44,7 +44,7 @@ import BookingHistory from "./components/BookingHistory";
 import ToastStack, { type ToastKind, type ToastMessage } from "./components/ToastStack";
 import ConfirmDialog, { type ConfirmRequest } from "./components/ConfirmDialog";
 import CheckoutForm from "./components/CheckoutForm";
-import EventDetail, { TierSelection } from "./components/EventDetail";
+import EventDetail from "./components/EventDetail";
 import EventFilters from "./components/EventFilters";
 import EventGrid from "./components/EventGrid";
 import EventTicker from "./components/EventTicker";
@@ -67,6 +67,28 @@ type ThemeMode = "dark" | "light";
  * inside these three screens; stepping between them keeps the selection and the countdown, and only
  * leaving the flow (or the TTL) releases it.
  */
+/**
+ * What the price slider spans in the seconds before the catalog answers, and only then.
+ *
+ * Not a business rule and not a cap — the moment `events` arrives, the dearest real ticket replaces
+ * it. It exists because a slider whose two ends are both zero has no positions on it.
+ */
+const PRICE_CEILING_BEFORE_CATALOG = 1_000_000;
+
+/**
+ * What clicking one row of a multi-select filter does to the set.
+ *
+ * `"all"` is a control rather than a value, so it clears; anything else flips its own membership.
+ * Returned as an updater so the three call sites read `setX(toggleFilterValue(v))` and none of them
+ * has to close over the current array.
+ */
+const toggleFilterValue =
+  (value: string) =>
+  (current: string[]): string[] => {
+    if (value === "all") return [];
+    return current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
+  };
+
 const FLOW_SCREENS: Screen[] = ["detail", "seats", "checkout"];
 
 const LEAVE_FLOW_WARNING =
@@ -156,11 +178,27 @@ export default function App() {
   const [showtimes, setShowtimes] = useState<Showtime[]>([]);
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeCategory, setActiveCategory] = useState("all");
+  /**
+   * The three list filters, each as the set of values in force. Empty means the filter is off.
+   *
+   * Empty rather than a `"all"` sentinel: the sentinel would have to be excluded from every
+   * membership test, and "everything" would then be sayable two ways — the token, or all four
+   * members ticked — that behave identically and look different.
+   */
+  const [activeCategories, setActiveCategories] = useState<string[]>([]);
   const [activeDate, setActiveDate] = useState<DateFilter>(null);
-  const [activeCity, setActiveCity] = useState("all");
-  const [maxPrice, setMaxPrice] = useState(1500000);
-  const [availability, setAvailability] = useState("all");
+  const [activeCities, setActiveCities] = useState<string[]>([]);
+  /**
+   * The price ceiling, or `null` for no ceiling at all.
+   *
+   * Null rather than a large opening number, because there is no such thing as a price too high to
+   * exist: `ticket_types.price_amount` is a bare `BIGINT` and the organizer API only refuses
+   * negatives, so any figure picked here would be a guess that quietly filters out every event
+   * above it. The catalog's own dearest ticket is what the slider opens on (see `priceCeiling`), and
+   * until the reader moves it nothing is excluded.
+   */
+  const [maxPrice, setMaxPrice] = useState<number | null>(null);
+  const [availabilities, setAvailabilities] = useState<string[]>([]);
 
   const [bookingDate, setBookingDate] = useState("");
   const [bookingTime, setBookingTime] = useState("");
@@ -610,7 +648,15 @@ export default function App() {
       });
   }, []);
 
-  const filteredEvents = useMemo(() => {
+  /**
+   * Everything that survives every filter except the price one.
+   *
+   * Split out because the price slider's far end is the dearest of *these*, and the price filter
+   * cannot be one of the things that decides it — drag the ceiling down, the dearest survivor drops
+   * with it, the rule shrinks to match, and the thumb is at the far end again with more to cut. The
+   * filter has to be excluded from its own scale or it eats itself.
+   */
+  const eventsBeforePriceFilter = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
 
     return events.filter((movie) => {
@@ -630,22 +676,43 @@ export default function App() {
         .toLowerCase();
 
       const matchesSearch = !normalizedQuery || searchBlob.includes(normalizedQuery);
-      const matchesCategory = activeCategory === "all" || movie.category === activeCategory;
+      const matchesCategory =
+        activeCategories.length === 0 || activeCategories.includes(movie.category);
       const matchesDate = matchesDateFilter(movie.dates, activeDate);
-      const matchesCity = activeCity === "all" || movie.city === activeCity;
-      const matchesPrice = movie.price <= maxPrice;
-      const matchesAvailability = availability === "all" || movie.status === availability;
+      const matchesCity = activeCities.length === 0 || activeCities.includes(movie.city);
+      const matchesAvailability =
+        availabilities.length === 0 || availabilities.includes(movie.status);
 
-      return (
-        matchesSearch &&
-        matchesCategory &&
-        matchesDate &&
-        matchesCity &&
-        matchesPrice &&
-        matchesAvailability
-      );
+      return matchesSearch && matchesCategory && matchesDate && matchesCity && matchesAvailability;
     });
-  }, [events, activeCategory, activeCity, activeDate, availability, maxPrice, searchQuery]);
+  }, [events, activeCategories, activeCities, activeDate, availabilities, searchQuery]);
+
+  /**
+   * How far the price slider reaches: the dearest ticket still on the table.
+   *
+   * Read off the events rather than written down, because nothing in the system caps a price —
+   * `ticket_types.price_amount` is an unconstrained `BIGINT` and the organizer API refuses only
+   * negatives and fractions. Any number hardcoded here would be a guess, and the day an event was
+   * listed above it the slider would bottom out with no way to reach the top of the catalog.
+   *
+   * Taken from the other filters' survivors, so the rule always spans exactly the prices that are
+   * still reachable. The cost is that narrowing by city or by date rescales it, and a ceiling set
+   * before that narrowing lands somewhere else on the rule afterwards — the number is unchanged,
+   * the ruler under it is not.
+   */
+  const priceCeiling = useMemo(() => {
+    const dearest = eventsBeforePriceFilter.reduce(
+      (top, evt) => (evt.price > top ? evt.price : top),
+      0,
+    );
+    // A span of zero has no fractions in it, so the rule needs *something* until the catalog lands.
+    return dearest > 0 ? dearest : PRICE_CEILING_BEFORE_CATALOG;
+  }, [eventsBeforePriceFilter]);
+
+  const filteredEvents = useMemo(
+    () => eventsBeforePriceFilter.filter((movie) => maxPrice === null || movie.price <= maxPrice),
+    [eventsBeforePriceFilter, maxPrice],
+  );
 
   /**
    * The date filter's options, taken from the catalog itself. They are compared verbatim against
@@ -866,6 +933,110 @@ export default function App() {
   };
 
   /**
+   * Every way out of a step, once the order exists: cancel it.
+   *
+   * Going back used to keep the hold and let the buyer return to it, which meant a selection
+   * could be half-committed on the server while the buyer was three screens away editing it.
+   * The rule now is the one the ticketing sites use, and it is simpler to hold in the head:
+   * forward commits, backward cancels. One way to take seats or tickets, one way to stop.
+   *
+   * Nothing to cancel — the buyer stepped back off the very first screen — is not a question
+   * worth asking, so the confirmation only appears when a hold actually exists.
+   */
+  const confirmCancelOrder = () =>
+    askConfirm({
+      title: "Hủy đơn hàng?",
+      message: "Bạn có chắc chắn muốn tiếp tục?\nBạn sẽ mất vị trí mình đã lựa chọn.",
+      confirmLabel: "Hủy đơn",
+      cancelLabel: "Giữ đơn",
+      tone: "danger",
+    });
+
+  /** Forget the showtime the flow was working on. The server side is `releaseHold`. */
+  const clearBookingSelection = () => {
+    setBookingShowtimeId(null);
+    setBookingDate("");
+    setBookingTime("");
+  };
+
+  /**
+   * Where the address bar was, so a backward move can be told from a forward one.
+   *
+   * Only the flow screens are ranked. Anything outside the purchase is 0, which makes "left the
+   * flow entirely" the same kind of move as "went back a step" — both release the hold.
+   */
+  const flowRank = (path: string): number => {
+    const route = pathToRoute(path);
+    if (!route) return 0;
+    if (route.screen === "detail") return 1;
+    if (route.screen === "seats") return 2;
+    if (route.screen === "checkout") return 3;
+    return 0;
+  };
+  const lastFlowPathRef = useRef(location.pathname);
+  /** True while a restore navigation is in flight, so the guard does not react to its own undo. */
+  const restoringRef = useRef(false);
+
+  /**
+   * The browser's back button, held to the same rule as the in-app one.
+   *
+   * Cancelling on the back *link* only was a rule the buyer could step around without meaning to:
+   * a browser back out of checkout left the seats held on the server with no screen left showing
+   * them, and they stayed held until the TTL swept them. The address bar is a way out of the flow
+   * whoever pressed it.
+   *
+   * It cannot be intercepted before the fact — by the time React hears about it the history entry
+   * has already moved — so a refusal is undone by navigating forward again rather than by
+   * preventing the move. `restoringRef` stops that undo from reading as a new backward move.
+   */
+  useEffect(() => {
+    const from = lastFlowPathRef.current;
+    const to = location.pathname;
+    lastFlowPathRef.current = to;
+
+    if (restoringRef.current) {
+      restoringRef.current = false;
+      return;
+    }
+    if (isOverlayPath(to) || from === to) return;
+
+    const live = holdRef.current;
+    // Only a *backward* move out of a step that had something held. Going deeper into the flow, or
+    // moving around outside it, is not a cancel.
+    if (!live || flowRank(from) < 2 || flowRank(to) >= flowRank(from)) return;
+
+    void (async () => {
+      if (await confirmCancelOrder()) {
+        await releaseHold(live);
+        clearBookingSelection();
+        return;
+      }
+      // Kept: put the buyer back where they were. `replace` so the declined step does not pile a
+      // second entry onto the history they just used.
+      restoringRef.current = true;
+      lastFlowPathRef.current = from;
+      navigate(from, { replace: true });
+    })();
+    // `location.pathname` is the whole trigger; the rest are stable refs and setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
+
+  const cancelBookingFlow = async () => {
+    const live = holdRef.current;
+
+    if (live) {
+      if (!(await confirmCancelOrder())) return;
+      await releaseHold(live);
+    }
+
+    // Back to the first step carrying nothing. The selection is gone on the server, so leaving
+    // it on screen would offer the buyer a resume that no longer exists.
+    clearBookingSelection();
+    goTo("detail", { eventSlug: selectedMovie.id });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  /**
    * Picking or dropping a seat — a real server hold, not local state. The window starts at the first
    * held seat and adding another never extends it (FR-006); dropping the last seat ends the
    * reservation, so the next pick starts a fresh window.
@@ -909,64 +1080,83 @@ export default function App() {
   };
 
   /**
-   * General admission has no seat map to walk through — a chosen quantity per tier is the whole
-   * selection, so checkout is the next screen. Each ticket becomes one line item; the seat shape is
-   * what the (cinema-derived) checkout and ticket screens still render.
+   * A general-admission stepper press, straight through to the server.
+   *
+   * The quantity is not local state any more. It used to be picked on the event page and only
+   * turned into a hold when the buyer pressed through to checkout, which meant the number on screen
+   * was a wish rather than a claim: two buyers could both step to 5 of a tier with 6 left and only
+   * discover the conflict at the very end. Holding on the press is what T023 asked for and what
+   * makes the remaining count on everyone else's screen true (FR-018).
+   *
+   * Every press is a round trip, so `holdBusy` disables the steppers in between — two presses racing
+   * would both read the same reservation and one would be lost.
    */
-  const handleProceedToQuantityCheckout = (
-    selection: TierSelection[],
+  const handleAdjustGaQuantity = (
+    tier: { id: string; label: string },
+    delta: number,
     showtimeId: number | null,
     date: string,
     time: string,
   ) => {
     runSignedIn(async () => {
-      if (showtimeId === null) return;
+      if (showtimeId === null || holdBusy) return;
+
+      // A hold belongs to one showtime (FR-011). Stepping a tier on a different one is a new
+      // selection, and the old seats/tickets have to go back before it starts.
+      const current = holdRef.current;
+      if (current && current.showtimeId !== showtimeId) {
+        const switching = await askConfirm({
+          title: "Đổi sang suất khác?",
+          message:
+            "Bạn đang giữ vé cho một suất khác. Chọn suất này sẽ hủy số vé đang giữ và trả lại " +
+            "cho người khác.",
+          confirmLabel: "Đổi suất",
+          cancelLabel: "Giữ suất cũ",
+          tone: "danger",
+        });
+        if (!switching) return;
+        await releaseHold(current);
+      }
+
+      const live = holdRef.current;
+      if (delta < 0 && !live) return;
+
+      const context = {
+        eventId: selectedMovie.id,
+        eventTitle: selectedMovie.title,
+        selectedDate: date,
+        selectedTime: time,
+        mode: "ga" as const,
+      };
 
       setHoldBusy(true);
       try {
-        // Any earlier selection for this showtime is replaced wholesale: the tier steppers express
-        // an absolute quantity, and the server would otherwise add to what is already held.
-        if (hold) await releaseHold(hold);
-
-        let reservation = null;
-        for (const line of selection) {
-          reservation = await holdsClient.hold({
-            showtimeId,
-            ticketTierId: Number(line.tierId),
-            quantity: line.quantity,
-          });
-        }
-        if (!reservation) return;
+        const tierId = Number(tier.id);
+        const updated =
+          delta > 0
+            ? live
+              ? await holdsClient.add(live.reservationId, { ticketTierId: tierId, quantity: delta })
+              : await holdsClient.hold({ showtimeId, ticketTierId: tierId, quantity: delta })
+            : await holdsClient.releaseQuantity(live!.reservationId, tierId, -delta);
 
         setBookingDate(date);
         setBookingTime(time);
         setBookingShowtimeId(showtimeId);
-        setHold(
-          sessionFromReservation(reservation, {
-            eventId: selectedMovie.id,
-            eventTitle: selectedMovie.title,
-            selectedDate: date,
-            selectedTime: time,
-            mode: "ga",
-            quantities: Object.fromEntries(selection.map((line) => [line.tierId, line.quantity])),
-          }),
-        );
-        goTo("checkout");
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        // Stepping the last ticket off closes the reservation server-side, which is the signal that
+        // there is nothing left to hold — not an error.
+        setHold(updated.status === "active" ? sessionFromReservation(updated, context) : null);
       } catch (e) {
         pushToast(
           "error",
           e instanceof HoldError ? e.message : "Không giữ được vé. Vui lòng thử lại.",
         );
+        if (e instanceof HoldError && e.status === 404) setHold(null);
       } finally {
         setHoldBusy(false);
       }
     });
   };
 
-  // Checkout is where an order starts existing, so it is the first step that needs an account.
-  // The seats are already held by this point, so this only moves the screen — the hold, its items
-  // and its countdown carry straight through.
   const handleProceedToCheckout = () => {
     runSignedIn(() => {
       goTo("checkout");
@@ -1104,8 +1294,28 @@ export default function App() {
       <Header
         searchQuery={searchQuery}
         onSearchChange={(value) => void goHomeAfterFilter(() => setSearchQuery(value))}
-        activeCategory={activeCategory}
-        onCategoryChange={(value) => void goHomeAfterFilter(() => setActiveCategory(value))}
+        /*
+         * The nav menu is a one-of-N list and stays that way — picking "Phim" up there means
+         * "show me films", not "add films to whatever is already ticked down in the filter bar".
+         * So it reads the set only when the set holds exactly one thing, and writes by replacing.
+         */
+        activeCategory={activeCategories.length === 1 ? activeCategories[0] : "all"}
+        /*
+         * And it lands on the catalog, not on the landing page.
+         *
+         * These are shortcuts into a filtered listing — the same promise Ticketbox's "Nhạc sống /
+         * Sân khấu / Phim" row makes. They used to set the filter and leave the reader where they
+         * were, which on the landing page meant the change happened somewhere below the hero, the
+         * ticker and the featured pair: a menu that appeared to do nothing. `/events` is the screen
+         * that is nothing but the filtered grid, so that is where a category shortcut belongs.
+         */
+        onCategoryChange={(value) =>
+          void leaveFlow(() => {
+            setActiveCategories(value === "all" ? [] : [value]);
+            goTo("browse");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          })
+        }
         onViewHistory={() => void leaveFlow(() => goTo("history"))}
         onViewWallet={() => void leaveFlow(() => goTo("wallet"))}
         onHomeClick={goHome}
@@ -1151,39 +1361,98 @@ export default function App() {
         )}
 
         {/*
-         * The catalog is the same on both screens. `/` leads with the hero and the venue list;
-         * `/events` is the grid on its own, which is what the nav's ticket icon wants.
+         * The catalog page opens on the same trailer the landing page does, in its plain variant:
+         * one big picture in a fixed band, no television around it and no scroll choreography. It
+         * is what the reference puts at the top of a collection — a full-bleed image carrying the
+         * section's title — and it means `/events` no longer starts cold on a row of filters.
+         */}
+        {activeScreen === "browse" && (
+          <HeroVideo
+            variant="plain"
+            movie={heroMovie}
+            onBookNow={() => void handleStartBookingInput(heroMovie)}
+          />
+        )}
+
+        {/*
+         * The catalog is the same on both screens, and so are the filters — only where they sit
+         * differs. `/` leads with the hero and runs the filters as a strip under it; `/events` is
+         * the catalog on its own and runs them as a rail down the left of the grid, which is the
+         * shape the reference collection page uses and the reason `EventFilters` has a variant.
          */}
         {(activeScreen === "home" || activeScreen === "browse") && (
           <div className="space-y-4">
-            <EventFilters
-              activeCategory={activeCategory}
-              onCategoryChange={(value) => void goHomeAfterFilter(() => setActiveCategory(value))}
-              activeDate={activeDate}
-              dateOptions={dateOptions}
-              onDateChange={(value) => void goHomeAfterFilter(() => setActiveDate(value))}
-              activeCity={activeCity}
-              onCityChange={(value) => void goHomeAfterFilter(() => setActiveCity(value))}
-              maxPrice={maxPrice}
-              onMaxPriceChange={(value) => void goHomeAfterFilter(() => setMaxPrice(value))}
-              availability={availability}
-              onAvailabilityChange={(value) => void goHomeAfterFilter(() => setAvailability(value))}
-              wishlistCount={wishlistedIds.length}
-            />
+            {(() => {
+              const filters = (
+                <EventFilters
+                  variant={activeScreen === "browse" ? "rail" : "bar"}
+                  resultCount={filteredEvents.length}
+                  activeCategories={activeCategories}
+                  onCategoryChange={(value) =>
+                    void goHomeAfterFilter(() => setActiveCategories(toggleFilterValue(value)))
+                  }
+                  activeDate={activeDate}
+                  dateOptions={dateOptions}
+                  onDateChange={(value) => void goHomeAfterFilter(() => setActiveDate(value))}
+                  activeCities={activeCities}
+                  onCityChange={(value) =>
+                    void goHomeAfterFilter(() => setActiveCities(toggleFilterValue(value)))
+                  }
+                  maxPrice={maxPrice}
+                  priceCeiling={priceCeiling}
+                  onMaxPriceChange={(value) => void goHomeAfterFilter(() => setMaxPrice(value))}
+                  availabilities={availabilities}
+                  onAvailabilityChange={(value) =>
+                    void goHomeAfterFilter(() => setAvailabilities(toggleFilterValue(value)))
+                  }
+                  /*
+                   * The search box is deliberately not cleared here. It lives in the nav, above
+                   * this bar and outside it, and wiping a query the reader can still see typed up
+                   * there from a control down here reads as a bug rather than as a reset.
+                   */
+                  onResetFilters={() =>
+                    void goHomeAfterFilter(() => {
+                      setActiveCategories([]);
+                      setActiveDate(null);
+                      setActiveCities([]);
+                      setAvailabilities([]);
+                      setMaxPrice(null);
+                    })
+                  }
+                />
+              );
 
-            <EventGrid
-              events={filteredEvents}
-              selectedEvent={heroMovie}
-              onSelectEvent={handleSelectEventForTrailer}
-              onBookNow={(movie) => void handleStartBookingInput(movie)}
-              wishlistedIds={wishlistedIds}
-              onToggleWishlist={handleToggleWishlist}
-              // Offered on the landing page only. `/events` is where the link would go, so on that
-              // screen it would point at itself.
-              onViewAll={
-                activeScreen === "home" ? () => void leaveFlow(() => goTo("browse")) : undefined
-              }
-            />
+              const grid = (
+                <EventGrid
+                  events={filteredEvents}
+                  // The landing band keeps the ruled card it has always had; only `/events` takes
+                  // the borderless catalog one.
+                  variant={activeScreen === "browse" ? "catalog" : "landing"}
+                  selectedEvent={heroMovie}
+                  onSelectEvent={handleSelectEventForTrailer}
+                  onBookNow={(movie) => void handleStartBookingInput(movie)}
+                  wishlistedIds={wishlistedIds}
+                  onToggleWishlist={handleToggleWishlist}
+                  // Offered on the landing page only. `/events` is where the link would go, so on
+                  // that screen it would point at itself.
+                  onViewAll={
+                    activeScreen === "home" ? () => void leaveFlow(() => goTo("browse")) : undefined
+                  }
+                  // The rail is handed to the grid rather than placed beside it, so the two share
+                  // one measure instead of two that have to be kept equal by hand.
+                  sidebar={activeScreen === "browse" ? filters : undefined}
+                />
+              );
+
+              return activeScreen === "browse" ? (
+                grid
+              ) : (
+                <>
+                  {filters}
+                  {grid}
+                </>
+              );
+            })()}
           </div>
         )}
 
@@ -1198,17 +1467,17 @@ export default function App() {
             onToggleWishlist={handleToggleWishlist}
             onBookRelated={(movie) => void handleStartBookingInput(movie)}
             onProceedToSeatSelection={handleProceedToSeats}
-            onProceedToQuantityCheckout={handleProceedToQuantityCheckout}
-            restoreHold={
-              hold && hold.eventId === selectedMovie.id
-                ? {
-                    selectedDate: hold.selectedDate,
-                    selectedTime: hold.selectedTime,
-                    quantities: hold.quantities ?? {},
-                  }
-                : null
+            onProceedToCheckout={handleProceedToCheckout}
+            // General admission holds as it steps, so this screen owns a live reservation and needs
+            // the clock and the busy flag that used to belong only to the seat map.
+            heldQuantities={
+              hold?.mode === "ga" && hold.eventId === selectedMovie.id
+                ? (hold.quantities ?? {})
+                : {}
             }
-            holdRemainingMs={holdRemainingMs}
+            onAdjustQuantity={handleAdjustGaQuantity}
+            holdBusy={holdBusy}
+            holdRemainingMs={hold?.mode === "ga" ? holdRemainingMs : 0}
           />
         )}
 
@@ -1222,8 +1491,9 @@ export default function App() {
             remainingMs={holdRemainingMs}
             busy={holdBusy}
             onToggleSeat={(seat) => void handleToggleSeat(seat)}
-            // Stepping back to the showtime picker stays inside the flow: the hold is kept.
-            onBack={() => goTo("detail", { eventSlug: selectedMovie.id })}
+            // Backward is a cancel, here and everywhere else in the flow.
+            onBack={() => void cancelBookingFlow()}
+            onGoToStep={() => void cancelBookingFlow()}
             onProceedToCheckout={handleProceedToCheckout}
           />
         )}
@@ -1236,11 +1506,12 @@ export default function App() {
             selectedSeats={bookingSeats}
             totalPrice={bookingTotalPrice}
             remainingMs={holdRemainingMs}
-            backLabel={hold?.mode === "ga" ? "Quay lại chọn số lượng vé" : "Quay lại chọn ghế"}
-            // Also inside the flow — the selection and the countdown are still there when they return.
-            onBack={() =>
-              goTo(hold?.mode === "ga" ? "detail" : "seats", { eventSlug: selectedMovie.id })
-            }
+            // Named for what it does. It used to say "Quay lại chọn ghế" and keep the hold; it now
+            // releases the order, and a back link that quietly destroys the purchase while promising
+            // to return to the seat map is the wrong label.
+            backLabel="Hủy đơn và quay lại"
+            onBack={() => void cancelBookingFlow()}
+            onGoToStep={() => void cancelBookingFlow()}
             reservationId={hold?.reservationId ?? null}
             shortfall={shortfall}
             onConfirmBooking={handleConfirmPurchase}
@@ -1274,15 +1545,15 @@ export default function App() {
          */}
         {activeScreen === "wallet" &&
           (!authReady ? (
-            <p className="mx-auto max-w-4xl px-4 py-16 font-mono text-sm text-ink-soft sm:px-6 lg:px-8">
+            <p className="mx-auto max-w-4xl px-4 py-16 font-meta text-body text-ink-soft sm:px-6 lg:px-8">
               Đang kiểm tra phiên đăng nhập…
             </p>
           ) : isSignedIn ? (
             <WalletPanel onBack={goHome} />
           ) : (
             <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6 lg:px-8">
-              <h2 className="font-display text-3xl font-black text-beige-kem">Ví TixHub</h2>
-              <p className="mt-3 text-sm leading-6 text-beige-kem/70">
+              <h2 className="font-display text-title-m font-black text-beige-kem">Ví TixHub</h2>
+              <p className="mt-3 text-body leading-6 text-beige-kem/70">
                 Ví gắn với tài khoản của bạn. Đăng nhập để xem số dư và lịch sử giao dịch.
               </p>
               <div className="mt-6 flex flex-wrap items-center gap-6">

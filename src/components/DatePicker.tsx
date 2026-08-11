@@ -174,7 +174,8 @@ export default function DatePicker({ label, value, available, onChange }: DatePi
         onClick={() => (open ? close() : openPanel())}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="flex h-8 w-full items-center gap-2 border-b border-beige-kem/40 pr-1 text-left font-mono text-xs text-beige-kem transition hover:border-beige-kem"
+        aria-label={label}
+        className="flex h-8 w-full items-center gap-2 border-b border-beige-kem/40 pr-1 text-left font-meta text-body text-beige-kem transition hover:border-beige-kem"
       >
         <CalendarDays className="h-3.5 w-3.5 shrink-0 text-ink-soft" />
         <span className={`truncate ${value ? "" : "text-ink-soft"}`}>{triggerText}</span>
@@ -259,7 +260,7 @@ export default function DatePicker({ label, value, available, onChange }: DatePi
               {WEEKDAYS.map((w) => (
                 <span
                   key={w}
-                  className="grid h-6 place-items-center font-mono text-[12px] text-ink-soft"
+                  className="grid h-6 place-items-center font-meta text-eyebrow text-ink-soft"
                 >
                   {w}
                 </span>
@@ -283,7 +284,7 @@ export default function DatePicker({ label, value, available, onChange }: DatePi
                     aria-pressed={inBand}
                     onClick={() => clickDay(iso)}
                     onMouseEnter={() => setHovered(iso)}
-                    className={`relative grid h-9 place-items-center font-mono text-sm transition ${
+                    className={`relative grid h-9 place-items-center font-meta text-body transition ${
                       isEnd
                         ? "bg-burgundy font-bold text-white"
                         : inBand
@@ -307,7 +308,7 @@ export default function DatePicker({ label, value, available, onChange }: DatePi
               })}
             </div>
 
-            <p className="mt-3 px-4 font-mono text-[12px] leading-4 text-ink-soft">
+            <p className="mt-3 px-4 font-meta text-eyebrow leading-4 text-ink-soft">
               {anchor
                 ? "Chọn ngày thứ hai để lấy cả khoảng."
                 : "Bấm một ngày, rồi bấm ngày nữa để chọn khoảng."}

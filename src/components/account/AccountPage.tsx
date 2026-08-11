@@ -262,12 +262,12 @@ export default function AccountPage({
         className="w-full px-4 py-5 sm:px-6 sm:py-7 lg:px-8"
       >
         <div className="flex items-center justify-between gap-4 border-b border-beige-kem/25 pb-4">
-          <h2 id="account-title" className="font-display text-3xl font-black sm:text-4xl">
+          <h2 id="account-title" className="font-display text-title-m font-black sm:text-title-l">
             Tài khoản
           </h2>
           <button
             onClick={requestClose}
-            className="grid h-10 place-items-center rounded-xl border-2 border-beige-kem px-4 font-mono text-[13px] font-bold uppercase text-beige-kem/80 transition hover:text-beige-kem"
+            className="grid h-10 place-items-center rounded-xl border-2 border-beige-kem px-4 font-meta text-meta font-bold uppercase text-beige-kem/80 transition hover:text-beige-kem"
           >
             ← Quay lại
           </button>
@@ -276,7 +276,7 @@ export default function AccountPage({
         {/* One live region for both outcomes, so a screen reader announces either without duplicates. */}
         <div aria-live="polite" className="mt-4 space-y-2 empty:mt-0">
           {notice && (
-            <div className="flex items-start gap-2 rounded-xl border-2 border-beige-kem bg-la-co p-3 text-xs leading-5 text-on-tint">
+            <div className="flex items-start gap-2 rounded-xl border-2 border-beige-kem bg-la-co p-3 text-eyebrow leading-5 text-on-tint">
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
               {notice}
             </div>
@@ -284,7 +284,7 @@ export default function AccountPage({
           {err && (
             <div
               role="alert"
-              className="flex items-start gap-2 rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-xs leading-5 text-on-tint"
+              className="flex items-start gap-2 rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-eyebrow leading-5 text-on-tint"
             >
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-burgundy-ink" aria-hidden />
               {err}
@@ -303,8 +303,10 @@ export default function AccountPage({
               to TixHub. Same treatment as the header, one size down.
             */}
             <div className="mb-3 border-b border-beige-kem/25 px-2 pb-3">
-              <p className="font-display text-2xl font-black leading-none text-beige-kem">TixHub</p>
-              <p className="mt-1.5 text-[13px] font-semibold uppercase tracking-[0.22em] text-ink-soft">
+              <p className="font-display text-title-m font-black leading-none text-beige-kem">
+                TixHub
+              </p>
+              <p className="mt-1.5 text-meta font-semibold uppercase tracking-[0.22em] text-ink-soft">
                 Music / Stage / Film
               </p>
             </div>
@@ -318,7 +320,7 @@ export default function AccountPage({
                       type="button"
                       onClick={() => selectSection(id)}
                       aria-current={active ? "page" : undefined}
-                      className={`relative flex h-11 w-full items-center gap-2.5 whitespace-nowrap rounded-xl px-3.5 text-sm font-bold transition ${
+                      className={`relative flex h-11 w-full items-center gap-2.5 whitespace-nowrap rounded-xl px-3.5 text-body font-bold transition ${
                         active
                           ? "bg-cam-dat text-on-tint"
                           : "text-beige-kem/70 hover:bg-surface-2 hover:text-beige-kem"
@@ -352,7 +354,7 @@ export default function AccountPage({
                   />
                 ) : (
                   <div
-                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full font-display text-xs font-black"
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full font-display text-eyebrow font-black"
                     style={{ backgroundColor: avatarColor(me?.email), color: DEFAULT_AVATAR_FG }}
                     aria-hidden
                   >
@@ -360,10 +362,10 @@ export default function AccountPage({
                   </div>
                 )}
                 <div className="min-w-0">
-                  <p className="truncate text-xs font-bold text-beige-kem">
+                  <p className="truncate text-eyebrow font-bold text-beige-kem">
                     {me?.nickname || me?.email || "Đang tải…"}
                   </p>
-                  <p className="truncate font-mono text-[12px] text-beige-kem/70">
+                  <p className="truncate font-meta text-eyebrow text-beige-kem/70">
                     {me?.email ?? "…"}
                   </p>
                 </div>
@@ -371,7 +373,7 @@ export default function AccountPage({
               <button
                 type="button"
                 onClick={confirmLogout}
-                className="mt-3 flex h-10 w-full items-center gap-2.5 rounded-xl px-3.5 text-sm font-bold text-ink-soft transition hover:bg-bubblegum hover:text-on-tint"
+                className="mt-3 flex h-10 w-full items-center gap-2.5 rounded-xl px-3.5 text-body font-bold text-ink-soft transition hover:bg-bubblegum hover:text-on-tint"
               >
                 <LogOut className="h-4 w-4 shrink-0" aria-hidden />
                 Đăng xuất
@@ -383,7 +385,7 @@ export default function AccountPage({
             {loadFailed && !me && (
               <div
                 role="alert"
-                className="rounded-2xl border-2 border-beige-kem bg-bubblegum p-5 text-sm leading-6"
+                className="rounded-2xl border-2 border-beige-kem bg-bubblegum p-5 text-body leading-6"
               >
                 Không tải được thông tin tài khoản. Kiểm tra kết nối rồi thử lại.
               </div>

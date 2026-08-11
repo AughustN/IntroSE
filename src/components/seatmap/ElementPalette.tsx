@@ -22,7 +22,8 @@ const KINDS: { kind: ElementKind; label: string; w: number; h: number }[] = [
   { kind: "label", label: "Nhãn chữ", w: 800, h: 250 },
 ];
 
-const btn = "rounded-lg border-2 border-beige-kem px-2.5 py-1.5 text-xs font-bold text-beige-kem/80 transition hover:text-beige-kem";
+const btn =
+  "rounded-lg border-2 border-beige-kem px-2.5 py-1.5 text-eyebrow font-bold text-beige-kem/80 transition hover:text-beige-kem";
 
 export default function ElementPalette({ onAdd }: { onAdd: (el: LayoutElement) => void }) {
   const [text, setText] = useState("");
@@ -41,8 +42,10 @@ export default function ElementPalette({ onAdd }: { onAdd: (el: LayoutElement) =
 
   return (
     <div className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
-      <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">Chi tiết không bán</h3>
-      <p className="mt-1 text-[13px] leading-4 text-beige-kem/50">
+      <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-beige-kem/70">
+        Chi tiết không bán
+      </h3>
+      <p className="mt-1 text-meta leading-4 text-beige-kem/50">
         Không bao giờ trở thành vé: không giữ, không bán, không tính vào sức chứa.
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
@@ -57,7 +60,7 @@ export default function ElementPalette({ onAdd }: { onAdd: (el: LayoutElement) =
         onChange={(e) => setText(e.target.value)}
         maxLength={60}
         placeholder="Nội dung nhãn chữ"
-        className="mt-3 h-9 w-full rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-xs text-beige-kem outline-none focus:border-burgundy"
+        className="mt-3 h-9 w-full rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow text-beige-kem outline-none focus:border-burgundy"
       />
     </div>
   );

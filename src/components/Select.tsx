@@ -4,7 +4,7 @@
  */
 
 import { useRef, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { useDismiss } from "../hooks/useDismiss";
 
 export interface SelectOption {
@@ -29,10 +29,27 @@ interface SelectProps {
   triggerClassName?: string;
   /** Shown when `value` matches no option — the "Chọn địa điểm" case in the admin forms. */
   placeholder?: string;
+  /**
+   * Present to switch the control into multi-select. `value` is then ignored and these are the
+   * options that carry a tick; `onChange` fires with whichever row was clicked and the caller
+   * decides whether that adds or removes it.
+   *
+   * Optional rather than a second component because everything below the trigger is identical —
+   * same panel, same reveal, same rows. What changes is three things: what the trigger reads, what
+   * marks a row, and whether a click closes the panel. Two components would duplicate the rest to
+   * vary those three.
+   */
+  selectedValues?: string[];
+  /** The trigger's text when `selectedValues` is empty. Multi-select only. */
+  emptyLabel?: string;
 }
 
+/**
+ * The filter bar's hairline trigger, and only that bar's — every admin caller passes its own
+ * `triggerClassName`, so the size here can follow the filter row without touching the panels.
+ */
 const UNDERLINE_TRIGGER =
-  "h-8 border-b border-beige-kem/40 pr-1 font-mono text-xs hover:border-beige-kem";
+  "h-8 border-b border-beige-kem/40 pr-1 font-meta text-body hover:border-beige-kem";
 
 /**
  * A dropdown built on the same motion as the nav's ticket panel, after siena.film.
@@ -53,13 +70,34 @@ export default function Select({
   onChange,
   triggerClassName,
   placeholder,
+  selectedValues,
+  emptyLabel,
 }: SelectProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useDismiss(ref, open, () => setOpen(false));
 
+  const multiple = selectedValues !== undefined;
   const current = options.find((o) => o.value === value);
+
+  /*
+   * What the trigger says when several things are picked.
+   *
+   * Two names fit the column; three do not, and a truncated list reads as one long unfamiliar word
+   * rather than as a list that continues. Past two it counts instead, which is always the same
+   * width and always legible.
+   */
+  const multiLabel = !multiple
+    ? ""
+    : selectedValues.length === 0
+      ? (emptyLabel ?? "Tất cả")
+      : selectedValues.length <= 2
+        ? options
+            .filter((o) => selectedValues.includes(o.value))
+            .map((o) => o.label)
+            .join(", ")
+        : `${selectedValues.length} đã chọn`;
 
   return (
     <div ref={ref} className="relative flex min-w-0 flex-col gap-1.5">
@@ -75,8 +113,18 @@ export default function Select({
         aria-label={label ?? placeholder}
         className={`flex w-full items-center justify-between gap-2 text-left text-beige-kem transition ${triggerClassName ?? UNDERLINE_TRIGGER}`}
       >
-        <span className={`truncate ${current ? "" : "text-ink-soft"}`}>
-          {current?.label ?? placeholder ?? "—"}
+        <span
+          className={`truncate ${
+            multiple
+              ? selectedValues.length === 0
+                ? "text-ink-soft"
+                : ""
+              : current
+                ? ""
+                : "text-ink-soft"
+          }`}
+        >
+          {multiple ? multiLabel : (current?.label ?? placeholder ?? "—")}
         </span>
         <ChevronDown
           className={`h-3.5 w-3.5 shrink-0 text-ink-soft transition-transform duration-300 ${
@@ -99,10 +147,13 @@ export default function Select({
           <ul
             role="listbox"
             aria-label={label}
+            aria-multiselectable={multiple || undefined}
             className="ticket-corners max-h-64 overflow-y-auto bg-surface-2 py-1"
           >
             {options.map((option, i) => {
-              const selected = option.value === value;
+              const selected = multiple
+                ? selectedValues.includes(option.value)
+                : option.value === value;
               return (
                 <li key={option.value}>
                   <button
@@ -111,9 +162,11 @@ export default function Select({
                     aria-selected={selected}
                     onClick={() => {
                       onChange(option.value);
-                      setOpen(false);
+                      // A multi-select that closes on the first tick makes picking three things
+                      // three round trips through the trigger.
+                      if (!multiple) setOpen(false);
                     }}
-                    className={`flex w-full items-center justify-between gap-3 overflow-clip px-4 py-2 text-left font-mono text-xs transition-colors ${
+                    className={`flex w-full items-center justify-between gap-3 overflow-clip px-4 py-2 text-left font-meta text-eyebrow transition-colors ${
                       selected
                         ? "bg-bubblegum/50 text-on-tint"
                         : "text-beige-kem hover:bg-bubblegum/30"
@@ -126,7 +179,21 @@ export default function Select({
                     >
                       {option.label}
                     </span>
-                    {selected && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-burgundy" />}
+                    {/*
+                      A tick in multi-select, a dot in single. The dot says "this is the one"; a
+                      list where several rows can be marked at once needs a mark that means "this
+                      one too", and the rail beside it already uses a tick for exactly that.
+                    */}
+                    {multiple ? (
+                      <Check
+                        aria-hidden="true"
+                        className={`h-3.5 w-3.5 shrink-0 text-burgundy ${
+                          selected ? "opacity-100" : "opacity-0"
+                        }`}
+                      />
+                    ) : (
+                      selected && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-burgundy" />
+                    )}
                   </button>
                 </li>
               );

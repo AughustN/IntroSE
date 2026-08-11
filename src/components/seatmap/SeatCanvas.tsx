@@ -4,7 +4,12 @@
  */
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import type { SeatMapElement, SeatMapFloorPlan, SeatMapSeat, SeatMapSpace } from "@/shared/catalog/types";
+import type {
+  SeatMapElement,
+  SeatMapFloorPlan,
+  SeatMapSeat,
+  SeatMapSpace,
+} from "@/shared/catalog/types";
 
 /**
  * The one surface that turns layout coordinates into pixels (research R-4).
@@ -96,7 +101,8 @@ export default function SeatCanvas({
     [],
   );
   const nudge = useCallback(
-    (dx: number, dy: number) => setPan((p) => ({ x: p.x + (dx * bounds.w) / 8, y: p.y + (dy * bounds.h) / 8 })),
+    (dx: number, dy: number) =>
+      setPan((p) => ({ x: p.x + (dx * bounds.w) / 8, y: p.y + (dy * bounds.h) / 8 })),
     [bounds],
   );
   const reset = useCallback(() => {
@@ -109,10 +115,31 @@ export default function SeatCanvas({
   return (
     <div className={`relative ${className}`}>
       {/* Zoom and pan are reachable from the keyboard, not only by pointer gesture (FR-039a). */}
-      <div className="absolute right-2 top-2 z-10 flex gap-1 font-mono text-xs">
-        <button type="button" onClick={() => step(1.4)} aria-label="Phóng to sơ đồ" className="grid h-7 w-7 place-items-center rounded-md border border-beige-kem/40 bg-surface-2 text-beige-kem">+</button>
-        <button type="button" onClick={() => step(1 / 1.4)} aria-label="Thu nhỏ sơ đồ" className="grid h-7 w-7 place-items-center rounded-md border border-beige-kem/40 bg-surface-2 text-beige-kem">−</button>
-        <button type="button" onClick={reset} aria-label="Đặt lại khung nhìn" className="grid h-7 w-auto place-items-center rounded-md border border-beige-kem/40 bg-surface-2 px-2 text-beige-kem">⟲</button>
+      <div className="absolute right-2 top-2 z-10 flex gap-1 font-meta text-eyebrow">
+        <button
+          type="button"
+          onClick={() => step(1.4)}
+          aria-label="Phóng to sơ đồ"
+          className="grid h-7 w-7 place-items-center rounded-md border border-beige-kem/40 bg-surface-2 text-beige-kem"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          onClick={() => step(1 / 1.4)}
+          aria-label="Thu nhỏ sơ đồ"
+          className="grid h-7 w-7 place-items-center rounded-md border border-beige-kem/40 bg-surface-2 text-beige-kem"
+        >
+          −
+        </button>
+        <button
+          type="button"
+          onClick={reset}
+          aria-label="Đặt lại khung nhìn"
+          className="grid h-7 w-auto place-items-center rounded-md border border-beige-kem/40 bg-surface-2 px-2 text-beige-kem"
+        >
+          ⟲
+        </button>
       </div>
 
       <svg
@@ -148,7 +175,10 @@ export default function SeatCanvas({
           if (!from) return;
           const rect = e.currentTarget.getBoundingClientRect();
           const scale = bounds.w / zoom / rect.width;
-          setPan((p) => ({ x: p.x - (e.clientX - from.x) * scale, y: p.y - (e.clientY - from.y) * scale }));
+          setPan((p) => ({
+            x: p.x - (e.clientX - from.x) * scale,
+            y: p.y - (e.clientY - from.y) * scale,
+          }));
           dragging.current = { x: e.clientX, y: e.clientY };
         }}
         onPointerUp={(e) => {
@@ -174,7 +204,12 @@ export default function SeatCanvas({
 
         {/* Non-sellable decoration. Excluded from the seat tab order (FR-040). */}
         {elements.map((el, i) => (
-          <g key={`el-${i}`} transform={`rotate(${el.rotation} ${el.x} ${el.y})`} aria-hidden="true" pointerEvents="none">
+          <g
+            key={`el-${i}`}
+            transform={`rotate(${el.rotation} ${el.x} ${el.y})`}
+            aria-hidden="true"
+            pointerEvents="none"
+          >
             {el.kind !== "label" && (
               <rect
                 x={el.x - el.width / 2}
@@ -195,7 +230,7 @@ export default function SeatCanvas({
                 textAnchor="middle"
                 dominantBaseline="central"
                 fontSize={Math.max(60, el.height / 3)}
-                className="fill-beige-kem/70 font-mono"
+                className="fill-beige-kem/70 font-meta"
               >
                 {el.label}
               </text>

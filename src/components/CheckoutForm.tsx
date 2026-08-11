@@ -5,10 +5,17 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { CheckoutPayload, MovieEvent, Seat } from "../types";
-import { formatEventDate } from "../services/formatDate";
-import { formatHoldClock } from "../services/holdSession";
 import { walletClient, type WalletLimits } from "../services/walletClient";
 import TopUpSheet from "./wallet/TopUpSheet";
+import {
+  type BookingStep,
+  BookingHeader,
+  BookingLayout,
+  BookingSection,
+  OrderSummary,
+  TicketStub,
+  type SummaryLine,
+} from "./booking/BookingChrome";
 import { formatVnd } from "../services/currency";
 
 interface CheckoutFormProps {
@@ -29,6 +36,8 @@ interface CheckoutFormProps {
    */
   shortfall: { required: number; balance: number; shortfall: number } | null;
   onBack: () => void;
+  /** Jump back to a finished step. The last step, so nothing is ahead. */
+  onGoToStep?: (step: BookingStep) => void;
   onConfirmBooking: (payload: CheckoutPayload) => Promise<void>;
 }
 
@@ -52,6 +61,7 @@ export default function CheckoutForm({
   reservationId,
   shortfall,
   onBack,
+  onGoToStep,
   onConfirmBooking,
 }: CheckoutFormProps) {
   const [name, setName] = useState("");
@@ -114,122 +124,172 @@ export default function CheckoutForm({
     }
   };
 
+  /**
+   * The order, one line per seat or ticket.
+   *
+   * A seated purchase names every seat, because "3 ghế" is not something a buyer can check against
+   * the map they just clicked. General admission has no seat to name, so the same rows read as the
+   * tickets they are.
+   */
+  const summaryLines: SummaryLine[] = selectedSeats.map((seat, index) => ({
+    key: String(seat.showtimeSeatId ?? `${seat.id}-${index}`),
+    label: isSeated ? `Ghế ${seat.id}` : seat.id,
+    detail: isSeated && seat.row ? `Hàng ${seat.row}` : undefined,
+    amount: seat.price,
+  }));
+
+  const canSubmit = Boolean(name && email && phone && agreeTerms) && !submitting;
+
+  /** The form lives in the left column; the summary's button is what submits it. */
+  const formId = "checkout-form";
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
-      <div className="flex flex-col gap-4 border-b border-beige-kem/25 pb-4 sm:flex-row sm:items-center sm:justify-between">
-        <button
-          onClick={onBack}
-          className="flex items-center gap-2 font-mono text-sm text-ink-soft transition hover:text-beige-kem"
-        >
-          {backLabel}
-        </button>
+      <BookingHeader
+        backLabel={backLabel}
+        onBack={onBack}
+        /*
+          Last step either way, but "last" is a different number in each flow: a seated purchase
+          has three chapters and a general-admission one has two. Hardcoding 3 left the general
+          admission bar with nothing highlighted, because there is no third chapter to match.
+        */
+        current={isSeated ? 3 : 2}
+        seated={isSeated}
+        onGoToStep={onGoToStep}
+      />
 
-        <div className="flex flex-wrap items-center gap-3 font-mono text-xs text-ink-soft">
-          <span>01 Chọn suất</span>
-          <span className="h-0.5 w-6 bg-beige-kem" />
-          <span>02 {isSeated ? "Chọn ghế" : "Chọn số lượng vé"}</span>
-          <span className="h-0.5 w-6 bg-beige-kem" />
-          <span className="rounded-full bg-bubblegum px-2.5 py-1 font-bold text-on-tint">
-            03 Thanh toán
-          </span>
+      <TicketStub event={event} date={selectedDate} time={selectedTime} />
 
-          {/* Same hold, same clock as step 02 — going back does not restart it. */}
-          <span className="inline-flex items-center gap-2 rounded-lg border-2 border-beige-kem bg-cam-dat px-2.5 py-1 text-on-tint">
-            Giữ chỗ
-            <b className="text-sm font-black text-beige-kem">{formatHoldClock(remainingMs)}</b>
-          </span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-12">
-        <section className="space-y-6 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 sm:p-8 lg:col-span-7">
-          <div>
-            <h3 className="font-display text-3xl font-black text-beige-kem">
-              Thông tin người nhận vé
-            </h3>
-            <p className="mt-2 text-sm text-ink-soft">
-              Vé điện tử sẽ được gửi qua email và hiển thị trong thông báo trong ứng dụng (không có
-              SMS).
-            </p>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="space-y-1.5">
-              <label className="block font-mono text-xs text-beige-kem/75">Họ và tên</label>
-              <input
-                type="text"
-                required
-                placeholder="Nhập đầy đủ tên của bạn"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="h-11 w-full rounded-xl border-2 border-beige-kem bg-xanh-pho px-4 text-sm text-beige-kem outline-none transition focus:border-burgundy"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <BookingLayout
+        aside={
+          <OrderSummary
+            event={event}
+            date={selectedDate}
+            time={selectedTime}
+            venue={event.venueName || event.location}
+            lines={summaryLines}
+            total={finalPrice}
+            holdMs={remainingMs}
+            emptyLabel="Chưa có vé nào"
+            ctaLabel={submitting ? "Đang thanh toán…" : "Trừ ví và xuất vé"}
+            /*
+             * `requestSubmit`, not `submit`: the plain method skips validation and every `onSubmit`
+             * handler, so the required fields would go unchecked and `handleSubmit` would never run.
+             */
+            onCta={() =>
+              (document.getElementById(formId) as HTMLFormElement | null)?.requestSubmit()
+            }
+            ctaDisabled={!canSubmit}
+            note="Ví, đơn hàng và mã vé được tạo trong một giao dịch khi thanh toán thành công."
+          >
+            {balance !== null && (
+              <div className="flex items-baseline justify-between gap-3 font-meta text-meta">
+                <span className="text-ink-soft">Số dư ví</span>
+                <b className={balance < finalPrice ? "text-burgundy-ink" : "text-beige-kem"}>
+                  {formatVnd(balance)}
+                </b>
+              </div>
+            )}
+          </OrderSummary>
+        }
+      >
+        <form id={formId} onSubmit={handleSubmit} className="space-y-10">
+          <BookingSection
+            step="03"
+            title="Người nhận vé"
+            hint="Vé điện tử gửi qua email và hiện trong thông báo trong ứng dụng (không có SMS)."
+          >
+            <div className="space-y-5">
               <div className="space-y-1.5">
-                <label className="block font-mono text-xs text-beige-kem/75">Email nhận vé</label>
+                <label
+                  htmlFor="checkout-name"
+                  className="block font-meta text-eyebrow tracking-[0.08em] text-ink-soft"
+                >
+                  Họ và tên
+                </label>
                 <input
-                  type="email"
+                  id="checkout-name"
+                  type="text"
                   required
-                  placeholder="name@domain.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="h-11 w-full rounded-xl border-2 border-beige-kem bg-xanh-pho px-4 text-sm text-beige-kem outline-none transition focus:border-burgundy"
+                  placeholder="Nhập đầy đủ tên của bạn"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="h-11 w-full border-b border-beige-kem/40 bg-transparent text-body text-beige-kem outline-none transition placeholder:text-ink-soft/60 focus:border-burgundy"
                 />
               </div>
 
-              <div className="space-y-1.5">
-                <label className="block font-mono text-xs text-beige-kem/75">Số điện thoại</label>
-                <input
-                  type="tel"
-                  required
-                  placeholder="09xx xxx xxx"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  className="h-11 w-full rounded-xl border-2 border-beige-kem bg-xanh-pho px-4 text-sm text-beige-kem outline-none transition focus:border-burgundy"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-3 border-t border-beige-kem/25 pt-6">
-              <h4 className="font-display text-xl font-black text-beige-kem">Thanh toán bằng ví</h4>
-
-              <div className="rounded-xl border border-burgundy bg-bubblegum p-4">
-                <span className="block font-mono text-sm font-bold text-beige-kem">
-                  {PAYMENT_METHOD_LABEL} · số dư tài khoản
-                </span>
-                <span className="mt-1 block text-xs leading-5 text-beige-kem/62">
-                  Mua vé là trừ thẳng vào số dư ví, xong ngay trong một giao dịch — không qua cổng
-                  thanh toán nào. Tiền chỉ vào ví bằng cách nạp qua VNPay, và chỉ ra khỏi ví dưới
-                  dạng vé; hoàn vé trả tiền về lại ví, không rút ra tiền mặt.
-                </span>
-              </div>
-
-              {balance !== null && (
-                <div className="flex flex-wrap items-baseline justify-between gap-2 rounded-xl border-2 border-beige-kem bg-surface-2 px-4 py-3 font-mono text-xs">
-                  <span className="text-ink-soft">Số dư ví hiện tại</span>
-                  <b className="text-sm text-beige-kem">{formatVnd(balance)}</b>
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="checkout-email"
+                    className="block font-meta text-eyebrow tracking-[0.08em] text-ink-soft"
+                  >
+                    Email nhận vé
+                  </label>
+                  <input
+                    id="checkout-email"
+                    type="email"
+                    required
+                    placeholder="name@domain.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="h-11 w-full border-b border-beige-kem/40 bg-transparent text-body text-beige-kem outline-none transition placeholder:text-ink-soft/60 focus:border-burgundy"
+                  />
                 </div>
-              )}
+
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="checkout-phone"
+                    className="block font-meta text-eyebrow tracking-[0.08em] text-ink-soft"
+                  >
+                    Số điện thoại
+                  </label>
+                  <input
+                    id="checkout-phone"
+                    type="tel"
+                    required
+                    placeholder="09xx xxx xxx"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className="h-11 w-full border-b border-beige-kem/40 bg-transparent text-body text-beige-kem outline-none transition placeholder:text-ink-soft/60 focus:border-burgundy"
+                  />
+                </div>
+              </div>
+            </div>
+          </BookingSection>
+
+          <BookingSection
+            step="04"
+            title="Thanh toán"
+            hint="Mua vé trừ thẳng vào số dư ví, xong trong một giao dịch — không qua cổng thanh toán nào. Tiền vào ví bằng cách nạp qua VNPay; hoàn vé trả tiền về lại ví."
+          >
+            <div className="space-y-5">
+              <div className="flex items-baseline justify-between gap-4 border border-beige-kem/35 px-4 py-3">
+                <span className="font-display text-body font-bold uppercase tracking-[0.04em] text-beige-kem">
+                  {PAYMENT_METHOD_LABEL}
+                </span>
+                <span className="font-meta text-meta text-ink-soft">
+                  {balance === null ? "Đang tải số dư…" : `Số dư ${formatVnd(balance)}`}
+                </span>
+              </div>
 
               {/* UC-12 A2: the shortfall is named, and topping it up is one click — not a dead end. */}
               {shortfall && !showTopUp && (
-                <div className="space-y-3 rounded-xl border-2 border-beige-kem bg-bubblegum p-4 text-sm text-on-tint">
-                  <p>
-                    <span className="font-bold text-burgundy-ink">Số dư không đủ.</span> Cần nạp thêm{" "}
-                    <span className="font-mono font-bold">{formatVnd(shortfall.shortfall)}</span> để
+                <div className="space-y-3 border border-burgundy/50 p-4">
+                  <p className="text-body leading-6 text-beige-kem">
+                    <span className="font-bold text-burgundy-ink">Số dư không đủ.</span> Cần nạp
+                    thêm{" "}
+                    <span className="font-meta font-bold">{formatVnd(shortfall.shortfall)}</span> để
                     hoàn tất đơn này.
                   </p>
-                  <p className="font-mono text-[13px] leading-5">
+                  <p className="font-meta text-meta leading-5 text-ink-soft">
                     Chưa có gì được tạo ra: chưa có đơn hàng, chưa trừ tiền, chưa xuất vé. Chỗ bạn
                     giữ vẫn chạy theo đồng hồ cũ; bắt đầu nạp tiền sẽ gia hạn thêm một lần duy nhất.
                   </p>
                   <button
                     type="button"
                     onClick={() => setShowTopUp(true)}
-                    className="rounded-lg bg-burgundy px-4 py-2 text-xs font-black uppercase text-white"
+                    className="label-eyebrow bg-burgundy px-4 py-2 text-white transition hover:brightness-110"
                   >
                     Nạp thêm vào ví
                   </button>
@@ -247,100 +307,37 @@ export default function CheckoutForm({
                   onCancel={() => setShowTopUp(false)}
                 />
               )}
-            </div>
 
-            <div className="flex items-start gap-2 text-xs leading-relaxed text-beige-kem/62">
-              <input
-                id="agree-terms"
-                type="checkbox"
-                checked={agreeTerms}
-                onChange={(e) => setAgreeTerms(e.target.checked)}
-                className="mt-0.5 accent-burgundy"
-              />
-              <label htmlFor="agree-terms" className="cursor-pointer select-none">
-                Tôi đồng ý điều khoản bán vé và chính sách hoàn vé (hoàn tiền về ví, trước giờ diễn
-                24 tiếng).
-              </label>
-            </div>
+              <div className="flex items-start gap-2.5 text-meta leading-6 text-beige-kem/75">
+                <input
+                  id="agree-terms"
+                  type="checkbox"
+                  checked={agreeTerms}
+                  onChange={(e) => setAgreeTerms(e.target.checked)}
+                  className="mt-1 accent-burgundy"
+                />
+                <label htmlFor="agree-terms" className="cursor-pointer select-none">
+                  Tôi đồng ý điều khoản bán vé và chính sách hoàn vé (hoàn tiền về ví, trước giờ
+                  diễn 24 tiếng).
+                </label>
+              </div>
 
-            <button
-              type="submit"
-              disabled={!name || !email || !phone || !agreeTerms || submitting}
-              className="w-full rounded-xl bg-burgundy px-6 py-4 text-sm font-black text-white transition hover:brightness-95 disabled:bg-surface-2 disabled:text-white/60"
-            >
-              {submitting ? "Đang thanh toán..." : "Trừ tiền từ ví và xuất vé QR"}
-            </button>
-          </form>
-        </section>
-
-        <aside className="space-y-6 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 lg:col-span-5">
-          <div>
-            <h4 className="font-display text-2xl font-black text-beige-kem">Tóm tắt đơn hàng</h4>
-            <p className="mt-1 font-mono text-xs uppercase text-ink-soft">
-              Hiển thị phí trước khi thanh toán
-            </p>
-          </div>
-
-          <div className="flex gap-4">
-            <img
-              src={event.imageUrl}
-              alt={event.title}
-              referrerPolicy="no-referrer"
-              className="h-24 w-20 rounded-xl object-cover border-2 border-beige-kem"
-            />
-            <div className="min-w-0 flex-1">
-              <h5 className="line-clamp-2 font-display text-xl font-black text-beige-kem">
-                {event.title}
-              </h5>
-              <p className="mt-1 font-mono text-xs text-ink-soft">{event.venueName}</p>
-              <p className="mt-3 rounded-lg border-2 border-beige-kem bg-surface-2 px-3 py-2 font-mono text-xs text-beige-kem/70">
-                {selectedTime} / {formatEventDate(selectedDate, true)}
-              </p>
+              {/*
+                A submit button inside the form, for the keyboard and for a narrow screen where the
+                summary has fallen below the fold. The summary's button drives this same form
+                through `requestSubmit`, so there is one submit path, not two.
+              */}
+              <button
+                type="submit"
+                disabled={!canSubmit}
+                className="w-full bg-burgundy px-6 py-3.5 font-display text-body font-black uppercase tracking-[0.05em] text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:bg-beige-kem/20 disabled:text-ink-soft lg:hidden"
+              >
+                {submitting ? "Đang thanh toán…" : "Trừ ví và xuất vé"}
+              </button>
             </div>
-          </div>
-
-          <div className="space-y-3 border-t border-dashed border-beige-kem/25 pt-4 font-mono text-xs text-beige-kem/78">
-            <div className="flex justify-between gap-4">
-              <span>{isSeated ? "Ghế" : "Vé"}</span>
-              <span className="font-bold text-ink-soft">
-                {selectedSeats.map((seat) => seat.id).join(", ")}
-              </span>
-            </div>
-            {/* Seat type is a seated-event concept; general admission counts tickets instead. */}
-            <div className="flex justify-between gap-4">
-              <span>{isSeated ? "Loại ghế" : "Số lượng"}</span>
-              <span>
-                {isSeated
-                  ? `${selectedSeats.filter((seat) => seat.type === "double").length} đôi / ${selectedSeats.filter((seat) => seat.type === "single").length} đơn`
-                  : `${selectedSeats.length} vé`}
-              </span>
-            </div>
-            <div className="flex justify-between gap-4">
-              <span>Tạm tính</span>
-              <span>{formatVnd(totalPrice)}</span>
-            </div>
-          </div>
-
-          <div className="border-t border-beige-kem/25 pt-5">
-            <div className="flex items-baseline justify-between gap-4">
-              <span className="font-mono text-xs uppercase text-beige-kem/60">Cần thanh toán</span>
-              <span className="font-display text-4xl font-black text-burgundy-ink">
-                {formatVnd(finalPrice)}
-              </span>
-            </div>
-            <div className="mt-4 rounded-xl border-2 border-beige-kem bg-la-co p-3 text-[13px] leading-5 text-on-tint">
-              <span>
-                Ví, đơn hàng và mã vé được tạo trong một giao dịch khi thanh toán thành công.
-              </span>
-            </div>
-            <div className="mt-3 rounded-xl border-2 border-beige-kem bg-cam-dat p-3 text-[13px] leading-5 text-on-tint">
-              <span>
-                Vé sẽ xuất hiện trong Vé của tôi, có thể in/tải lại/gửi lại email ở màn vé.
-              </span>
-            </div>
-          </div>
-        </aside>
-      </div>
+          </BookingSection>
+        </form>
+      </BookingLayout>
     </div>
   );
 }

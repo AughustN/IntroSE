@@ -25,29 +25,29 @@ import { DEFAULT_AVATAR_FG, avatarColor } from "../../services/defaultAvatar";
  */
 
 export const inputClass =
-  "h-11 w-full rounded-xl border-2 border-beige-kem bg-surface-2 px-4 text-sm text-beige-kem outline-none transition focus:border-burgundy";
+  "h-11 w-full rounded-xl border-2 border-beige-kem bg-surface-2 px-4 text-body text-beige-kem outline-none transition focus:border-burgundy";
 export const inputErrorClass =
-  "h-11 w-full rounded-xl border-2 border-burgundy bg-bubblegum px-4 text-sm text-on-tint outline-none transition focus:border-burgundy";
+  "h-11 w-full rounded-xl border-2 border-burgundy bg-bubblegum px-4 text-body text-on-tint outline-none transition focus:border-burgundy";
 export const textareaClass =
-  "w-full rounded-xl border-2 border-beige-kem bg-surface-2 px-4 py-2.5 text-sm leading-6 text-beige-kem outline-none transition focus:border-burgundy";
+  "w-full rounded-xl border-2 border-beige-kem bg-surface-2 px-4 py-2.5 text-body leading-6 text-beige-kem outline-none transition focus:border-burgundy";
 
 export const btnPrimary =
-  "inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-burgundy px-5 text-sm font-black text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-burgundy px-5 text-body font-black text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60";
 export const btnSecondary =
-  "inline-flex h-11 items-center justify-center gap-2 rounded-xl border-2 border-beige-kem px-5 text-sm font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex h-11 items-center justify-center gap-2 rounded-xl border-2 border-beige-kem px-5 text-body font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:cursor-not-allowed disabled:opacity-60";
 /*
  * Danger carries its warning in the outline, not the label: tomato as *text* misses 4.5:1 on cream,
  * so the tomato border does the signalling and the fill only arrives on hover, where white text
  * clears AA against it.
  */
 export const btnDanger =
-  "inline-flex h-11 items-center justify-center gap-2 rounded-xl border-2 border-burgundy px-5 text-sm font-bold text-beige-kem transition hover:bg-burgundy hover:text-white disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex h-11 items-center justify-center gap-2 rounded-xl border-2 border-burgundy px-5 text-body font-bold text-beige-kem transition hover:bg-burgundy hover:text-white disabled:cursor-not-allowed disabled:opacity-60";
 
 /** Card-header action. Shorter than the body buttons so it reads as secondary to the card's content. */
 export const btnHeader =
-  "inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border-2 border-beige-kem px-3.5 text-xs font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border-2 border-beige-kem px-3.5 text-eyebrow font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:cursor-not-allowed disabled:opacity-60";
 export const btnHeaderPrimary =
-  "inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-burgundy px-3.5 text-xs font-black text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-burgundy px-3.5 text-eyebrow font-black text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60";
 
 /** An elevated surface with a brand-tinted heading over a hairline rule. */
 export function InfoCard({
@@ -68,7 +68,7 @@ export function InfoCard({
       }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-beige-kem/25 pb-4">
-        <h3 className="font-display text-xl font-bold text-ink-soft">{title}</h3>
+        <h3 className="font-display text-title-s font-bold text-ink-soft">{title}</h3>
         {action}
       </div>
       <div className="pt-5">{children}</div>
@@ -94,9 +94,9 @@ export function Field({
   const empty = value === null || value === undefined || value === "";
   return (
     <div className={full ? "sm:col-span-2 lg:col-span-3" : undefined}>
-      <p className="font-mono text-[13px] uppercase tracking-wide text-beige-kem/70">{label}</p>
+      <p className="font-meta text-meta uppercase tracking-wide text-beige-kem/70">{label}</p>
       <div
-        className={`mt-1.5 break-words text-[15px] font-medium ${empty ? "text-beige-kem/70" : "text-beige-kem"}`}
+        className={`mt-1.5 break-words text-body font-medium ${empty ? "text-beige-kem/70" : "text-beige-kem"}`}
       >
         {empty ? "—" : value}
       </div>
@@ -124,19 +124,19 @@ export function FormField({
     <div className={full ? "sm:col-span-2 lg:col-span-3" : undefined}>
       <label
         htmlFor={htmlFor}
-        className="block font-mono text-[13px] uppercase tracking-wide text-beige-kem/70"
+        className="block font-meta text-meta uppercase tracking-wide text-beige-kem/70"
       >
         {label}
       </label>
       <div className="mt-1.5">{children}</div>
       {hint && !error && (
-        <p className="mt-1.5 font-mono text-[13px] leading-5 text-beige-kem/70">{hint}</p>
+        <p className="mt-1.5 font-meta text-meta leading-5 text-beige-kem/70">{hint}</p>
       )}
       {error && (
         <p
           id={htmlFor ? `${htmlFor}-error` : undefined}
           role="alert"
-          className="mt-1.5 flex items-start gap-1.5 text-xs leading-5 text-beige-kem"
+          className="mt-1.5 flex items-start gap-1.5 text-eyebrow leading-5 text-beige-kem"
         >
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-burgundy-ink" aria-hidden />
           {error}
@@ -179,7 +179,7 @@ export function AvatarWithBadge({
         />
       ) : (
         <div
-          className="grid h-20 w-20 place-items-center rounded-full font-display text-2xl font-black"
+          className="grid h-20 w-20 place-items-center rounded-full font-display text-title-m font-black"
           style={{ backgroundColor: avatarColor(email), color: DEFAULT_AVATAR_FG }}
           aria-hidden
         >
@@ -227,7 +227,7 @@ export function Badge({
         : "border-beige-kem/25 bg-surface-2 text-beige-kem/80";
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[13px] font-bold uppercase ${toneClass}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-meta text-meta font-bold uppercase ${toneClass}`}
     >
       {icon}
       {children}
@@ -238,7 +238,9 @@ export function Badge({
 /** Live checklist used by the password rules. */
 export function RuleItem({ ok, label }: { ok: boolean; label: string }) {
   return (
-    <li className={`flex items-center gap-2 text-xs ${ok ? "text-ink-soft" : "text-beige-kem/70"}`}>
+    <li
+      className={`flex items-center gap-2 text-eyebrow ${ok ? "text-ink-soft" : "text-beige-kem/70"}`}
+    >
       <span
         className={`grid h-4 w-4 shrink-0 place-items-center rounded-full border ${
           ok ? "border-la-co bg-la-co" : "border-beige-kem/30"

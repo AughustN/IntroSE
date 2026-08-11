@@ -155,11 +155,11 @@ export default function ProfileSection({ me, onSaved, onError, onDirtyChange }: 
             onPick={pickAvatar}
           />
           <div className="min-w-0 flex-1">
-            <p className="truncate font-display text-2xl font-black text-beige-kem">
+            <p className="truncate font-display text-title-m font-black text-beige-kem">
               {me.nickname || me.email}
             </p>
-            <p className="mt-1 text-sm text-beige-kem/70">{roleLabel(me)}</p>
-            <p className="mt-1 flex items-center gap-1.5 truncate font-mono text-xs text-beige-kem/70">
+            <p className="mt-1 text-body text-beige-kem/70">{roleLabel(me)}</p>
+            <p className="mt-1 flex items-center gap-1.5 truncate font-meta text-eyebrow text-beige-kem/70">
               <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden />
               {me.email}
             </p>
@@ -168,13 +168,19 @@ export default function ProfileSection({ me, onSaved, onError, onDirtyChange }: 
         {(avatarFile || avatarMsg) && (
           <div className="mt-4 border-t border-beige-kem/25 pt-3">
             {avatarMsg ? (
-              <p role="alert" className="flex items-start gap-1.5 text-xs leading-5 text-beige-kem">
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-burgundy-ink" aria-hidden />
+              <p
+                role="alert"
+                className="flex items-start gap-1.5 text-eyebrow leading-5 text-beige-kem"
+              >
+                <AlertTriangle
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 text-burgundy-ink"
+                  aria-hidden
+                />
                 {avatarMsg}
               </p>
             ) : (
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="font-mono text-[13px] text-ink-soft">Ảnh mới chưa được lưu.</p>
+                <p className="font-meta text-meta text-ink-soft">Ảnh mới chưa được lưu.</p>
                 <div className="flex gap-2">
                   <button
                     type="button"
@@ -265,7 +271,7 @@ export default function ProfileSection({ me, onSaved, onError, onDirtyChange }: 
 
               <Field label="Email" value={me.email} />
             </FieldGrid>
-            <p className="mt-5 border-t border-beige-kem/25 pt-4 font-mono text-[13px] leading-5 text-beige-kem/70">
+            <p className="mt-5 border-t border-beige-kem/25 pt-4 font-meta text-meta leading-5 text-beige-kem/70">
               Email, hình thức đăng nhập, quyền và trạng thái tài khoản không thể tự đổi ở đây.
             </p>
             {/* Submitting with Enter should work, but the visible commit lives in the card header. */}

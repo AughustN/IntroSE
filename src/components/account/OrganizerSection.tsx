@@ -52,7 +52,7 @@ function Stepper({ current }: { current: 0 | 1 | 2 }) {
           <li key={label} className="flex flex-1 items-center gap-2">
             <span
               aria-current={active ? "step" : undefined}
-              className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border font-mono text-[13px] font-bold ${
+              className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border font-meta text-meta font-bold ${
                 done
                   ? "border-la-co bg-la-co text-on-tint"
                   : active
@@ -63,7 +63,7 @@ function Stepper({ current }: { current: 0 | 1 | 2 }) {
               {done ? <Check className="h-3 w-3" aria-hidden /> : i + 1}
             </span>
             <span
-              className={`truncate font-mono text-[13px] uppercase ${
+              className={`truncate font-meta text-meta uppercase ${
                 active ? "text-beige-kem" : "text-beige-kem/70"
               }`}
             >
@@ -245,7 +245,7 @@ export default function OrganizerSection({
         </FieldGrid>
         <div className="mt-5 flex items-start gap-3 rounded-xl border-2 border-beige-kem bg-cam-dat p-4">
           <Clock className="mt-0.5 h-4 w-4 shrink-0 text-ink-soft" aria-hidden />
-          <p className="text-xs leading-5 text-beige-kem/80">
+          <p className="text-eyebrow leading-5 text-beige-kem/80">
             Bạn không cần làm gì thêm. Khi được duyệt, mục này sẽ mở ra trang quản lý sự kiện. Trong
             lúc chờ, bạn vẫn mua vé bình thường.
           </p>
@@ -270,7 +270,7 @@ export default function OrganizerSection({
           <Field label="Ngày gửi đơn" value={formatDate(latest.applied_at)} />
           {latest.review_note && <Field label="Lý do" value={latest.review_note} full />}
         </FieldGrid>
-        <p className="mt-5 text-xs leading-5 text-beige-kem/70">
+        <p className="mt-5 text-eyebrow leading-5 text-beige-kem/70">
           Bạn không thể tạo hoặc bán vé cho tới khi được mở lại. Vé đã bán không bị ảnh hưởng. Liên
           hệ admin nếu bạn cho rằng đây là nhầm lẫn.
         </p>
@@ -296,12 +296,12 @@ export default function OrganizerSection({
             <Field label="Ngày gửi đơn" value={formatDate(latest.applied_at)} />
             {latest.review_note && <Field label="Lý do từ chối" value={latest.review_note} full />}
           </FieldGrid>
-          <p className="mt-5 text-xs leading-5 text-beige-kem/70">
+          <p className="mt-5 text-eyebrow leading-5 text-beige-kem/70">
             Bạn có thể chỉnh sửa và gửi lại — nội dung cũ sẽ được điền sẵn.
           </p>
         </>
       ) : (
-        <p className="text-sm leading-6 text-beige-kem/70">
+        <p className="text-body leading-6 text-beige-kem/70">
           Đăng ký để tự tạo sự kiện, thiết kế sơ đồ ghế và bán vé trên TixHub. Admin xét duyệt đơn
           trước khi bạn bắt đầu bán.
         </p>

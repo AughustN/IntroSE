@@ -166,7 +166,7 @@ function StubCell({ label, onClick }: { label: string; onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="menu-stub-cell truncate px-1 text-[13px] font-bold uppercase tracking-[0.1em] text-ink-soft transition hover:text-beige-kem"
+      className="menu-stub-cell truncate px-1 text-meta font-bold uppercase tracking-[0.1em] text-ink-soft transition hover:text-beige-kem"
     >
       {label}
     </button>
@@ -216,7 +216,7 @@ function PanelLink({
     <button
       type="button"
       onClick={onClick}
-      className="overflow-clip px-1 py-1 text-left text-[13px] font-bold uppercase tracking-[0.14em] text-ink-soft transition-colors hover:text-beige-kem"
+      className="overflow-clip px-1 py-1 text-left text-meta font-bold uppercase tracking-[0.14em] text-ink-soft transition-colors hover:text-beige-kem"
     >
       <span data-a="y" style={rowDelay(LINK_DELAY(index))} className="block">
         {label}
@@ -355,10 +355,10 @@ export default function Header({
           className="pointer-events-auto justify-self-start text-left leading-none"
           title="Trang chủ"
         >
-          <span className="block font-display text-3xl font-black tracking-normal text-beige-kem sm:text-4xl">
+          <span className="block font-display text-title-m font-black tracking-normal text-beige-kem sm:text-title-l">
             TixHub
           </span>
-          <span className="mt-0.5 hidden text-[13px] font-semibold uppercase tracking-[0.22em] text-ink-soft sm:block">
+          <span className="mt-0.5 hidden text-meta font-semibold uppercase tracking-[0.22em] text-ink-soft sm:block">
             Music / Stage / Film
           </span>
         </button>
@@ -387,7 +387,7 @@ export default function Header({
                   placeholder="Tìm tên sự kiện, nghệ sĩ, rạp, nhà hát, địa điểm…"
                   value={searchQuery}
                   onChange={(e) => onSearchChange(e.target.value)}
-                  className="nav-search-input w-56 bg-transparent px-3 text-sm text-beige-kem outline-none placeholder:text-beige-kem/40 sm:w-80 lg:w-[26rem]"
+                  className="nav-search-input w-56 bg-transparent px-3 text-body text-beige-kem outline-none placeholder:text-beige-kem/40 sm:w-80 lg:w-[26rem]"
                 />
                 <button
                   type="button"
@@ -462,7 +462,7 @@ export default function Header({
                         avatarUrl={avatarUrl}
                         size={22}
                       />
-                      <span className="truncate text-[13px] font-bold uppercase tracking-[0.04em] text-beige-kem">
+                      <span className="truncate text-meta font-bold uppercase tracking-[0.04em] text-beige-kem">
                         {userName}
                       </span>
                     </button>
@@ -559,7 +559,7 @@ export default function Header({
                           style={rowDelay(CATEGORY_DELAY(i))}
                           // Mê Ly is already condensed; `tracking-tight` on top of it closes
                           // the counters up. 2rem matches the size Siena sets its menu links.
-                          className="block font-display text-[2rem] font-bold leading-[0.95]"
+                          className="block font-display text-title-m font-bold leading-[0.95]"
                         >
                           {cat.label}
                         </span>

@@ -10,11 +10,11 @@ import ShowtimeMapPanel from "./seatmap/ShowtimeMapPanel";
 import Select from "./Select";
 
 const input =
-  "h-10 w-full rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
+  "h-10 w-full rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-body text-beige-kem outline-none focus:border-burgundy";
 const btn =
-  "rounded-lg bg-burgundy px-3 py-2 text-xs font-black text-white transition hover:brightness-95";
+  "rounded-lg bg-burgundy px-3 py-2 text-eyebrow font-black text-white transition hover:brightness-95";
 const ghost =
-  "rounded-lg border-2 border-beige-kem px-3 py-2 text-xs font-bold text-beige-kem/80 transition";
+  "rounded-lg border-2 border-beige-kem px-3 py-2 text-eyebrow font-bold text-beige-kem/80 transition";
 
 export default function SeatMapBuilder({
   eventId,
@@ -96,21 +96,23 @@ export default function SeatMapBuilder({
     <div className="fixed inset-0 z-50 overflow-y-auto bg-xanh-pho">
       <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8 text-beige-kem">
         <div className="flex items-center justify-between">
-          <h2 className="font-display text-3xl font-black">Sơ đồ ghế</h2>
+          <h2 className="font-display text-title-m font-black">Sơ đồ ghế</h2>
           <button onClick={onClose} className={ghost}>
             Đóng
           </button>
         </div>
         {notice && (
-          <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-xs text-on-tint">
+          <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-eyebrow text-on-tint">
             {notice}
           </div>
         )}
         {err && (
-          <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-xs">{err}</div>
+          <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-eyebrow">
+            {err}
+          </div>
         )}
         {rows.length === 0 && (
-          <p className="text-sm text-beige-kem/60">
+          <p className="text-body text-beige-kem/60">
             Chưa có suất chiếu. Thêm suất chiếu trước ở màn "Quản lý sự kiện".
           </p>
         )}
@@ -123,7 +125,7 @@ export default function SeatMapBuilder({
               </span>
               <div className="flex items-center gap-2">
                 {st.hasSeatMap && (
-                  <span className="rounded-lg border-2 border-beige-kem bg-la-co px-2 py-0.5 font-mono text-[12px] text-on-tint">
+                  <span className="rounded-lg border-2 border-beige-kem bg-la-co px-2 py-0.5 font-meta text-eyebrow text-on-tint">
                     Đã có sơ đồ ghế
                   </span>
                 )}
@@ -201,7 +203,7 @@ export default function SeatMapBuilder({
 
                 {/* section → tier mapping */}
                 {st.sections.filter((s) => s.seatCount > 0).length === 0 ? (
-                  <p className="text-xs text-beige-kem/50">
+                  <p className="text-eyebrow text-beige-kem/50">
                     Thêm khu vực + ghế, rồi gán hạng vé cho từng khu để tạo sơ đồ.
                   </p>
                 ) : (
@@ -210,9 +212,9 @@ export default function SeatMapBuilder({
                       .filter((s) => s.seatCount > 0)
                       .map((s) => (
                         <div key={s.id} className="flex items-center gap-3">
-                          <span className="w-40 text-sm">
+                          <span className="w-40 text-body">
                             {s.name}{" "}
-                            <span className="font-mono text-[12px] text-beige-kem/40">
+                            <span className="font-meta text-eyebrow text-beige-kem/40">
                               ({s.seatCount} ghế)
                             </span>
                           </span>

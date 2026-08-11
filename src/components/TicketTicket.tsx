@@ -99,12 +99,12 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
     <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto space-y-8 animate-fade-in">
       {/* Success Banner */}
       <div className="text-center space-y-3">
-        <div className="inline-flex items-center justify-center rounded-full border-2 border-beige-kem bg-la-co px-4 py-2 font-mono text-xs font-bold uppercase text-on-tint">
+        <div className="inline-flex items-center justify-center rounded-full border-2 border-beige-kem bg-la-co px-4 py-2 font-meta text-eyebrow font-bold uppercase text-on-tint">
           Đã thanh toán
         </div>
-        <h2 className="font-display text-4xl font-black text-beige-kem">Đặt vé thành công</h2>
-        <p className="text-sm text-beige-kem/80 max-w-lg mx-auto leading-relaxed">
-          Giao dịch mã số <span className="font-mono text-ink-soft font-bold">{booking.id}</span> đã
+        <h2 className="font-display text-title-l font-black text-beige-kem">Đặt vé thành công</h2>
+        <p className="text-body text-beige-kem/80 max-w-lg mx-auto leading-relaxed">
+          Giao dịch mã số <span className="font-meta text-ink-soft font-bold">{booking.id}</span> đã
           được hạch toán qua {booking.paymentMethod}. Vé QR đã được xếp hàng gửi về{" "}
           <span className="text-ink-soft font-semibold">{booking.customerEmail}</span>.
         </p>
@@ -122,20 +122,20 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
         {/* Part A: Ticket Header */}
         <div className="bg-burgundy text-white p-6 flex justify-between items-center border-b-4 border-dashed border-xanh-pho">
           <div className="space-y-1">
-            <span className="text-[13px] font-mono tracking-widest text-ink-soft uppercase font-bold">
+            <span className="text-meta font-meta tracking-widest text-ink-soft uppercase font-bold">
               VÉ ĐIỆN TỬ TIXHUB
             </span>
             <div className="flex items-baseline gap-1.5">
-              <h3 className="font-display font-black text-2xl">TIXHUB</h3>
-              <span className="text-[13px] font-mono bg-[#E0E2CA] text-burgundy-ink px-1 py-0.5 rounded font-black">
+              <h3 className="font-display font-black text-title-m">TIXHUB</h3>
+              <span className="text-meta font-meta bg-[#E0E2CA] text-burgundy-ink px-1 py-0.5 rounded font-black">
                 QR PASS
               </span>
             </div>
           </div>
 
-          <div className="text-right font-mono text-xs">
+          <div className="text-right font-meta text-eyebrow">
             <p className="opacity-75">Mã Vé</p>
-            <p className="font-bold text-ink-soft text-sm break-all max-w-40">{ticketCode}</p>
+            <p className="font-bold text-ink-soft text-body break-all max-w-40">{ticketCode}</p>
           </div>
         </div>
 
@@ -144,20 +144,20 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
           {/* Main info columns (8 cols) */}
           <div className="md:col-span-8 space-y-5">
             <div className="space-y-1">
-              <span className="text-[12px] font-mono font-semibold bg-bubblegum text-on-tint border-2 border-beige-kem px-2 py-0.5 rounded">
+              <span className="text-eyebrow font-meta font-semibold bg-bubblegum text-on-tint border-2 border-beige-kem px-2 py-0.5 rounded">
                 Rated: {booking.movie.ageRating}
               </span>
-              <h4 className="font-display font-black text-3xl text-burgundy-ink leading-tight pt-1">
+              <h4 className="font-display font-black text-title-m text-burgundy-ink leading-tight pt-1">
                 {booking.movie.title}
               </h4>
               {booking.movie.originalTitle && (
-                <p className="text-xs font-mono text-burgundy-ink/75">
+                <p className="text-eyebrow font-meta text-burgundy-ink/75">
                   {booking.movie.originalTitle}
                 </p>
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-4 font-mono text-xs">
+            <div className="grid grid-cols-2 gap-4 font-meta text-eyebrow">
               <div className="space-y-1">
                 <span className="text-gray-500">Ngày chiếu</span>
                 <span className="font-bold text-xanh-pho">
@@ -170,7 +170,7 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 font-mono text-xs pt-1">
+            <div className="grid grid-cols-2 gap-4 font-meta text-eyebrow pt-1">
               <div className="space-y-1">
                 <span className="text-gray-500">Khán giả</span>
                 <span
@@ -182,13 +182,13 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
               </div>
               <div className="space-y-1">
                 <span className="text-gray-500">Số Ghế Đã Đặt</span>
-                <span className="font-bold text-burgundy-ink text-sm">
+                <span className="font-bold text-burgundy-ink text-body">
                   {booking.selectedSeats.map((s) => s.id).join(", ")}
                 </span>
               </div>
             </div>
 
-            <div className="space-y-2 pt-2.5 border-t border-gray-300 font-mono text-xs">
+            <div className="space-y-2 pt-2.5 border-t border-gray-300 font-meta text-eyebrow">
               <div className="flex justify-between">
                 <span className="text-gray-500">Tạm tính:</span>
                 <span className="font-bold text-xanh-pho">{formatVnd(booking.totalPrice)}</span>
@@ -203,7 +203,7 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
               </div>
               <div className="flex justify-between items-baseline border-t border-gray-300 pt-2">
                 <span className="text-gray-500">Tổng thanh toán:</span>
-                <span className="font-black text-burgundy-ink text-lg">
+                <span className="font-black text-burgundy-ink text-lede">
                   {formatVnd(booking.finalPrice)}
                 </span>
               </div>
@@ -220,15 +220,15 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
                   className="w-full h-full rounded bg-beige-kem"
                 />
               ) : (
-                <span className="text-xs text-beige-kem">Đang tạo QR</span>
+                <span className="text-eyebrow text-beige-kem">Đang tạo QR</span>
               )}
             </div>
 
-            <div className="text-center font-mono">
-              <p className="text-[13px] font-bold text-burgundy-ink uppercase tracking-widest">
+            <div className="text-center font-meta">
+              <p className="text-meta font-bold text-burgundy-ink uppercase tracking-widest">
                 VÉ VÀO CỬA QR
               </p>
-              <p className="text-[12px] text-gray-500 mt-0.5">
+              <p className="text-eyebrow text-gray-500 mt-0.5">
                 QR một lần / {booking.qrStatus === "unused" ? "Chưa check-in" : "Đã check-in"}
               </p>
             </div>
@@ -237,7 +237,7 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
 
         {/* Part C: Stylized printable barcode footer */}
         <div className="bg-beige-kem border-t-2 border-dashed border-xanh-pho/35 px-6 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex flex-col items-start gap-1 font-mono text-[12px] text-gray-500 leading-none">
+          <div className="flex flex-col items-start gap-1 font-meta text-eyebrow text-gray-500 leading-none">
             <span>RẠP: {booking.movie.location}</span>
             <span>THỜI GIAN ĐẶT: {booking.bookingTime}</span>
             <span>
@@ -257,7 +257,7 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
       </div>
 
       {/* Action list */}
-      <div className="flex flex-wrap justify-center items-center gap-4 py-4 font-mono text-sm">
+      <div className="flex flex-wrap justify-center items-center gap-4 py-4 font-meta text-body">
         <button
           onClick={onHomeClick}
           className="flex items-center px-5 py-2.5 bg-xanh-pho border-2 border-beige-kem hover:border-beige-kem/60 text-beige-kem rounded-lg transition"
@@ -304,9 +304,9 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
           {resending ? "ĐANG GỬI..." : resent ? "ĐÃ XẾP HÀNG GỬI" : "GỬI LẠI EMAIL"}
         </button>
       </div>
-      {resendError && <p className="text-center text-sm text-burgundy">{resendError}</p>}
+      {resendError && <p className="text-center text-body text-burgundy">{resendError}</p>}
 
-      <div className="mx-auto max-w-2xl rounded-xl border-2 border-beige-kem bg-la-co p-4 text-xs leading-6 text-on-tint">
+      <div className="mx-auto max-w-2xl rounded-xl border-2 border-beige-kem bg-la-co p-4 text-eyebrow leading-6 text-on-tint">
         Vé đã được lưu trong Vé của tôi. Bạn có thể gửi lại email tối đa 3 lần trong mỗi giờ.
       </div>
     </div>

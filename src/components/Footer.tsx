@@ -60,7 +60,7 @@ function NavColumn({
             <button
               type="button"
               onClick={() => onNavigate(screen)}
-              className="font-mono text-sm text-beige-kem transition hover:text-burgundy-ink"
+              className="font-meta text-body text-beige-kem transition hover:text-burgundy-ink"
             >
               {label}
             </button>
@@ -88,7 +88,7 @@ export default function Footer({ onNavigate, onSubscribe }: FooterProps) {
            * of a sentence divides.
            */}
           <div>
-            <p className="font-display text-2xl font-black leading-[1.05] tracking-tight text-beige-kem sm:text-[1.75rem]">
+            <p className="font-display text-title-m font-black leading-[1.05] tracking-tight text-beige-kem sm:text-title-m">
               {["TixHub:", "Đặt vé liền tay,", "săn ngay kẻo hết."].map((line) => (
                 <span key={line} className="block">
                   {line}
@@ -105,7 +105,7 @@ export default function Footer({ onNavigate, onSubscribe }: FooterProps) {
 
           <div>
             <p className="label-eyebrow text-ink-soft">Giữ liên lạc</p>
-            <p className="mt-4 text-sm leading-6 text-beige-kem/70">
+            <p className="mt-4 text-body leading-6 text-beige-kem/70">
               Nhận vé mở bán sớm, mã giảm giá và lịch diễn mới trước khi hết chỗ.
             </p>
 
@@ -126,7 +126,7 @@ export default function Footer({ onNavigate, onSubscribe }: FooterProps) {
                   disabled={!onSubscribe}
                   placeholder="email@cua-ban.com"
                   aria-label="Email nhận bản tin"
-                  className="w-full bg-transparent py-2 font-mono text-sm text-beige-kem outline-none placeholder:text-beige-kem/35 disabled:cursor-not-allowed"
+                  className="w-full bg-transparent py-2 font-meta text-body text-beige-kem outline-none placeholder:text-beige-kem/35 disabled:cursor-not-allowed"
                 />
                 <button
                   type="submit"
@@ -138,15 +138,17 @@ export default function Footer({ onNavigate, onSubscribe }: FooterProps) {
               </div>
             </form>
 
-            {!onSubscribe && <p className="mt-2 font-mono text-[13px] text-ink-soft">Sắp mở.</p>}
+            {!onSubscribe && <p className="mt-2 font-meta text-meta text-ink-soft">Sắp mở.</p>}
           </div>
         </div>
 
         {/* The organiser pitch, Doron's affiliate banner in the same slot. */}
         <div className="hud-dashed mt-14 flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="font-display text-2xl font-black text-beige-kem">Bán vé cùng TixHub</p>
-            <p className="mt-1 text-sm text-beige-kem/70">
+            <p className="font-display text-title-m font-black text-beige-kem">
+              Bán vé cùng TixHub
+            </p>
+            <p className="mt-1 text-body text-beige-kem/70">
               Đăng sự kiện, dựng sơ đồ ghế và theo dõi doanh thu trong một trang.
             </p>
           </div>
@@ -160,7 +162,7 @@ export default function Footer({ onNavigate, onSubscribe }: FooterProps) {
           </button>
         </div>
 
-        <div className="mt-10 flex flex-col gap-3 border-t border-beige-kem/25 pt-6 font-mono text-[13px] text-ink-soft sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-10 flex flex-col gap-3 border-t border-beige-kem/25 pt-6 font-meta text-meta text-ink-soft sm:flex-row sm:items-center sm:justify-between">
           <p>© 2026 TixHub</p>
           {/*
            * One legal link, not Doron's four. Privacy, terms, disclaimer and refunds all live on

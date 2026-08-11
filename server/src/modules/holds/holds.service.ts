@@ -203,6 +203,58 @@ export async function addToReservation(
   return result.reservation;
 }
 
+/**
+ * Give general-admission quantity back to a tier without ending the reservation.
+ *
+ * The seated mirror of this is `removeSeats`, and the two agree on the parts that matter: the
+ * window is untouched (FR-006), the tier row is locked before the count moves (FR-019), and a
+ * reservation left holding nothing is closed so it cannot block the next selection (FR-011).
+ */
+export async function removeQuantity(
+  userId: number,
+  reservationId: number,
+  ticketTierId: number,
+  quantity: number,
+): Promise<Reservation> {
+  const reservation = await requireOwnedActive(userId, reservationId);
+  if (quantity <= 0) return view(reservationId);
+
+  const left = await withTransaction(async (client) => {
+    const lockedReservation = await repo.findReservation(client, reservation.id, true);
+    if (
+      !lockedReservation ||
+      lockedReservation.user_id !== userId ||
+      lockedReservation.status !== "active" ||
+      lockedReservation.expires_at.getTime() <= Date.now()
+    ) {
+      throw err.notFound("not_found", "Đơn giữ chỗ đã hết hạn hoặc đã kết thúc.");
+    }
+
+    const tier = await repo.lockTier(client, ticketTierId);
+    if (!tier || tier.showtime_id !== lockedReservation.showtime_id) {
+      throw err.unprocessable("invalid_selection", "Hạng vé không thuộc suất diễn này.");
+    }
+
+    const removed = await repo.reduceGaItem(client, lockedReservation.id, tier.id, quantity);
+    if (removed > 0) await repo.bumpReserved(client, tier.id, -removed);
+
+    if ((await repo.countHeldTickets(client, lockedReservation.id)) === 0) {
+      await repo.setReservationStatus(client, lockedReservation.id, "cancelled");
+    }
+
+    return repo.tierRemaining({
+      ...tier,
+      reserved_quantity: Math.max(tier.reserved_quantity - removed, 0),
+    });
+  });
+
+  broadcastSeatUpdate({
+    showtimeId: reservation.showtime_id,
+    tier: { ticketTierId, remaining: left },
+  });
+  return view(reservationId);
+}
+
 export async function removeSeats(
   userId: number,
   reservationId: number,

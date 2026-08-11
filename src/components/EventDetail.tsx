@@ -3,14 +3,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Showtime } from "@/shared/catalog/types";
 import { MovieEvent, TicketTier } from "../types";
 import { catalogClient } from "../services/catalogClient";
 import { formatEventDate } from "../services/formatDate";
-import { formatHoldClock } from "../services/holdSession";
 import { watchShowtime } from "../services/seatSocket";
-import SeatMapView from "./SeatMapView";
+import { Clock3, Tag, Ticket, Users } from "lucide-react";
+import Disclosure from "./Disclosure";
+import {
+  BookingHeader,
+  BookingLayout,
+  BookingSection,
+  OrderSummary,
+  type SummaryDetail,
+  type SummaryHighlight,
+  type SummaryLine,
+} from "./booking/BookingChrome";
 import { formatVnd } from "../services/currency";
 
 export interface TierSelection {
@@ -33,24 +42,28 @@ interface EventDetailProps {
   onBookRelated: (event: MovieEvent) => void;
   /** Seated events: hand off to the seat picker. */
   onProceedToSeatSelection: (showtimeId: number | null, date: string, time: string) => void;
-  /** General admission: no seat map exists, so quantities go straight to checkout. */
-  onProceedToQuantityCheckout: (
-    selection: TierSelection[],
+  /** General admission: the tickets are already held, so this is a plain step forward. */
+  onProceedToCheckout: () => void;
+  /**
+   * What the buyer currently holds, per tier id. General admission only.
+   *
+   * The server's number, not this screen's. A stepper press is a hold, so the count on screen has
+   * to be the count the reservation actually carries — local state would drift the moment a press
+   * was refused for want of stock.
+   */
+  heldQuantities: Record<string, number>;
+  /** A stepper press. The parent places or releases the hold and the new count comes back above. */
+  onAdjustQuantity: (
+    tier: { id: string; label: string },
+    delta: number,
     showtimeId: number | null,
     date: string,
     time: string,
   ) => void;
-  /**
-   * The hold already placed for this event, if any. Stepping back here from checkout must show the
-   * same showtime and the same quantities — the flow keeps its selection until the buyer leaves it.
-   */
-  restoreHold?: {
-    selectedDate: string;
-    selectedTime: string;
-    quantities: Record<string, number>;
-  } | null;
-  /** Milliseconds left on that hold, so step 01 shows the same clock as steps 02 and 03. */
-  holdRemainingMs?: number;
+  /** A hold round trip is in flight; the steppers are inert so two presses cannot race. */
+  holdBusy: boolean;
+  /** Milliseconds left on the general-admission hold this screen now owns. */
+  holdRemainingMs: number;
 }
 
 const statusLabels = {
@@ -87,9 +100,11 @@ export default function EventDetail({
   onToggleWishlist,
   onBookRelated,
   onProceedToSeatSelection,
-  onProceedToQuantityCheckout,
-  restoreHold = null,
-  holdRemainingMs = 0,
+  onProceedToCheckout,
+  heldQuantities,
+  onAdjustQuantity,
+  holdBusy,
+  holdRemainingMs,
 }: EventDetailProps) {
   const isSeated = event.eventType === "seated";
 
@@ -113,17 +128,6 @@ export default function EventDetail({
     () => (showtimeTiers ?? event.ticketTiers).slice(0, MAX_TIERS),
     [showtimeTiers, event.ticketTiers],
   );
-  // Divide the row evenly by tier count so 1/2/3/4 tiers each fill the width (mobile stays single
-  // column, and 4 tiers fall to two rows of two on a narrow screen).
-  const tierGridClass =
-    tiers.length <= 1
-      ? "grid-cols-1"
-      : tiers.length === 2
-        ? "grid-cols-1 sm:grid-cols-2"
-        : tiers.length === 3
-          ? "grid-cols-1 sm:grid-cols-3"
-          : "grid-cols-2 sm:grid-cols-4";
-
   const slots = useMemo<Slot[]>(() => {
     if (showtimes.length > 0) {
       return showtimes.map((s) => ({
@@ -149,33 +153,38 @@ export default function EventDetail({
   }, [showtimes, event.dates, event.times, event.venueName]);
 
   const [selectedSlotKey, setSelectedSlotKey] = useState<string>("");
-  const [quantities, setQuantities] = useState<Record<string, number>>({});
-  /** The held showtime is restored once; after that the buyer's own clicks win. */
-  const restoredKeyRef = useRef<string | null>(null);
 
+  /*
+   * There is no local quantity any more.
+   *
+   * The steppers hold on the server as they are pressed, so the reservation is the only place the
+   * number lives. Mirroring it into state here would give two answers to "how many" that disagree
+   * for as long as a request is in flight, and disagree permanently when one is refused.
+   */
+  const quantities = heldQuantities;
+
+  /*
+   * Nothing to restore any more.
+   *
+   * This screen used to be handed the live hold so a buyer stepping back from checkout found their
+   * showtime and quantities as they left them. Backward is a cancel now: by the time this renders,
+   * the hold has been released and there is nothing to come back to. All that is left is landing on
+   * a sensible showtime the first time the list arrives.
+   */
   useEffect(() => {
-    const held =
-      restoreHold &&
-      slots.find((s) => s.date === restoreHold.selectedDate && s.time === restoreHold.selectedTime);
-
-    if (held && restoredKeyRef.current !== held.key) {
-      restoredKeyRef.current = held.key;
-      setSelectedSlotKey(held.key);
-      setQuantities(restoreHold!.quantities);
-      return;
-    }
-
-    if (selectedSlotKey) return;
-    const firstOpen = slots.find((s) => !s.soldOut) ?? slots[0];
+    /*
+     * Re-picks whenever the held key names nothing in the list, not only when it is empty.
+     *
+     * `slots` is built twice: once from `event.dates` × `event.times` while the detail request is
+     * in flight, keyed `2026-08-11T21:30`, and again from the real showtimes, keyed by their
+     * database id. Guarding on "is a key set at all" meant the placeholder's key survived the
+     * swap and matched no real slot — the date chip lit up from its own fallback while the time
+     * grid showed nothing selected and the panel read "Chưa chọn suất" over a list of one showtime.
+     */
+    if (slots.some((slot) => slot.key === selectedSlotKey)) return;
+    const firstOpen = slots.find((slot) => !slot.soldOut) ?? slots[0];
     setSelectedSlotKey(firstOpen?.key ?? "");
-  }, [slots, restoreHold, selectedSlotKey]);
-
-  useEffect(() => {
-    // Switching event or showtime starts a new selection — unless this is the slot we just
-    // restored from the live hold.
-    if (restoredKeyRef.current === selectedSlotKey) return;
-    setQuantities({});
-  }, [event.id, selectedSlotKey]);
+  }, [slots, selectedSlotKey]);
 
   const selectedSlot = slots.find((s) => s.key === selectedSlotKey) ?? null;
   const eventUnavailable = event.status === "sold_out" || event.status === "cancelled";
@@ -268,11 +277,15 @@ export default function EventDetail({
       : Math.min(remaining, MAX_PER_TIER);
   };
 
-  const adjustQuantity = (tierId: string, delta: number, cap: number) => {
-    setQuantities((current) => {
-      const next = Math.min(Math.max((current[tierId] ?? 0) + delta, 0), cap);
-      return { ...current, [tierId]: next };
-    });
+  const adjustQuantity = (tier: TicketTier, delta: number) => {
+    if (!selectedSlot) return;
+    onAdjustQuantity(
+      { id: tier.id, label: tier.label },
+      delta,
+      selectedSlot.showtimeId,
+      selectedSlot.date,
+      selectedSlot.time,
+    );
   };
 
   const handlePrimaryAction = () => {
@@ -280,13 +293,9 @@ export default function EventDetail({
     // The showtime id is what the hold API locks against — carry it, not just the display strings.
     if (isSeated)
       onProceedToSeatSelection(selectedSlot.showtimeId, selectedSlot.date, selectedSlot.time);
-    else
-      onProceedToQuantityCheckout(
-        selection,
-        selectedSlot.showtimeId,
-        selectedSlot.date,
-        selectedSlot.time,
-      );
+    // General admission is already holding by the time this is pressed, so there is nothing to
+    // commit here — only somewhere to go.
+    else onProceedToCheckout();
   };
 
   const primaryLabel = eventUnavailable
@@ -295,354 +304,451 @@ export default function EventDetail({
       ? "Tiếp tục chọn ghế"
       : "Tiếp tục thanh toán";
 
+  /*
+   * The showtimes, split into a strip of days and a grid of times.
+   *
+   * They used to be one flat list of "11/08/2026 · 21:30 · Online" buttons two to a row, so twenty
+   * showtimes were twenty near-identical labels and the only way to find a Saturday was to read all
+   * of them. Every cinema in the country splits the two, and it is the split that does the work:
+   * the day is a decision with four or five options, and only then is the time a decision with
+   * four or five options.
+   */
+  const slotDates = useMemo(() => [...new Set(slots.map((slot) => slot.date))].sort(), [slots]);
+  const activeDate = selectedSlot?.date ?? slotDates[0] ?? "";
+  const slotsOnActiveDate = useMemo(
+    () => slots.filter((slot) => slot.date === activeDate),
+    [slots, activeDate],
+  );
+
+  /** Picking a day lands on its first open showtime, so the grid below is never showing nothing. */
+  const chooseDate = (date: string) => {
+    const onDate = slots.filter((slot) => slot.date === date);
+    const firstOpen = onDate.find((slot) => !slot.soldOut) ?? onDate[0];
+    if (firstOpen) setSelectedSlotKey(firstOpen.key);
+  };
+
+  /** Every showtime on a day being gone is what greys the day out — not the day itself. */
+  const dateSoldOut = (date: string) =>
+    slots.filter((slot) => slot.date === date).every((slot) => slot.soldOut);
+
+  /*
+   * The event's particulars, moved out of the page's tail and into the booking panel.
+   *
+   * They were a two-column definition list below the blurb, below the policies — under the button
+   * they were meant to inform. A buyer weighing up the price could not see the running time or the
+   * age rating without scrolling past the thing they were deciding about.
+   *
+   * Four is the count the row is built for; anything with no value drops out rather than printing a
+   * glyph over an empty label, and the grid closes up around it.
+   */
+  const highlights: SummaryHighlight[] = [
+    { icon: Clock3, label: event.duration > 0 ? `${event.duration} phút` : "" },
+    { icon: Tag, label: event.genre[0] ?? "" },
+    // "P" on its own is not a fact anyone can read. The graded ratings say what they mean already.
+    { icon: Users, label: event.ageRating === "P" ? "Mọi lứa tuổi" : event.ageRating },
+    { icon: Ticket, label: event.ticketsLeft > 0 ? `Còn ${event.ticketsLeft} vé` : "" },
+  ].filter((h) => h.label);
+
+  const details: SummaryDetail[] = [
+    { label: "Địa điểm", value: event.venueName || event.location },
+    { label: "Thành phố", value: event.city },
+    { label: "Suất diễn", value: selectedSlot ? `${selectedSlot.time}` : "Chưa chọn" },
+    { label: "Tình trạng", value: statusLabels[event.status] },
+    { label: "Giá từ", value: formatVnd(event.price) },
+  ].filter((d) => d.value);
+
+  const summaryLines: SummaryLine[] = selection.map((line) => ({
+    key: line.tierId,
+    label: `${line.quantity} × ${line.label}`,
+    detail: formatVnd(line.price),
+    amount: line.quantity * line.price,
+  }));
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
-      <div className="flex flex-col gap-4 border-b border-beige-kem/25 pb-4 sm:flex-row sm:items-center sm:justify-between">
-        <button
-          onClick={onBack}
-          className="flex items-center gap-2 font-mono text-sm text-ink-soft transition hover:text-beige-kem"
-        >
-          Quay lại danh sách
-        </button>
+      <BookingHeader backLabel="Quay lại danh sách" onBack={onBack} current={1} seated={isSeated} />
 
+      <BookingLayout
+        aside={
+          <OrderSummary
+            event={event}
+            date={selectedSlot?.date}
+            time={selectedSlot?.time}
+            venue={selectedSlot?.venue}
+            highlights={highlights}
+            details={details}
+            lines={isSeated ? [] : summaryLines}
+            total={totalPrice}
+            // No hold exists on this screen until one is placed further along, so the clock is only
+            // drawn when the buyer has stepped back into a live one.
+            // General admission holds from the first stepper press, so its countdown belongs
+            // on this screen. A seated order has nothing held until the next one.
+            holdMs={isSeated ? undefined : holdRemainingMs}
+            emptyLabel={isSeated ? "Ghế được chọn ở bước sau" : "Chưa chọn vé nào"}
+            ctaLabel={primaryLabel}
+            onCta={handlePrimaryAction}
+            ctaDisabled={bookingDisabled}
+            note={
+              !isSignedIn && !eventUnavailable
+                ? isSeated
+                  ? "Cần đăng nhập để chọn ghế"
+                  : "Cần đăng nhập để thanh toán"
+                : undefined
+            }
+            reassurance={event.refundPolicy}
+          />
+        }
+      >
         {/*
-          The connectors carry the text colour so the three steps read as one line rather than as
-          three loose labels — a tint here washes out against the page in light mode. The current
-          step is a filled chip instead of tomato text: tomato only clears 4.45:1 on cream, which is
-          under AA for a label this size.
+          One step, not two.
+
+          A general-admission purchase decides the showtime and the quantity on this page and then
+          pays; splitting that into "01 Chọn suất" and "02 Chọn số lượng vé" numbered two halves of
+          one screen as if the buyer travelled between them. A seated purchase really does travel —
+          the seat map is its own screen — so for that one this page is step 01 and nothing else.
         */}
-        <div className="flex flex-wrap items-center gap-3 font-mono text-xs text-ink-soft">
-          <span className="rounded-full bg-bubblegum px-2.5 py-1 font-bold text-on-tint">
-            01 Chọn suất
-          </span>
-          <span className="h-0.5 w-6 bg-beige-kem" />
-          <span>02 {isSeated ? "Chọn ghế" : "Chọn số lượng vé"}</span>
-          <span className="h-0.5 w-6 bg-beige-kem" />
-          <span>03 Thanh toán</span>
+        {/*
+          The artwork, at the size it was made to be seen.
 
-          {/* A hold placed further along the flow is still running while the buyer looks back here. */}
-          {restoreHold && holdRemainingMs > 0 && (
-            <span className="inline-flex items-center gap-2 rounded-lg border-2 border-beige-kem bg-cam-dat px-2.5 py-1 text-on-tint">
-              Đang giữ chỗ
-              <b className="text-sm font-black text-beige-kem">
-                {formatHoldClock(holdRemainingMs)}
-              </b>
-            </span>
+          This screen opened on a 128px thumbnail inside a ticket stub — the object being sold,
+          reproduced smaller than the step indicator above it. The reference runs a gallery down the
+          whole left column against the booking panel on the right, and the page already has that
+          two-column shape; it was simply not using the left one to show anything.
+
+          The stub is not gone, it has moved: on the seat map and at checkout the buyer has already
+          decided, and a compact reminder of what they are buying is exactly the right size there.
+
+          One image, not a carousel. `MovieEvent` carries a single `imageUrl`; the arrows and dots
+          the reference has would be furniture around nothing until the catalog gains a gallery.
+
+          `3/2` with the blurred fill behind it, the same arrangement the catalog cards use: posters
+          arrive in every shape and `object-contain` is the only crop that never cuts a face off.
+        */}
+        <div>
+          <h1 className="font-display text-title-l font-black uppercase leading-[1.05] tracking-[0.02em] text-beige-kem">
+            {event.title}
+          </h1>
+          {event.originalTitle && (
+            <p className="mt-2 font-meta text-lede text-ink-soft">{event.originalTitle}</p>
           )}
-        </div>
-      </div>
 
-      <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-12">
-        <aside className="space-y-6 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-5 lg:col-span-5">
-          <div className="relative aspect-[4/3] overflow-hidden rounded-2xl">
+          <figure className="relative mt-6 aspect-[3/2] overflow-hidden bg-beige-kem/[0.07]">
+            <img
+              src={event.imageUrl}
+              alt=""
+              aria-hidden="true"
+              referrerPolicy="no-referrer"
+              className="absolute inset-0 h-full w-full scale-125 object-cover opacity-70 blur-2xl"
+            />
             <img
               src={event.imageUrl}
               alt={event.title}
               referrerPolicy="no-referrer"
-              className="h-full w-full object-cover"
+              className="relative h-full w-full object-contain"
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-xanh-pho/90 via-transparent to-transparent" />
-            <button
-              onClick={() => onToggleWishlist(event.id)}
-              className="absolute right-4 top-4 inline-flex h-10 items-center justify-center rounded-full border border-white/25 bg-black/35 px-3 text-[12px] font-bold uppercase text-white transition hover:bg-white hover:text-xanh-pho"
-              title="Wishlist hoặc nhắc lịch"
-            >
-              {isWishlisted ? "Đã lưu" : "Lưu"}
-            </button>
-            <div className="absolute bottom-4 left-4 rounded-lg bg-burgundy px-3 py-1 font-mono text-xs font-bold text-white shadow">
-              {statusLabels[event.status]} / còn {event.ticketsLeft} vé
-            </div>
-          </div>
+          </figure>
+        </div>
 
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded bg-cam-dat px-2 py-0.5 font-mono text-xs font-bold text-xanh-pho">
-                {event.ageRating}
-              </span>
-              <span className="font-mono text-xs font-semibold text-ink-soft">
-                {event.rating} / {event.reviewCount} đánh giá
-              </span>
-            </div>
-
-            <div>
-              <h2 className="font-display text-4xl font-black leading-tight text-beige-kem sm:text-5xl">
-                {event.title}
-              </h2>
-              {event.originalTitle && (
-                <p className="mt-1 font-mono text-sm text-ink-soft">{event.originalTitle}</p>
-              )}
-            </div>
-
-            <p className="rounded-xl border-2 border-beige-kem bg-surface-2 p-3 text-xs leading-relaxed text-ink-soft">
-              <span className="mb-1 block font-semibold text-beige-kem">Độ tuổi phù hợp</span>
-              {event.ageDescription}
+        <BookingSection
+          step="01"
+          title={isSeated ? "Chọn suất" : "Chọn vé"}
+          hint={
+            slots.length === 0
+              ? undefined
+              : isSeated
+                ? "Chọn ngày và giờ. Ghế được chọn ở bước sau."
+                : "Chọn ngày, giờ, rồi số lượng cho từng hạng vé."
+          }
+        >
+          {slots.length === 0 ? (
+            <p className="border border-dashed border-beige-kem/30 py-8 text-center font-meta text-meta text-ink-soft">
+              Chưa có suất nào đang mở bán.
             </p>
-
-            <p className="text-sm leading-7 text-beige-kem/80">{event.description}</p>
-
-            <div className="space-y-3 border-t border-beige-kem/25 pt-4 text-xs text-beige-kem/72">
-              <div className="flex items-center gap-3">
-                <span className="font-bold text-ink-soft">Thời lượng</span>
-                <span>{event.duration} phút</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="font-bold text-ink-soft">Thể loại</span>
-                <span>{event.genre.join(", ")}</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="font-bold text-ink-soft">Đơn vị/nghệ sĩ</span>
-                <span>{event.cast.join(", ")}</span>
-              </div>
-              <div className="flex items-start gap-3">
-                <span className="shrink-0 font-bold text-ink-soft">Địa điểm</span>
-                <span>{event.location}</span>
-              </div>
-            </div>
-          </div>
-        </aside>
-
-        <div className="space-y-6 lg:col-span-7">
-          {/* Step 01 — Chọn suất. Placed first so the on-screen order matches the flow the
-              step indicator promises (Chọn suất → Chọn vé → Thanh toán). */}
-          <section className="rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6">
-            <h3 className="mb-4 font-display text-xl font-black text-beige-kem">
-              <span className="font-mono text-xs text-ink-soft">01 · </span>Chọn suất
-            </h3>
-            {slots.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-beige-kem/25 py-6 text-center text-xs text-beige-kem/45">
-                Chưa có suất nào đang mở bán.
-              </p>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2">
-                {slots.map((slot) => {
-                  const isSelected = slot.key === selectedSlotKey;
-                  return (
-                    <button
-                      key={slot.key}
-                      onClick={() => setSelectedSlotKey(slot.key)}
-                      disabled={slot.soldOut}
-                      className={`rounded-xl border-2 p-3 text-left transition ${
-                        isSelected
-                          ? "border-beige-kem bg-burgundy text-white"
-                          : "border-beige-kem bg-surface-2 text-beige-kem hover:border-burgundy"
-                      } disabled:cursor-not-allowed disabled:border-ink-soft disabled:bg-surface-2 disabled:text-ink-soft`}
-                    >
-                      <span className="block font-mono text-sm font-bold">
-                        {formatEventDate(slot.date, true)} · {slot.time}
-                      </span>
-                      <span className="mt-0.5 block font-mono text-[13px] opacity-70">
-                        {slot.venue}
-                        {slot.soldOut ? " · Hết vé" : ""}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
-          {isSeated && selectedSlot?.showtimeId !== null && selectedSlot && (
-            <section className="rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6">
-              <h3 className="mb-1 font-display text-xl font-black text-beige-kem">
-                Tình trạng ghế
-              </h3>
-              <p className="mb-4 font-mono text-[13px] text-beige-kem/50">
-                Xem trước chỗ còn trống của suất đã chọn. Chọn ghế ở bước sau.
-              </p>
-              <SeatMapView showtimeId={selectedSlot.showtimeId} />
-            </section>
-          )}
-
-          {/* Step 02 — Chọn vé (seat tiers for a seated event, quantity per tier for GA). */}
-          <section className="rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6">
-            <h3 className="mb-1 font-display text-2xl font-black text-beige-kem">
-              <span className="font-mono text-xs text-ink-soft">02 · </span>
-              {isSeated ? "Hạng vé đang bán" : "Chọn số lượng vé"}
-            </h3>
-            <p className="mb-4 font-mono text-[13px] text-beige-kem/50">
-              {isSeated
-                ? "Sự kiện có ghế ngồi — giá theo hạng ghế, chọn vị trí ở bước sau."
-                : "Sự kiện vé tự do, không có sơ đồ ghế. Chọn số lượng cho từng hạng vé."}
-            </p>
-            <div className={`grid gap-3 ${tierGridClass}`}>
-              {tiers.map((tier) =>
-                isSeated ? (
-                  /* Seated: pure information (seat is picked on the next screen). Rendered as a flat
-                     tile — no card border, no hover — so it never reads as a tappable button. */
-                  <div key={tier.id} className="border-l-2 border-cam-dat/40 pl-3">
-                    <div className="flex items-center gap-2">
-                      <span className="font-display text-lg font-black text-beige-kem">
-                        {tier.label}
-                      </span>
-                      {tier.badge && (
-                        <span className="rounded-full border-2 border-beige-kem bg-cam-dat px-2 py-0.5 font-mono text-[12px] font-bold text-on-tint">
-                          {tier.badge}
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-1 font-mono text-sm font-bold text-ink-soft">
-                      {formatVnd(tier.price)}
-                    </p>
-                    {tier.description && (
-                      <p className="mt-1 text-xs leading-5 text-beige-kem/62">{tier.description}</p>
-                    )}
-                  </div>
-                ) : (
-                  /* General admission: interactive — pick a quantity here, so the card affordance
-                     (border + stepper) is intended. */
-                  (() => {
-                    const cap = tierCap(tier);
-                    const quantity = quantities[tier.id] ?? 0;
-                    const soldOut = cap === 0;
+          ) : (
+            <div className="space-y-8">
+              <div>
+                <p className="label-eyebrow text-ink-soft">Ngày</p>
+                {/*
+                  The day strip scrolls sideways rather than wrapping. A run of dates that wraps to a
+                  second line stops reading as a calendar and starts reading as a paragraph of
+                  numbers, and the order is no longer obvious at a glance.
+                */}
+                <div className="-mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1">
+                  {slotDates.map((date) => {
+                    const isActive = date === activeDate;
+                    const gone = dateSoldOut(date);
                     return (
-                      <div
-                        key={tier.id}
-                        className="flex flex-col rounded-xl border-2 border-beige-kem bg-surface-2 p-4"
+                      <button
+                        key={date}
+                        type="button"
+                        onClick={() => chooseDate(date)}
+                        disabled={gone}
+                        aria-pressed={isActive}
+                        className={`shrink-0 border px-4 py-2.5 text-center transition ${
+                          isActive
+                            ? "border-burgundy bg-burgundy text-white"
+                            : gone
+                              ? "cursor-not-allowed border-beige-kem/20 text-ink-soft/50"
+                              : "border-beige-kem/35 text-beige-kem hover:border-beige-kem"
+                        }`}
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-display text-lg font-black text-beige-kem">
-                            {tier.label}
-                          </span>
-                          {tier.badge && (
-                            <span className="rounded-full border-2 border-beige-kem bg-cam-dat px-2 py-0.5 font-mono text-[12px] font-bold text-on-tint">
-                              {tier.badge}
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-2 font-mono text-sm font-bold text-ink-soft">
-                          {formatVnd(tier.price)}
-                        </p>
-                        {tier.description && (
-                          <p className="mt-2 text-xs leading-5 text-beige-kem/62">
-                            {tier.description}
-                          </p>
-                        )}
-                        <p className="mt-2 font-mono text-[13px] text-beige-kem/55">
-                          {remainingOf(tier) === null || remainingOf(tier) === undefined
-                            ? "Còn vé"
-                            : soldOut
-                              ? "Hết vé"
-                              : `Còn ${remainingOf(tier)} vé`}
-                        </p>
-                        <div className="mt-3 flex items-center justify-between gap-2 border-t border-beige-kem/25 pt-3">
-                          <button
-                            type="button"
-                            onClick={() => adjustQuantity(tier.id, -1, cap)}
-                            disabled={quantity === 0}
-                            aria-label={`Bớt vé ${tier.label}`}
-                            className="grid h-8 w-8 place-items-center rounded-lg border-2 border-beige-kem font-mono text-sm font-bold text-beige-kem transition disabled:cursor-not-allowed disabled:opacity-30"
-                          >
-                            −
-                          </button>
-                          <span className="font-mono text-base font-black text-beige-kem">
-                            {quantity}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => adjustQuantity(tier.id, 1, cap)}
-                            disabled={soldOut || quantity >= cap}
-                            aria-label={`Thêm vé ${tier.label}`}
-                            className="grid h-8 w-8 place-items-center rounded-lg border-2 border-beige-kem font-mono text-sm font-bold text-beige-kem transition disabled:cursor-not-allowed disabled:opacity-30"
-                          >
-                            +
-                          </button>
-                        </div>
-                      </div>
+                        <span className="block font-meta text-body font-bold leading-none">
+                          {formatEventDate(date)}
+                        </span>
+                        <span className="mt-1 block font-meta text-eyebrow leading-none opacity-70">
+                          {gone ? "hết vé" : `${slots.filter((s) => s.date === date).length} suất`}
+                        </span>
+                      </button>
                     );
-                  })()
-                ),
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <p className="label-eyebrow text-ink-soft">Giờ</p>
+                <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                  {slotsOnActiveDate.map((slot) => {
+                    const isSelected = slot.key === selectedSlotKey;
+                    return (
+                      <button
+                        key={slot.key}
+                        type="button"
+                        onClick={() => setSelectedSlotKey(slot.key)}
+                        disabled={slot.soldOut}
+                        aria-pressed={isSelected}
+                        className={`border p-3 text-left transition ${
+                          isSelected
+                            ? "border-burgundy bg-burgundy/10 text-beige-kem"
+                            : slot.soldOut
+                              ? "cursor-not-allowed border-beige-kem/20 text-ink-soft/60"
+                              : "border-beige-kem/35 text-beige-kem hover:border-beige-kem"
+                        }`}
+                      >
+                        <span className="block font-display text-title-s font-black leading-none">
+                          {slot.time}
+                        </span>
+                        <span className="mt-1.5 block truncate font-meta text-eyebrow text-ink-soft">
+                          {slot.venue}
+                        </span>
+                        <span
+                          className={`mt-0.5 block font-meta text-eyebrow ${
+                            slot.soldOut ? "text-ink-soft" : "text-burgundy-ink"
+                          }`}
+                        >
+                          {slot.soldOut ? "Hết vé" : "Còn vé"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/*
+                Only general admission picks a quantity here. A seated order's quantity is however
+                many seats get clicked on the next screen, so listing the tiers on this page would
+                be a second, contradictory way to say the same number.
+              */}
+              {!isSeated && (
+                <div>
+                  <p className="label-eyebrow text-ink-soft">Hạng vé</p>
+                  {/*
+                    One tier per row, ruled apart. A grid of bordered cards made each tier an object
+                    to compare side by side, which is the wrong reading — this is a price list, and a
+                    price list is a column.
+                  */}
+                  <ul className="mt-3 border-t border-beige-kem/25">
+                    {tiers.map((tier) => {
+                      const cap = tierCap(tier);
+                      const quantity = quantities[tier.id] ?? 0;
+                      const soldOut = cap === 0;
+                      const remaining = remainingOf(tier);
+
+                      return (
+                        <li
+                          key={tier.id}
+                          className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-beige-kem/25 py-4"
+                        >
+                          <div className="min-w-[12rem] flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-display text-lede font-black uppercase tracking-[0.03em] text-beige-kem">
+                                {tier.label}
+                              </span>
+                              {tier.badge && (
+                                <span className="border border-beige-kem/50 px-2 py-0.5 font-meta text-eyebrow text-beige-kem">
+                                  {tier.badge}
+                                </span>
+                              )}
+                            </div>
+                            {tier.description && (
+                              <p className="mt-1 text-meta leading-5 text-beige-kem/70">
+                                {tier.description}
+                              </p>
+                            )}
+                            <p className="mt-1 font-meta text-eyebrow text-ink-soft">
+                              {remaining === null || remaining === undefined
+                                ? "Còn vé"
+                                : soldOut
+                                  ? "Hết vé"
+                                  : `Còn ${remaining} vé`}
+                            </p>
+                          </div>
+
+                          <span className="shrink-0 font-display text-title-s font-black text-beige-kem">
+                            {formatVnd(tier.price)}
+                          </span>
+
+                          <div className="flex shrink-0 items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => adjustQuantity(tier, -1)}
+                              disabled={quantity === 0 || holdBusy}
+                              aria-label={`Bớt vé ${tier.label}`}
+                              className="grid h-9 w-9 place-items-center border border-beige-kem/50 font-meta text-beige-kem transition hover:border-beige-kem disabled:cursor-not-allowed disabled:opacity-30"
+                            >
+                              −
+                            </button>
+                            <span className="w-6 text-center font-meta text-body font-bold text-beige-kem">
+                              {quantity}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => adjustQuantity(tier, 1)}
+                              disabled={soldOut || quantity >= cap || holdBusy}
+                              aria-label={`Thêm vé ${tier.label}`}
+                              className="grid h-9 w-9 place-items-center border border-beige-kem/50 font-meta text-beige-kem transition hover:border-beige-kem disabled:cursor-not-allowed disabled:opacity-30"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
               )}
             </div>
-          </section>
+          )}
+        </BookingSection>
 
-          <section className="grid gap-4 md:grid-cols-3">
-            <div className="rounded-2xl border-2 border-beige-kem bg-la-co p-4">
-              <h4 className="font-display font-bold text-beige-kem">Hoàn/đổi vé</h4>
-              <p className="mt-2 text-xs leading-5 text-beige-kem/68">{event.refundPolicy}</p>
-            </div>
-            <div className="rounded-2xl border-2 border-beige-kem bg-cam-dat p-4">
-              <h4 className="font-display font-bold text-beige-kem">Hướng dẫn đến nơi</h4>
-              <p className="mt-2 text-xs leading-5 text-beige-kem/68">{event.venueGuide}</p>
-            </div>
-            <div className="rounded-2xl border-2 border-beige-kem bg-bubblegum p-4">
-              <h4 className="font-display font-bold text-beige-kem">Nhắc lịch</h4>
-              <p className="mt-2 text-xs leading-5 text-beige-kem/68">
-                Bấm Lưu để thêm vào wishlist và nhắc lịch gần ngày diễn. Trạng thái này đang lưu
-                local trong frontend.
-              </p>
-            </div>
-          </section>
+        {/*
+          Everything below is about the event rather than the purchase, so it comes after both
+          steps — and it is set as one ruled column, the shape the reference gives its itinerary.
 
-          <section className="rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="space-y-1">
-                <p className="font-mono text-xs uppercase text-ink-soft">Suất bạn chọn</p>
-                <h4 className="font-display text-xl font-black text-beige-kem">
-                  {selectedSlot
-                    ? `${formatEventDate(selectedSlot.date, true)} · ${selectedSlot.time} · ${selectedSlot.venue}`
-                    : "Chưa chọn suất"}
-                </h4>
-                {!isSeated && (
-                  <p className="font-mono text-xs text-beige-kem/70">
-                    {totalQuantity === 0
-                      ? "Chưa chọn vé"
-                      : `${selection
-                          .map((line) => `${line.quantity} × ${line.label}`)
-                          .join(" · ")} — ${formatVnd(totalPrice)}`}
-                  </p>
-                )}
-              </div>
-              <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
-                <button
-                  onClick={handlePrimaryAction}
-                  disabled={bookingDisabled}
-                  className="inline-flex items-center justify-center rounded-xl bg-burgundy px-7 py-4 text-sm font-black text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-white/60"
+          Only the blurb collapses. It is the one thing here long enough that hiding it saves a
+          screen; the two policy notes are two sentences each, and a click to reveal two sentences
+          costs more than it returns. The refund line in particular is already printed under the
+          buy button, so folding it away here would be hiding what the page just said elsewhere.
+        */}
+        <div className="border-t border-beige-kem/30 pt-2">
+          <Disclosure label="Giới thiệu" heading="section" defaultOpen>
+            {/*
+              Set at reading size, not at caption size. This is the only prose on the page; at 14px
+              it was smaller than the labels around it. `max-w-2xl` holds the measure so the line
+              length stays readable on a wide screen even though the column is not.
+            */}
+            <p className="max-w-2xl whitespace-pre-line text-lede leading-8 text-beige-kem/90">
+              {event.description}
+            </p>
+
+            {/*
+              The two facts the panel has no room for: the age note is a sentence rather than a
+              rating, and the line-up is a list. Everything shorter is up beside the price.
+            */}
+            <dl className="mt-8 grid gap-x-12 gap-y-4 sm:grid-cols-2">
+              {[
+                ["Đơn vị/nghệ sĩ", event.cast.join(", ")],
+                ["Độ tuổi", event.ageDescription],
+                ["Địa chỉ", event.location],
+              ]
+                .filter(([, value]) => value)
+                .map(([label, value]) => (
+                  <div key={label} className="flex gap-4 border-b border-beige-kem/20 pb-3">
+                    <dt className="w-32 shrink-0 font-meta text-meta tracking-[0.08em] text-ink-soft">
+                      {label}
+                    </dt>
+                    <dd className="min-w-0 flex-1 text-body leading-6 text-beige-kem">{value}</dd>
+                  </div>
+                ))}
+            </dl>
+          </Disclosure>
+
+          {/*
+            Label left, content right, one hairline under each — the same row the reference uses for
+            a day of its itinerary. It replaces a three-column grid, which gave three short notes
+            equal width and equal weight and made the page end on a wall of small print.
+          */}
+          <dl>
+            {[
+              ["Hoàn/đổi vé", event.refundPolicy],
+              ["Hướng dẫn đến nơi", event.venueGuide],
+            ]
+              .filter(([, value]) => value)
+              .map(([label, value]) => (
+                <div
+                  key={label}
+                  className="flex flex-col gap-1 border-b border-beige-kem/30 py-4 sm:flex-row sm:gap-8"
                 >
-                  {primaryLabel}
-                </button>
-                {!isSignedIn && !eventUnavailable && (
-                  <p className="font-mono text-[13px] text-beige-kem/50">
-                    {isSeated ? "Cần đăng nhập để chọn ghế" : "Cần đăng nhập để thanh toán"}
-                  </p>
-                )}
-              </div>
-            </div>
-          </section>
+                  <dt className="shrink-0 font-display text-body font-bold uppercase tracking-[0.04em] text-beige-kem sm:w-56">
+                    {label}
+                  </dt>
+                  <dd className="min-w-0 flex-1 text-body leading-6 text-beige-kem/80">{value}</dd>
+                </div>
+              ))}
 
-          {relatedEvents.length > 0 && (
-            <section className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-6">
-              <h3 className="mb-4 font-display text-2xl font-black text-beige-kem">
-                Gợi ý tương tự
-              </h3>
-              <div className="grid gap-3 md:grid-cols-3">
-                {relatedEvents.map((related) => (
-                  <button
-                    key={related.id}
-                    onClick={() => onBookRelated(related)}
-                    className="group overflow-hidden rounded-xl border-2 border-beige-kem bg-xanh-pho text-left transition"
-                  >
+            <div className="flex flex-col gap-2 border-b border-beige-kem/30 py-4 sm:flex-row sm:items-center sm:gap-8">
+              <dt className="shrink-0 font-display text-body font-bold uppercase tracking-[0.04em] text-beige-kem sm:w-56">
+                Nhắc lịch
+              </dt>
+              <dd className="min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() => onToggleWishlist(event.id)}
+                  aria-pressed={isWishlisted}
+                  className={`border px-3 py-1.5 font-meta text-meta transition ${
+                    isWishlisted
+                      ? "border-burgundy bg-burgundy text-white"
+                      : "border-beige-kem/50 text-beige-kem hover:border-beige-kem"
+                  }`}
+                >
+                  {isWishlisted ? "Đã lưu" : "Lưu sự kiện"}
+                </button>
+              </dd>
+            </div>
+          </dl>
+        </div>
+
+        {relatedEvents.length > 0 && (
+          <section className="border-t border-beige-kem/30 pt-7">
+            <p className="label-eyebrow text-ink-soft">Gợi ý tương tự</p>
+            <div className="mt-5 grid gap-8 sm:grid-cols-3">
+              {relatedEvents.map((related) => (
+                <button
+                  key={related.id}
+                  onClick={() => onBookRelated(related)}
+                  className="group text-left"
+                >
+                  <span className="block aspect-[4/3] overflow-hidden bg-beige-kem/[0.07]">
                     <img
                       src={related.imageUrl}
                       alt={related.title}
                       referrerPolicy="no-referrer"
-                      className="h-24 w-full object-cover transition duration-500 group-hover:scale-105"
+                      className="h-full w-full object-cover transition duration-700 group-hover:scale-[1.06]"
                     />
-                    <span className="block p-3">
-                      <span className="line-clamp-2 font-display text-base font-bold text-beige-kem">
-                        {related.title}
-                      </span>
-                      <span className="mt-1 block font-mono text-[13px] text-ink-soft">
-                        {formatVnd(related.price)}
-                      </span>
+                  </span>
+                  <span className="mt-3 block">
+                    <span className="line-clamp-2 font-display text-body font-bold uppercase leading-[1.35] tracking-[0.06em] text-beige-kem transition group-hover:text-burgundy-ink">
+                      {related.title}
                     </span>
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
-        </div>
-      </div>
+                    <span className="mt-1 block font-meta text-meta text-ink-soft">
+                      {formatVnd(related.price)}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+      </BookingLayout>
     </div>
   );
 }

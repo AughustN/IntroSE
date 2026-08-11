@@ -81,21 +81,21 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
       <div className="flex items-center justify-between border-b border-beige-kem/25 pb-4">
         <button
           onClick={onBack}
-          className="font-mono text-sm text-ink-soft transition hover:text-beige-kem"
+          className="font-meta text-body text-ink-soft transition hover:text-beige-kem"
         >
           Quay lại
         </button>
-        <h2 className="font-display text-3xl font-black text-beige-kem">Ví TixHub</h2>
+        <h2 className="font-display text-title-m font-black text-beige-kem">Ví TixHub</h2>
       </div>
 
-      {loading && <p className="font-mono text-sm text-ink-soft">Đang tải ví...</p>}
+      {loading && <p className="font-meta text-body text-ink-soft">Đang tải ví...</p>}
 
       {error && !loading && (
         <div className="space-y-3 rounded-2xl border-2 border-beige-kem bg-bubblegum p-5 text-on-tint">
-          <p className="text-sm">{error}</p>
+          <p className="text-body">{error}</p>
           <button
             onClick={() => void load()}
-            className="rounded-xl border-2 border-beige-kem px-4 py-2 text-xs font-bold uppercase"
+            className="rounded-xl border-2 border-beige-kem px-4 py-2 text-eyebrow font-bold uppercase"
           >
             Thử lại
           </button>
@@ -105,11 +105,11 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
       {statement && limits && !loading && (
         <>
           <section className="space-y-4 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 sm:p-8">
-            <p className="font-mono text-xs uppercase text-ink-soft">Số dư khả dụng</p>
-            <p className="font-display text-5xl font-black text-burgundy-ink">
+            <p className="font-meta text-eyebrow uppercase text-ink-soft">Số dư khả dụng</p>
+            <p className="font-display text-title-l font-black text-burgundy-ink">
               {formatVnd(statement.balanceAmount)}
             </p>
-            <p className="font-mono text-[13px] leading-5 text-beige-kem/70">
+            <p className="font-meta text-meta leading-5 text-beige-kem/70">
               Mỗi lần nạp {formatVnd(limits.min)} – {formatVnd(limits.max)} · số dư tối đa{" "}
               {formatVnd(limits.balanceCap)}. Tiền vào ví bằng cách nạp qua VNPay, ra khỏi ví dưới
               dạng vé. Hoàn vé trả tiền về lại ví, không rút ra tiền mặt.
@@ -117,7 +117,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
             {!showTopUp && (
               <button
                 onClick={() => setShowTopUp(true)}
-                className="rounded-xl bg-burgundy px-6 py-3 text-sm font-black text-white transition hover:brightness-95"
+                className="rounded-xl bg-burgundy px-6 py-3 text-body font-black text-white transition hover:brightness-95"
               >
                 Nạp tiền
               </button>
@@ -134,14 +134,14 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
 
           {statement.pending.length > 0 && (
             <section className="space-y-3 rounded-2xl border-2 border-beige-kem bg-cam-dat p-5 text-on-tint">
-              <h3 className="font-display text-xl font-black">Đang chờ xác nhận</h3>
-              <p className="font-mono text-[13px] leading-5">
+              <h3 className="font-display text-title-s font-black">Đang chờ xác nhận</h3>
+              <p className="font-meta text-meta leading-5">
                 VNPay chưa báo về. Tiền chưa vào ví và cũng chưa mất — hệ thống tự đối soát lại sau
                 ít phút.
               </p>
               <ul className="space-y-2">
                 {statement.pending.map((row) => (
-                  <li key={row.id} className="flex justify-between gap-4 font-mono text-xs">
+                  <li key={row.id} className="flex justify-between gap-4 font-meta text-eyebrow">
                     <span>{formatMoment(row.createdAt)}</span>
                     <b>{formatVnd(row.amount)}</b>
                   </li>
@@ -151,14 +151,16 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
           )}
 
           <section className="space-y-4">
-            <h3 className="font-display text-2xl font-black text-beige-kem">Lịch sử giao dịch</h3>
+            <h3 className="font-display text-title-m font-black text-beige-kem">
+              Lịch sử giao dịch
+            </h3>
 
             {statement.entries.length === 0 ? (
               <div className="rounded-2xl border-2 border-dashed border-beige-kem/50 p-8 text-center">
-                <p className="font-display text-xl font-black text-beige-kem">
+                <p className="font-display text-title-s font-black text-beige-kem">
                   Ví chưa có giao dịch
                 </p>
-                <p className="mx-auto mt-2 max-w-md font-mono text-xs leading-5 text-ink-soft">
+                <p className="mx-auto mt-2 max-w-md font-meta text-eyebrow leading-5 text-ink-soft">
                   Nạp tiền qua VNPay để có số dư, rồi mua vé — mỗi lần nạp, mua hay hoàn vé đều hiện
                   ở đây kèm số dư sau giao dịch.
                 </p>
@@ -166,7 +168,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
             ) : (
               <div className="overflow-x-auto rounded-2xl border-2 border-beige-kem">
                 <table className="w-full min-w-[34rem] border-collapse text-left">
-                  <thead className="bg-surface-2 font-mono text-[13px] uppercase text-ink-soft">
+                  <thead className="bg-surface-2 font-meta text-meta uppercase text-ink-soft">
                     <tr>
                       <th className="px-4 py-3">Thời điểm</th>
                       <th className="px-4 py-3">Loại</th>
@@ -174,7 +176,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
                       <th className="px-4 py-3 text-right">Số dư sau</th>
                     </tr>
                   </thead>
-                  <tbody className="font-mono text-xs text-beige-kem/85">
+                  <tbody className="font-meta text-eyebrow text-beige-kem/85">
                     {statement.entries.map((entry) => (
                       <tr key={entry.id} className="border-t border-beige-kem/20">
                         <td className="px-4 py-3 whitespace-nowrap">
@@ -183,7 +185,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
                         <td className="px-4 py-3">
                           {KIND_LABEL[entry.kind]}
                           {entry.eventTitle && (
-                            <span className="block text-[13px] text-ink-soft">
+                            <span className="block text-meta text-ink-soft">
                               {entry.eventTitle}
                             </span>
                           )}
@@ -210,7 +212,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
               <button
                 onClick={() => void loadMore()}
                 disabled={loadingMore}
-                className="rounded-xl border-2 border-beige-kem px-5 py-2.5 font-mono text-xs font-bold text-beige-kem transition hover:bg-surface-2 disabled:opacity-50"
+                className="rounded-xl border-2 border-beige-kem px-5 py-2.5 font-meta text-eyebrow font-bold text-beige-kem transition hover:bg-surface-2 disabled:opacity-50"
               >
                 {loadingMore ? "Đang tải..." : "Xem thêm"}
               </button>

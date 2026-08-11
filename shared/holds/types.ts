@@ -20,6 +20,8 @@ export interface HoldRequest {
 export interface ReservationPatch {
   add?: Omit<HoldRequest, 'showtimeId'> & { showtimeId?: number };
   removeSeatIds?: number[];
+  /** General admission: give quantity back to a tier. The seated equivalent is `removeSeatIds`. */
+  removeQuantity?: { ticketTierId: number; quantity: number };
 }
 
 export interface ReservationItem {

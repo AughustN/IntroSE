@@ -105,12 +105,12 @@ export function SectionHead({
       <div className="mt-5 flex flex-col gap-3 border-b border-beige-kem/25 pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="label-eyebrow text-ink-soft">{eyebrow}</p>
-          <h2 className="mt-2 font-display text-4xl font-black leading-none text-beige-kem sm:text-5xl">
+          <h2 className="mt-2 font-display text-title-l font-black leading-none text-beige-kem sm:text-title-l">
             {title}
           </h2>
         </div>
         <div className="flex items-center gap-5">
-          {meta && <span className="font-mono text-xs text-ink-soft">{meta}</span>}
+          {meta && <span className="font-meta text-eyebrow text-ink-soft">{meta}</span>}
           {actionLabel && onAction && (
             <button
               type="button"

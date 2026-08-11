@@ -60,10 +60,13 @@ export default function ConfirmDialog({
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-md rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6"
       >
-        <h2 id="confirm-title" className="font-display text-2xl font-black text-beige-kem">
+        <h2 id="confirm-title" className="font-display text-title-m font-black text-beige-kem">
           {title}
         </h2>
-        <p id="confirm-message" className="mt-3 whitespace-pre-line text-sm leading-6 text-beige-kem/70">
+        <p
+          id="confirm-message"
+          className="mt-3 whitespace-pre-line text-body leading-6 text-beige-kem/70"
+        >
           {message}
         </p>
 
@@ -71,14 +74,16 @@ export default function ConfirmDialog({
           <button
             ref={cancelRef}
             onClick={onCancel}
-            className="rounded-xl border-2 border-beige-kem px-4 py-2.5 font-mono text-sm text-beige-kem/80 transition hover:border-beige-kem/40 hover:text-beige-kem"
+            className="rounded-xl border-2 border-beige-kem px-4 py-2.5 font-meta text-body text-beige-kem/80 transition hover:border-beige-kem/40 hover:text-beige-kem"
           >
             {cancelLabel}
           </button>
           <button
             onClick={onConfirm}
-            className={`rounded-xl px-4 py-2.5 font-mono text-sm font-bold text-beige-kem transition ${
-              tone === "danger" ? "bg-burgundy hover:brightness-95" : "bg-cam-dat hover:brightness-95"
+            className={`rounded-xl px-4 py-2.5 font-meta text-body font-bold text-beige-kem transition ${
+              tone === "danger"
+                ? "bg-burgundy hover:brightness-95"
+                : "bg-cam-dat hover:brightness-95"
             }`}
           >
             {confirmLabel}

@@ -14,6 +14,11 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    // Fail rather than drift. Google OAuth authorises one JavaScript origin for this app —
+    // http://localhost:3000 — so a Vite that quietly falls forward to 3001 because something
+    // else holds 3000 produces a dev server that looks fine and rejects every Google sign-in
+    // with `Error 400: origin_mismatch`. Refusing to start says which port is taken, immediately.
+    strictPort: true,
     proxy: {
       // 127.0.0.1 (not localhost) → force IPv4 to match Express's bind and avoid the
       // Windows localhost→::1 ECONNREFUSED on the dev proxy.
