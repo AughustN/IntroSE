@@ -365,6 +365,9 @@ describe('US3 – System settings', () => {
         wallet_topup_max: 0,
         wallet_balance_ceiling: 0,
         ai_features_enabled: false,
+        // Zero is a real setting, not an omission: it stops every outbound AI call (feature 008).
+        ai_platform_request_ceiling: 0,
+        ai_platform_window_hours: 1,
       };
       const res = await request(app).put('/api/admin/settings').set(a.h).send(min).expect(200);
       expect(res.body.seat_hold_ttl_minutes).toBe(1);
@@ -382,6 +385,8 @@ describe('US3 – System settings', () => {
         wallet_topup_max: 1000,
         wallet_balance_ceiling: 10000,
         ai_features_enabled: true,
+        ai_platform_request_ceiling: 1_000_000,
+        ai_platform_window_hours: 720,
       };
       const res = await request(app).put('/api/admin/settings').set(a.h).send(max).expect(200);
       expect(res.body.seat_hold_ttl_minutes).toBe(30);

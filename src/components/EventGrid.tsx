@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useMemo, useRef, useState } from "react";
 import { Heart } from "lucide-react";
 import { MovieEvent } from "../types";
 import { formatEventDate } from "../services/formatDate";
@@ -41,6 +42,16 @@ interface EventGridProps {
    * Its presence also narrows the grid from four columns to three.
    */
   sidebar?: React.ReactNode;
+  /**
+   * Cards per page.
+   *
+   * The whole catalog is now in memory — the browse page filters in the browser, so it has to be —
+   * and a page that renders five hundred stills at once is a page nobody scrolls to the end of. The
+   * `catalog` variant splits the list and draws controls; the `landing` band simply takes the first
+   * page, which is what it always effectively showed. Growing the catalog therefore adds pages
+   * rather than length, with no further change here.
+   */
+  pageSize?: number;
 }
 
 /**
@@ -63,8 +74,43 @@ const statusMeta: Record<
   available: { label: "Còn vé", className: "text-ink-soft", onImage: "text-white/75" },
   low: { label: "Còn vé", className: "text-ink-soft", onImage: "text-white/75" },
   sold_out: { label: "Hết vé", className: "text-burgundy-ink", onImage: "text-cam-dat" },
+  // Quiet, not alarming: a finished event is not a disappointment the way a sold-out one is. It is
+  // simply the archive, so it takes the same soft ink "Còn vé" does rather than the warning red.
+  finished: { label: "Đã diễn", className: "text-ink-soft", onImage: "text-white/70" },
   cancelled: { label: "Đã hủy", className: "text-burgundy-ink", onImage: "text-cam-dat" },
 };
+
+/**
+ * Whether the card's buy control is dead.
+ *
+ * The same test was written out three times below, which is how `finished` would have been added to
+ * two of them and forgotten in the third. One name, one place to extend.
+ */
+const isUnbookable = (status: MovieEvent["status"]): boolean =>
+  status === "sold_out" || status === "finished" || status === "cancelled";
+
+/**
+ * Which page numbers to draw.
+ *
+ * Every number up to seven pages; beyond that, the first, the last, the current and its neighbours,
+ * with an ellipsis standing in for each run that was dropped. `null` is the ellipsis — a marker
+ * rather than a string so the renderer cannot mistake it for a page called "…".
+ */
+function pageWindow(current: number, total: number): Array<number | null> {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+
+  const near = [current - 1, current, current + 1].filter((n) => n > 1 && n < total);
+  const shown = [1, ...near, total];
+
+  const out: Array<number | null> = [];
+  let previous = 0;
+  for (const n of shown) {
+    if (n - previous > 1) out.push(null);
+    out.push(n);
+    previous = n;
+  }
+  return out;
+}
 
 /**
  * This band's own measure, wider than the site's.
@@ -112,7 +158,7 @@ function RuledCard({
   onToggleWishlist,
 }: CardProps & { isActiveHero: boolean }) {
   const meta = statusMeta[evt.status];
-  const bookingDisabled = evt.status === "sold_out" || evt.status === "cancelled";
+  const bookingDisabled = isUnbookable(evt.status);
 
   /*
    * The hover fill is the card's only *static* way of saying "this is one object". `surface-2`
@@ -286,7 +332,7 @@ function RuledCard({
 /** The catalog page's card: no frame at all, three lines of type under the still. */
 function PlainCard({ evt, isWishlisted, onSelectEvent, onBookNow, onToggleWishlist }: CardProps) {
   const meta = statusMeta[evt.status];
-  const bookingDisabled = evt.status === "sold_out" || evt.status === "cancelled";
+  const bookingDisabled = isUnbookable(evt.status);
 
   return (
     <article onClick={() => onBookNow(evt)} className="group cursor-pointer">
@@ -415,9 +461,51 @@ export default function EventGrid({
   onViewAll,
   variant = "landing",
   sidebar,
+  pageSize = 20,
 }: EventGridProps) {
   const featuredEvents = events.filter((evt) => evt.isFeatured).slice(0, 2);
   const catalog = variant === "catalog";
+  // Anything a reader could actually pay for. `isUnbookable` already knows what that excludes, so
+  // the heading below cannot drift from what the cards say.
+  const bookableCount = events.filter((evt) => !isUnbookable(evt.status)).length;
+
+  const [page, setPage] = useState(1);
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  const pageCount = Math.max(1, Math.ceil(events.length / pageSize));
+
+  /*
+   * Back to the first page whenever the result set changes.
+   *
+   * `events` is the caller's memoised filtered list, so its identity changes exactly when a filter
+   * does — which is also the only moment page seven can stop existing. Without this, narrowing a
+   * search from twelve pages to two leaves the reader looking at an empty grid and no obvious
+   * reason why.
+   *
+   * Adjusted during render against a remembered previous value, not in an effect. React supports
+   * setting a component's own state while rendering it and re-runs the render immediately, before
+   * anything is committed; the effect version would paint the wrong page first and then correct
+   * itself, and it is what `react-hooks/set-state-in-effect` exists to catch.
+   */
+  const [previousEvents, setPreviousEvents] = useState(events);
+  if (previousEvents !== events) {
+    setPreviousEvents(events);
+    setPage(1);
+  }
+
+  // Clamped anyway: `pageSize` can change under a page that is still valid for the old one.
+  const current = Math.min(page, pageCount);
+  const visible = useMemo(
+    () => (catalog ? events.slice((current - 1) * pageSize, current * pageSize) : events.slice(0, pageSize)),
+    [events, catalog, current, pageSize],
+  );
+
+  const goToPage = (next: number) => {
+    setPage(next);
+    // The reader is at the bottom of the grid when they press "Sau"; without this they land on a
+    // new page already scrolled past its first two rows.
+    gridRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   return (
     /*
@@ -430,7 +518,20 @@ export default function EventGrid({
         <SectionHead
           eyebrow="Đang mở bán"
           title="Khám phá lịch diễn"
-          meta={`${events.length} sự kiện`}
+          /*
+           * How many, and how many you can actually buy.
+           *
+           * A bare count is the first thing the eye lands on and the last thing that is checked
+           * against the cards under it. Filtering to "Âm nhạc" here returns 160 events of which 159
+           * have already happened and one is sold out — every card says so, in small type, one at a
+           * time, while the heading says "160 sự kiện" and is believed. The second number is only
+           * printed when it disagrees with the first, so a normal result set stays uncluttered.
+           */
+          meta={
+            bookableCount === events.length
+              ? `${events.length} sự kiện`
+              : `${events.length} sự kiện · ${bookableCount} còn vé`
+          }
           actionLabel={onViewAll ? "Xem tất cả" : undefined}
           onAction={onViewAll}
         />
@@ -466,10 +567,10 @@ export default function EventGrid({
                   <div className="mt-6 flex flex-wrap items-center gap-6">
                     <button
                       onClick={() => onBookNow(evt)}
-                      disabled={evt.status === "sold_out" || evt.status === "cancelled"}
+                      disabled={isUnbookable(evt.status)}
                       className="label-eyebrow inline-flex items-center gap-2 text-white transition hover:text-cam-dat disabled:cursor-not-allowed disabled:text-white/35"
                     >
-                      {evt.status === "sold_out" ? "Hết vé" : "Mua vé"}
+                      {isUnbookable(evt.status) ? statusMeta[evt.status].label : "Mua vé"}
                       <span aria-hidden="true">&gt;</span>
                     </button>
                     <button
@@ -503,7 +604,7 @@ export default function EventGrid({
           <aside className="lg:sticky lg:top-24 lg:h-fit lg:w-60 lg:shrink-0">{sidebar}</aside>
         )}
 
-        <div className="min-w-0 flex-1">
+        <div ref={gridRef} className="min-w-0 flex-1 scroll-mt-24">
           {events.length === 0 ? (
             <div className="hud-dashed mx-auto max-w-lg px-4 py-20 text-center">
               <h3 className="font-display text-title-s font-semibold text-beige-kem">
@@ -531,7 +632,7 @@ export default function EventGrid({
                 sidebar ? "lg:grid-cols-3" : "lg:grid-cols-4"
               }`}
             >
-              {events.map((evt) => (
+              {visible.map((evt) => (
                 <PlainCard
                   key={evt.id}
                   evt={evt}
@@ -554,7 +655,7 @@ export default function EventGrid({
              * solid block of ink where the fifth and sixth cards are not.
              */
             <div className="grid grid-flow-dense grid-cols-1 border-l border-t border-beige-kem/45 sm:grid-cols-2 lg:grid-cols-4">
-              {events.map((evt) => (
+              {visible.map((evt) => (
                 <RuledCard
                   key={evt.id}
                   evt={evt}
@@ -566,6 +667,73 @@ export default function EventGrid({
                 />
               ))}
             </div>
+          )}
+
+          {/*
+            Pagination, on the catalog only.
+
+            Ruled off the grid rather than boxed, and set in the page's own meta type — this is the
+            same furniture the filter rail and the card meta lines use, not a widget borrowed from
+            somewhere else. It renders only when there is more than one page, so a short result set
+            is not told it is on page one of one.
+          */}
+          {catalog && pageCount > 1 && (
+            <nav
+              aria-label="Phân trang danh sách sự kiện"
+              className="mt-14 flex flex-wrap items-center justify-between gap-x-8 gap-y-4 border-t border-beige-kem/25 pt-6"
+            >
+              <p className="font-meta text-meta text-ink-soft">
+                {(current - 1) * pageSize + 1}–{Math.min(current * pageSize, events.length)} trong{" "}
+                {events.length} sự kiện
+              </p>
+
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
+                <button
+                  type="button"
+                  onClick={() => goToPage(current - 1)}
+                  disabled={current === 1}
+                  className="label-eyebrow px-2 py-1 text-ink-soft transition hover:text-beige-kem disabled:cursor-not-allowed disabled:text-ink-soft/40"
+                >
+                  ‹ Trước
+                </button>
+
+                {pageWindow(current, pageCount).map((n, index) =>
+                  n === null ? (
+                    // Not a button, and not reachable: it stands for pages, it is not one.
+                    <span
+                      key={`gap-${index}`}
+                      aria-hidden="true"
+                      className="px-1 font-meta text-meta text-ink-soft/50"
+                    >
+                      …
+                    </span>
+                  ) : (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => goToPage(n)}
+                      aria-current={n === current ? "page" : undefined}
+                      className={`min-w-8 px-2 py-1 font-meta text-meta tabular-nums transition ${
+                        n === current
+                          ? "border-b-2 border-burgundy font-bold text-beige-kem"
+                          : "text-ink-soft hover:text-beige-kem"
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  ),
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => goToPage(current + 1)}
+                  disabled={current === pageCount}
+                  className="label-eyebrow px-2 py-1 text-ink-soft transition hover:text-beige-kem disabled:cursor-not-allowed disabled:text-ink-soft/40"
+                >
+                  Sau ›
+                </button>
+              </div>
+            </nav>
           )}
         </div>
       </div>

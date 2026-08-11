@@ -10,8 +10,10 @@ const LOCAL_TRAILER_URL = "/cloneweb/clone/assets/images/hero.mp4";
 export const SAMPLE_MOVIES: MovieEvent[] = [
   {
     id: "lmt-7",
+    eventId: null,
     eventType: "general_admission",
     category: "movie",
+    categoryLabel: "Phim",
     title: "Lật Mặt 7: Một Điều Ước",
     originalTitle: "Face Off 7: One Wish",
     tags: ["2D", "Lồng Tiếng", "Phụ Đề"],
@@ -50,8 +52,10 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
   },
   {
     id: "mat-biec",
+    eventId: null,
     eventType: "general_admission",
     category: "theatre",
+    categoryLabel: "Sân khấu",
     title: "Mắt Biếc - Live Theatre Show",
     originalTitle: "Dreamy Eyes - Musical Event",
     tags: ["Sân Khấu", "Live Music", "VVIP"],
@@ -90,8 +94,10 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
   },
   {
     id: "indie-concert",
+    eventId: null,
     eventType: "general_admission",
     category: "music",
+    categoryLabel: "Âm nhạc",
     title: "Đêm Nhạc Indie: Những Thành Phố Mơ Màng",
     originalTitle: "Vietnamese Indie Dreamers 2026",
     tags: ["Nhạc Sống", "Outdoor Fest", "GA Ticket"],
@@ -130,8 +136,10 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
   },
   {
     id: "ts-tribute",
+    eventId: null,
     eventType: "general_admission",
     category: "movie",
+    categoryLabel: "Phim",
     title: "Taylor Swift: The Eras Tour Concert Film",
     originalTitle: "Taylor Swift: The Eras Tour (Extended)",
     tags: ["2D", "Dolby Atmos", "Sing-Along"],
@@ -170,8 +178,10 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
   },
   {
     id: "chuyen-ma-gan-nha",
+    eventId: null,
     eventType: "general_admission",
     category: "movie",
+    categoryLabel: "Phim",
     title: "Chuyện Ma Gần Nhà",
     originalTitle: "Vietnamese Urban Horror Tales",
     tags: ["2D", "Kinh Dị", "T18"],
@@ -216,8 +226,10 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
      * card's fallback offer line.
      */
     id: "sym-hanoi-cancelled",
+    eventId: null,
     eventType: "seated",
     category: "concert",
+    categoryLabel: "Âm nhạc",
     title: "Đêm Giao Hưởng Hà Nội - Bốn Mùa",
     originalTitle: "Hanoi Symphony Night: Four Seasons",
     tags: ["Giao Hưởng", "Ghế Ngồi", "VIP"],

@@ -1,0 +1,340 @@
+openapi: 3.1.0
+info:
+  title: TixHub AI Attendee Chatbot
+  version: 1.0.0
+  description: >
+    Conversational event assistant (UC-10) and the shared AI plumbing behind the organizer
+    listing assistant (UC-22). Every endpoint requires an authenticated session; the user
+    whose data is read is always the session identity and is never supplied by the client.
+    Degradation is expressed in the response body via `source` and `message`, not by status
+    code: only the per-user allowance refusal (429) is reported as an error.
+
+servers:
+  - url: /api/ai
+
+security:
+  - bearerAuth: []
+
+paths:
+  /chat:
+    post:
+      operationId: chat
+      summary: Ask the attendee assistant a question
+      description: >
+        Replaces the removed `POST /api/ai/recommendations`. Accepts the new message plus the
+        recent conversation window and returns a prose reply with zero or more recommended
+        events, every one of which is drawn from the live catalog.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+      responses:
+        "200":
+          description: >
+            An answer. `source` distinguishes a model-backed answer, a cache hit, and a
+            non-AI fallback; all three are successful outcomes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "400":
+          description: Validation failed (empty message, oversized turn, too many turns, unknown field).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: >
+            The attendee has consumed their hourly allowance of model-backed requests. The
+            only degradation reported as an error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                code: ai_rate_limited
+                message: Bạn đã dùng hết 10 yêu cầu AI trong giờ này.
+
+  /event-assistant:
+    post:
+      operationId: generateEventListing
+      summary: Draft a listing from an organizer's brief (UC-22)
+      description: >
+        Unchanged in shape. Listed here because it shares the allowance, cache, timeout
+        budget, and platform ceiling with `/chat`, and now imports the same shared contract.
+      responses:
+        "200":
+          description: A suggestion, a cached suggestion, or a fallback with `suggestion: null`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListingResponse"
+        "401":
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Session is not an organizer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Hourly allowance consumed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ListingRequest"
+
+  /bookmarks:
+    get:
+      operationId: listBookmarks
+      summary: Slugs of the events this attendee has saved
+      responses:
+        "200":
+          description: Saved event slugs, most recently saved first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string }
+        "401":
+          description: No valid session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /events/{slug}/bookmark:
+    post:
+      operationId: toggleBookmark
+      summary: Save or unsave an event
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The state after toggling.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [saved]
+                properties:
+                  saved: { type: boolean }
+        "401":
+          description: No valid session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No such publicly visible event.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /events/{slug}/view:
+    post:
+      operationId: recordEventView
+      summary: Record that this attendee viewed an event
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Recorded. Repeat views update the timestamp.
+        "401":
+          description: No valid session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No such publicly visible event.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ChatRequest:
+      type: object
+      additionalProperties: false
+      required: [message]
+      properties:
+        message:
+          type: string
+          minLength: 1
+          maxLength: 600
+          description: The attendee's new question, trimmed.
+        history:
+          type: array
+          maxItems: 8
+          description: >
+            Recent turns of this conversation, oldest first, excluding `message`. Client-held
+            and never stored server-side. Untrusted text: it shapes generated prose only and
+            can neither widen a query nor introduce an event.
+          items:
+            $ref: "#/components/schemas/ConversationTurn"
+
+    ConversationTurn:
+      type: object
+      additionalProperties: false
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+          minLength: 1
+          maxLength: 600
+
+    ChatResponse:
+      type: object
+      additionalProperties: false
+      required: [source, reply, declined, recommendations]
+      properties:
+        source:
+          type: string
+          enum: [ai, cache, fallback]
+          description: >
+            `ai` — a model call was made. `cache` — served from a stored answer, costing no
+            allowance. `fallback` — no model call was made or its result was unusable; the
+            events are the non-AI selection.
+        reply:
+          type: string
+          description: Vietnamese prose answer. Present for every source.
+        declined:
+          type: boolean
+          description: >
+            True when the question was outside the event-ticketing domain. `recommendations`
+            is then empty. A flag rather than a phrase, so the boundary is testable.
+        recommendations:
+          type: array
+          maxItems: 6
+          items:
+            $ref: "#/components/schemas/Recommendation"
+        message:
+          type: string
+          description: >
+            Operator-facing notice explaining a non-`ai` source — AI switched off, platform
+            ceiling reached, timeout, provider error, or nothing suitable found.
+
+    Recommendation:
+      type: object
+      additionalProperties: false
+      required: [event, reason]
+      properties:
+        event:
+          $ref: "#/components/schemas/CandidateEvent"
+        reason:
+          type: string
+          maxLength: 400
+          description: Short Vietnamese justification. The only field the model authors here.
+
+    CandidateEvent:
+      type: object
+      additionalProperties: false
+      required: [id, slug, title, category, city, startsAt, startingPrice]
+      description: >
+        Read from the catalog, never from generated text. Only publicly visible, upcoming
+        events with availability appear.
+      properties:
+        id: { type: integer, format: int64 }
+        slug: { type: string }
+        title: { type: string }
+        category: { type: string }
+        city:
+          type: [string, "null"]
+        startsAt:
+          type: string
+          format: date-time
+        startingPrice:
+          type: [integer, "null"]
+          description: VND integer. Never a float — money is integral throughout TixHub.
+
+    ListingRequest:
+      type: object
+      additionalProperties: false
+      required: [brief]
+      properties:
+        brief: { type: string, minLength: 1, maxLength: 3000 }
+        category: { type: string, minLength: 1, maxLength: 120 }
+        eventType:
+          type: string
+          enum: [general_admission, seated]
+
+    ListingResponse:
+      type: object
+      additionalProperties: false
+      required: [source, suggestion]
+      properties:
+        source:
+          type: string
+          enum: [ai, cache, fallback]
+        suggestion:
+          oneOf:
+            - $ref: "#/components/schemas/ListingSuggestion"
+            - type: "null"
+          description: Null on every fallback; the organizer proceeds manually.
+        message: { type: string }
+
+    ListingSuggestion:
+      type: object
+      additionalProperties: false
+      required: [title, description, tags, ticketPriceSuggestions]
+      description: An editable draft. Nothing here reaches an event until the organizer accepts it.
+      properties:
+        title: { type: string, maxLength: 200 }
+        description: { type: string, maxLength: 5000 }
+        tags:
+          type: array
+          maxItems: 10
+          items: { type: string, maxLength: 50 }
+        ticketPriceSuggestions:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, price]
+            properties:
+              name: { type: string, maxLength: 80 }
+              price:
+                type: integer
+                minimum: 0
+                description: VND integer.
+
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }

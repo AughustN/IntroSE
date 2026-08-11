@@ -318,6 +318,29 @@ select:focus-visible {
 }
 
 /*
+ * Two holes punched through the left and right edges, at whatever height the caller says.
+ *
+ * `ticket-corners` bites the four corners and the top/bottom perforation; this is its side-edge
+ * sibling, for the seam where a stub tears off. Both are masks rather than painted circles, and the
+ * difference is the whole point: a cream circle laid on top of a card is a sticker — the card's
+ * shadow still runs behind it, so the "hole" sits proud of the thing it is supposed to be a hole in.
+ * A mask removes the pixels, so the page shows through and the shadow ends at the edge of the bite.
+ *
+ * `--punch-y` is set from the element, because the seam is wherever the header happens to end and
+ * that changes with the text inside it.
+ */
+@utility ticket-punch {
+  --punch-r: 16px;
+  --punch-y: 50%;
+  mask:
+    radial-gradient(circle var(--punch-r) at 0 var(--punch-y), #0000 98%, #000 100%),
+    radial-gradient(circle var(--punch-r) at 100% var(--punch-y), #0000 98%, #000 100%);
+  /* Keep only what both layers keep, so each circle is removed rather than one cancelling the other. */
+  mask-composite: intersect;
+  -webkit-mask-composite: source-in;
+}
+
+/*
  * No outline, like Siena's. The silhouette is carried entirely by the fill and the punched corners.
  *
  * That works over the hero, where a cream ticket sits on a dark still. It is weakest in light mode
@@ -711,6 +734,56 @@ select:focus-visible {
   }
   to {
     transform: translate3d(-50%, 0, 0);
+  }
+}
+
+/*
+ * The assistant composing a reply.
+ *
+ * Three dots lifting in turn, the shape every messaging app uses for "still typing" — which is the
+ * point: a reader already knows what it means and does not have to be told. It sits in a real
+ * message bubble rather than beside the send button, because what is being waited on is the other
+ * side's answer, not the delivery of your own message.
+ *
+ * `animation-delay` is negative so all three are already mid-cycle on the first frame; starting
+ * them at zero makes the row sit flat for a beat before it begins, which reads as a stall.
+ */
+@keyframes chat-typing {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+.chat-dot {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: chat-typing 1.2s ease-in-out infinite;
+}
+.chat-dot:nth-child(1) {
+  animation-delay: -1.2s;
+}
+.chat-dot:nth-child(2) {
+  animation-delay: -1s;
+}
+.chat-dot:nth-child(3) {
+  animation-delay: -0.8s;
+}
+
+/* Someone who has asked for less motion is told the same thing by a steady row of dots. */
+@media (prefers-reduced-motion: reduce) {
+  .chat-dot {
+    animation: none;
+    opacity: 0.6;
   }
 }
 

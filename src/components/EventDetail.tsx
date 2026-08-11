@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Showtime } from "@/shared/catalog/types";
 import { MovieEvent, TicketTier } from "../types";
+import ReviewSection from "./reviews/ReviewSection";
 import { catalogClient } from "../services/catalogClient";
 import { formatEventDate } from "../services/formatDate";
 import { watchShowtime } from "../services/seatSocket";
@@ -67,10 +68,11 @@ interface EventDetailProps {
   holdRemainingMs: number;
 }
 
-const statusLabels = {
+const statusLabels: Record<MovieEvent["status"], string> = {
   available: "Còn vé",
   low: "Sắp hết vé",
   sold_out: "Hết vé",
+  finished: "Đã diễn",
   cancelled: "Đã hủy",
 };
 
@@ -192,7 +194,9 @@ export default function EventDetail({
   }, [slots, selectedSlotKey]);
 
   const selectedSlot = slots.find((s) => s.key === selectedSlotKey) ?? null;
-  const eventUnavailable = event.status === "sold_out" || event.status === "cancelled";
+  // `finished` joins the other two: the event is still readable, but nothing on it is buyable.
+  const eventUnavailable =
+    event.status === "sold_out" || event.status === "finished" || event.status === "cancelled";
 
   /**
    * Live tier availability for the selected showtime (US3): when anyone reserves or releases a
@@ -752,6 +756,14 @@ export default function EventDetail({
               ))}
             </div>
           </section>
+        )}
+        {/*
+          Reviews close the page, below everything about buying.
+          Rendered only for a real catalogue event: the dev-only sample data has no server row to
+          attach reviews to, and asking the API about id `null` would be a 400 on every sample.
+        */}
+        {event.eventId !== null && (
+          <ReviewSection eventId={event.eventId} isSignedIn={isSignedIn} />
         )}
       </BookingLayout>
     </div>

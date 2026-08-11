@@ -1,5 +1,11 @@
 // Public catalog data layer plus authed organizer/admin calls.
-import type { EventDetail, EventListResponse, SeatMap, Showtime } from "@/shared/catalog/types";
+import type {
+  EventCard,
+  EventDetail,
+  EventListResponse,
+  SeatMap,
+  Showtime,
+} from "@/shared/catalog/types";
 import type {
   ApplyPreview,
   Layout,
@@ -208,14 +214,21 @@ export const adminApi = {
     authed<{ ok: true }>(`/admin/events/${id}/remove`, { method: "POST", body: {} }),
 };
 
-export const EVENT_CATEGORIES = [
-  { code: "music", label: "Âm nhạc" },
-  { code: "workshop", label: "Workshop" },
-  { code: "theatre", label: "Sân khấu" },
-  { code: "community", label: "Cộng đồng" },
-  { code: "sports", label: "Thể thao" },
-  { code: "exhibition", label: "Triển lãm" },
-];
+/**
+ * The catalogue's categories, fetched.
+ *
+ * This was a six-entry constant while the database held thirteen. Seven categories — `business`,
+ * `other`, `technology`, `health`, `family`, `food`, `travel`, between them 287 events — could not
+ * be chosen by anyone creating an event, and a category an Admin added through the console saved
+ * successfully and then appeared nowhere. Categories are Admin-managed data (UC-35); a copy of them
+ * compiled into the bundle can only ever be a stale second opinion.
+ */
+export interface EventCategory {
+  id: number;
+  code: string;
+  labelVi: string;
+  labelEn: string | null;
+}
 
 export interface CatalogQuery {
   q?: string;
@@ -226,6 +239,8 @@ export interface CatalogQuery {
   maxPrice?: number;
   availability?: "available" | "all";
   page?: number;
+  /** Cards per request. Server default 20, server ceiling 200. */
+  pageSize?: number;
 }
 
 export const catalogClient = {
@@ -235,6 +250,30 @@ export const catalogClient = {
       if (v !== undefined && v !== "") qs.set(k, String(v));
     const s = qs.toString();
     return get<EventListResponse>(`/events${s ? `?${s}` : ""}`);
+  },
+  /**
+   * The whole catalog, however many requests that takes.
+   *
+   * The browse page filters in the browser, so it cannot work from one page of results: a category
+   * with nothing on the first page would look empty, and the price rule's far end is the dearest of
+   * whatever survived the other filters — it has to see them all. `total` comes back with the first
+   * response, so the remaining pages are known at once and fetched together rather than in a chain.
+   */
+  async listAllEvents(params: Omit<CatalogQuery, "page" | "pageSize"> = {}): Promise<EventCard[]> {
+    const pageSize = 200;
+    const first = await this.listEvents({ ...params, page: 1, pageSize });
+    const pages = Math.ceil(first.total / pageSize);
+    if (pages <= 1) return first.events;
+
+    const rest = await Promise.all(
+      Array.from({ length: pages - 1 }, (_, i) =>
+        this.listEvents({ ...params, page: i + 2, pageSize }),
+      ),
+    );
+    return [first.events, ...rest.map((r) => r.events)].flat();
+  },
+  listCategories(): Promise<EventCategory[]> {
+    return get<EventCategory[]>("/categories");
   },
   getEvent(slug: string): Promise<EventDetail> {
     return get<EventDetail>(`/events/${encodeURIComponent(slug)}`);

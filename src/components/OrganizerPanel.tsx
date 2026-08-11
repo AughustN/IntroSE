@@ -5,7 +5,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Select from "./Select";
-import { EVENT_CATEGORIES, MyEvent, MyVenue, organizerApi } from "../services/catalogClient";
+import { catalogClient, type EventCategory, MyEvent, MyVenue, organizerApi } from "../services/catalogClient";
 import { aiClient, type ListingSuggestion } from "../services/aiClient";
 import SeatMapBuilder from "./SeatMapBuilder";
 
@@ -47,6 +47,16 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
   // create-event form
   const [title, setTitle] = useState("");
   const [categoryCode, setCategoryCode] = useState("music");
+  /*
+   * The categories on offer, from the API rather than from a constant.
+   *
+   * Admin owns this list (UC-35), so the only correct source is the server. The constant that used
+   * to be here had gone stale — six entries against thirteen in the database — which meant a
+   * category an Admin created was saved and then unusable, and seven existing categories could not
+   * be picked at all. Empty until the fetch lands; the select simply has nothing to offer for that
+   * moment, which is honest.
+   */
+  const [categories, setCategories] = useState<EventCategory[]>([]);
   const [eventType, setEventType] = useState<"general_admission" | "seated">("general_admission");
   const [description, setDescription] = useState("");
   const [aiBrief, setAiBrief] = useState("");
@@ -79,6 +89,9 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
     try {
       setEvents(await organizerApi.myEvents());
       setVenues(await organizerApi.myVenues());
+      // Categories come with the rest of the panel's data rather than from a separate effect, so
+      // the "set state in an effect" rule has nothing to object to and there is one loader to read.
+      setCategories(await catalogClient.listCategories());
     } catch (e) {
       setErr((e as Error).message);
     }
@@ -202,7 +215,7 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
               triggerClassName={input}
               value={categoryCode}
               onChange={setCategoryCode}
-              options={EVENT_CATEGORIES.map((c) => ({ value: c.code, label: c.label }))}
+              options={categories.map((c) => ({ value: c.code, label: c.labelVi }))}
             />
           </div>
           <div className="block">

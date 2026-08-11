@@ -20,6 +20,21 @@ export interface CheckoutOrder {
   }>;
 }
 
+/**
+ * One row of the buyer's ticket list, straight from the server.
+ *
+ * Wider than `CheckoutOrder` because the tickets page has no other context: checkout already knows
+ * which event it just sold, a list does not.
+ */
+export interface OrderListItem extends CheckoutOrder {
+  eventSlug: string;
+  eventTitle: string;
+  eventImageUrl: string | null;
+  startsAt: string;
+  venueName: string;
+  city: string;
+}
+
 export interface WalletLimits {
   min: number;
   max: number;
@@ -126,6 +141,9 @@ export const walletClient = {
    * VNPay the client polls this instead of trusting what the redirect said.
    */
   getTopup: (id: number): Promise<Topup> => call(`/wallet/topups/${id}`),
+
+  /** Every order this account owns, newest first. The tickets page's real source. */
+  orders: (): Promise<OrderListItem[]> => call("/orders"),
 
   checkout: (reservationId: number): Promise<CheckoutOrder> =>
     call("/checkout", { method: "POST", body: { reservationId } }),

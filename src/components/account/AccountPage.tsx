@@ -22,9 +22,17 @@ interface Props {
   onLogoutAll: () => void;
   onProfileUpdated: (user: Me) => void;
   onManageEvents: () => void;
+  /**
+   * Which section to land on.
+   *
+   * Defaults to the profile. The footer's "Đăng ký làm nhà tổ chức" opens this page *for* the
+   * organizer form, and dropping that reader on the profile with a sidebar to find would undo the
+   * point of the link.
+   */
+  initialSection?: SectionId;
 }
 
-type SectionId = "profile" | "security" | "organizer";
+export type SectionId = "profile" | "security" | "organizer";
 
 const SECTIONS: { id: SectionId; label: string; icon: typeof User }[] = [
   { id: "profile", label: "Hồ sơ", icon: User },
@@ -53,12 +61,13 @@ export default function AccountPage({
   onLogoutAll,
   onProfileUpdated,
   onManageEvents,
+  initialSection = "profile",
 }: Props) {
   const [me, setMe] = useState<Me | null>(null);
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [applications, setApplications] = useState<OrganizerApplicationView[]>([]);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [section, setSection] = useState<SectionId>("profile");
+  const [section, setSection] = useState<SectionId>(initialSection);
   const [notice, setNotice] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);

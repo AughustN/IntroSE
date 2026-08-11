@@ -32,7 +32,7 @@ import {
   venueOwnerUserId,
 } from "./catalog.write.js";
 import {
-  processPendingNotifications,
+  kickNotificationWorker,
   queueAnnouncement,
 } from "../notifications/notifications.service.js";
 import { cancelEvent } from "../payments/tickets.service.js";
@@ -131,7 +131,7 @@ organizerRouter.patch(
     const id = Number(req.params.id);
     await assertEventOwner(req, id);
     const updated = await updateEvent(id, req.body as z.infer<typeof updateEventSchema>);
-    void processPendingNotifications();
+    kickNotificationWorker();
     res.json(updated);
   }),
 );
@@ -168,7 +168,7 @@ organizerRouter.post(
     await assertEventOwner(req, id);
     const body = req.body as z.infer<typeof announcementSchema>;
     const recipients = await queueAnnouncement(pool, id, req.auth!.userId, body.title, body.body);
-    void processPendingNotifications();
+    kickNotificationWorker();
     res.status(202).json({ ok: true, recipients });
   }),
 );

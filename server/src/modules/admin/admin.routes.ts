@@ -5,6 +5,7 @@ import { requireAdmin } from '../../middleware/authz.js';
 import { requireAuth } from '../../middleware/requireAuth.js';
 import { validate } from '../../middleware/validate.js';
 import { listAuditLogs } from './audit.js';
+import { removeAsAdmin as removeReviewAsAdmin } from '../reviews/reviews.service.js';
 import { approveOrganizer, categories, createCategory, dismissReport, featured, moderateEvent, queue, removeCategory, rejectOrganizer, replaceFeaturedEvents, renameCategory, resolveReportedEvent, suspendOrganizer } from './admin.service.js';
 import { getSettings, updateSettings } from './settings.service.js';
 
@@ -20,6 +21,7 @@ const featuredBody = z.object({ events: z.array(z.object({ eventId: z.number().i
 const settingsBody = z.object({
   seat_hold_ttl_minutes: z.number().int().min(1).max(30), topup_grace_minutes: z.number().int().min(1).max(15), absolute_ceiling_minutes: z.number().int().min(2).max(30), max_tickets_per_buyer: z.number().int().min(1).max(50),
   wallet_topup_min: z.number().int().nonnegative(), wallet_topup_max: z.number().int().nonnegative(), wallet_balance_ceiling: z.number().int().nonnegative(), ai_features_enabled: z.boolean(),
+  ai_platform_request_ceiling: z.number().int().nonnegative(), ai_platform_window_hours: z.number().int().min(1).max(720),
 }).strict();
 
 adminRouter.get('/moderation', asyncH(async (_req, res) => { res.json((await queue()).events); }));
@@ -35,6 +37,15 @@ adminRouter.post('/events/:id/remove', validate(optionalReason), asyncH(async (r
 adminRouter.post('/reports/:id/dismiss', validate(optionalReason), asyncH(async (req, res) => { res.json(await dismissReport(req.auth!.userId, id(req), req.body.reason ?? null)); }));
 adminRouter.post('/reports/:id/resolve', validate(reportDecision), asyncH(async (req, res) => { res.json(await resolveReportedEvent(req.auth!.userId, id(req), req.body.decision, req.body.reason)); }));
 adminRouter.get('/audit-logs', asyncH(async (_req, res) => { res.json(await listAuditLogs()); }));
+/*
+ * Moderation removal for a review (009, UC-39 → UC-34).
+ *
+ * Hides rather than erases: the report that prompted it and the audit row it writes both need a
+ * subject an admin can still read. The status change and the audit entry share one transaction, so
+ * a removal without its record is not a state the database can be left in.
+ */
+adminRouter.delete('/reviews/:id', asyncH(async (req, res) => { await removeReviewAsAdmin(req.auth!.userId, id(req)); res.status(204).end(); }));
+
 adminRouter.get('/categories', asyncH(async (_req, res) => { res.json(await categories()); }));
 adminRouter.post('/categories', validate(categoryBody), asyncH(async (req, res) => { res.status(201).json(await createCategory(req.auth!.userId, req.body.labelVi, req.body.labelEn ?? null)); }));
 adminRouter.put('/categories/:id', validate(categoryBody), asyncH(async (req, res) => { res.json(await renameCategory(req.auth!.userId, id(req), req.body.labelVi, req.body.labelEn ?? null)); }));

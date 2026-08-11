@@ -14,17 +14,19 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.server.json --noEmit",
-    "lint": "eslint . && prettier --check ."
+    "lint": "eslint . && prettier --check .",
+    "ai:embedder": "tsx --tsconfig tsconfig.server.json server/src/modules/ai/embedding/embedder.server.ts",
+    "ai:index": "tsx --tsconfig tsconfig.server.json server/src/modules/ai/embedding/index-events.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
+    "@huggingface/transformers": "^4.2.0",
     "@types/qrcode": "^1.5.6",
     "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "google-auth-library": "^9.15.0",
-    "html2canvas": "^1.4.1",
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^1.17.0",
     "motion": "^12.23.24",

@@ -15,6 +15,10 @@ assertNotDemoBranch("The test suite");
 // (vitest.config: fileParallelism false).
 beforeEach(async () => {
   // Auth + catalog tables. event_categories is NOT truncated — it is seed data (0002_catalog.sql).
+  // `ai_usage_windows` is listed explicitly: every other AI table carries a foreign key to users and
+  // is therefore swept by CASCADE, but that one is keyed by window and references nothing. Left out,
+  // the ceiling test would leave the counter at its limit and every later case would silently take
+  // the AI fallback path instead of calling its provider double.
   // audit_logs has an append-only trigger (0004) — TRUNCATE is DDL-level, not row-level, so it is
   // not blocked by the BEFORE UPDATE OR DELETE trigger and stays valid for test isolation.
   await pool.query(
@@ -23,7 +27,8 @@ beforeEach(async () => {
              events, showtimes, ticket_tiers, showtime_seats, audit_logs,
              reservations, reservation_items, orders, payment_transactions, tickets, wallet_transactions,
              content_reports, moderation_actions, moderation_notifications,
-             system_settings, featured_events
+             system_settings, featured_events,
+             ai_usage_windows, event_reviews
      RESTART IDENTITY CASCADE`,
   );
   // The hold throttle is process-wide in-memory state (FR-017) — clear it so a spam test cannot

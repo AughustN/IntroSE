@@ -51,6 +51,12 @@ const SETTINGS_META: Record<string, { label: string; hint: string; min?: number;
   wallet_topup_max: { label: "Nạp tối đa (VND)", hint: "≥ nạp tối thiểu; ≤ số dư tối đa", min: 0 },
   wallet_balance_ceiling: { label: "Số dư tối đa (VND)", hint: "≥ nạp tối đa", min: 0 },
   ai_features_enabled: { label: "Bật tính năng AI", hint: "Bật/Tắt" },
+  ai_platform_request_ceiling: {
+    label: "Trần yêu cầu AI / kỳ",
+    hint: "Toàn nền tảng; 0 = ngừng gọi AI",
+    min: 0,
+  },
+  ai_platform_window_hours: { label: "Độ dài kỳ tính trần AI (giờ)", hint: "1–720", min: 1, max: 720 },
 };
 
 export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps) {

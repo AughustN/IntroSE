@@ -64,11 +64,19 @@ function AccountAvatar({
  * filter reducer use, so a click here and a click on the matching filter chip land on identical
  * state.
  */
+/*
+ * Shortcuts into the catalogue, and every one of these ids has to be a real category code.
+ *
+ * `movie` was not: no event in the catalogue uses it, so "Phim" filtered to nothing and looked like
+ * a broken page rather than an empty category. It is dropped in favour of the two largest categories
+ * that actually exist beside music and theatre. The full list lives in the filter rail, which builds
+ * itself from the catalogue and therefore cannot go stale this way again.
+ */
 const NAV_CATEGORIES = [
   { id: "all", label: "Tất cả" },
   { id: "music", label: "Âm nhạc" },
   { id: "theatre", label: "Sân khấu" },
-  { id: "movie", label: "Phim" },
+  { id: "business", label: "Kinh doanh" },
 ] as const;
 
 /**
@@ -236,6 +244,18 @@ interface HeaderProps {
   onLoginClick: () => void;
   /** The organiser's own event list, `/organizer`. */
   onOrganizerClick: () => void;
+  /** The moderation and settings console, `/admin`. */
+  onAdminClick: () => void;
+  /**
+   * Whether this account is an *approved* organizer, and whether it is an admin.
+   *
+   * These gate what the menu offers, nothing more: both routes are enforced on the server, so a
+   * hidden link is a tidier menu and never a security control (SEC-04). Offering "Quản lý sự kiện"
+   * to everyone signed in was the previous behaviour, and it sent anyone who had not applied to a
+   * page with nothing on it.
+   */
+  isOrganizer: boolean;
+  isAdmin: boolean;
   /** The catalog on its own page, `/events`. */
   onBrowse: () => void;
   onViewGuide: () => void;
@@ -266,6 +286,9 @@ export default function Header({
   onHomeClick,
   onLoginClick,
   onOrganizerClick,
+  onAdminClick,
+  isOrganizer,
+  isAdmin,
   onBrowse,
   onViewGuide,
   onViewAbout,
@@ -574,21 +597,36 @@ export default function Header({
                     <div className="menu-rule" style={rowDelay(RULE_DELAY)} />
                   </div>
 
+                  {/*
+                    Built as a list rather than written out, because two of these rows are now
+                    conditional. `index` drives the stagger of the reveal, so it has to be the row's
+                    position in what is actually rendered — hard-coding 0..3 around a conditional
+                    leaves a hole in the sequence and the rows below it arrive late for no reason.
+                  */}
                   <div className="mt-3 flex flex-col items-start px-4">
-                    <PanelLink label="Vé của tôi" index={0} onClick={run(onViewHistory)} />
-                    {userName ? (
-                      <>
-                        <PanelLink label="Ví TixHub" index={1} onClick={run(onViewWallet)} />
-                        <PanelLink label="Tài khoản" index={2} onClick={run(onLoginClick)} />
-                        <PanelLink
-                          label="Quản lý sự kiện"
-                          index={3}
-                          onClick={run(onOrganizerClick)}
-                        />
-                      </>
-                    ) : (
-                      <PanelLink label="Đăng nhập" index={1} onClick={run(onLoginClick)} />
-                    )}
+                    {(userName
+                      ? [
+                          { label: "Vé của tôi", onClick: onViewHistory },
+                          { label: "Ví TixHub", onClick: onViewWallet },
+                          { label: "Tài khoản", onClick: onLoginClick },
+                          // Only an approved organizer has an event list to manage.
+                          ...(isOrganizer
+                            ? [{ label: "Quản lý sự kiện", onClick: onOrganizerClick }]
+                            : []),
+                          ...(isAdmin ? [{ label: "Trang quản trị", onClick: onAdminClick }] : []),
+                        ]
+                      : [
+                          { label: "Vé của tôi", onClick: onViewHistory },
+                          { label: "Đăng nhập", onClick: onLoginClick },
+                        ]
+                    ).map((row, i) => (
+                      <PanelLink
+                        key={row.label}
+                        label={row.label}
+                        index={i}
+                        onClick={run(row.onClick)}
+                      />
+                    ))}
                   </div>
                 </div>
               </div>

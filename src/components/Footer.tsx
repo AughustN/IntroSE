@@ -14,6 +14,8 @@ interface FooterProps {
    * that accepts an email and does not subscribe anyone is worse than a visibly unfinished one.
    */
   onSubscribe?: (email: string) => void;
+  /** Opens the account page on its "Nhà tổ chức" section, where the application form lives. */
+  onApplyAsOrganizer: () => void;
 }
 
 /** A column of destinations. Every entry here is a route that exists. */
@@ -71,7 +73,7 @@ function NavColumn({
   );
 }
 
-export default function Footer({ onNavigate, onSubscribe }: FooterProps) {
+export default function Footer({ onNavigate, onSubscribe, onApplyAsOrganizer }: FooterProps) {
   const [email, setEmail] = useState("");
 
   return (
@@ -142,7 +144,14 @@ export default function Footer({ onNavigate, onSubscribe }: FooterProps) {
           </div>
         </div>
 
-        {/* The organiser pitch, Doron's affiliate banner in the same slot. */}
+        {/*
+          The organiser pitch, Doron's affiliate banner in the same slot.
+
+          It opens the application form, not the management console. This is the one place in the
+          product aimed at someone who is *not* an organizer yet — sending them to `/organizer` gave
+          them an empty event list and no way to find out what to do about it. The console has its
+          own way in, from the nav menu, and only once an application has been approved.
+        */}
         <div className="hud-dashed mt-14 flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="font-display text-title-m font-black text-beige-kem">
@@ -154,28 +163,21 @@ export default function Footer({ onNavigate, onSubscribe }: FooterProps) {
           </div>
           <button
             type="button"
-            onClick={() => onNavigate("organizer")}
+            onClick={onApplyAsOrganizer}
             className="label-eyebrow inline-flex shrink-0 items-center gap-2 text-beige-kem transition hover:text-burgundy-ink"
           >
-            Mở trang nhà tổ chức
+            Đăng ký làm nhà tổ chức
             <span aria-hidden="true">&gt;</span>
           </button>
         </div>
 
-        <div className="mt-10 flex flex-col gap-3 border-t border-beige-kem/25 pt-6 font-meta text-meta text-ink-soft sm:flex-row sm:items-center sm:justify-between">
+        {/*
+          Copyright alone. "Điều khoản website" used to sit here as well, opening a second terms
+          page beside the "Điều khoản sử dụng" already in the Hỗ trợ column above — two links, two
+          routes, one subject, and no way for a reader to tell which one they wanted.
+        */}
+        <div className="mt-10 border-t border-beige-kem/25 pt-6 font-meta text-meta text-ink-soft">
           <p>© 2026 TixHub</p>
-          {/*
-           * One legal link, not Doron's four. Privacy, terms, disclaimer and refunds all live on
-           * `/chinh-sach` for now; splitting the label into four would advertise pages that do not
-           * exist.
-           */}
-          <button
-            type="button"
-            onClick={() => onNavigate("website-terms")}
-            className="text-left transition hover:text-beige-kem"
-          >
-            Điều khoản website
-          </button>
         </div>
       </div>
     </footer>

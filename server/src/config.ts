@@ -23,6 +23,20 @@ const defaultOpenaiChatUrl = openaiBaseUrl.endsWith("/chat/completions")
   ? openaiBaseUrl
   : `${openaiBaseUrl}/chat/completions`;
 
+/*
+ * Two variables can name the same endpoint, and `OPENAI_CHAT_URL` wins.
+ *
+ * That is a deliberate escape hatch for a gateway whose path is not `/chat/completions`, but it is
+ * also a way to spend an afternoon editing `OPENAI_BASE_URL` and watching nothing change. It is not
+ * in `.env.example`, so anyone who has it has it by choice or by inheritance — say so once at
+ * startup rather than letting the override be invisible.
+ */
+if (process.env.OPENAI_CHAT_URL?.trim() && process.env.OPENAI_BASE_URL?.trim()) {
+  console.warn(
+    `[config] OPENAI_CHAT_URL is set and overrides OPENAI_BASE_URL. Editing OPENAI_BASE_URL will have no effect. Unset one of them.`,
+  );
+}
+
 /**
  * The project runs against three Neon branches, one per job:
  *
@@ -113,11 +127,38 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   wallet_topup_max: 10_000_000,
   wallet_balance_ceiling: 20_000_000,
   ai_features_enabled: true,
+  // The automatic quota guard beneath the manual switch above (UC-10 A3, UC-22 A3, SCAL-03). Model-
+  // backed requests permitted per window across all attendees; at the ceiling every AI operation
+  // serves cache or a non-AI fallback and makes no external call. Zero is a valid emergency value.
+  ai_platform_request_ceiling: 2_000,
+  ai_platform_window_hours: 24,
 } as const;
 
 export const AI_REQUEST_LIMIT = 10;
 export const AI_CACHE_TTL_MS = 60 * 60 * 1000;
-export const AI_REQUEST_TIMEOUT_MS = 60_000;
+/**
+ * How long a model call may run before it is abandoned for the non-AI fallback.
+ *
+ * UC-10 and UC-22 alternative flow A4 say roughly eight seconds, and eight is what this was. The
+ * number was written when the AI row of the technology table still said Gemini; the gateway the
+ * team actually configured serves reasoning models, and measured against the real prompt every one
+ * of them is slower than that budget:
+ *
+ *   alic/deepseek-v4-flash (configured)  18.8 s, 19.8 s   (~1100 reasoning tokens)
+ *   deepseek-v4-flash                    23.1 s
+ *   MiniMax-M2.7                         14.5 s
+ *   Minimax-M3                           3.3 s – 8.7 s    (fastest, but swings ~2.5x)
+ *
+ * At eight seconds every real question timed out and the assistant answered from the non-AI
+ * fallback every time — working exactly as designed, and useless. Twenty-five clears the configured
+ * model with headroom for its variance. Switching the model to `Minimax-M3` would allow ten.
+ *
+ * This is a deliberate, recorded deviation from PERF-05: see the Complexity Tracking table in
+ * specs/008-ai-chatbot/plan.md. The guarantee PERF-05 actually protects is that AI never blocks a
+ * purchase, and that still holds — the call is off the critical path, the page stays interactive,
+ * and the wait is legible because the panel shows a typing indicator throughout.
+ */
+export const AI_REQUEST_TIMEOUT_MS = ms("AI_REQUEST_TIMEOUT_MS", 25_000);
 
 // The env-derived constants below remain for process-only consumers (the sweep, throttles, startup
 // checks) that run outside a request and so have no SettingService cache to read. Request paths —

@@ -53,13 +53,18 @@ interface EventFiltersProps {
    * silently stops matching the moment the catalog moves on.
    */
   dateOptions: string[];
+  /**
+   * The categories present in the catalogue, derived from it — not a fixed list.
+   *
+   * Exactly the reasoning `dateOptions` above already carries, and the one place it was not applied.
+   * The hardcoded three (`movie`, `music`, `theatre`) stopped describing a catalogue that grew to a
+   * dozen: `Phim` matched nothing at all, and `Ca nhạc` matched 461 of 503 events because the
+   * adapter relabelled everything it did not recognise as music.
+   */
+  categoryOptions: ReadonlyArray<{ id: string; label: string }>;
 }
 
-const categories = [
-  { id: "movie", label: "Phim" },
-  { id: "music", label: "Ca nhạc" },
-  { id: "theatre", label: "Kịch" },
-];
+
 
 const cityOptions = ["TP.HCM", "Hà Nội", "Đà Nẵng"];
 
@@ -67,6 +72,7 @@ const availabilityOptions = [
   ["available", "Còn vé"],
   ["low", "Sắp hết"],
   ["sold_out", "Hết vé"],
+  ["finished", "Đã diễn"],
   ["cancelled", "Đã hủy"],
 ] as const;
 
@@ -162,6 +168,7 @@ export default function EventFilters({
   dateOptions,
   variant = "bar",
   resultCount = 0,
+  categoryOptions,
 }: EventFiltersProps) {
   /*
    * Whether there is anything to undo. Drives whether the reset appears at all: a permanently
@@ -234,7 +241,7 @@ export default function EventFilters({
     labels.length === 0 ? undefined : labels.length === 1 ? labels[0] : `${labels.length} mục`;
 
   const categorySummary = summarise(
-    categories.filter((c) => activeCategories.includes(c.id)).map((c) => c.label),
+    categoryOptions.filter((c) => activeCategories.includes(c.id)).map((c) => c.label),
   );
   const citySummary = summarise(activeCities);
   const availabilitySummary = summarise(
@@ -252,7 +259,7 @@ export default function EventFilters({
       active={activeCategories.length === 0}
       onClick={() => onCategoryChange("all")}
     />,
-    ...categories.map((cat) => (
+    ...categoryOptions.map((cat) => (
       <Chip
         key={cat.id}
         label={cat.label}
@@ -426,7 +433,7 @@ export default function EventFilters({
               active={activeCategories.length === 0}
               onClick={() => onCategoryChange("all")}
             />
-            {categories.map((cat) => (
+            {categoryOptions.map((cat) => (
               <OptionRow
                 key={cat.id}
                 label={cat.label}

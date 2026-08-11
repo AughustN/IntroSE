@@ -37,12 +37,12 @@ import {
   sessionFromReservation,
 } from "./services/holdSession";
 import { HoldError, holdsClient } from "./services/holdsClient";
-import { walletClient, WalletError, type Topup } from "./services/walletClient";
+import { walletClient, WalletError, type OrderListItem, type Topup } from "./services/walletClient";
 import WalletPanel from "./components/wallet/WalletPanel";
 import VnpayReturn from "./components/wallet/VnpayReturn";
 import { useHoldCountdown } from "./hooks/useHoldCountdown";
 import BookingHistory from "./components/BookingHistory";
-import AIRecommendationPanel from "./components/AIRecommendationPanel";
+import AIChatPanel from "./components/AIChatPanel";
 import ToastStack, { type ToastKind, type ToastMessage } from "./components/ToastStack";
 import ConfirmDialog, { type ConfirmRequest } from "./components/ConfirmDialog";
 import CheckoutForm from "./components/CheckoutForm";
@@ -60,7 +60,6 @@ import aboutUsMd from "./content/legal/about-us.md?raw";
 import termsOfServiceMd from "./content/legal/terms-of-service.md?raw";
 import websiteTermsMd from "./content/legal/website-terms.md?raw";
 import refundPolicyMd from "./content/legal/refund-policy.md?raw";
-import { ArrowUp } from "lucide-react";
 
 type ThemeMode = "dark" | "light";
 
@@ -171,6 +170,69 @@ function getInitialTheme(): ThemeMode {
   }
 }
 
+/**
+ * Turn a server order into the `Booking` the ticket screens read.
+ *
+ * The two shapes disagree because they were built for different worlds: `Booking` was designed when
+ * an order only ever existed in this browser, so it carries a whole `MovieEvent` and the buyer's
+ * contact details. The server row carries neither — the event is referenced, and the contact fields
+ * were never persisted on the order at all.
+ *
+ * So the event is reconstructed from what the list does return, and the contact fields come back
+ * empty. Nothing on the tickets or ticket-detail screen prints them; they exist on the type because
+ * checkout collects them, not because a saved order remembers them.
+ */
+function bookingFromOrder(order: OrderListItem, known?: MovieEvent): Booking {
+  const startsAt = new Date(order.startsAt);
+  const iso = order.startsAt.slice(0, 10);
+  const time = order.startsAt.slice(11, 16);
+
+  // The catalog's own copy wins when the page happens to have it — it carries the genre, the
+  // description and the rest that a poster and a title cannot supply.
+  const movie: MovieEvent =
+    known ??
+    ({
+      ...SAMPLE_MOVIES[0],
+      id: order.eventSlug,
+      title: order.eventTitle,
+      imageUrl: order.eventImageUrl ?? "",
+      venueName: order.venueName,
+      city: order.city,
+      location: order.venueName,
+      dates: [iso],
+      times: [time],
+    } as MovieEvent);
+
+  return {
+    id: String(order.id),
+    movie,
+    selectedDate: iso,
+    selectedTime: time,
+    selectedSeats: order.tickets.map((ticket, index) => ({
+      id: ticket.seatLabel ?? ticket.tierLabel,
+      row: ticket.seatLabel?.[0] ?? "",
+      number: index + 1,
+      type: "single" as const,
+      price: ticket.unitPriceAmount,
+      isBooked: true,
+    })),
+    customerName: "",
+    customerEmail: "",
+    customerPhone: "",
+    totalPrice: order.totalAmount,
+    serviceFee: 0,
+    discount: 0,
+    finalPrice: order.totalAmount,
+    paymentMethod: "Ví TixHub",
+    deliveryChannel: "email_sms",
+    // A refunded order is one the holder can no longer use, which is what `cancelled` means to them.
+    status: order.status === "paid" ? "paid" : "cancelled",
+    qrStatus: order.tickets.some((t) => t.status === "used") ? "checked_in" : "unused",
+    bookingTime: startsAt.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" }),
+    qrPayload: order.tickets[0]?.ticketCode ?? "",
+  };
+}
+
 export default function App() {
   const [activeScreen, setActiveScreen] = useState<Screen>("home");
   const [theme, setTheme] = useState<ThemeMode>(getInitialTheme);
@@ -232,6 +294,16 @@ export default function App() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [userName, setUserName] = useState("");
   const [isSignedIn, setIsSignedIn] = useState(false);
+  /*
+   * What this account is allowed to see in the nav.
+   *
+   * Both come from the server on every identity read — `isOrganizer` is derived per request from an
+   * *approved* organizers row, so a pending or rejected application does not open the door. These
+   * only decide what is offered: every route behind them is enforced server-side regardless, since
+   * hiding a link is not access control (Principle II, SEC-04).
+   */
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isOrganizer, setIsOrganizer] = useState(false);
   /** Whether `authClient.restore()` has answered yet. See the restore effect below. */
   const [authReady, setAuthReady] = useState(false);
   /**
@@ -268,6 +340,14 @@ export default function App() {
   const bookingShowtimeIdRef = useLatest(bookingShowtimeId);
   const finalBookingRef = useLatest(finalBooking);
   const bookingsHistoryRef = useLatest(bookingsHistory);
+  /*
+   * Read by the ticket loader, which must not re-run when the catalog arrives.
+   *
+   * The catalog only enriches a rebuilt booking — it supplies the genre and description a server
+   * order does not carry. Listing `events` as a dependency would refetch every ticket the moment
+   * the catalog landed, for a detail nothing on the list even prints.
+   */
+  const eventsRef = useLatest(events);
 
   /** An overlay route (see routes.ts): the address bar is the only state the account page needs. */
   const showAccountPage = location.pathname === ACCOUNT_PATH;
@@ -306,6 +386,10 @@ export default function App() {
   const applyIdentity = useCallback((user: Me | null) => {
     const name = user ? user.nickname || user.email : "";
     setUserName(name);
+    // Roles ride along with the identity rather than being fetched separately, so they cannot lag
+    // behind a sign-out and leave an admin link on screen for a visitor.
+    setIsAdmin(user?.isAdmin ?? false);
+    setIsOrganizer(user?.isOrganizer ?? false);
     setAvatarUrl(user?.avatarUrl ?? null);
     setUserEmail(user?.email ?? null);
     cacheValue(USER_CACHE_KEY, name || null);
@@ -319,6 +403,45 @@ export default function App() {
       .bookmarks()
       .then(setWishlistedIds)
       .catch(() => {});
+  }, [isSignedIn]);
+
+  /*
+   * The tickets, from the account rather than from the browser.
+   *
+   * They used to exist only in `localStorage`, written at checkout and never read from anywhere
+   * else — so a purchase made on a phone was invisible on a laptop, and clearing site data wiped
+   * the only copy the buyer could see while the wallet, which reads the server, still showed the
+   * debit. The database always held the order; there was no endpoint to ask for the list.
+   *
+   * The cache stays, one step down: it is what paints the page on the first frame and what survives
+   * an offline reload. The server overwrites it as soon as it answers, so a stale local copy can
+   * never outlive the truth.
+   *
+   * A failure is left alone deliberately. Whatever the cache holds is better than an empty page,
+   * and a network blip should not read as "your tickets are gone".
+   */
+  useEffect(() => {
+    if (!isSignedIn) return;
+    let cancelled = false;
+    void walletClient
+      .orders()
+      .then((orders) => {
+        if (cancelled) return;
+        const catalog = new Map(eventsRef.current.map((event) => [event.id, event]));
+        const rebuilt = orders.map((order) =>
+          bookingFromOrder(order, catalog.get(order.eventSlug)),
+        );
+        setBookingsHistory(rebuilt);
+        try {
+          localStorage.setItem(BOOKINGS_CACHE_KEY, JSON.stringify(rebuilt));
+        } catch (err) {
+          console.error("Failed to cache the ticket list:", err);
+        }
+      })
+      .catch((err) => console.error("Failed to load tickets from the server:", err));
+    return () => {
+      cancelled = true;
+    };
   }, [isSignedIn]);
 
   const dismissToast = useCallback((id: number) => {
@@ -641,9 +764,9 @@ export default function App() {
     };
 
     catalogClient
-      .listEvents({ page: 1 })
-      .then((res) => {
-        const mapped = res.events.map(cardToMovie);
+      .listAllEvents()
+      .then((cards) => {
+        const mapped = cards.map(cardToMovie);
         if (mapped.length === 0) {
           useSamplesInDev("returned no events");
           return;
@@ -734,6 +857,27 @@ export default function App() {
     [events],
   );
 
+  /*
+   * The categories this catalogue actually contains, most populous first.
+   *
+   * Derived, like the dates above, because the alternative was tried and failed silently: a fixed
+   * list of three could not describe a catalogue of a dozen, so "Phim" matched nothing and "Ca nhạc"
+   * matched everything the adapter had quietly relabelled — 461 events of 503. A list built from
+   * the events themselves cannot drift from them.
+   */
+  const categoryOptions = useMemo(() => {
+    const counts = new Map<string, { id: string; label: string; n: number }>();
+    for (const event of events) {
+      if (!event.category) continue;
+      const seen = counts.get(event.category);
+      if (seen) seen.n += 1;
+      else counts.set(event.category, { id: event.category, label: event.categoryLabel || event.category, n: 1 });
+    }
+    return [...counts.values()]
+      .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label, "vi"))
+      .map(({ id, label }) => ({ id, label }));
+  }, [events]);
+
   const relatedEvents = useMemo(() => {
     return events
       .filter((event) => {
@@ -823,27 +967,6 @@ export default function App() {
       localStorage.setItem(BOOKINGS_CACHE_KEY, JSON.stringify(updated));
     } catch (err) {
       console.error("Failed to save bookings history:", err);
-    }
-  };
-
-  const clearHistory = async () => {
-    const wiping = await askConfirm({
-      title: "Xóa lịch sử đặt vé?",
-      message:
-        "Toàn bộ lịch sử đặt vé lưu trên trình duyệt này sẽ bị xóa và không khôi phục được. " +
-        "Vé đã mua không bị ảnh hưởng.",
-      confirmLabel: "Xóa lịch sử",
-      cancelLabel: "Giữ lại",
-      tone: "danger",
-    });
-    if (!wiping) return;
-
-    setBookingsHistory([]);
-    try {
-      localStorage.removeItem(BOOKINGS_CACHE_KEY);
-      LEGACY_BOOKINGS_CACHE_KEYS.forEach((key) => localStorage.removeItem(key));
-    } catch (err) {
-      console.error("Failed to clear local storage:", err);
     }
   };
 
@@ -1344,6 +1467,14 @@ export default function App() {
             window.scrollTo({ top: 0, behavior: "smooth" });
           })
         }
+        onAdminClick={() =>
+          leaveFlow(() => {
+            goTo("admin");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          })
+        }
+        isOrganizer={isOrganizer}
+        isAdmin={isAdmin}
         onBrowse={() => void leaveFlow(() => goTo("browse"))}
         onViewGuide={() => void leaveFlow(() => goTo("about-us"))}
         onViewAbout={() => void leaveFlow(() => goTo("terms-of-service"))}
@@ -1411,6 +1542,7 @@ export default function App() {
                   }
                   activeDate={activeDate}
                   dateOptions={dateOptions}
+                  categoryOptions={categoryOptions}
                   onDateChange={(value) => void goHomeAfterFilter(() => setActiveDate(value))}
                   activeCities={activeCities}
                   onCityChange={(value) =>
@@ -1446,6 +1578,10 @@ export default function App() {
                   // The landing band keeps the ruled card it has always had; only `/events` takes
                   // the borderless catalog one.
                   variant={activeScreen === "browse" ? "catalog" : "landing"}
+                  // `/events` splits the catalog into pages of 24 — two full rows of four with the
+                  // rail, eight without. The landing band takes the first 20 and draws no controls,
+                  // which is exactly the length it showed back when the API only ever sent one page.
+                  pageSize={activeScreen === "browse" ? 24 : 20}
                   selectedEvent={heroMovie}
                   onSelectEvent={handleSelectEventForTrailer}
                   onBookNow={(movie) => void handleStartBookingInput(movie)}
@@ -1462,23 +1598,11 @@ export default function App() {
                 />
               );
 
-              /*
-               * The recommendation panel sits between the filters and the grid, which is where
-               * `dev_hieu` put it — after the reader has said what they are looking for and before
-               * the results they are about to scroll. On `/events` the filters are a rail inside
-               * the grid's own row, so there is no "between": it goes above the pair instead.
-               */
-              const recommendations = <AIRecommendationPanel signedIn={isSignedIn} />;
-
               return activeScreen === "browse" ? (
-                <>
-                  {recommendations}
-                  {grid}
-                </>
+                grid
               ) : (
                 <>
                   {filters}
-                  {recommendations}
                   {grid}
                 </>
               );
@@ -1560,7 +1684,6 @@ export default function App() {
               setFinalBooking(normalizeBooking(booking));
               goTo("ticket", { bookingId: booking.id });
             }}
-            onClearHistory={() => void clearHistory()}
           />
         )}
 
@@ -1631,16 +1754,39 @@ export default function App() {
             screen === "wallet" ? runSignedIn(() => goTo(screen)) : goTo(screen),
           )
         }
+        /*
+         * Straight to the application form, and through the sign-in gate if there is one: applying
+         * needs an identity, and `runSignedIn` parks the click and replays it afterwards rather
+         * than dropping the reader on a login screen with nothing to return to.
+         */
+        onApplyAsOrganizer={() =>
+          void leaveFlow(() => runSignedIn(() => navigate(`${ACCOUNT_PATH}?section=organizer`)))
+        }
       />
 
-      <button
-        onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-        className="fixed bottom-6 right-6 z-30 grid h-12 w-12 place-items-center rounded-xl border border-cam-dat/20 bg-burgundy text-white transition-all hover:scale-105 hover:brightness-95"
-        aria-label="Cuộn lên đầu trang"
-        title="Cuộn lên đầu trang"
-      >
-        <ArrowUp className="h-5 w-5" />
-      </button>
+      {/*
+       * The assistant, mounted once for the whole app rather than inside the browse screen.
+       *
+       * It used to be a full-width bar wedged between the filters and the results, which pushed
+       * them apart on every visit whether or not anyone wanted to ask anything, and vanished the
+       * moment you opened an event. As a launcher it is available on every screen and costs no
+       * layout — and because it is mounted here, the conversation survives moving between screens.
+       */}
+      <AIChatPanel
+        signedIn={isSignedIn}
+        /*
+         * In-application navigation, not an `<a href>`.
+         *
+         * The whole catalog is in `events` now, and a recommendation is by construction a publicly
+         * visible event, so the lookup effectively always hits. It went through a raw anchor
+         * before, which reloaded the entire SPA — losing the conversation the reader had just had,
+         * along with every other piece of session state.
+         */
+        onOpenEvent={(slug) => {
+          const movie = eventsRef.current.find((event) => event.id === slug);
+          if (movie) void handleStartBookingInput(movie);
+        }}
+      />
 
       {showAuthModal && <AuthModal onClose={dismissAuthModal} onLogin={handleLogin} />}
       {showAccountPage && userName && (
@@ -1655,6 +1801,17 @@ export default function App() {
             closeAccountPage();
           }}
           onProfileUpdated={applyIdentity}
+          /*
+           * `/account?section=organizer` lands on the organizer section, which is what the footer's
+           * application link opens. Read once, as the initial value — the sidebar owns the section
+           * after that, and writing every click back to the address bar would make each one a
+           * history entry the Back button has to walk through before it can close the page.
+           */
+          initialSection={
+            new URLSearchParams(location.search).get("section") === "organizer"
+              ? "organizer"
+              : "profile"
+          }
           onManageEvents={() =>
             leaveFlow(() => {
               // One navigation, not a close followed by a move: `/organizer` replaces `/account`.

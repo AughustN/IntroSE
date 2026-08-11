@@ -25,6 +25,9 @@ function validValue(key: SystemSettingKey, value: unknown): boolean {
     case 'wallet_topup_max':
     case 'wallet_balance_ceiling': return integer(value, 0, Number.MAX_SAFE_INTEGER);
     case 'ai_features_enabled': return typeof value === 'boolean';
+    // Zero is deliberately allowed: it stops every external AI call without touching the switch.
+    case 'ai_platform_request_ceiling': return integer(value, 0, Number.MAX_SAFE_INTEGER);
+    case 'ai_platform_window_hours': return integer(value, 1, 720);
   }
 }
 

@@ -12,6 +12,7 @@ import { seatmapRouter } from "./modules/seatmap/seatmap.routes.js";
 import { walletRouter } from "./modules/payments/wallet.routes.js";
 import { notificationRouter } from "./modules/notifications/notifications.routes.js";
 import { aiRouter } from "./modules/ai/ai.routes.js";
+import { reviewsRouter } from "./modules/reviews/reviews.routes.js";
 
 /** Build the Express app (no listen) so tests can drive it with supertest. */
 export function createApp(): Express {
@@ -42,6 +43,15 @@ export function createApp(): Express {
 
   app.use("/api", authRouter);
   app.use("/api", catalogPublicRouter);
+  /*
+   * Reviews go here, immediately after the catalogue and before anything with a router-level guard.
+   *
+   * `notificationRouter` is mounted on `/api` and calls `router.use(requireAuth)`, which applies to
+   * every request that reaches that router — not only to its own paths. Anything public mounted
+   * after it therefore answers 401 before its own handler is consulted, which is exactly what the
+   * public review listing did until it was moved above.
+   */
+  app.use("/api", reviewsRouter);
   app.use("/api", walletRouter);
   app.use("/api", notificationRouter);
   app.use("/api/ai", aiRouter);

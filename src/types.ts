@@ -4,13 +4,31 @@
  */
 
 export interface MovieEvent {
+  /** The event slug. Named `id` because routing keys off it; the numeric one is `eventId`. */
   id: string;
+  /**
+   * The catalogue's numeric id.
+   *
+   * The adapter used to drop it, so anything needing to address an event by id — reviews being the
+   * first — had no way to. Null only for the dev-only sample catalogue, which has no server rows.
+   */
+  eventId: number | null;
   /**
    * Which inventory model this event sells. Seated events pick seats from a map; general-admission
    * events pick a quantity per tier and never see a seat map — they have no seats in the database.
    */
   eventType: "general_admission" | "seated";
-  category: "movie" | "music" | "theatre" | "concert";
+  /*
+   * The catalogue's own category code, verbatim — not a fixed set.
+   *
+   * It was `"movie" | "music" | "theatre" | "concert"`, a leftover from when this was a cinema
+   * mock-up, and the adapter squeezed a dozen real categories into it by defaulting everything it
+   * did not recognise to `music`. Filtering by "Âm nhạc" therefore returned business conferences,
+   * marathons and merchandise: 461 of 503 events.
+   */
+  category: string;
+  /** The same category's Vietnamese name, so the UI never has to own a translation table. */
+  categoryLabel: string;
   title: string;
   originalTitle?: string;
   tags: string[]; // e.g. ["2D", "Phụ Đề", "IMAX"]
@@ -37,7 +55,10 @@ export interface MovieEvent {
   venueMapUrl: string;
   venueGuide: string;
   refundPolicy: string;
-  status: "available" | "low" | "sold_out" | "cancelled";
+  // `finished` is not a degree of "sold out": the event happened. It keeps its card, its tag, and
+  // its detail page, but nothing about it is buyable, so every booking control reads it the same
+  // way it reads `cancelled`.
+  status: "available" | "low" | "sold_out" | "finished" | "cancelled";
   ticketsLeft: number;
   isFeatured: boolean;
   comboOffer?: string;

@@ -58,7 +58,14 @@ export function applyEventSeo(d: EventDetail, showtimes: Showtime[]): void {
       '@type': 'Offer',
       price: t.price,
       priceCurrency: 'VND',
-      availability: d.soldOut ? 'https://schema.org/SoldOut' : 'https://schema.org/InStock',
+      // A finished event reports `soldOut: false` — it has no upcoming showtime for that flag to be
+      // about — so testing `soldOut` alone would tell a search engine the tickets are in stock.
+      // `OutOfStock` rather than `SoldOut`, which would claim they all sold.
+      availability: !d.hasUpcoming
+        ? 'https://schema.org/OutOfStock'
+        : d.soldOut
+          ? 'https://schema.org/SoldOut'
+          : 'https://schema.org/InStock',
     })),
     url: canonical,
   };

@@ -1,133 +1,278 @@
-import { createHash } from "node:crypto";
-import { pool, withTransaction } from "../../db/pool.js";
-import { err } from "../../http.js";
-import { AI_CACHE_TTL_MS, AI_REQUEST_LIMIT } from "../../config.js";
-import { getSettings } from "../admin/settings.service.js";
-import { SHOWTIME_HAS_AVAILABILITY, UPCOMING_SHOWTIME, VISIBLE_JOIN, VISIBLE_WHERE } from "../catalog/visibility.js";
-import { OpenAIProvider } from "./providers/openai.provider.js";
-import type { AICandidateEvent, ListingInput, ListingSuggestion } from "./providers/ai.provider.js";
+import { createHash } from 'node:crypto';
+import type {
+  AICandidateEvent,
+  ChatResponse,
+  ConversationTurn,
+  ListingInput,
+  ListingResponse,
+  RecommendationContext,
+} from '@shared/ai/types.js';
+import { AI_CACHE_TTL_MS } from '../../config.js';
+import { err } from '../../http.js';
+import { getSettings } from '../admin/settings.service.js';
+import * as repo from './ai.repo.js';
+import type { AIProvider } from './providers/ai.provider.js';
+import { OpenAIProvider } from './providers/openai.provider.js';
 
-type Recommendation = { event: AICandidateEvent; reason: string };
-type RecommendationResult = { source: "ai" | "cache" | "fallback"; recommendations: Recommendation[]; message?: string };
-type ListingResult = { source: "ai" | "cache" | "fallback"; suggestion: ListingSuggestion | null; message?: string };
+/** How many recent turns reach the model. Bounded here as well as at the route (defence in depth). */
+export const HISTORY_LIMIT = 8;
 
-const provider = new OpenAIProvider();
-const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+/**
+ * The provider, swappable.
+ *
+ * It used to be a module-level `new OpenAIProvider()`, which meant no test could substitute it and
+ * so every degradation path — the whole point of Principle III — was untestable without a network.
+ */
+let provider: AIProvider = new OpenAIProvider();
 
-async function consumeRequest(userId: number): Promise<void> {
-  await withTransaction(async (db) => {
-    await db.query("INSERT INTO ai_request_limits (user_id, window_started_at, request_count) VALUES ($1, date_trunc('hour', now()), 0) ON CONFLICT (user_id) DO NOTHING", [userId]);
-    const { rows } = await db.query<{ window_started_at: string; request_count: number }>("SELECT window_started_at, request_count FROM ai_request_limits WHERE user_id = $1 FOR UPDATE", [userId]);
-    const current = rows[0]!;
-    const sameWindow = new Date(current.window_started_at).getTime() >= new Date(new Date().setMinutes(0, 0, 0)).getTime();
-    if (sameWindow && current.request_count >= AI_REQUEST_LIMIT) throw err.tooMany("ai_rate_limited", "Bạn đã dùng hết 10 yêu cầu AI trong giờ này.");
-    await db.query("UPDATE ai_request_limits SET window_started_at = CASE WHEN $2 THEN window_started_at ELSE date_trunc('hour', now()) END, request_count = CASE WHEN $2 THEN request_count + 1 ELSE 1 END WHERE user_id = $1", [userId, sameWindow]);
-  });
+/** Test seam only. Returns the previous provider so a suite can restore it. */
+export function setAIProvider(next: AIProvider): AIProvider {
+  const previous = provider;
+  provider = next;
+  return previous;
 }
 
-async function cacheGet<T>(kind: "recommendation" | "listing", userId: number, key: string): Promise<T | null> {
-  const { rows } = await pool.query<{ response: T }>("SELECT response FROM ai_response_cache WHERE kind = $1 AND user_id = $2 AND cache_key = $3 AND expires_at > now()", [kind, userId, key]);
-  return rows[0]?.response ?? null;
+const hash = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+
+/**
+ * The non-AI answer.
+ *
+ * Only ever built from `candidates`, so a fallback is subject to the same visibility, upcoming, and
+ * availability rules an AI answer is: degrading never lowers the bar on what may be shown.
+ */
+function fallback(list: AICandidateEvent[], reply: string, message?: string): ChatResponse {
+  return {
+    source: 'fallback',
+    reply,
+    declined: false,
+    recommendations: list.slice(0, 6).map((event) => ({
+      event,
+      reason: 'Sự kiện sắp diễn ra và vẫn còn vé.',
+    })),
+    message,
+  };
 }
 
-async function cachePut(kind: "recommendation" | "listing", userId: number, key: string, response: unknown): Promise<void> {
-  await pool.query("INSERT INTO ai_response_cache (kind, user_id, cache_key, response, expires_at) VALUES ($1, $2, $3, $4::jsonb, now() + $5 * interval '1 millisecond') ON CONFLICT (kind, user_id, cache_key) DO UPDATE SET response = EXCLUDED.response, expires_at = EXCLUDED.expires_at, created_at = now()", [kind, userId, key, JSON.stringify(response), AI_CACHE_TTL_MS]);
-}
+const FALLBACK_REPLY = 'Đây là những sự kiện sắp diễn ra và vẫn còn vé. Sự kiện đã diễn ra không nằm trong danh sách này.';
 
-async function candidates(limit = 20): Promise<AICandidateEvent[]> {
-  const { rows } = await pool.query<AICandidateEvent>(
-    `SELECT e.id, e.slug, e.title, ec.code AS category, v.city, min(s.starts_at)::text AS "startsAt", min(tt.price_amount)::bigint AS "startingPrice"
-       FROM events e ${VISIBLE_JOIN}
-       JOIN event_categories ec ON ec.id = e.category_id
-       JOIN showtimes s ON ${UPCOMING_SHOWTIME}
-       JOIN venues v ON v.id = s.venue_id
-       LEFT JOIN ticket_tiers tt ON tt.showtime_id = s.id
-      WHERE ${VISIBLE_WHERE} AND ${SHOWTIME_HAS_AVAILABILITY}
-      GROUP BY e.id, e.slug, e.title, ec.code, v.city
-      ORDER BY min(s.starts_at), e.id
-      LIMIT $1`, [limit],
-  );
-  return rows.map((row) => ({ ...row, startingPrice: row.startingPrice === null ? null : Number(row.startingPrice) }));
-}
-
-async function categoryContext(userId: number, source: "purchased" | "saved" | "viewed"): Promise<string[]> {
-  const sql = source === "purchased"
-    ? `SELECT ec.code FROM tickets t JOIN orders o ON o.id = t.order_id JOIN reservation_items ri ON ri.id = t.reservation_item_id JOIN ticket_tiers tt ON tt.id = ri.ticket_tier_id JOIN showtimes s ON s.id = tt.showtime_id JOIN events e ON e.id = s.event_id JOIN event_categories ec ON ec.id = e.category_id WHERE o.user_id = $1 GROUP BY ec.code ORDER BY count(*) DESC`
-    : source === "saved"
-      ? `SELECT ec.code FROM user_event_bookmarks b JOIN events e ON e.id = b.event_id JOIN event_categories ec ON ec.id = e.category_id WHERE b.user_id = $1 GROUP BY ec.code ORDER BY max(b.created_at) DESC`
-      : `SELECT ec.code FROM user_event_views h JOIN events e ON e.id = h.event_id JOIN event_categories ec ON ec.id = e.category_id WHERE h.user_id = $1 GROUP BY ec.code ORDER BY max(h.viewed_at) DESC`;
-  return (await pool.query<{ code: string }>(sql, [userId])).rows.map((row) => row.code);
-}
-
-function fallback(list: AICandidateEvent[], message?: string): RecommendationResult {
-  return { source: "fallback", recommendations: list.slice(0, 6).map((event) => ({ event, reason: "Sự kiện đang mở bán và sắp diễn ra." })), message };
-}
-
-export async function recommendEvents(userId: number, message: string): Promise<RecommendationResult> {
-  const list = await candidates();
+/**
+ * Answer one turn of a conversation.
+ *
+ * The order of the steps is the design, not an implementation detail:
+ *
+ *  1. candidates — an empty catalog is answered without touching anything else;
+ *  2. the Admin switch — off means no external call at all;
+ *  3. the cache — consulted BEFORE any allowance is spent, because a cache hit costs no model call
+ *     and so must cost no part of the ten-per-hour budget (UC-10 A1);
+ *  4. the allowance — one unit of the attendee's hour and one of the platform window, together;
+ *  5. the provider — under an 8s budget, its ids resolved against the candidate set;
+ *  6. anything thrown — timeout, non-2xx, unparseable output, schema violation — becomes a
+ *     fallback, never an error. The single exception is the attendee's own rate limit, which is a
+ *     429 because it is the one refusal they can act on by waiting.
+ */
+export async function chat(
+  userId: number,
+  input: { message: string; history?: ConversationTurn[] },
+): Promise<ChatResponse> {
+  /*
+   * Retrieval is driven by the whole turn, not just the newest line.
+   *
+   * "rẻ hơn nữa đi" retrieves nothing on its own — the subject was named a turn ago. Joining the
+   * reader's own recent words to the new message keeps a follow-up anchored to what it follows.
+   * Only their turns: feeding the assistant's own replies back in would let one loose match in an
+   * earlier answer drag the whole conversation off course.
+   */
+  const askedRecently = (input.history ?? [])
+    .filter((turn) => turn.role === 'user')
+    .slice(-2)
+    .map((turn) => turn.content);
+  const list = await repo.candidates([...askedRecently, input.message].join(' '));
   if (!list.length) {
-    return { source: "fallback", recommendations: [], message: "Hiện chưa có sự kiện đang mở bán và còn vé để gợi ý." };
+    return {
+      source: 'fallback',
+      reply: 'Hiện chưa có sự kiện nào sắp diễn ra và còn vé. Các sự kiện đã diễn ra vẫn xem được trong mục Sự kiện.',
+      declined: false,
+      recommendations: [],
+    };
   }
-  if (!(await getSettings()).ai_features_enabled) return fallback(list, "Tính năng AI hiện đang tắt.");
-  await consumeRequest(userId);
-  const context = { message, purchasedCategories: await categoryContext(userId, "purchased"), savedCategories: await categoryContext(userId, "saved"), viewedCategories: await categoryContext(userId, "viewed"), candidates: list };
+
+  const settings = await getSettings();
+  if (!settings.ai_features_enabled) {
+    return fallback(list, FALLBACK_REPLY, 'Tính năng AI hiện đang tắt.');
+  }
+
+  const history = (input.history ?? []).slice(-HISTORY_LIMIT);
+  const context: RecommendationContext = {
+    message: input.message,
+    history,
+    purchasedCategories: await repo.categoryContext(userId, 'purchased'),
+    savedCategories: await repo.categoryContext(userId, 'saved'),
+    viewedCategories: await repo.categoryContext(userId, 'viewed'),
+    candidates: list,
+    /*
+     * The platform's own rules, live.
+     *
+     * The assistant is told it may answer "how long does a seat hold last" — a question with a real
+     * answer that lives in Admin settings and nowhere the model can see. Without this it had two
+     * options, both bad: refuse a question it was told to handle, or invent a number and break the
+     * grounding rule everything else in this module enforces. Read per request so a changed setting
+     * changes the answer, the same way event facts come from live rows.
+     */
+    platform: {
+      seatHoldMinutes: settings.seat_hold_ttl_minutes,
+      topupGraceMinutes: settings.topup_grace_minutes,
+      absoluteCeilingMinutes: settings.absolute_ceiling_minutes,
+      maxTicketsPerBuyer: settings.max_tickets_per_buyer,
+      walletTopupMin: settings.wallet_topup_min,
+      walletTopupMax: settings.wallet_topup_max,
+    },
+  };
+
+  // The candidate set is part of the key on purpose: availability changes invalidate the cache, so
+  // a stored answer can never outlive the inventory it was grounded in and offer a sold-out event.
   const key = hash(context);
-  const cached = await cacheGet<RecommendationResult>("recommendation", userId, key);
-  if (cached) return { ...cached, source: "cache" };
+  const cached = await repo.cacheGet<ChatResponse>('chat', userId, key);
+  if (cached) return { ...cached, source: 'cache' };
+
+  const allowance = await repo.consumeAllowance(
+    userId,
+    settings.ai_platform_request_ceiling,
+    settings.ai_platform_window_hours,
+  );
+  if (!allowance.ok) {
+    if (allowance.reason === 'user') {
+      throw err.tooMany('ai_rate_limited', 'Bạn đã dùng hết 10 yêu cầu AI trong giờ này.');
+    }
+    return fallback(list, FALLBACK_REPLY, 'Hệ thống đang tạm giới hạn AI, đây là gợi ý thay thế.');
+  }
+
   try {
-    const ranked = await provider.recommendEvents(context);
+    const completion = await provider.chat(context);
+
+    // A decline is a successful answer, not a failure: it is the domain fence doing its job.
+    if (completion.declined) {
+      const declined: ChatResponse = {
+        source: 'ai',
+        reply: completion.reply,
+        declined: true,
+        recommendations: [],
+      };
+      await repo.cachePut('chat', userId, key, declined, AI_CACHE_TTL_MS);
+      return declined;
+    }
+
+    // The grounding step. Ids the model returned are looked up here; anything not in the set the
+    // server built is discarded, so an invented event cannot survive into the response.
     const byId = new Map(list.map((event) => [event.id, event]));
-    const recommendations = ranked.flatMap((item) => {
+    const recommendations = completion.recommendations.flatMap((item) => {
       const event = byId.get(item.eventId);
       return event ? [{ event, reason: item.reason }] : [];
     });
-    const result: RecommendationResult = recommendations.length ? { source: "ai", recommendations } : fallback(list, "AI không chọn được sự kiện phù hợp.");
-    await cachePut("recommendation", userId, key, result);
+
+    /*
+     * An answer with no events can be fine or useless, and the two need telling apart.
+     *
+     * Grounded away: the model named events and the filter above discarded every one. The answer is
+     * unusable, so the reader gets the non-AI list.
+     *
+     * Nothing at all: no events *and* no prose. Also unusable, and worth checking here rather than
+     * relying on the provider's schema to reject an empty reply — this service must be safe against
+     * any implementation of the interface, not just the one that happens to validate.
+     *
+     * Prose only: no events but real prose. That is a perfectly good reply to "how long does a seat
+     * hold last", and labelling it a fallback would tack "AI không chọn được sự kiện phù hợp" onto a
+     * correct answer to a question that was never about choosing an event.
+     */
+    const reply = completion.reply.trim();
+    if (!recommendations.length) {
+      if (completion.recommendations.length > 0) {
+        return fallback(list, reply || FALLBACK_REPLY, 'Không có sự kiện nào sắp diễn ra khớp yêu cầu — đây là những lựa chọn gần nhất.');
+      }
+      if (!reply) {
+        return fallback(list, FALLBACK_REPLY, 'AI không đưa ra được câu trả lời, đây là gợi ý thay thế.');
+      }
+    }
+
+    const result: ChatResponse = {
+      source: 'ai',
+      // Trimmed, and never empty by this point — the branch above sent that case to the fallback.
+      reply: reply || FALLBACK_REPLY,
+      declined: false,
+      recommendations: recommendations.slice(0, 6),
+    };
+    await repo.cachePut('chat', userId, key, result, AI_CACHE_TTL_MS);
     return result;
   } catch (error) {
-    console.warn("AI recommendation fallback:", error instanceof Error ? error.message : error);
-    return fallback(list, "Không thể kết nối AI, đang hiển thị sự kiện gợi ý.");
+    // Logged for an operator, never surfaced: the reason can name the provider and the request.
+    console.warn('AI chat fallback:', error instanceof Error ? error.message : error);
+    return fallback(list, FALLBACK_REPLY, degradedBecause(error));
   }
 }
 
-export async function generateEventListing(userId: number, input: ListingInput): Promise<ListingResult> {
-  if (!(await getSettings()).ai_features_enabled) return { source: "fallback", suggestion: null, message: "Tính năng AI hiện đang tắt." };
-  await consumeRequest(userId);
+/**
+ * Say which thing went wrong, because they are not the same problem.
+ *
+ * One message covered every failure — "không thể kết nối AI" — which is simply untrue when the
+ * provider answered and answered correctly, just slower than the budget. Whoever reads that goes
+ * looking for a network fault that is not there. A timeout is about speed and is worth a different
+ * sentence from an outage.
+ */
+function degradedBecause(error: unknown): string {
+  const timedOut =
+    error instanceof Error &&
+    (error.name === 'TimeoutError' || /abort|timeout/i.test(error.message));
+  return timedOut
+    ? 'AI phản hồi chậm hơn thường lệ, đang hiển thị sự kiện gợi ý.'
+    : 'Không thể kết nối AI, đang hiển thị sự kiện gợi ý.';
+}
+
+/**
+ * The organizer's listing assistant (UC-22).
+ *
+ * Same ordering as `chat` — switch, cache, allowance, call — which is the fix to its own bug: it
+ * used to decrement the allowance before reading its cache, so re-generating from an identical
+ * brief cost a unit and produced nothing new.
+ */
+export async function generateEventListing(userId: number, input: ListingInput): Promise<ListingResponse> {
+  const settings = await getSettings();
+  if (!settings.ai_features_enabled) {
+    return { source: 'fallback', suggestion: null, message: 'Tính năng AI hiện đang tắt.' };
+  }
+
   const key = hash(input);
-  const cached = await cacheGet<ListingResult>("listing", userId, key);
-  if (cached) return { ...cached, source: "cache" };
+  const cached = await repo.cacheGet<ListingResponse>('listing', userId, key);
+  if (cached) return { ...cached, source: 'cache' };
+
+  const allowance = await repo.consumeAllowance(
+    userId,
+    settings.ai_platform_request_ceiling,
+    settings.ai_platform_window_hours,
+  );
+  if (!allowance.ok) {
+    if (allowance.reason === 'user') {
+      throw err.tooMany('ai_rate_limited', 'Bạn đã dùng hết 10 yêu cầu AI trong giờ này.');
+    }
+    return {
+      source: 'fallback',
+      suggestion: null,
+      message: 'Hệ thống đang tạm giới hạn AI. Bạn vẫn có thể nhập thủ công.',
+    };
+  }
+
   try {
-    const result: ListingResult = { source: "ai", suggestion: await provider.generateEventListing(input) };
-    await cachePut("listing", userId, key, result);
+    const result: ListingResponse = { source: 'ai', suggestion: await provider.generateEventListing(input) };
+    await repo.cachePut('listing', userId, key, result, AI_CACHE_TTL_MS);
     return result;
   } catch (error) {
-    console.warn("AI listing fallback:", error instanceof Error ? error.message : error);
-    return { source: "fallback", suggestion: null, message: "Không thể tạo gợi ý AI. Bạn vẫn có thể nhập thủ công." };
+    console.warn('AI listing fallback:', error instanceof Error ? error.message : error);
+    return {
+      source: 'fallback',
+      suggestion: null,
+      message: 'Không thể tạo gợi ý AI. Bạn vẫn có thể nhập thủ công.',
+    };
   }
 }
 
-async function visibleEventId(slug: string): Promise<number> {
-  const { rows } = await pool.query<{ id: number }>(`SELECT e.id FROM events e ${VISIBLE_JOIN} WHERE e.slug = $1 AND ${VISIBLE_WHERE}`, [slug]);
-  if (!rows[0]) throw err.notFound("not_found", "Không tìm thấy sự kiện.");
-  return rows[0].id;
-}
-
-export async function toggleBookmark(userId: number, slug: string): Promise<{ saved: boolean }> {
-  const eventId = await visibleEventId(slug);
-  const removed = await pool.query("DELETE FROM user_event_bookmarks WHERE user_id = $1 AND event_id = $2 RETURNING event_id", [userId, eventId]);
-  if (removed.rowCount) return { saved: false };
-  await pool.query("INSERT INTO user_event_bookmarks (user_id, event_id) VALUES ($1, $2)", [userId, eventId]);
-  return { saved: true };
-}
-
-export async function listBookmarks(userId: number): Promise<string[]> {
-  return (await pool.query<{ slug: string }>(
-    `SELECT e.slug FROM user_event_bookmarks b JOIN events e ON e.id = b.event_id ${VISIBLE_JOIN}
-      WHERE b.user_id = $1 AND ${VISIBLE_WHERE} ORDER BY b.created_at DESC`, [userId],
-  )).rows.map((row) => row.slug);
-}
-
-export async function recordEventView(userId: number, slug: string): Promise<void> {
-  const eventId = await visibleEventId(slug);
-  await pool.query("INSERT INTO user_event_views (user_id, event_id, viewed_at) VALUES ($1, $2, now()) ON CONFLICT (user_id, event_id) DO UPDATE SET viewed_at = EXCLUDED.viewed_at", [userId, eventId]);
-}
+export const toggleBookmark = repo.toggleBookmark;
+export const listBookmarks = repo.listBookmarks;
+export const recordEventView = repo.recordEventView;

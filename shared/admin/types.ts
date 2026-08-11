@@ -83,6 +83,10 @@ export interface SystemSettings {
   wallet_topup_max: number;
   wallet_balance_ceiling: number;
   ai_features_enabled: boolean;
+  /** Model-backed AI requests permitted per window across all attendees. 0 stops external calls. */
+  ai_platform_request_ceiling: number;
+  /** Length of that window, in hours. */
+  ai_platform_window_hours: number;
 }
 
 export type SystemSettingKey = keyof SystemSettings;

@@ -1,35 +1,31 @@
-export interface AICandidateEvent {
-  id: number;
-  slug: string;
-  title: string;
-  category: string;
-  city: string | null;
-  startsAt: string;
-  startingPrice: number | null;
-}
+// The seam between the AI domain and whichever vendor answers.
+//
+// Types live in @shared/ai/types.js so the web client imports the same declarations (Principle VI).
+// Re-exported here because every consumer inside this module already reaches for this file.
 
-export interface RecommendationContext {
-  message: string;
-  purchasedCategories: string[];
-  savedCategories: string[];
-  viewedCategories: string[];
-  candidates: AICandidateEvent[];
-}
+export type {
+  AICandidateEvent,
+  ChatCompletion,
+  ConversationTurn,
+  ListingInput,
+  ListingSuggestion,
+  RecommendationContext,
+} from '@shared/ai/types.js';
 
-export interface ListingInput {
-  brief: string;
-  category?: string;
-  eventType?: "general_admission" | "seated";
-}
+import type {
+  ChatCompletion,
+  ListingInput,
+  ListingSuggestion,
+  RecommendationContext,
+} from '@shared/ai/types.js';
 
-export interface ListingSuggestion {
-  title: string;
-  description: string;
-  tags: string[];
-  ticketPriceSuggestions: Array<{ name: string; price: number }>;
-}
-
+/**
+ * One class implements this, and swapping vendors is meant to stay that one class.
+ *
+ * `chat` returns event *ids*, never event records: the service resolves each id against the
+ * candidate set it built, so nothing the model invents can reach a reader (ADR-0001 grounding).
+ */
 export interface AIProvider {
-  recommendEvents(context: RecommendationContext): Promise<Array<{ eventId: number; reason: string }>>;
+  chat(context: RecommendationContext): Promise<ChatCompletion>;
   generateEventListing(input: ListingInput): Promise<ListingSuggestion>;
 }

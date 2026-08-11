@@ -197,7 +197,7 @@ export async function queueTicketResend(userId: number, orderId: number): Promis
     });
     return true;
   });
-  if (queued) void processPendingNotifications();
+  if (queued) kickNotificationWorker();
   return queued;
 }
 
@@ -333,7 +333,7 @@ export async function notifyWaitlistForShowtime(showtimeId: number): Promise<voi
     }
     return selected;
   });
-  if (allowed.length > 0) void processPendingNotifications();
+  if (allowed.length > 0) kickNotificationWorker();
 }
 
 export async function queueDueReminders(db: Db = pool): Promise<void> {
@@ -373,7 +373,7 @@ export async function queueDueReminders(db: Db = pool): Promise<void> {
       });
     }
   }
-  void processPendingNotifications();
+  kickNotificationWorker();
 }
 
 async function sendMail(
@@ -480,6 +480,36 @@ async function sendMail(
     throw new Error(`${error.name ?? "send_failed"}: ${error.message ?? "unknown Resend error"}`);
 }
 
+/**
+ * Append one delivery-attempt log line, and never let that be the thing that fails.
+ *
+ * The log is a record of what happened, not part of what happened: the mail has been sent or it
+ * has not, and nothing about that changes because a row could not be written. The row goes missing
+ * for two reasons in practice — the notification was deleted underneath the worker (which is the
+ * whole of what the test suite does between cases, via `TRUNCATE users … CASCADE`), or the database
+ * is unreachable. Both are worth a line in the log and neither is worth a crash.
+ */
+async function writeLog(
+  notificationId: number,
+  attempt: number,
+  status: 'sent' | 'failed',
+  error?: string,
+): Promise<void> {
+  try {
+    await pool.query(
+      `INSERT INTO notification_logs (notification_id, attempt_no, status, error) VALUES ($1, $2, $3, $4)`,
+      [notificationId, attempt, status, error ?? null],
+    );
+  } catch (logError) {
+    console.error('[notifications] could not write attempt log:', {
+      notificationId,
+      attempt,
+      status,
+      message: logError instanceof Error ? logError.message : logError,
+    });
+  }
+}
+
 export async function processPendingNotifications(): Promise<number> {
   let processed = 0;
   for (let i = 0; i < MAX_BATCH; i += 1) {
@@ -512,20 +542,32 @@ export async function processPendingNotifications(): Promise<number> {
         notification.payload,
       );
       await pool.query(`UPDATE notifications SET sent_at = now() WHERE id = $1`, [notification.id]);
-      await pool.query(
-        `INSERT INTO notification_logs (notification_id, attempt_no, status) VALUES ($1, $2, 'sent')`,
-        [notification.id, attempt],
-      );
+      // Outside the try: the mail is already gone, so a failure to *record* that must not be
+      // reported as a failure to send. Treating it as one used to send the reader a second copy.
+      await writeLog(notification.id, attempt, 'sent');
     } catch (error) {
       const message = error instanceof Error ? error.message.slice(0, 1000) : "unknown send error";
-      await pool.query(
-        `UPDATE notifications SET next_attempt_at = now() + ($2::bigint * interval '1 millisecond') WHERE id = $1`,
-        [notification.id, retryDelayMs(attempt)],
-      );
-      await pool.query(
-        `INSERT INTO notification_logs (notification_id, attempt_no, status, error) VALUES ($1, $2, 'failed', $3)`,
-        [notification.id, attempt, message],
-      );
+      /*
+       * Error handling that cannot itself throw.
+       *
+       * Both statements below write to the same database whose failure may be what landed us here,
+       * so both were able to throw straight out of the loop — past this catch, past the caller's
+       * bare `void`, and into an unhandled rejection. Node terminates the process on those, which
+       * meant a database hiccup while emailing a ticket could kill the API moments after a
+       * successful checkout.
+       */
+      try {
+        await pool.query(
+          `UPDATE notifications SET next_attempt_at = now() + ($2::bigint * interval '1 millisecond') WHERE id = $1`,
+          [notification.id, retryDelayMs(attempt)],
+        );
+      } catch (scheduleError) {
+        console.error('[notifications] could not reschedule:', {
+          notificationId: notification.id,
+          message: scheduleError instanceof Error ? scheduleError.message : scheduleError,
+        });
+      }
+      await writeLog(notification.id, attempt, 'failed', message);
       console.error("[notifications] delivery failed:", {
         notificationId: notification.id,
         message,
@@ -536,20 +578,35 @@ export async function processPendingNotifications(): Promise<number> {
   return processed;
 }
 
+/**
+ * Nudge the outbox and forget about it — safely.
+ *
+ * Callers want delivery attempted soon after a business event, not to wait for it: notification
+ * delivery is never on the critical path of a checkout. That intent used to be spelled `void
+ * processPendingNotifications()` at five call sites, none of which attached a handler, so any
+ * rejection became an unhandled one — and Node terminates the process on those. One named function
+ * so the sixth call site cannot get it wrong.
+ */
+export function kickNotificationWorker(): void {
+  void processPendingNotifications().catch((error) =>
+    console.error('[notifications] worker run failed:', error instanceof Error ? error.message : error),
+  );
+}
+
 let timer: NodeJS.Timeout | null = null;
 
 export function startNotificationWorker(): void {
   if (timer) return;
-  void processPendingNotifications();
-  void queueDueReminders().catch((error) =>
-    console.error("[notifications] reminder queue failed:", error),
-  );
-  timer = setInterval(() => {
-    void processPendingNotifications();
+  // Both loops are fire-and-forget on a timer, so both need a handler. `queueDueReminders` always
+  // had one; `processPendingNotifications` did not, which is what `kickNotificationWorker` fixes.
+  const tick = () => {
+    kickNotificationWorker();
     void queueDueReminders().catch((error) =>
       console.error("[notifications] reminder queue failed:", error),
     );
-  }, 15 * 60_000);
+  };
+  tick();
+  timer = setInterval(tick, 15 * 60_000);
   timer.unref?.();
 }
 

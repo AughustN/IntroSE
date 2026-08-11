@@ -13,7 +13,6 @@ interface BookingHistoryProps {
   bookings: Booking[];
   onBack: () => void;
   onSelectBooking: (booking: Booking) => void;
-  onClearHistory: () => void;
 }
 
 /**
@@ -49,9 +48,8 @@ function pileOf(booking: Booking, today: string): Pile {
 /**
  * What the stub says about itself, bottom right.
  *
- * Three states, and only one of them is good news, so only one of them is coloured. A row of green
- * "valid" badges on a page where every ticket is valid tells the holder nothing they did not
- * already know by the ticket existing.
+ * Only bad news is coloured. A row of coloured "valid" badges on a page where every ticket is valid
+ * tells the holder nothing they did not already know by the ticket existing.
  */
 function statusOf(booking: Booking, today: string): { label: string; className: string } {
   const bad = "text-burgundy-ink";
@@ -63,12 +61,7 @@ function statusOf(booking: Booking, today: string): { label: string; className: 
   return { label: "Còn hiệu lực", className: quiet };
 }
 
-export default function BookingHistory({
-  bookings,
-  onBack,
-  onSelectBooking,
-  onClearHistory,
-}: BookingHistoryProps) {
+export default function BookingHistory({ bookings, onBack, onSelectBooking }: BookingHistoryProps) {
   const today = todayISO();
   const [pile, setPile] = useState<Pile | "all">("all");
 
@@ -258,19 +251,6 @@ export default function BookingHistory({
               })}
             </ul>
           )}
-
-          {/*
-            Destructive, so it sits at the bottom in the quietest type on the page rather than up
-            beside the tabs where a mis-aimed click could reach it.
-          */}
-          <div className="border-t border-beige-kem/25 pt-6 text-center">
-            <button
-              onClick={onClearHistory}
-              className="font-meta text-meta text-ink-soft underline-offset-4 transition hover:text-burgundy-ink hover:underline"
-            >
-              Xóa lịch sử đặt vé trên thiết bị này
-            </button>
-          </div>
         </>
       )}
     </div>

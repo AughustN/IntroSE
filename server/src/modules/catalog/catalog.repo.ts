@@ -17,6 +17,7 @@ type Row = {
   title: string;
   image_url: string | null;
   category: string;
+  category_label: string;
   earliest_showtime: string | null;
   starting_price: string | null;
   city: string | null;
@@ -30,10 +31,12 @@ const toCard = (r: Row): EventCard => ({
   title: r.title,
   imageUrl: r.image_url,
   category: r.category,
+  categoryLabel: r.category_label,
   city: r.city,
   earliestShowtime: r.earliest_showtime,
   startingPrice: r.starting_price === null ? null : Number(r.starting_price),
   soldOut: r.has_upcoming && !r.has_available,
+  hasUpcoming: r.has_upcoming,
 });
 
 export interface EventFilters {
@@ -45,9 +48,23 @@ export interface EventFilters {
   maxPrice?: number;
   availability?: 'available' | 'all';
   page?: number;
+  pageSize?: number;
 }
 
 const PAGE_SIZE = 20;
+/**
+ * How many cards one request may carry.
+ *
+ * The browse page filters in the browser — categories, cities, availability, and a price rule whose
+ * far end is the dearest of whatever survived the other filters — so it needs the whole catalog in
+ * hand, not one page of it. Twenty at a time meant twenty-six round trips for the current 503; this
+ * lets it be three. The ceiling is here so a caller cannot ask for the table.
+ */
+const MAX_PAGE_SIZE = 200;
+const pageSizeOf = (requested: number | undefined): number =>
+  requested === undefined || !Number.isFinite(requested)
+    ? PAGE_SIZE
+    : Math.min(MAX_PAGE_SIZE, Math.max(1, Math.trunc(requested)));
 
 /** Public catalog list (US1). Only visible events; sold-out shown & sorted last. */
 export async function listEvents(f: EventFilters, db: Db = pool): Promise<{ events: EventCard[]; total: number; page: number }> {
@@ -71,7 +88,8 @@ export async function listEvents(f: EventFilters, db: Db = pool): Promise<{ even
 
   const whereSql = where.join(' AND ');
   const page = Math.max(1, f.page ?? 1);
-  const offset = (page - 1) * PAGE_SIZE;
+  const size = pageSizeOf(f.pageSize);
+  const offset = (page - 1) * size;
 
   const totalRes = await db.query<{ c: string }>(
     `SELECT count(*)::text AS c FROM events e ${VISIBLE_JOIN} JOIN event_categories ec ON ec.id = e.category_id WHERE ${whereSql}`,
@@ -79,13 +97,13 @@ export async function listEvents(f: EventFilters, db: Db = pool): Promise<{ even
   );
 
   const rows = await db.query<Row>(
-    `SELECT e.id, e.slug, e.title, e.image_url, ec.code AS category,
+    `SELECT e.id, e.slug, e.title, e.image_url, ec.code AS category, ec.label_vi AS category_label,
             ${EARLIEST} AS earliest_showtime, ${START_PRICE} AS starting_price, ${CITY} AS city,
             ${HAS_UPCOMING} AS has_upcoming, ${HAS_AVAILABLE} AS has_available, ${rank} AS rank
        FROM events e ${VISIBLE_JOIN} JOIN event_categories ec ON ec.id = e.category_id
       WHERE ${whereSql}
       ORDER BY has_available DESC, rank DESC, earliest_showtime ASC NULLS LAST, e.id
-      LIMIT ${PAGE_SIZE} OFFSET ${offset}`,
+      LIMIT ${size} OFFSET ${offset}`,
     params,
   );
 
@@ -95,7 +113,7 @@ export async function listEvents(f: EventFilters, db: Db = pool): Promise<{ even
 /** Public homepage curation. Hidden events disappear immediately through the live visibility predicate. */
 export async function listFeaturedEvents(db: Db = pool): Promise<EventCard[]> {
   const { rows } = await db.query<Row>(
-    `SELECT e.id, e.slug, e.title, e.image_url, ec.code AS category,
+    `SELECT e.id, e.slug, e.title, e.image_url, ec.code AS category, ec.label_vi AS category_label,
             ${EARLIEST} AS earliest_showtime, ${START_PRICE} AS starting_price, ${CITY} AS city,
             ${HAS_UPCOMING} AS has_upcoming, ${HAS_AVAILABLE} AS has_available
        FROM featured_events f
@@ -123,7 +141,7 @@ export async function getEventDetail(slug: string, db: Db = pool): Promise<Event
     category_id: number;
     venue_guide: string | null;
   }>(
-    `SELECT e.id, e.slug, e.title, e.image_url, ec.code AS category, e.description, e.age_restriction,
+    `SELECT e.id, e.slug, e.title, e.image_url, ec.code AS category, ec.label_vi AS category_label, e.description, e.age_restriction,
             e.lineup, e.genre, e.trailer_url, e.refund_policy, e.event_type, e.seo_title, e.seo_description,
             e.category_id,
             ${EARLIEST} AS earliest_showtime, ${START_PRICE} AS starting_price, ${CITY} AS city,
@@ -146,7 +164,7 @@ export async function getEventDetail(slug: string, db: Db = pool): Promise<Event
   const tiers: Tier[] = tiersRes.rows.map((t, i) => ({ id: i, label: t.label, price: Number(t.price), remaining: null }));
 
   const relatedRes = await db.query<Row>(
-    `SELECT e.id, e.slug, e.title, e.image_url, ec.code AS category,
+    `SELECT e.id, e.slug, e.title, e.image_url, ec.code AS category, ec.label_vi AS category_label,
             ${EARLIEST} AS earliest_showtime, ${START_PRICE} AS starting_price, ${CITY} AS city,
             ${HAS_UPCOMING} AS has_upcoming, ${HAS_AVAILABLE} AS has_available
        FROM events e ${VISIBLE_JOIN} JOIN event_categories ec ON ec.id = e.category_id
@@ -155,8 +173,21 @@ export async function getEventDetail(slug: string, db: Db = pool): Promise<Event
     [r.id, r.category_id],
   );
 
+  /*
+   * The rating rides along with the detail rather than costing the screen a second request on open.
+   * Null when nobody has rated it — an unrated event is not a zero-star event.
+   */
+  const ratingRow = await db.query<{ n: string; avg: string | null }>(
+    `SELECT count(*)::text AS n, avg(rating)::text AS avg
+       FROM event_reviews WHERE event_id = $1 AND status = 'visible'`,
+    [r.id],
+  );
+  const reviewCount = Number(ratingRow.rows[0]?.n ?? 0);
+
   return {
     ...toCard(r),
+    rating: reviewCount === 0 ? null : Math.round(Number(ratingRow.rows[0]!.avg) * 10) / 10,
+    reviewCount,
     description: r.description,
     ageRestriction: r.age_restriction,
     lineup: r.lineup,

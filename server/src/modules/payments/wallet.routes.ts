@@ -10,6 +10,7 @@ import {
   checkout,
   createTopup,
   getOrder,
+  listOrders,
   getStatement,
   getTopup,
   getWallet,
@@ -162,6 +163,16 @@ walletRouter.post(
   asyncH(async (req, res) => {
     const { reservationId } = req.body as z.infer<typeof checkoutSchema>;
     res.status(201).json(await checkout(req.auth!.userId, reservationId));
+  }),
+);
+
+// GET /api/orders — the buyer's own tickets. Registered before `/orders/:id` so the bare path is
+// never read as an order whose id happens to be missing.
+walletRouter.get(
+  "/orders",
+  requireAuth,
+  asyncH(async (req, res) => {
+    res.json(await listOrders(req.auth!.userId));
   }),
 );
 

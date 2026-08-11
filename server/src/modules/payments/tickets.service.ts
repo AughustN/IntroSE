@@ -3,7 +3,7 @@ import { err } from "../../http.js";
 import { broadcastSeatUpdate } from "../../realtime/io.js";
 import {
   notifyWaitlistForShowtime,
-  processPendingNotifications,
+  kickNotificationWorker,
   queueEventNotification,
 } from "../notifications/notifications.service.js";
 
@@ -96,7 +96,7 @@ export async function cancelTicket(userId: number, ticketId: number): Promise<vo
       : { seats: [{ showtimeSeatId: row.showtime_seat_id, status: "available" as const }] }),
   });
   await notifyWaitlistForShowtime(row.showtime_id);
-  void processPendingNotifications();
+  kickNotificationWorker();
 }
 
 export async function cancelEvent(eventId: number): Promise<{ refundedTickets: number }> {
@@ -137,6 +137,6 @@ export async function cancelEvent(eventId: number): Promise<{ refundedTickets: n
     );
     return { refundedTickets: tickets.rowCount ?? 0 };
   });
-  void processPendingNotifications();
+  kickNotificationWorker();
   return result;
 }
