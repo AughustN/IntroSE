@@ -123,7 +123,7 @@ export default function SecuritySection({ me, onNotice, onError, onConfirmLogout
           // explanation of why they have no password to manage (principle: user diversity).
           <div className="flex items-start gap-3 rounded-xl border-2 border-beige-kem bg-surface-2 p-4">
             <Info className="mt-0.5 h-4 w-4 shrink-0 text-ink-soft" aria-hidden />
-            <p className="text-sm leading-6 text-beige-kem/70">
+            <p className="text-body leading-6 text-beige-kem/70">
               Tài khoản này đăng nhập bằng Google, nên TixHub không giữ mật khẩu nào. Mật khẩu được
               quản lý trong tài khoản Google của bạn.
             </p>
@@ -132,7 +132,7 @@ export default function SecuritySection({ me, onNotice, onError, onConfirmLogout
           <form onSubmit={submit}>
             <div className="mb-5 flex items-start gap-3 rounded-xl border-2 border-beige-kem bg-cam-dat p-3">
               <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-ink-soft" aria-hidden />
-              <p className="text-xs leading-5 text-beige-kem/80">
+              <p className="text-eyebrow leading-5 text-beige-kem/80">
                 Sau khi đổi mật khẩu,{" "}
                 <strong className="font-bold text-beige-kem">mọi thiết bị khác</strong> sẽ bị đăng
                 xuất. Thiết bị này vẫn đăng nhập.
@@ -229,7 +229,7 @@ export default function SecuritySection({ me, onNotice, onError, onConfirmLogout
         <div className="flex items-start gap-3">
           <MonitorSmartphone className="mt-0.5 h-4 w-4 shrink-0 text-beige-kem/70" aria-hidden />
           <div className="min-w-0 flex-1">
-            <p className="text-sm leading-6 text-beige-kem/70">
+            <p className="text-body leading-6 text-beige-kem/70">
               Nếu bạn nghi ngờ ai đó truy cập tài khoản, hãy đăng xuất khỏi tất cả thiết bị. Bạn sẽ
               cần đăng nhập lại, kể cả trên thiết bị này.
             </p>

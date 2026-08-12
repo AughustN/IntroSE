@@ -23,7 +23,7 @@ components:
     Money: { type: integer, description: whole VND đồng (no fractional part) }
     EventCard:
       type: object
-      required: [id, slug, title, category, startingPrice, soldOut]
+      required: [id, slug, title, category, startingPrice, soldOut, hasUpcoming]
       properties:
         id: { type: integer }
         slug: { type: string }
@@ -34,6 +34,7 @@ components:
         earliestShowtime: { type: [string, 'null'], format: date-time }
         startingPrice: { $ref: '#/components/schemas/Money' }
         soldOut: { type: boolean, description: derived — all upcoming showtimes sold out (D-A) }
+        hasUpcoming: { type: boolean, description: derived — a showtime is still ahead. False means the event has finished, which soldOut cannot express because it is only ever true while this is }
     EventDetail:
       allOf:
         - $ref: '#/components/schemas/EventCard'
@@ -99,6 +100,7 @@ paths:
         - { name: maxPrice, in: query, schema: { $ref: '#/components/schemas/Money' } }
         - { name: availability, in: query, schema: { type: string, enum: [available, all] } }
         - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 200 }, description: Cards per page. Clamped server-side; out-of-range and unparseable values are corrected rather than rejected. The browse page filters client-side, so it pulls the whole catalog at the ceiling. }
       responses:
         '200':
           description: "Only public events (on_sale ∧ approved ∧ organizer approved). Sold-out shown, labelled, last (FR-004). Ranked title>lineup>description (FR-003)."

@@ -1,6 +1,7 @@
 import { type NextFunction, type Request, type Response, Router } from 'express';
 import { err } from '../../http.js';
-import { getEventDetail, getSeatMap, getShowtimes, listEvents } from './catalog.repo.js';
+import { listCategories } from '../admin/admin.repo.js';
+import { getEventDetail, getSeatMap, getShowtimes, listEvents, listFeaturedEvents } from './catalog.repo.js';
 
 // Public catalog reads — no auth. Every query composes the live visibility predicate (R-1).
 export const catalogPublicRouter = Router();
@@ -16,6 +17,21 @@ const num = (v: unknown): number | undefined => {
 };
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
 
+/*
+ * GET /api/categories
+ *
+ * Public because a category list is a description of the catalogue, not a privileged fact — the
+ * codes are already on every event card. It exists so the organizer's "Danh mục" dropdown can be
+ * built from the categories that exist rather than from a constant compiled into the bundle: that
+ * constant had drifted to six entries while the database held thirteen, so seven categories —
+ * 287 events' worth — were unreachable to anyone creating an event, and a category an Admin added
+ * through the console appeared to save and was then invisible everywhere.
+ */
+catalogPublicRouter.get('/categories', asyncH(async (_req, res) => { res.json(await listCategories()); }));
+
+// GET /api/events/featured
+catalogPublicRouter.get('/events/featured', asyncH(async (_req, res) => { res.json(await listFeaturedEvents()); }));
+
 // GET /api/events (US1)
 catalogPublicRouter.get(
   '/events',
@@ -30,6 +46,7 @@ catalogPublicRouter.get(
       maxPrice: num(q.maxPrice),
       availability: q.availability === 'available' ? 'available' : 'all',
       page: num(q.page),
+      pageSize: num(q.pageSize),
     });
     res.json(result);
   }),

@@ -1,9 +1,10 @@
 import type { HoldRequest, Reservation, SeatUpdate } from "@shared/holds/types.js";
-import { HOLD_ABSOLUTE_MS, HOLD_GRACE_MS, HOLD_TTL_MS, SEAT_CAP } from "../../config.js";
 import { pool, withTransaction } from "../../db/pool.js";
 import { err } from "../../http.js";
 import { broadcastSeatUpdate } from "../../realtime/io.js";
+import { getSettings } from "../admin/settings.service.js";
 import * as repo from "./holds.repo.js";
+import { notifyWaitlistForShowtime } from "../notifications/notifications.service.js";
 
 /**
  * Seat holds (feature 003). Every path here obeys four rules:
@@ -22,7 +23,8 @@ export interface HoldResult {
   created: boolean;
 }
 
-const ttlFrom = (createdAt: Date): Date => new Date(createdAt.getTime() + HOLD_TTL_MS);
+const ttlFrom = (createdAt: Date, minutes: number): Date =>
+  new Date(createdAt.getTime() + minutes * 60 * 1000);
 
 /** Load the caller's reservation as the API returns it. */
 async function view(reservationId: number): Promise<Reservation> {
@@ -70,6 +72,7 @@ async function requireSellableShowtime(showtimeId: number): Promise<repo.Showtim
 
 export async function hold(userId: number, body: HoldRequest): Promise<HoldResult> {
   const selection = assertSelection(body);
+  const settings = await getSettings();
   const showtime = await requireSellableShowtime(body.showtimeId);
 
   if (selection.kind === "seated" && showtime.eventType !== "seated") {
@@ -115,15 +118,20 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
         }
       }
 
-      if (held + fresh.length > SEAT_CAP) {
+      if (held + fresh.length > settings.max_tickets_per_buyer) {
         throw err.unprocessable(
           "cap_exceeded",
-          `Mỗi tài khoản chỉ giữ tối đa ${SEAT_CAP} vé cho một suất diễn.`,
+          `Mỗi tài khoản chỉ giữ tối đa ${settings.max_tickets_per_buyer} vé cho một suất diễn.`,
         );
       }
 
       if (!reservation) {
-        reservation = await repo.createReservation(client, userId, body.showtimeId, ttlFrom(now));
+        reservation = await repo.createReservation(
+          client,
+          userId,
+          body.showtimeId,
+          ttlFrom(now, settings.seat_hold_ttl_minutes),
+        );
       }
 
       const freshIds = fresh.map((s) => s.id);
@@ -157,15 +165,20 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
     if (remaining !== null && selection.quantity > remaining) {
       throw err.unprocessable("insufficient_stock", "Không đủ vé còn lại cho hạng vé này.");
     }
-    if (held + selection.quantity > SEAT_CAP) {
+    if (held + selection.quantity > settings.max_tickets_per_buyer) {
       throw err.unprocessable(
         "cap_exceeded",
-        `Mỗi tài khoản chỉ giữ tối đa ${SEAT_CAP} vé cho một suất diễn.`,
+        `Mỗi tài khoản chỉ giữ tối đa ${settings.max_tickets_per_buyer} vé cho một suất diễn.`,
       );
     }
 
     if (!reservation) {
-      reservation = await repo.createReservation(client, userId, body.showtimeId, ttlFrom(now));
+      reservation = await repo.createReservation(
+        client,
+        userId,
+        body.showtimeId,
+        ttlFrom(now, settings.seat_hold_ttl_minutes),
+      );
     }
     await repo.bumpReserved(client, tier.id, selection.quantity);
     await repo.upsertGaItem(client, reservation.id, tier.id, selection.quantity, tier.price_amount);
@@ -195,6 +208,58 @@ export async function addToReservation(
   const reservation = await requireOwnedActive(userId, reservationId);
   const result = await hold(userId, { ...body, showtimeId: reservation.showtime_id });
   return result.reservation;
+}
+
+/**
+ * Give general-admission quantity back to a tier without ending the reservation.
+ *
+ * The seated mirror of this is `removeSeats`, and the two agree on the parts that matter: the
+ * window is untouched (FR-006), the tier row is locked before the count moves (FR-019), and a
+ * reservation left holding nothing is closed so it cannot block the next selection (FR-011).
+ */
+export async function removeQuantity(
+  userId: number,
+  reservationId: number,
+  ticketTierId: number,
+  quantity: number,
+): Promise<Reservation> {
+  const reservation = await requireOwnedActive(userId, reservationId);
+  if (quantity <= 0) return view(reservationId);
+
+  const left = await withTransaction(async (client) => {
+    const lockedReservation = await repo.findReservation(client, reservation.id, true);
+    if (
+      !lockedReservation ||
+      lockedReservation.user_id !== userId ||
+      lockedReservation.status !== "active" ||
+      lockedReservation.expires_at.getTime() <= Date.now()
+    ) {
+      throw err.notFound("not_found", "Đơn giữ chỗ đã hết hạn hoặc đã kết thúc.");
+    }
+
+    const tier = await repo.lockTier(client, ticketTierId);
+    if (!tier || tier.showtime_id !== lockedReservation.showtime_id) {
+      throw err.unprocessable("invalid_selection", "Hạng vé không thuộc suất diễn này.");
+    }
+
+    const removed = await repo.reduceGaItem(client, lockedReservation.id, tier.id, quantity);
+    if (removed > 0) await repo.bumpReserved(client, tier.id, -removed);
+
+    if ((await repo.countHeldTickets(client, lockedReservation.id)) === 0) {
+      await repo.setReservationStatus(client, lockedReservation.id, "cancelled");
+    }
+
+    return repo.tierRemaining({
+      ...tier,
+      reserved_quantity: Math.max(tier.reserved_quantity - removed, 0),
+    });
+  });
+
+  broadcastSeatUpdate({
+    showtimeId: reservation.showtime_id,
+    tier: { ticketTierId, remaining: left },
+  });
+  return view(reservationId);
 }
 
 export async function removeSeats(
@@ -261,7 +326,7 @@ export async function releaseEverything(
   reservation: repo.ReservationRow,
   status: "cancelled" | "expired",
 ): Promise<SeatUpdate[]> {
-  return withTransaction(async (client) => {
+  const updates = await withTransaction(async (client) => {
     const locked = await repo.findReservation(client, reservation.id, true);
     if (!locked || locked.status !== "active") return []; // someone got there first (or 004 converted it)
 
@@ -292,6 +357,8 @@ export async function releaseEverything(
     }
     return updates;
   });
+  if (updates.length > 0) await notifyWaitlistForShowtime(reservation.showtime_id);
+  return updates;
 }
 
 // ---- One-time top-up grace (FR-010) ---------------------------------------
@@ -303,13 +370,14 @@ export async function releaseEverything(
  */
 export async function extendOnce(userId: number, reservationId: number): Promise<Reservation> {
   const reservation = await requireOwnedActive(userId, reservationId);
+  const settings = await getSettings();
 
   const extended = await withTransaction(async (client) => {
     const row = await repo.extendReservationOnce(
       client,
       reservation.id,
-      HOLD_GRACE_MS,
-      HOLD_ABSOLUTE_MS,
+      settings.topup_grace_minutes * 60 * 1000,
+      settings.absolute_ceiling_minutes * 60 * 1000,
     );
     if (row) await repo.syncSeatExpiry(client, row.id, row.expires_at);
     return row;

@@ -7,6 +7,13 @@ import { pool } from "../../src/db/pool.js";
 import { applyVnpayIpn, createTopup } from "../../src/modules/payments/wallet.service.js";
 
 describe("wallet checkout (UC-02)", () => {
+  it("accepts the unsigned public VNPay IPN request instead of an auth challenge", async () => {
+    const response = await request(app).get("/api/payments/vnpay/ipn");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ RspCode: "97", Message: "Invalid signature" });
+  });
+
   it("credits a successful VNPay top-up once even when its IPN is delivered twice", async () => {
     const user = await registerUser();
     const topup = await createTopup(user.userId, 500_000);

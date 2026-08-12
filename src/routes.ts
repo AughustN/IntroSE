@@ -14,6 +14,8 @@
 
 export type Screen =
   | "home"
+  /** The catalog on its own, without the landing hero in front of it. */
+  | "browse"
   | "detail"
   | "seats"
   | "checkout"
@@ -22,7 +24,11 @@ export type Screen =
   | "wallet"
   | "admin"
   | "organizer"
-  | "moderation";
+  | "moderation"
+  | "about-us"
+  | "terms-of-service"
+  | "website-terms"
+  | "refund-policy";
 
 export interface Route {
   screen: Screen;
@@ -37,12 +43,21 @@ export interface Route {
 /** Screens whose URL carries no parameter. Order is irrelevant; lookup goes both ways. */
 const STATIC_PATHS: ReadonlyArray<readonly [Screen, string]> = [
   ["home", "/"],
+  /*
+   * `/events` is matched here, before the `events/:slug` branch below. That branch needs a second
+   * segment, so the bare path can never be mistaken for an event whose slug went missing.
+   */
+  ["browse", "/events"],
   ["checkout", "/checkout"],
   ["history", "/bookings"],
   ["wallet", "/wallet"],
   ["admin", "/admin"],
   ["organizer", "/organizer"],
   ["moderation", "/moderation"],
+  ["about-us", "/about-us"],
+  ["terms-of-service", "/terms-of-service"],
+  ["website-terms", "/website-terms"],
+  ["refund-policy", "/refund-policy"],
 ];
 
 export const ACCOUNT_PATH = "/account";

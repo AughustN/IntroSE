@@ -1,4 +1,6 @@
 import { withAuthRetry } from "./authClient";
+import { apiUrl } from "./api";
+import { readApiError } from "./apiError";
 
 export interface CheckoutOrder {
   id: number;
@@ -16,6 +18,21 @@ export interface CheckoutOrder {
     seatLabel: string | null;
     unitPriceAmount: number;
   }>;
+}
+
+/**
+ * One row of the buyer's ticket list, straight from the server.
+ *
+ * Wider than `CheckoutOrder` because the tickets page has no other context: checkout already knows
+ * which event it just sold, a list does not.
+ */
+export interface OrderListItem extends CheckoutOrder {
+  eventSlug: string;
+  eventTitle: string;
+  eventImageUrl: string | null;
+  startsAt: string;
+  venueName: string;
+  city: string;
 }
 
 export interface WalletLimits {
@@ -78,25 +95,22 @@ async function call<T>(path: string, opts: { method?: string; body?: unknown } =
     const headers: Record<string, string> = { Accept: "application/json" };
     if (opts.body !== undefined) headers["Content-Type"] = "application/json";
     if (token) headers.Authorization = `Bearer ${token}`;
-    return fetch(`/api${path}`, {
+    return fetch(apiUrl(`/api${path}`), {
       method: opts.method ?? "GET",
       headers,
       credentials: "include",
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
     });
   });
-  const body = (await res.json().catch(() => ({}))) as {
-    error?: string;
-    message?: string;
-    details?: Record<string, number | string>;
-  };
-  if (!res.ok)
+  if (!res.ok) {
+    const err = await readApiError(res);
     throw new WalletError(
-      body.error ?? "wallet_request_failed",
-      body.message ?? "Không thực hiện được thao tác ví.",
-      body.details,
+      err.code === "error" ? "wallet_request_failed" : err.code,
+      err.message ?? "Không thực hiện được thao tác ví.",
+      err.details,
     );
-  return body as T;
+  }
+  return (await res.json().catch(() => ({}))) as T;
 }
 
 export const walletClient = {
@@ -128,6 +142,11 @@ export const walletClient = {
    */
   getTopup: (id: number): Promise<Topup> => call(`/wallet/topups/${id}`),
 
+  /** Every order this account owns, newest first. The tickets page's real source. */
+  orders: (): Promise<OrderListItem[]> => call("/orders"),
+
   checkout: (reservationId: number): Promise<CheckoutOrder> =>
     call("/checkout", { method: "POST", body: { reservationId } }),
+  resendTicket: (orderId: number): Promise<{ ok: true }> =>
+    call(`/orders/${orderId}/resend`, { method: "POST" }),
 };

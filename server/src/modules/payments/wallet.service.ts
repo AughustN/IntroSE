@@ -4,6 +4,10 @@ import type { Db } from "../../db/pool.js";
 import { pool, withTransaction } from "../../db/pool.js";
 import { err } from "../../http.js";
 import { broadcastSeatUpdate } from "../../realtime/io.js";
+import {
+  kickNotificationWorker,
+  queueOrderConfirmation,
+} from "../notifications/notifications.service.js";
 
 export interface WalletView {
   balanceAmount: number;
@@ -513,6 +517,7 @@ export async function checkout(userId: number, reservationId: number): Promise<O
          FROM ticket_tiers WHERE id = ANY($1::bigint[])`,
       [tierIds],
     );
+    await queueOrderConfirmation(client, order.id);
     return { order: orderView, soldSeatIds, tiers: tiers.rows };
   });
   if (outcome.soldSeatIds.length > 0) {
@@ -527,6 +532,7 @@ export async function checkout(userId: number, reservationId: number): Promise<O
       tier: { ticketTierId: tier.id, remaining: tier.remaining },
     });
   }
+  kickNotificationWorker();
   return outcome.order;
 }
 
@@ -553,6 +559,110 @@ export function allocateRefundable(faceValues: number[], discount: number): numb
   shares[0] += discount - shares.reduce((sum, share) => sum + share, 0);
 
   return faceValues.map((value, i) => value - shares[i]);
+}
+
+/**
+ * One row of the buyer's ticket list.
+ *
+ * Deliberately wider than `OrderView`. That shape answers "what did I just buy" to a screen that
+ * already knows the event, because it is returned from the checkout the buyer just completed. A
+ * list has no such context: it is the *only* thing the tickets page has, so it has to carry what
+ * that page prints — the event's name and poster, where and when, and what the tickets are.
+ *
+ * It exists because the tickets page had no server source at all. Orders were written to
+ * `localStorage` at checkout and read back from there, so a purchase made in one browser was
+ * invisible in every other, and clearing site data destroyed the only record the buyer could see —
+ * while the wallet, which reads the server, still showed the money leaving. The database always had
+ * the order; there was simply no way to ask for the list.
+ */
+export interface OrderListItem extends OrderView {
+  eventSlug: string;
+  eventTitle: string;
+  eventImageUrl: string | null;
+  /** ISO instant of the showtime, so the client can split its own date and time. */
+  startsAt: string;
+  venueName: string;
+  city: string;
+}
+
+/**
+ * Every order this buyer has, newest first.
+ *
+ * Two queries rather than a join with the tickets: one order can hold eight tickets, and folding
+ * them into the same result set would repeat every event title and poster URL eight times over the
+ * wire. The second query fetches them all at once, keyed by order — not one round trip per order.
+ */
+export async function listOrders(userId: number, db: Db = pool): Promise<OrderListItem[]> {
+  const { rows } = await db.query<{
+    id: number;
+    reservation_id: number;
+    showtime_id: number;
+    total_amount: number;
+    payment_method: "wallet";
+    status: "paid" | "refunded";
+    created_at: Date;
+    starts_at: Date;
+    event_slug: string;
+    event_title: string;
+    event_image_url: string | null;
+    venue_name: string;
+    city: string;
+  }>(
+    `SELECT o.id, o.reservation_id, r.showtime_id, o.final_total_cents AS total_amount,
+            o.payment_method, o.payment_status AS status, o.created_at,
+            s.starts_at, e.slug AS event_slug, e.title AS event_title, e.image_url AS event_image_url,
+            v.name AS venue_name, v.city
+       FROM orders o
+       JOIN reservations r ON r.id = o.reservation_id
+       JOIN showtimes s ON s.id = r.showtime_id
+       JOIN events e ON e.id = s.event_id
+       JOIN venues v ON v.id = s.venue_id
+      WHERE o.user_id = $1
+      ORDER BY o.created_at DESC, o.id DESC`,
+    [userId],
+  );
+  if (rows.length === 0) return [];
+
+  const ticketRows = (
+    await db.query<PurchasedTicket & { orderId: number }>(
+      `SELECT t.order_id AS "orderId", t.id, t.barcode_value AS "ticketCode",
+              CASE t.qr_status WHEN 'unused' THEN 'valid' WHEN 'checked_in' THEN 'used' ELSE 'refunded' END AS status,
+              tt.label AS "tierLabel",
+              CASE WHEN ri.showtime_seat_id IS NULL THEN NULL ELSE (se.row_label || se.seat_number::text) END AS "seatLabel",
+              ri.unit_price_amount AS "unitPriceAmount"
+         FROM tickets t
+         JOIN reservation_items ri ON ri.id = t.reservation_item_id
+         JOIN ticket_tiers tt ON tt.id = ri.ticket_tier_id
+         LEFT JOIN showtime_seats ss ON ss.id = ri.showtime_seat_id
+         LEFT JOIN seats se ON se.id = ss.seat_id
+        WHERE t.order_id = ANY($1::bigint[]) ORDER BY t.id`,
+      [rows.map((r) => r.id)],
+    )
+  ).rows;
+
+  const byOrder = new Map<number, PurchasedTicket[]>();
+  for (const { orderId, ...ticket } of ticketRows) {
+    const list = byOrder.get(orderId);
+    if (list) list.push(ticket);
+    else byOrder.set(orderId, [ticket]);
+  }
+
+  return rows.map((row) => ({
+    id: row.id,
+    reservationId: row.reservation_id,
+    showtimeId: row.showtime_id,
+    totalAmount: row.total_amount,
+    paymentMethod: row.payment_method,
+    status: row.status,
+    createdAt: row.created_at.toISOString(),
+    tickets: byOrder.get(row.id) ?? [],
+    eventSlug: row.event_slug,
+    eventTitle: row.event_title,
+    eventImageUrl: row.event_image_url,
+    startsAt: row.starts_at.toISOString(),
+    venueName: row.venue_name,
+    city: row.city,
+  }));
 }
 
 export async function getOrder(userId: number, orderId: number, db: Db = pool): Promise<OrderView> {

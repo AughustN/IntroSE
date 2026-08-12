@@ -449,11 +449,19 @@ authRouter.post(
       });
       try {
         await mailer.sendPasswordReset(email, `${config.appUrl}/reset-password?token=${token}`);
+        console.info('[mailer] password reset accepted for delivery:', { userId: user.id });
       } catch (e) {
         // A mail-provider failure must never change the reply: a 500 here would only ever fire for
         // a registered address, turning the uniform response (FR-028) into an enumeration oracle.
         console.error('[mailer] password reset send failed:', e);
       }
+    } else {
+      // Never log the address or reset token. This is enough to distinguish a skipped request
+      // from a provider failure while keeping credentials out of process logs.
+      console.info('[mailer] password reset skipped:', {
+        identifierHash: hashIdentifier(email),
+        reason: user ? `${user.provider}_${user.status}` : 'unknown_email',
+      });
     }
     // Uniform response whether or not the address is registered (FR-028).
     res.status(200).json({ ok: true, message: 'Nếu email tồn tại, chúng tôi đã gửi liên kết đặt lại mật khẩu.' });

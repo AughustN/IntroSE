@@ -6,13 +6,6 @@
 import type { EventCard, EventDetail, Showtime } from '@/shared/catalog/types';
 import type { MovieEvent } from '../types';
 
-const CATEGORY: Record<string, MovieEvent['category']> = {
-  music: 'music',
-  theatre: 'theatre',
-  concert: 'concert',
-};
-const toCategory = (code: string): MovieEvent['category'] => CATEGORY[code] ?? 'music';
-
 const CITY = new Set(['TP.HCM', 'Hà Nội', 'Đà Nẵng']);
 const toCity = (c: string | null): MovieEvent['city'] =>
   c && CITY.has(c) ? (c as MovieEvent['city']) : 'TP.HCM';
@@ -22,10 +15,12 @@ const AGE: Record<string, MovieEvent['ageRating']> = { all: 'P', '13+': 'T13', '
 export function cardToMovie(c: EventCard): MovieEvent {
   return {
     id: c.slug,
+    eventId: c.id,
     // A card carries no event type; detail supplies the real one. GA is the safe default: it is the
     // only branch that renders without seat data.
     eventType: 'general_admission',
-    category: toCategory(c.category),
+    category: c.category,
+    categoryLabel: c.categoryLabel,
     title: c.title,
     tags: [],
     ageRating: 'P',
@@ -51,8 +46,11 @@ export function cardToMovie(c: EventCard): MovieEvent {
     venueMapUrl: '',
     venueGuide: '',
     refundPolicy: '',
-    status: c.soldOut ? 'sold_out' : 'available',
-    ticketsLeft: c.soldOut ? 0 : 50,
+    // Order matters. `soldOut` is derived from the *upcoming* showtimes, so an event whose every
+    // showtime is behind it reports `soldOut: false` — read the wrong way round, a finished event
+    // renders as freely bookable with a "Mua vé" button that leads nowhere.
+    status: !c.hasUpcoming ? 'finished' : c.soldOut ? 'sold_out' : 'available',
+    ticketsLeft: c.hasUpcoming && !c.soldOut ? 50 : 0,
     isFeatured: false,
   };
 }

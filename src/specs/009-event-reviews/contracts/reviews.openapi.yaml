@@ -1,0 +1,330 @@
+openapi: 3.1.0
+info:
+  title: TixHub Event Reviews & Ratings
+  version: 1.0.0
+  description: >
+    UC-18 (rate & review) and the review half of UC-39 (report). Reading is public; writing needs a
+    session and a paid ticket to an event that has already started, re-derived on the server for
+    every write. Review bodies are plain text in both directions — never markup, never escaped in
+    storage; the renderer encodes at the boundary.
+
+servers:
+  - url: /api
+
+paths:
+  /events/{eventId}/reviews:
+    get:
+      operationId: listReviews
+      summary: Reviews for an event, newest first
+      description: >
+        Public: a rating exists to inform the next buyer, so it cannot require an account to read.
+        Keyset-paginated on `createdAt` rather than by offset, so a review posted mid-scroll cannot
+        shift the page boundary and make the reader see one twice or miss one.
+      security: []
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10, minimum: 1, maximum: 50 }
+        - name: before
+          in: query
+          description: Return reviews older than this instant. Omit for the newest page.
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: A page of reviews and the event's summary.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReviewPage" }
+        "404":
+          description: No such publicly visible event.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+    post:
+      operationId: submitReview
+      summary: Write or replace your review of an event
+      description: >
+        Idempotent per person per event: a second submission edits the first rather than creating a
+        duplicate (UC-18 A2). Enforced by a unique index, so two simultaneous first submissions
+        cannot both succeed.
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReviewInput" }
+      responses:
+        "200":
+          description: The stored review.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Review" }
+        "400":
+          description: Missing or out-of-range rating, or body over the length limit.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401":
+          description: No valid session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: >
+            Not eligible. `code` distinguishes the two rules so the reader is told which one they
+            failed: `no_ticket` or `event_not_started`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                noTicket:
+                  value: { code: no_ticket, message: Bạn cần có vé đã thanh toán cho sự kiện này để đánh giá. }
+                notStarted:
+                  value: { code: event_not_started, message: Sự kiện chưa diễn ra nên chưa thể đánh giá. }
+
+  /reviews/{id}:
+    patch:
+      operationId: editReview
+      summary: Change your own review
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReviewInput" }
+      responses:
+        "200":
+          description: The updated review, with `edited` now true.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Review" }
+        "401":
+          description: No valid session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: >
+            No such review *belonging to this caller*. Someone else's review answers 404 rather than
+            403, so probing ids discloses nothing about what exists.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+    delete:
+      operationId: deleteReview
+      summary: Withdraw your own review
+      description: >
+        Removes the row. Withdrawal is the author taking back their own words, so unlike a
+        moderation removal it leaves no hidden copy.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "204": { description: Withdrawn. The event's average and count are recalculated without it. }
+        "401":
+          description: No valid session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No such review belonging to this caller.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /reviews/{id}/report:
+    post:
+      operationId: reportReview
+      summary: Report a review to the moderation queue
+      description: Writes to the existing `content_reports` queue with `target_type = 'review'` (UC-39).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        "201": { description: Report recorded. }
+        "200":
+          description: Already reported by this reader. Not an error, and no duplicate is created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [alreadyReported]
+                properties:
+                  alreadyReported: { type: boolean, const: true }
+        "401":
+          description: No valid session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No such visible review.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /admin/reviews/{id}:
+    delete:
+      operationId: removeReviewAsAdmin
+      summary: Remove a review (moderation)
+      description: >
+        Hides rather than erases: the moderation record and the audit row must keep a subject that
+        can still be read. The review stops appearing and stops counting toward the average.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "204": { description: Removed and audited. }
+        "401":
+          description: No valid session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not an admin.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: No such review.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - bearerAuth: []
+
+  schemas:
+    ReviewInput:
+      type: object
+      additionalProperties: false
+      required: [rating]
+      properties:
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: Whole stars. Required — text alone is not a review (UC-18 A3).
+        body:
+          type: [string, "null"]
+          maxLength: 2000
+          description: >
+            Optional. Sent and stored as the characters the author typed; whitespace-only is treated
+            as absent. Never contains markup, because it is never rendered as any.
+
+    Review:
+      type: object
+      additionalProperties: false
+      required: [id, eventId, rating, body, author, createdAt, edited]
+      properties:
+        id: { type: integer, format: int64 }
+        eventId: { type: integer, format: int64 }
+        rating: { type: integer, minimum: 1, maximum: 5 }
+        body: { type: [string, "null"] }
+        author:
+          oneOf:
+            - $ref: "#/components/schemas/ReviewAuthor"
+            - type: "null"
+          description: Null when the account has been deleted; the review itself survives (FR-016).
+        createdAt: { type: string, format: date-time }
+        edited:
+          type: boolean
+          description: Derived from `updatedAt > createdAt`, so it cannot fall out of step with the row.
+        mine:
+          type: boolean
+          description: Present only for a signed-in reader; true on their own review.
+
+    ReviewAuthor:
+      type: object
+      additionalProperties: false
+      required: [nickname]
+      properties:
+        nickname: { type: string }
+        avatarUrl: { type: [string, "null"] }
+
+    ReviewSummary:
+      type: object
+      additionalProperties: false
+      required: [rating, reviewCount]
+      properties:
+        rating:
+          type: [number, "null"]
+          description: Mean of visible ratings. **Null when there are none** — an unrated event is not a zero-star one.
+        reviewCount: { type: integer, minimum: 0 }
+
+    ReviewPage:
+      type: object
+      additionalProperties: false
+      required: [summary, reviews, hasMore]
+      properties:
+        summary: { $ref: "#/components/schemas/ReviewSummary" }
+        reviews:
+          type: array
+          items: { $ref: "#/components/schemas/Review" }
+        hasMore:
+          type: boolean
+          description: Whether another page exists older than the last item returned.
+        viewer:
+          $ref: "#/components/schemas/ViewerState"
+
+    ViewerState:
+      type: object
+      additionalProperties: false
+      description: >
+        Present only for a signed-in reader. Returned with the listing so the page can decide in one
+        call whether to show the form, the reader's existing review, or the reason neither applies.
+      required: [canReview]
+      properties:
+        canReview: { type: boolean }
+        reason:
+          type: [string, "null"]
+          enum: [no_ticket, event_not_started, null]
+          description: Why `canReview` is false, so the interface can explain rather than just omit.
+        myReview:
+          oneOf:
+            - $ref: "#/components/schemas/Review"
+            - type: "null"
+
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }

@@ -1,6 +1,5 @@
-// Frontend auth data layer. Wires the existing UI to the real API (same-origin,
-// /api proxied to the backend in dev). The access token lives in memory only
-// (never localStorage — FR-016); the refresh token is the httpOnly cookie.
+// Frontend auth data layer. The access token lives in memory only (never localStorage — FR-016);
+// the refresh token is the httpOnly cookie.
 
 import type {
   AuthSuccess,
@@ -12,6 +11,8 @@ import type {
   ResetBody,
   UpdateMeBody,
 } from "@/shared/auth/types";
+import { apiAssetUrl, apiUrl } from "./api";
+import { readApiError } from "./apiError";
 
 /** Mirrors `OrganizerApplication` as GET /api/organizers/me returns it (newest first). */
 export interface OrganizerApplicationView {
@@ -55,7 +56,7 @@ async function raw(path: string, opts: Options = {}): Promise<Response> {
   const headers: Record<string, string> = { ...opts.headers };
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
   if (opts.auth && accessToken) headers.Authorization = `Bearer ${accessToken}`;
-  return fetch(`/api${path}`, {
+  return fetch(apiUrl(`/api${path}`), {
     method: opts.method ?? "GET",
     headers,
     credentials: "include", // send/receive the tix_refresh cookie
@@ -63,13 +64,16 @@ async function raw(path: string, opts: Options = {}): Promise<Response> {
   });
 }
 
+function normalizeMe(user: Me): Me {
+  return { ...user, avatarUrl: apiAssetUrl(user.avatarUrl) };
+}
+
 async function parse<T>(res: Response): Promise<T> {
-  const data = res.status === 204 ? null : await res.json().catch(() => null);
   if (!res.ok) {
-    const err = (data ?? {}) as { error?: string; message?: string };
-    throw new ApiClientError(res.status, err.error ?? "error", err.message);
+    const err = await readApiError(res);
+    throw new ApiClientError(res.status, err.code, err.message);
   }
-  return data as T;
+  return (res.status === 204 ? null : await res.json().catch(() => null)) as T;
 }
 
 // ---- single-flight refresh (R-12: one in-flight /refresh; concurrent callers await it) ----
@@ -126,13 +130,13 @@ export const authClient = {
   async register(body: RegisterBody): Promise<Me> {
     const data = await parse<AuthSuccess>(await raw("/auth/register", { method: "POST", body }));
     setToken(data.accessToken);
-    return data.user;
+    return normalizeMe(data.user);
   },
 
   async login(body: LoginBody): Promise<Me> {
     const data = await parse<AuthSuccess>(await raw("/auth/login", { method: "POST", body }));
     setToken(data.accessToken);
-    return data.user;
+    return normalizeMe(data.user);
   },
 
   async loginWithGoogle(credential: string): Promise<Me> {
@@ -140,7 +144,7 @@ export const authClient = {
       await raw("/auth/oauth/google", { method: "POST", body: { credential } }),
     );
     setToken(data.accessToken);
-    return data.user;
+    return normalizeMe(data.user);
   },
 
   async logout(): Promise<void> {
@@ -160,7 +164,7 @@ export const authClient = {
   },
 
   me(): Promise<Me> {
-    return authed<Me>("/me");
+    return authed<Me>("/me").then(normalizeMe);
   },
 
   async forgotPassword(body: ForgotBody): Promise<void> {
@@ -186,11 +190,16 @@ export const authClient = {
       fd.append("file", file);
       const headers: Record<string, string> = {};
       if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-      return fetch("/api/me/avatar", { method: "POST", headers, credentials: "include", body: fd });
+      return fetch(apiUrl("/api/me/avatar"), {
+        method: "POST",
+        headers,
+        credentials: "include",
+        body: fd,
+      });
     };
     let res = await send();
     if (res.status === 401 && (await doRefresh())) res = await send();
-    return parse<Me>(res);
+    return normalizeMe(await parse<Me>(res));
   },
 
   applyOrganizer(body: {

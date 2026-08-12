@@ -10,6 +10,7 @@ import {
   getActiveForShowtime,
   getReservation,
   hold,
+  removeQuantity,
   removeSeats,
 } from './holds.service.js';
 
@@ -39,6 +40,8 @@ const holdBody = z.object({
 const patchBody = z.object({
   add: holdBody.partial({ showtimeId: true }).optional(),
   removeSeatIds: z.array(id).max(50).optional(),
+  // General admission has no seat to name, so a decrease says which tier and how many.
+  removeQuantity: z.object({ ticketTierId: id, quantity: z.number().int().positive().max(50) }).optional(),
 });
 
 const numericParam = (raw: string): number => {
@@ -83,10 +86,12 @@ reservationsRouter.patch(
   asyncH(async (req, res) => {
     const reservationId = numericParam(req.params.id);
     const userId = req.auth!.userId;
-    const { add, removeSeatIds } = req.body as z.infer<typeof patchBody>;
+    const { add, removeSeatIds, removeQuantity: drop } = req.body as z.infer<typeof patchBody>;
 
     let result = null;
-    if (removeSeatIds && removeSeatIds.length > 0) {
+    if (drop) {
+      result = await removeQuantity(userId, reservationId, drop.ticketTierId, drop.quantity);
+    } else if (removeSeatIds && removeSeatIds.length > 0) {
       result = await removeSeats(userId, reservationId, removeSeatIds);
     }
     if (add) {

@@ -1,20 +1,36 @@
 import { join } from "node:path";
 import cookieParser from "cookie-parser";
 import express, { type Express } from "express";
+import { config } from "./config.js";
 import { errorHandler, notFound } from "./middleware/error.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
 import { catalogPublicRouter } from "./modules/catalog/catalog.public.routes.js";
 import { organizerRouter } from "./modules/catalog/organizer.routes.js";
-import { moderationRouter } from "./modules/catalog/moderation.routes.js";
+import { studioRouter } from "./modules/studio/studio.routes.js";
+import { adminRouter } from "./modules/admin/admin.routes.js";
 import { reservationsRouter } from "./modules/holds/reservations.routes.js";
 import { seatmapRouter } from "./modules/seatmap/seatmap.routes.js";
-import { studioRouter } from "./modules/studio/studio.routes.js";
 import { walletRouter } from "./modules/payments/wallet.routes.js";
+import { notificationRouter } from "./modules/notifications/notifications.routes.js";
+import { aiRouter } from "./modules/ai/ai.routes.js";
+import { reviewsRouter } from "./modules/reviews/reviews.routes.js";
 
 /** Build the Express app (no listen) so tests can drive it with supertest. */
 export function createApp(): Express {
   const app = express();
   app.set("trust proxy", 1); // one Nginx hop (ADR 0003) → req.ip is the real client
+  app.use((req, res, next) => {
+    const origin = req.get("origin");
+    if (origin && config.corsOrigins.includes(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,PATCH,DELETE,OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type,X-Idempotency-Key");
+      res.vary("Origin");
+      if (req.method === "OPTIONS") return res.sendStatus(204);
+    }
+    next();
+  });
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
 
@@ -28,12 +44,31 @@ export function createApp(): Express {
 
   app.use("/api", authRouter);
   app.use("/api", catalogPublicRouter);
-  app.use("/api", reservationsRouter);
+  /*
+   * Reviews go here, immediately after the catalogue and before anything with a router-level guard.
+   *
+   * `notificationRouter` is mounted on `/api` and calls `router.use(requireAuth)`, which applies to
+   * every request that reaches that router — not only to its own paths. Anything public mounted
+   * after it therefore answers 401 before its own handler is consulted, which is exactly what the
+   * public review listing did until it was moved above.
+   */
+  app.use("/api", reviewsRouter);
   app.use("/api", walletRouter);
+  app.use("/api", notificationRouter);
+  app.use("/api/ai", aiRouter);
+  // `reservationsRouter` has a router-wide auth guard. Mount wallet first so the
+  // public, signature-verified VNPay IPN callback can reach its handler.
+  app.use("/api", reservationsRouter);
   app.use("/api/organizer", seatmapRouter);
+  // Studio owns PATCH /events/:id — it widened the handler beyond four text fields and made it
+  // transactional with re-moderation, so it must be mounted AHEAD of the catalog organizer router
+  // that used to serve that path (feature 006).
   app.use("/api/organizer", studioRouter);
   app.use("/api/organizer", organizerRouter);
-  app.use("/api/admin", moderationRouter);
+  // One router owns /api/admin.  supersedes the old catalog moderation router: it
+  // serves every route that one did and adds organizers, reports and audit logs. Mounting both
+  // would leave five paths resolved by registration order, which is not a decision anyone made.
+  app.use("/api/admin", adminRouter);
 
   app.use(notFound);
   app.use(errorHandler);

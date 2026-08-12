@@ -16,8 +16,10 @@ import { layoutApi } from "../../services/catalogClient";
  * overwritten.
  */
 
-const btn = "rounded-lg border-2 border-beige-kem px-2.5 py-1.5 text-xs font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
-const primary = "rounded-lg bg-burgundy px-3 py-1.5 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-40";
+const btn =
+  "rounded-lg border-2 border-beige-kem px-2.5 py-1.5 text-eyebrow font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
+const primary =
+  "rounded-lg bg-burgundy px-3 py-1.5 text-eyebrow font-black text-white transition hover:brightness-95 disabled:opacity-40";
 
 const KIND_LABEL: Record<string, string> = {
   add: "Thêm",
@@ -65,10 +67,20 @@ export default function ShowtimeMapPanel({
 
   return (
     <div className="space-y-3 rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
-      <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">Sơ đồ của suất chiếu</h3>
+      <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-beige-kem/70">
+        Sơ đồ của suất chiếu
+      </h3>
 
-      {error && <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-xs text-on-tint">{error}</div>}
-      {notice && <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-xs text-on-tint">{notice}</div>}
+      {error && (
+        <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-eyebrow text-on-tint">
+          {error}
+        </div>
+      )}
+      {notice && (
+        <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-eyebrow text-on-tint">
+          {notice}
+        </div>
+      )}
 
       {/* --- Re-apply, previewed (FR-027a) --- */}
       <div className="flex flex-wrap gap-2">
@@ -97,10 +109,10 @@ export default function ShowtimeMapPanel({
 
       {preview && (
         <div className="rounded-xl border-2 border-beige-kem/40 p-3">
-          <p className="font-mono text-[11px] text-beige-kem/60">
+          <p className="font-meta text-meta text-beige-kem/60">
             {preview.changes.length} thay đổi · {preview.refusals.length} bị từ chối
           </p>
-          <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-[11px] text-beige-kem/80">
+          <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-meta text-beige-kem/80">
             {preview.changes.map((c, i) => (
               <li key={`c${i}`}>
                 <span className="font-bold">{KIND_LABEL[c.kind] ?? c.kind}</span> — {c.seatLabel}
@@ -113,7 +125,7 @@ export default function ShowtimeMapPanel({
             ))}
           </ul>
           {!preview.wouldSucceed && (
-            <p className="mt-2 text-[11px] text-beige-kem/60">
+            <p className="mt-2 text-meta text-beige-kem/60">
               Không thể áp dụng khi còn ghế bị từ chối — sơ đồ sẽ được giữ nguyên.
             </p>
           )}
@@ -121,47 +133,76 @@ export default function ShowtimeMapPanel({
       )}
 
       {/* --- Block / unblock and marquee tier assignment (FR-033, FR-034) --- */}
-      <label className="block font-mono text-[10px] text-beige-kem/60">
+      <label className="block font-meta text-eyebrow text-beige-kem/60">
         Mã ghế đã chọn (cách nhau bằng dấu phẩy)
         <input
           value={selectionText}
           onChange={(e) => setSelectionText(e.target.value)}
           placeholder="VD 1201, 1202, 1203"
-          className="mt-1 h-9 w-full rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-xs text-beige-kem outline-none focus:border-burgundy"
+          className="mt-1 h-9 w-full rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow text-beige-kem outline-none focus:border-burgundy"
         />
       </label>
 
       <div className="flex flex-wrap items-center gap-2">
-        <button className={btn} disabled={busy || ids().length === 0}
-          onClick={() => run(async () => { await layoutApi.blockSeats(showtimeId, ids(), true); setNotice("Đã khoá ghế."); onDone?.(); })}>
+        <button
+          className={btn}
+          disabled={busy || ids().length === 0}
+          onClick={() =>
+            run(async () => {
+              await layoutApi.blockSeats(showtimeId, ids(), true);
+              setNotice("Đã khoá ghế.");
+              onDone?.();
+            })
+          }
+        >
           Khoá ghế
         </button>
-        <button className={btn} disabled={busy || ids().length === 0}
-          onClick={() => run(async () => { await layoutApi.blockSeats(showtimeId, ids(), false); setNotice("Đã mở khoá ghế."); onDone?.(); })}>
+        <button
+          className={btn}
+          disabled={busy || ids().length === 0}
+          onClick={() =>
+            run(async () => {
+              await layoutApi.blockSeats(showtimeId, ids(), false);
+              setNotice("Đã mở khoá ghế.");
+              onDone?.();
+            })
+          }
+        >
           Mở khoá
         </button>
 
         <select
           value={tierId}
           onChange={(e) => setTierId(Number(e.target.value) || "")}
-          className="h-9 rounded-lg border-2 border-beige-kem bg-surface-2 px-2 text-xs text-beige-kem outline-none"
+          className="h-9 rounded-lg border-2 border-beige-kem bg-surface-2 px-2 text-eyebrow text-beige-kem outline-none"
         >
-          <option value="" className="bg-xanh-pho">Hạng vé</option>
+          <option value="" className="bg-xanh-pho">
+            Hạng vé
+          </option>
           {tiers.map((t) => (
             <option key={t.id} value={t.id} className="bg-xanh-pho">
               {t.label} — {t.price.toLocaleString("vi-VN")}đ
             </option>
           ))}
         </select>
-        <button className={btn} disabled={busy || ids().length === 0 || tierId === ""}
-          onClick={() => run(async () => { await layoutApi.assignTier(showtimeId, ids(), Number(tierId)); setNotice("Đã gán hạng vé."); onDone?.(); })}>
+        <button
+          className={btn}
+          disabled={busy || ids().length === 0 || tierId === ""}
+          onClick={() =>
+            run(async () => {
+              await layoutApi.assignTier(showtimeId, ids(), Number(tierId));
+              setNotice("Đã gán hạng vé.");
+              onDone?.();
+            })
+          }
+        >
           Gán hạng vé
         </button>
       </div>
 
-      <p className="text-[10px] leading-4 text-beige-kem/45">
-        Ghế đã bán chỉ đổi được vị trí hiển thị; ghế đang được khách giữ thì không đổi được gì cho tới
-        khi lượt giữ hết hạn. Mọi thay đổi bị từ chối sẽ giữ nguyên toàn bộ sơ đồ.
+      <p className="text-eyebrow leading-4 text-beige-kem/45">
+        Ghế đã bán chỉ đổi được vị trí hiển thị; ghế đang được khách giữ thì không đổi được gì cho
+        tới khi lượt giữ hết hạn. Mọi thay đổi bị từ chối sẽ giữ nguyên toàn bộ sơ đồ.
       </p>
     </div>
   );

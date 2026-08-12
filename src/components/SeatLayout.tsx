@@ -7,10 +7,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SeatMap, SeatMapSeat, SeatStatus } from "@/shared/catalog/types";
 import { MovieEvent, Seat } from "../types";
 import { catalogClient } from "../services/catalogClient";
-import { formatHoldClock } from "../services/holdSession";
 import { watchShowtime } from "../services/seatSocket";
 import SeatCanvas from "./seatmap/SeatCanvas";
 import TierLegend from "./seatmap/TierLegend";
+import {
+  type BookingStep,
+  BookingHeader,
+  BookingLayout,
+  BookingSection,
+  OrderSummary,
+  TicketStub,
+  type SummaryLine,
+} from "./booking/BookingChrome";
+import { formatVnd } from "../services/currency";
 
 interface SeatLayoutProps {
   event: MovieEvent;
@@ -28,6 +37,8 @@ interface SeatLayoutProps {
   busy: boolean;
   onToggleSeat: (seat: Seat) => void;
   onBack: () => void;
+  /** A finished step on the bar. Pressing one cancels the order, like the back link. */
+  onGoToStep?: (step: BookingStep) => void;
   onProceedToCheckout: () => void;
 }
 
@@ -41,6 +52,7 @@ export default function SeatLayout({
   busy,
   onToggleSeat,
   onBack,
+  onGoToStep,
   onProceedToCheckout,
 }: SeatLayoutProps) {
   const [seats, setSeats] = useState<SeatMapSeat[]>([]);
@@ -51,7 +63,10 @@ export default function SeatLayout({
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const heldByMe = useMemo(
-    () => new Set(heldSeats.map((seat) => seat.showtimeSeatId).filter((id): id is number => id !== undefined)),
+    () =>
+      new Set(
+        heldSeats.map((seat) => seat.showtimeSeatId).filter((id): id is number => id !== undefined),
+      ),
     [heldSeats],
   );
 
@@ -134,17 +149,14 @@ export default function SeatLayout({
     });
   };
 
-  const formatPrice = (price: number) =>
-    new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(price);
-
   const selectedSeatsList = heldSeats;
   const totalPrice = selectedSeatsList.reduce((sum, seat) => sum + seat.price, 0);
-  const holdTimeLabel = formatHoldClock(remainingMs);
   const tierPrices = [...new Set(seats.map((s) => s.price))].sort((a, b) => a - b);
 
   const seatClasses = (seat: SeatMapSeat): string => {
     if (heldByMe.has(seat.id)) return "fill-burgundy stroke-burgundy";
-    if (seat.status === "sold" || seat.status === "blocked") return "fill-stone-800 stroke-stone-800";
+    if (seat.status === "sold" || seat.status === "blocked")
+      return "fill-stone-800 stroke-stone-800";
     if (seat.status === "held") return "fill-stone-700/60 stroke-stone-700";
     return "fill-transparent stroke-beige-kem/40 hover:stroke-burgundy";
   };
@@ -152,7 +164,7 @@ export default function SeatLayout({
   /** What a screen reader announces. Section, row, seat, status, price — enough to choose a seat
    *  without seeing the map (FR-039a). */
   const statusTitle = (seat: SeatMapSeat): string => {
-    const price = formatPrice(seat.price);
+    const price = formatVnd(seat.price);
     const where = `${seat.section ? `${seat.section}, ` : ""}hàng ${seat.row}, ghế ${seat.number}`;
     if (heldByMe.has(seat.id)) return `${where} — bạn đang giữ (${price})`;
     const label: Record<SeatStatus, string> = {
@@ -164,51 +176,72 @@ export default function SeatLayout({
     return `${where} — ${label[seat.status]} (${price})`;
   };
 
-  return (
-    <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto space-y-8">
-      {/* Header and indicator step */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-beige-kem/25 pb-4">
-        <button
-          onClick={onBack}
-          className="flex items-center gap-2 text-sm text-ink-soft hover:text-beige-kem transition font-mono"
-        >
-          QUAY LẠI CHI TIẾT SỰ KIỆN
-        </button>
+  const summaryLines: SummaryLine[] = selectedSeatsList.map((seat) => ({
+    key: String(seat.showtimeSeatId ?? seat.id),
+    label: `Ghế ${seat.id}`,
+    detail: seat.row ? `Hàng ${seat.row}` : undefined,
+    amount: seat.price,
+    onRemove: busy ? undefined : () => onToggleSeat(seat),
+  }));
 
-        <div className="flex items-center gap-2 sm:gap-4 font-mono text-xs text-ink-soft">
-          <span>01. CHỌN SUẤT</span>
-          <span className="h-0.5 w-6 bg-beige-kem" />
-          <span className="rounded-full bg-bubblegum px-2.5 py-1 font-bold text-on-tint">
-            02. CHỌN GHẾ
-          </span>
-          <span className="h-0.5 w-6 bg-beige-kem" />
-          <span>03. THANH TOÁN VÀ NHẬN VÉ</span>
-        </div>
-      </div>
+  return (
+    <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
+      <BookingHeader
+        backLabel="Hủy đơn và quay lại"
+        onBack={onBack}
+        current={2}
+        seated
+        onGoToStep={onGoToStep}
+      />
+
+      <TicketStub event={event} date={selectedDate} time={selectedTime} />
 
       {loadError && (
-        <div className="rounded-xl border-2 border-beige-kem bg-bubblegum px-4 py-3 font-mono text-[11px] leading-5 text-on-tint">
+        <p className="border border-burgundy/50 px-4 py-3 font-meta text-meta leading-5 text-burgundy-ink">
           {loadError}
-        </div>
+        </p>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left column: the real seat map for this showtime */}
-        <div className="lg:col-span-8 bg-xanh-pho border-2 border-beige-kem rounded-2xl p-6 sm:p-10 flex flex-col items-center">
-          <div className="relative w-full max-w-lg mb-12 text-center">
-            <h4 className="text-[10px] font-mono tracking-widest text-ink-soft uppercase mb-2">SÂN KHẤU</h4>
-            <div className="relative h-4 bg-gradient-to-t from-beige-kem/40 to-transparent border-t-2 border-beige-kem/75 rounded-[100%] filter blur-[1px]" />
-            <div className="absolute inset-x-0 -bottom-8 h-20 bg-gradient-to-b from-beige-kem/10 to-transparent pointer-events-none" />
-          </div>
+      <BookingLayout
+        aside={
+          <OrderSummary
+            event={event}
+            date={selectedDate}
+            time={selectedTime}
+            venue={event.venueName || event.location}
+            lines={summaryLines}
+            total={totalPrice}
+            holdMs={remainingMs}
+            emptyLabel="Chưa chọn ghế nào"
+            ctaLabel="Tiếp tục thanh toán"
+            onCta={onProceedToCheckout}
+            ctaDisabled={selectedSeatsList.length === 0 || remainingMs <= 0 || busy}
+            note="Ghế được giữ ngay khi bấm chọn. Đồng hồ chạy từ ghế đầu tiên và không cộng thêm khi chọn thêm ghế; hết giờ, ghế trả lại cho người khác."
+          />
+        }
+      >
+        <BookingSection
+          step="02"
+          title="Chọn ghế"
+          hint="Bấm vào ghế trên sơ đồ để giữ chỗ. Bấm lần nữa để bỏ."
+        >
+          {/*
+            The screen marker, then the map, then the legend — the order every cinema draws it in,
+            because it is the order the eye needs: which way am I facing, what is here, what do the
+            colours mean.
+          */}
+          <div className="border border-beige-kem/30 p-5 sm:p-8">
+            <div className="mx-auto mb-10 w-full max-w-lg text-center">
+              <p className="label-eyebrow mb-2 text-ink-soft">Sân khấu</p>
+              <div className="h-1 rounded-[100%] bg-gradient-to-t from-beige-kem/45 to-beige-kem/10" />
+            </div>
 
-          {/* The map, drawn from coordinates through the shared canvas — the same surface the event
-              page's preview uses, with zoom and pan (feature 005, FR-038/FR-039). The hold path
-              below is untouched: geometry changed where a seat is drawn, not how it is held. */}
-          <div className="w-full pb-4">
             {loading ? (
-              <p className="py-10 text-center font-mono text-xs text-beige-kem/50">Đang tải sơ đồ ghế…</p>
+              <p className="py-12 text-center font-meta text-meta text-ink-soft">
+                Đang tải sơ đồ ghế…
+              </p>
             ) : seats.length === 0 ? (
-              <p className="py-10 text-center font-mono text-xs text-beige-kem/50">
+              <p className="py-12 text-center font-meta text-meta text-ink-soft">
                 Suất diễn này chưa có sơ đồ ghế.
               </p>
             ) : (
@@ -220,138 +253,51 @@ export default function SeatLayout({
                 tables={mapMeta.tables}
                 interactive={!busy}
                 seatClass={seatClasses}
-                // Same rule as the event page: colour is price, status still wins (FR-068, FR-069).
-                seatFill={(s) =>
-                  s.status === "available"
-                    ? mapMeta.tierLegend?.find((t) => t.tierId === s.tierId)?.color
+                // Colour means PRICE on the buyer's map and nothing else (FR-067); status still
+                // outranks it, which `seatFillStyle`'s available-only rule enforces.
+                seatFill={(seat) =>
+                  seat.status === "available" && !heldByMe.has(seat.id)
+                    ? mapMeta.tierLegend?.find((t) => t.tierId === seat.tierId)?.color
                     : undefined
                 }
                 seatLabel={statusTitle}
                 onSeatActivate={toggleSeatSelection}
               />
             )}
-          </div>
 
-          {/* Legend */}
-          <div className="mt-8 w-full max-w-lg">
-            <TierLegend legend={mapMeta.tierLegend} />
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-6 border-t border-beige-kem/25 w-full max-w-lg font-mono text-xs text-beige-kem/70">
-            <div className="flex items-center gap-2">
-              <span className="w-5 h-5 bg-transparent border-2 border-beige-kem rounded" />
-              <span>Còn trống{tierPrices.length ? ` (${tierPrices.map(formatPrice).join(" / ")})` : ""}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-5 h-5 bg-burgundy rounded" />
-              <span>Bạn đang giữ</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-5 h-5 bg-stone-700/60 border border-stone-700 rounded" />
-              <span>Người khác giữ</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-5 h-5 bg-stone-800 border border-stone-800 rounded" />
-              <span>Đã bán / Không bán</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Right column: the live selection */}
-        <div className="lg:col-span-4 bg-xanh-pho border-2 border-beige-kem rounded-2xl p-6 space-y-6">
-          <div className="space-y-1">
-            <h3 className="font-display font-bold text-lg text-beige-kem">Thông tin suất</h3>
-            <p className="text-xs text-ink-soft font-mono uppercase tracking-wider">{event.genre.join(" | ")}</p>
-          </div>
-
-          <div className="rounded-xl border-2 border-beige-kem bg-cam-dat p-4 font-mono text-xs text-on-tint/75">
-            <div className="flex items-center justify-between gap-3">
-              <span className="inline-flex items-center font-bold text-ink-soft">Giữ ghế tạm thời</span>
-              <span className="text-base font-black text-beige-kem">
-                {selectedSeatsList.length ? holdTimeLabel : "--:--"}
+            <div className="mt-8 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-beige-kem/25 pt-6 font-meta text-meta text-beige-kem/80 sm:grid-cols-4">
+              <span className="flex items-center gap-2">
+                <span className="h-4 w-4 shrink-0 border-2 border-beige-kem/60" />
+                Còn trống
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="h-4 w-4 shrink-0 bg-burgundy" />
+                Bạn đang giữ
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="h-4 w-4 shrink-0 bg-stone-700/60" />
+                Người khác giữ
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="h-4 w-4 shrink-0 bg-stone-800" />
+                Đã bán / không bán
               </span>
             </div>
-            <p className="mt-2 leading-5">
-              Ghế được giữ ngay khi bạn bấm chọn, và chỉ mình bạn giữ. Đồng hồ chạy từ ghế đầu tiên và
-              giữ nguyên trong suốt quy trình (chọn suất → chọn ghế → thanh toán); thêm hoặc bớt ghế
-              không cộng thêm thời gian. Hết giờ, ghế tự trả lại cho người khác.
-            </p>
-          </div>
 
-          <div className="space-y-3 pt-4 border-t border-beige-kem/25 text-sm">
-            <div className="flex justify-between font-mono">
-              <span className="text-beige-kem/60">Tên tác phẩm:</span>
-              <span className="font-bold text-beige-kem shrink-0 max-w-[180px] text-right truncate">{event.title}</span>
-            </div>
-            <div className="flex justify-between font-mono">
-              <span className="text-beige-kem/60">Suất:</span>
-              <span className="font-bold text-beige-kem text-right">
-                {selectedTime} • {selectedDate}
-              </span>
-            </div>
-            <div className="flex justify-between font-mono">
-              <span className="text-beige-kem/60">Địa điểm:</span>
-              <span className="font-bold text-beige-kem text-right max-w-[200px] truncate" title={event.location}>
-                {event.venueName || event.location}
-              </span>
-            </div>
-          </div>
-
-          {/* Selected seat list */}
-          <div className="space-y-3 pt-4 border-t border-beige-kem/25">
-            <h4 className="font-display text-sm font-semibold text-beige-kem">Ghế ngồi đã chọn:</h4>
-
-            {selectedSeatsList.length === 0 ? (
-              <div className="py-6 text-center text-xs text-beige-kem/40 border border-dashed border-beige-kem/25 rounded-lg">
-                Vui lòng chọn ghế trên sơ đồ
+            {mapMeta.tierLegend && mapMeta.tierLegend.length > 0 ? (
+              <div className="mt-4">
+                <TierLegend legend={mapMeta.tierLegend} />
               </div>
             ) : (
-              <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
-                {selectedSeatsList.map((seat) => (
-                  <div
-                    key={seat.showtimeSeatId ?? seat.id}
-                    className="flex justify-between items-center bg-xanh-pho px-3 py-2 border-2 border-beige-kem rounded-lg text-xs font-mono"
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full bg-surface-2" />
-                      <span className="font-bold text-beige-kem">GHẾ {seat.id}</span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-beige-kem">{formatPrice(seat.price)}</span>
-                      <button
-                        onClick={() => onToggleSeat(seat)}
-                        disabled={busy}
-                        className="font-mono text-[10px] uppercase text-stone-500 transition hover:text-burgundy disabled:opacity-40 cursor-pointer"
-                        title="Bỏ giữ ghế này"
-                      >
-                        Xóa
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              tierPrices.length > 0 && (
+                <p className="mt-4 font-meta text-meta text-ink-soft">
+                  Giá theo hạng ghế: {tierPrices.map(formatVnd).join(" · ")}
+                </p>
+              )
             )}
           </div>
-
-          <div className="pt-4 border-t border-beige-kem/25 flex flex-col gap-1.5">
-            <div className="flex justify-between items-baseline font-mono">
-              <span className="text-xs text-beige-kem/60 uppercase">Tổng tiền phải trả:</span>
-              <span className="text-2xl font-black text-burgundy font-display">{formatPrice(totalPrice)}</span>
-            </div>
-            <p className="text-[10px] text-right font-mono text-ink-soft tracking-wide">
-              Đã bao gồm thuế giá trị gia tăng và phụ thu
-            </p>
-          </div>
-
-          <button
-            onClick={onProceedToCheckout}
-            disabled={selectedSeatsList.length === 0 || remainingMs <= 0 || busy}
-            className="w-full py-3.5 bg-burgundy hover:brightness-95 disabled:bg-surface-2 disabled:text-white/60 text-white hover:text-white font-bold rounded-xl transition shadow-hard hover:shadow-burgundy/30 cursor-pointer text-center text-sm"
-          >
-            TIẾP TỤC: ĐIỀN THÔNG TIN THÀNH VIÊN
-          </button>
-        </div>
-      </div>
+        </BookingSection>
+      </BookingLayout>
     </div>
   );
 }

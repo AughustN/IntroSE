@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
-import { err } from '../http.js';
+import { err, HttpError } from '../http.js';
 import { findById, isApprovedOrganizer, toMe } from '../modules/auth/auth.repo.js';
 import { familyHasLiveToken, verifyAccessToken } from '../modules/auth/sessions.js';
 
@@ -36,4 +36,30 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
   } catch (e) {
     next(e);
   }
+}
+
+/**
+ * Identify the caller if they are signed in, and carry on if they are not.
+ *
+ * For routes that are public but say more to somebody with a session — the review listing being the
+ * first: anyone may read the ratings, and a signed-in reader also learns whether they may write one
+ * and which review is theirs. Written as a wrapper around `requireAuth` rather than a second copy
+ * of the token check, so the two can never disagree about what a valid session is.
+ *
+ * Any authentication failure is swallowed deliberately: an expired token on a public page is a
+ * visitor, not an error. A *suspended* account is the one case that still refuses, because letting
+ * it read as an anonymous visitor would quietly restore access it is meant to have lost.
+ */
+export async function optionalAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (!req.headers.authorization?.startsWith('Bearer ')) {
+    next();
+    return;
+  }
+  await requireAuth(req, res, (error?: unknown) => {
+    if (error instanceof HttpError && error.code === 'account_suspended') {
+      next(error);
+      return;
+    }
+    next();
+  });
 }

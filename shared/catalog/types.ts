@@ -11,10 +11,24 @@ export interface EventCard {
   title: string;
   imageUrl: string | null;
   category: string; // category code
+  /**
+   * The category's Vietnamese name, from the database.
+   *
+   * Sent with the card so the browser can build its filter list from the events it actually holds.
+   * The alternative — a hardcoded list in the UI — is what broke: the catalogue grew past a dozen
+   * categories while the frontend still knew three, and everything it did not recognise was silently
+   * relabelled as one of them.
+   */
+  categoryLabel: string;
   city: string | null; // derived from showtime venues
   earliestShowtime: string | null; // ISO date-time
   startingPrice: number | null; // VND integer
   soldOut: boolean; // derived — all upcoming showtimes sold out (D-A)
+  // Derived — the event still has a showtime ahead of it. False means every showtime is in the past,
+  // which is a different thing from selling out and has to read differently on the card: `soldOut`
+  // is only ever true while `hasUpcoming` is, so without this field a finished event arrives looking
+  // identical to a bookable one.
+  hasUpcoming: boolean;
 }
 
 export interface Tier {
@@ -32,6 +46,12 @@ export interface Showtime {
 }
 
 export interface EventDetail extends EventCard {
+  /**
+   * The event's mean star rating, or **null when nobody has rated it** — an unrated event is not a
+   * zero-star event, and collapsing the two would libel every new listing.
+   */
+  rating: number | null;
+  reviewCount: number;
   description: string;
   ageRestriction: string;
   lineup: string[];

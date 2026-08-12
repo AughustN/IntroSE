@@ -5,7 +5,8 @@
 
 import { useState } from "react";
 import { isMaterialEdit } from "@/shared/catalog/material-edit";
-import { EVENT_CATEGORIES, MyEvent, MyVenue, studioApi } from "../../services/catalogClient";
+import { MyEvent, MyVenue, studioApi } from "../../services/catalogClient";
+import { useEventCategories } from "../../hooks/useEventCategories";
 import AiListingPanel from "./AiListingPanel";
 import ShowtimeList from "./ShowtimeList";
 import { Refusal } from "./states";
@@ -43,6 +44,7 @@ export default function EventEditor({
   const [title, setTitle] = useState(event.title);
   const [description, setDescription] = useState("");
   const [categoryCode, setCategoryCode] = useState(event.category);
+  const categories = useEventCategories();
   const [refusal, setRefusal] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -138,9 +140,9 @@ export default function EventEditor({
             onChange={(e) => setCategoryCode(e.target.value)}
             className={input}
           >
-            {EVENT_CATEGORIES.map((c) => (
+            {categories.map((c) => (
               <option key={c.code} value={c.code} className="bg-xanh-pho">
-                {c.label}
+                {c.labelVi}
               </option>
             ))}
           </select>

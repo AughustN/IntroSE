@@ -3,152 +3,522 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { formatEventDate } from "../services/formatDate";
+import { useState } from "react";
+import { Check, Tag, X } from "lucide-react";
+import { formatVnd } from "../services/currency";
+import Select from "./Select";
+import DatePicker from "./DatePicker";
+import Disclosure from "./Disclosure";
+import type { DateFilter } from "../services/dateFilter";
 
 interface EventFiltersProps {
-  activeCategory: string;
+  /**
+   * The categories in force. Empty means no category filter — there is no `"all"` member.
+   *
+   * An explicit `"all"` in the list would be a fifth value that has to be excluded from every
+   * `includes` test and stripped before the filter runs, and two ways to say "everything" (the
+   * token, or the other four all ticked) that mean the same thing and look different on screen.
+   * The `"all"` row is a *control* that clears the list, not a value in it.
+   */
+  activeCategories: string[];
+  /** Fired with the row that was clicked, `"all"` included. The caller toggles or clears. */
   onCategoryChange: (category: string) => void;
-  activeDate: string;
-  onDateChange: (date: string) => void;
-  activeCity: string;
+  activeDate: DateFilter;
+  onDateChange: (date: DateFilter) => void;
+  activeCities: string[];
   onCityChange: (city: string) => void;
-  maxPrice: number;
+  /** `null` means no ceiling is in force yet — the slider then opens on `priceCeiling`. */
+  maxPrice: number | null;
+  /** The dearest ticket still reachable through the other filters. Where the rule ends, full stop. */
+  priceCeiling: number;
   onMaxPriceChange: (price: number) => void;
-  availability: string;
+  availabilities: string[];
   onAvailabilityChange: (status: string) => void;
-  wishlistCount: number;
+  /** Puts every control in this bar back to its opening state in one go. */
+  onResetFilters: () => void;
+  /**
+   * Which shape to take.
+   *
+   * `bar` is the horizontal strip the landing page runs under its hero. `rail` is the vertical
+   * column the catalog page runs beside its grid, after the reference's collection layout: a count,
+   * then one collapsed accordion per filter. Same controls and the same state either way — only the
+   * furniture around them changes, which is why this is a variant rather than a second component.
+   */
+  variant?: "bar" | "rail";
+  /** Shown at the top of the rail. Ignored by the bar, which has no room for it. */
+  resultCount?: number;
   /**
    * Every date the loaded events actually run on, ISO and ascending. Derived from the catalog rather
    * than hardcoded: the option value is compared against `movie.dates` verbatim, so a fixed list
    * silently stops matching the moment the catalog moves on.
    */
   dateOptions: string[];
+  /**
+   * The categories present in the catalogue, derived from it — not a fixed list.
+   *
+   * Exactly the reasoning `dateOptions` above already carries, and the one place it was not applied.
+   * The hardcoded three (`movie`, `music`, `theatre`) stopped describing a catalogue that grew to a
+   * dozen: `Phim` matched nothing at all, and `Ca nhạc` matched 461 of 503 events because the
+   * adapter relabelled everything it did not recognise as music.
+   */
+  categoryOptions: ReadonlyArray<{ id: string; label: string }>;
 }
 
-const categories = [
-  { id: "all", label: "Tất cả" },
-  { id: "movie", label: "Phim" },
-  { id: "music", label: "Ca nhạc" },
-  { id: "theatre", label: "Kịch" },
-];
 
-const cityOptions = ["all", "TP.HCM", "Hà Nội", "Đà Nẵng"];
+
+const cityOptions = ["TP.HCM", "Hà Nội", "Đà Nẵng"];
+
+const availabilityOptions = [
+  ["available", "Còn vé"],
+  ["low", "Sắp hết"],
+  ["sold_out", "Hết vé"],
+  ["finished", "Đã diễn"],
+  ["cancelled", "Đã hủy"],
+] as const;
+
+/**
+ * The near end of the rule.
+ *
+ * Zero rather than a lowest sensible ticket price, because clearing the box means zero and zero has
+ * to be a position on the rule like any other. There is no matching constant for the far end: that
+ * one is the dearest ticket in the catalog, and it arrives as `priceCeiling`.
+ */
+const PRICE_FLOOR = 0;
+
+/**
+ * A filter chip. Flat and square — selection is carried by fill, not by a border or a shadow, so a
+ * row of these reads as one ruled strip rather than a row of separate objects.
+ */
+function Chip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`px-3.5 py-2 font-meta text-body uppercase tracking-[0.1em] transition ${
+        active
+          ? "bg-beige-kem text-xanh-pho"
+          : "text-ink-soft hover:bg-bubblegum/40 hover:text-beige-kem"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+/**
+ * One option in the rail, as a row with a tick.
+ *
+ * The rail used to put a `Select` inside each accordion, which meant opening a panel to reach a
+ * control that opened another panel — two clicks and two animations to change one value, and the
+ * inner listbox floated over the grid because that is what a dropdown does. The reference does not
+ * have a dropdown anywhere on its collection page: every facet is a list of rows you tick.
+ *
+ * `aria-checked` with `role="checkbox"` rather than a real `<input>`: these are one-of-N and
+ * clicking the active row does not clear it, so the row is a toggle in appearance only. The tick is
+ * the affordance; the box around it would be a promise the behaviour does not keep.
+ */
+function OptionRow({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={active}
+      onClick={onClick}
+      className={`flex w-full items-center justify-between gap-3 py-1.5 text-left font-meta text-body transition ${
+        active ? "text-beige-kem" : "text-ink-soft hover:text-beige-kem"
+      }`}
+    >
+      <span className="truncate">{label}</span>
+      {/*
+        The tick keeps its space when it is not showing. Rendered conditionally the labels would
+        shift left by the width of the glyph every time the selection moved down the list.
+      */}
+      <Check
+        aria-hidden="true"
+        className={`h-3.5 w-3.5 shrink-0 text-burgundy-ink transition-opacity ${
+          active ? "opacity-100" : "opacity-0"
+        }`}
+      />
+    </button>
+  );
+}
 
 export default function EventFilters({
-  activeCategory,
+  activeCategories,
   onCategoryChange,
   activeDate,
   onDateChange,
-  activeCity,
+  activeCities,
   onCityChange,
   maxPrice,
+  priceCeiling,
   onMaxPriceChange,
-  availability,
+  availabilities,
   onAvailabilityChange,
-  wishlistCount,
+  onResetFilters,
   dateOptions,
+  variant = "bar",
+  resultCount = 0,
+  categoryOptions,
 }: EventFiltersProps) {
-  const formatPrice = (price: number) =>
-    new Intl.NumberFormat("vi-VN", {
-      style: "currency",
-      currency: "VND",
-      maximumFractionDigits: 0,
-    }).format(price);
+  /*
+   * Whether there is anything to undo. Drives whether the reset appears at all: a permanently
+   * visible "clear" on a bar that is already clear is a control that does nothing most of the time,
+   * and the reader has to read it to find that out.
+   */
+  const hasActiveFilters =
+    activeCategories.length > 0 ||
+    activeDate !== null ||
+    activeCities.length > 0 ||
+    availabilities.length > 0 ||
+    maxPrice !== null;
 
-  return (
-    <section className="border-b border-beige-kem/25 bg-xanh-pho px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-[92rem]">
-        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="font-mono text-[11px] font-bold uppercase tracking-normal text-ink-soft">
-              Bộ lọc nhanh
-            </p>
-            <h2 className="font-display text-xl font-black text-beige-kem">
-              Tìm đúng suất diễn trước khi chọn vé
-            </h2>
-          </div>
-          <p className="font-mono text-xs text-beige-kem/55">
-            Lọc theo ngày, thành phố, giá và trạng thái vé
-          </p>
+  /*
+   * What is in the price box while it is being typed in, or `null` when it is not.
+   *
+   * The box has to show two different strings for the same number. Sitting there it shows the
+   * formatted price, because that is what the rest of the page shows and a bare 1500000 is hard to
+   * read. Being typed in it has to show exactly what was typed, because reformatting between
+   * keystrokes fights the caret — insert a digit mid-number, the separators shift, and the caret is
+   * suddenly somewhere else.
+   *
+   * `null` rather than a separate `editing` flag: one piece of state cannot disagree with itself.
+   */
+  const [priceDraft, setPriceDraft] = useState<string | null>(null);
+
+  /**
+   * Take whatever is in the box and make a price out of it, inside the catalog's own range.
+   *
+   * Dropping everything that is not a digit is what keeps the result whole — a typed "12,5" is 125,
+   * not 12.5 — and it also disposes of the "đ" and the thousands dots that were in the box before
+   * the reader started typing over them.
+   *
+   * Then the figure is held between zero and the dearest ticket on sale. Above that there is nothing
+   * left to exclude, so a larger ceiling would be a number that changes no result while making the
+   * rule and the box disagree about where the far end is.
+   *
+   * An empty box is zero, not a cancel. Clearing a ceiling is a thing someone can mean, and putting
+   * the old number back would make the box impossible to empty.
+   *
+   * Runs on blur and on Enter, never per keystroke — reformatting mid-word fights the caret, and a
+   * half-typed "8" is not yet the 8đ it would briefly become.
+   */
+  const commitPriceDraft = (raw: string) => {
+    setPriceDraft(null);
+    const typed = Number(raw.replace(/\D/g, "") || 0);
+    onMaxPriceChange(Math.min(priceCeiling, Math.max(PRICE_FLOOR, typed)));
+  };
+
+  /**
+   * The number both controls show.
+   *
+   * No ceiling in force yet means the rule opens at the top of the catalog. The clamp is for a
+   * `maxPrice` that arrives from outside these controls already too large — the catalog can shrink
+   * under a stored value — and it costs nothing, since a ceiling above the dearest ticket and one
+   * exactly at it filter identically.
+   */
+  const effectiveMax = Math.min(priceCeiling, maxPrice ?? priceCeiling);
+
+  /** Only the price control is shared with the rail, and only its label needs hiding there. */
+  const srOnly = variant === "rail";
+
+  /**
+   * What the rail prints beside a closed group. `undefined` where the filter is not in force.
+   *
+   * One name while there is one, a count past that. Three names do not fit a 240px header and a
+   * truncated list of three is less use than the number three.
+   */
+  const summarise = (labels: string[]) =>
+    labels.length === 0 ? undefined : labels.length === 1 ? labels[0] : `${labels.length} mục`;
+
+  const categorySummary = summarise(
+    categoryOptions.filter((c) => activeCategories.includes(c.id)).map((c) => c.label),
+  );
+  const citySummary = summarise(activeCities);
+  const availabilitySummary = summarise(
+    availabilityOptions.filter(([value]) => availabilities.includes(value)).map(([, l]) => l),
+  );
+
+  /*
+   * "Tất cả" is lit when nothing else is, which is what makes it read as the off switch for the row
+   * rather than as a fifth thing you can have on at the same time as "Phim".
+   */
+  const categoryChips = [
+    <Chip
+      key="all"
+      label="Tất cả"
+      active={activeCategories.length === 0}
+      onClick={() => onCategoryChange("all")}
+    />,
+    ...categoryOptions.map((cat) => (
+      <Chip
+        key={cat.id}
+        label={cat.label}
+        active={activeCategories.includes(cat.id)}
+        onClick={() => onCategoryChange(cat.id)}
+      />
+    )),
+  ];
+
+  const dateControl = (
+    <DatePicker label="Ngày" value={activeDate} available={dateOptions} onChange={onDateChange} />
+  );
+
+  const cityControl = (
+    <Select
+      label="Thành phố"
+      value=""
+      selectedValues={activeCities}
+      emptyLabel="Mọi thành phố"
+      onChange={onCityChange}
+      options={[
+        { value: "all", label: "Mọi thành phố" },
+        ...cityOptions.map((city) => ({ value: city, label: city })),
+      ]}
+    />
+  );
+
+  const statusControl = (
+    <Select
+      label="Trạng thái"
+      value=""
+      selectedValues={availabilities}
+      emptyLabel="Mọi trạng thái"
+      onChange={onAvailabilityChange}
+      options={[
+        { value: "all", label: "Mọi trạng thái" },
+        ...availabilityOptions.map(([value, label]) => ({ value, label })),
+      ]}
+    />
+  );
+
+  /*
+    Two ways into one number: drag it, or type it.
+
+    A `div` and an explicit `htmlFor`, not a wrapping `label`. A label binds to the first labelable
+    thing inside it, so wrapping both controls would name the box and leave the slider anonymous to
+    a screen reader. Naming the box and giving the slider its own `aria-label` is the only
+    arrangement where both are announced.
+  */
+  const priceControl = (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <label
+        htmlFor="filter-max-price"
+        className={srOnly ? "sr-only" : "label-eyebrow text-ink-soft"}
+      >
+        Giá tối đa
+      </label>
+
+      {/*
+        The box carries the same hairline the three triggers beside it do, and the same `h-8`, so in
+        the bar the four controls sit on one ruled line across the page. It used to be a short
+        underline tucked up on the label row, which is what made this cell read as an afterthought
+        next to three full-width fields.
+      */}
+      <div className="flex h-8 items-center gap-2 border-b border-beige-kem/40 pr-1 transition focus-within:border-burgundy hover:border-beige-kem">
+        {/*
+          `type="text"` with `inputMode="numeric"`, not `type="number"`: a number input refuses to
+          hold "1.500.000đ", so the formatted value could not be shown in the box at rest — and its
+          spinners step by one, which is meaningless here. The phone keypad comes from `inputMode`
+          either way.
+        */}
+        <input
+          id="filter-max-price"
+          type="text"
+          inputMode="numeric"
+          value={priceDraft ?? formatVnd(effectiveMax)}
+          // Swapping the formatted string for bare digits on focus means the first keystroke types
+          // into a number, not into "1.500.000đ" with a caret parked after the "đ".
+          onFocus={() => setPriceDraft(String(effectiveMax))}
+          onChange={(e) => setPriceDraft(e.target.value)}
+          onBlur={(e) => commitPriceDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              e.currentTarget.blur();
+            }
+            // Escape puts the old number back into the DOM node before blurring, not just into
+            // state. `setPriceDraft` does not land until the next render, so the blur fired on the
+            // line after it would still read the abandoned draft off the element and commit the
+            // very value Escape was pressed to throw away.
+            if (e.key === "Escape") {
+              e.currentTarget.value = String(effectiveMax);
+              setPriceDraft(null);
+              e.currentTarget.blur();
+            }
+          }}
+          className="w-full min-w-0 bg-transparent font-meta text-body text-beige-kem outline-none"
+        />
+        <Tag className="h-3.5 w-3.5 shrink-0 text-ink-soft" />
+      </div>
+
+      {/*
+        The rule runs the whole width of the catalog's prices and no further, so the two ends are
+        the cheapest thing you could ask for and the dearest thing on sale.
+
+        `step={1}` so it can hold any whole number the box produces. A coarser step would round the
+        value on the way in and the two controls would disagree about what was typed — the reason
+        the old fifty-thousand step had to go.
+
+        CSS cannot read a range's value, so the filled length of the track is handed over as a
+        percentage. Nothing clamps it here: `effectiveMax` is already inside the two ends, and
+        pinning it a second time would only hide the day that stops being true.
+      */}
+      <input
+        id="filter-max-price-range"
+        type="range"
+        aria-label="Giá tối đa"
+        min={PRICE_FLOOR}
+        max={priceCeiling}
+        step={1}
+        value={effectiveMax}
+        onChange={(e) => onMaxPriceChange(Number(e.target.value))}
+        style={
+          {
+            "--range-fill": `${((effectiveMax - PRICE_FLOOR) / (priceCeiling - PRICE_FLOOR)) * 100}%`,
+          } as React.CSSProperties
+        }
+        className="filter-range mt-1"
+      />
+    </div>
+  );
+
+  /*
+    One control that undoes all five. Only rendered when there is something to undo — see
+    `hasActiveFilters`.
+
+    Filled, and in the burgundy the rest of the page uses for its one real action, so it reads as
+    the thing to press rather than as another category. It does not get confused with the chips
+    beside it despite being a filled box like the selected one, because that chip is cream-on-ink
+    and this is white-on-red — and because it carries a glyph.
+  */
+  const resetButton = hasActiveFilters ? (
+    <button
+      type="button"
+      onClick={onResetFilters}
+      className="label-eyebrow flex h-9 items-center gap-1.5 bg-burgundy px-4 text-white transition hover:brightness-110"
+    >
+      <X className="h-3.5 w-3.5" />
+      Xóa bộ lọc
+    </button>
+  ) : null;
+
+  if (variant === "rail") {
+    /*
+     * The collection rail, after the reference: a count, then one accordion per filter, each a row
+     * of type over a hairline with a `+` at the far end.
+     *
+     * Every group starts closed, which is also what the reference does. On a rail this narrow, five
+     * open controls would run past the fold and the reader would be scrolling the filters to reach
+     * the grid; closed, the whole vocabulary of the page fits in one glance and only the group being
+     * used takes any room.
+     */
+    return (
+      <div>
+        <p className="font-meta text-body text-ink-soft">{resultCount} kết quả</p>
+
+        <div className="mt-5 border-t border-beige-kem/30">
+          <Disclosure label="Loại" summary={categorySummary}>
+            <OptionRow
+              label="Tất cả"
+              active={activeCategories.length === 0}
+              onClick={() => onCategoryChange("all")}
+            />
+            {categoryOptions.map((cat) => (
+              <OptionRow
+                key={cat.id}
+                label={cat.label}
+                active={activeCategories.includes(cat.id)}
+                onClick={() => onCategoryChange(cat.id)}
+              />
+            ))}
+          </Disclosure>
+
+          {/*
+            No date group here.
+
+            The catalog page has a calendar's worth of controls in a 240px column and the picker
+            needs three times that to draw a month, so it opened as a panel floating over the grid —
+            the one thing this rewrite was meant to get rid of. The landing bar keeps it, where
+            there is a full row to open into.
+          */}
+
+          <Disclosure label="Thành phố" summary={citySummary}>
+            <OptionRow
+              label="Mọi thành phố"
+              active={activeCities.length === 0}
+              onClick={() => onCityChange("all")}
+            />
+            {cityOptions.map((city) => (
+              <OptionRow
+                key={city}
+                label={city}
+                active={activeCities.includes(city)}
+                onClick={() => onCityChange(city)}
+              />
+            ))}
+          </Disclosure>
+
+          <Disclosure label="Trạng thái" summary={availabilitySummary}>
+            <OptionRow
+              label="Mọi trạng thái"
+              active={availabilities.length === 0}
+              onClick={() => onAvailabilityChange("all")}
+            />
+            {availabilityOptions.map(([value, label]) => (
+              <OptionRow
+                key={value}
+                label={label}
+                active={availabilities.includes(value)}
+                onClick={() => onAvailabilityChange(value)}
+              />
+            ))}
+          </Disclosure>
+
+          <Disclosure
+            label="Giá tối đa"
+            summary={maxPrice === null ? undefined : formatVnd(maxPrice)}
+          >
+            {priceControl}
+          </Disclosure>
         </div>
 
-        <div className="grid gap-3 rounded-2xl border-2 border-beige-kem bg-surface-2 p-3 shadow-hard shadow-black/10 lg:grid-cols-12">
-          <div className="flex min-w-0 flex-wrap items-center gap-1 rounded-xl border-2 border-beige-kem bg-xanh-pho p-1 lg:col-span-4">
-            {categories.map((cat) => (
-              <button
-                key={cat.id}
-                onClick={() => onCategoryChange(cat.id)}
-                className={`h-9 min-w-fit rounded-lg px-3 text-xs font-bold transition ${
-                  activeCategory === cat.id
-                    ? "bg-beige-kem text-xanh-pho"
-                    : "text-beige-kem/72 hover:bg-surface-2 hover:text-beige-kem"
-                }`}
-              >
-                {cat.label}
-              </button>
-            ))}
-          </div>
+        {resetButton && <div className="mt-6">{resetButton}</div>}
+      </div>
+    );
+  }
 
-          <label className="block lg:col-span-2">
-            <select
-              value={activeDate}
-              onChange={(e) => onDateChange(e.target.value)}
-              className="h-11 w-full appearance-none rounded-xl border-2 border-beige-kem bg-xanh-pho px-4 text-xs font-bold text-beige-kem outline-none focus:border-burgundy"
-            >
-              {["all", ...dateOptions].map((date) => (
-                <option key={date} value={date} className="bg-xanh-pho">
-                  {date === "all" ? "Mọi ngày" : formatEventDate(date, true)}
-                </option>
-              ))}
-            </select>
-          </label>
+  return (
+    /*
+     * No eyebrow override any more. This bar carried one because 12px eyebrows were too small to
+     * read here; the scale's floor is 14px now, so the override said nothing the token did not.
+     */
+    <section className="border-y border-beige-kem/25 bg-xanh-pho px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl">
+        {/*
+         * Categories on their own rule, the four remaining controls on the next. Doron separates
+         * its "shop by type" row from the rest the same way — one decision per line.
+         */}
+        <div className="flex flex-wrap items-center gap-x-1 gap-y-2 border-b border-beige-kem/25 pb-4">
+          <span className="label-eyebrow mr-3 text-ink-soft">Loại</span>
+          {categoryChips}
+          {resetButton && <div className="ml-auto">{resetButton}</div>}
+        </div>
 
-          <label className="block lg:col-span-2">
-            <select
-              value={activeCity}
-              onChange={(e) => onCityChange(e.target.value)}
-              className="h-11 w-full appearance-none rounded-xl border-2 border-beige-kem bg-xanh-pho px-4 text-xs font-bold text-beige-kem outline-none focus:border-burgundy"
-            >
-              {cityOptions.map((city) => (
-                <option key={city} value={city} className="bg-xanh-pho">
-                  {city === "all" ? "Mọi thành phố" : city}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="rounded-xl border-2 border-beige-kem bg-xanh-pho px-3 py-2 lg:col-span-2">
-            <span className="flex items-center justify-between text-[10px] font-bold uppercase text-beige-kem/60">
-              <span>Giá tối đa</span>
-              <span className="text-ink-soft">{formatPrice(maxPrice)}</span>
-            </span>
-            <input
-              type="range"
-              min={80000}
-              max={1500000}
-              step={50000}
-              value={maxPrice}
-              onChange={(e) => onMaxPriceChange(Number(e.target.value))}
-              className="mt-2 w-full accent-cam-dat"
-            />
-          </label>
-
-          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 lg:col-span-2">
-            <select
-              value={availability}
-              onChange={(e) => onAvailabilityChange(e.target.value)}
-              className="h-11 rounded-xl border-2 border-beige-kem bg-xanh-pho px-3 text-xs font-bold text-beige-kem outline-none focus:border-burgundy"
-            >
-              <option value="all" className="bg-xanh-pho">Mọi trạng thái</option>
-              <option value="available" className="bg-xanh-pho">Còn vé</option>
-              <option value="low" className="bg-xanh-pho">Sắp hết</option>
-              <option value="sold_out" className="bg-xanh-pho">Hết vé</option>
-              <option value="cancelled" className="bg-xanh-pho">Đã hủy</option>
-            </select>
-            <span className="inline-flex h-11 items-center rounded-xl border-2 border-beige-kem bg-bubblegum px-3 text-xs font-bold text-on-tint">
-              Lưu {wishlistCount}
-            </span>
-          </div>
+        <div className="grid gap-6 pt-5 sm:grid-cols-2 lg:grid-cols-4">
+          {dateControl}
+          {cityControl}
+          {statusControl}
+          {priceControl}
         </div>
       </div>
     </section>

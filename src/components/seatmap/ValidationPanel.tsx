@@ -17,27 +17,33 @@ export default function ValidationPanel({ issues }: { issues: ValidationIssue[] 
   if (issues.length === 0) {
     return (
       <div className="rounded-2xl border-2 border-la-co bg-surface-2 p-4">
-        <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-la-co">Hợp lệ</h3>
-        <p className="mt-1 text-xs text-beige-kem/70">Sơ đồ có thể phát hành.</p>
+        <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-la-co">
+          Hợp lệ
+        </h3>
+        <p className="mt-1 text-eyebrow text-beige-kem/70">Sơ đồ có thể phát hành.</p>
       </div>
     );
   }
 
   return (
     <div className="rounded-2xl border-2 border-bubblegum bg-surface-2 p-4">
-      <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-bubblegum">
+      <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-bubblegum">
         {issues.length} vấn đề — chưa thể phát hành
       </h3>
       <ul className="mt-2 space-y-2">
         {issues.map((issue, i) => (
-          <li key={`${issue.code}-${i}`} className="text-xs leading-5 text-beige-kem/80">
+          <li key={`${issue.code}-${i}`} className="text-eyebrow leading-5 text-beige-kem/80">
             {/* Message is plain text from the shared validator — React escapes it (SEC-07). */}
             <span className="font-bold">{issue.message}</span>
             {issue.seatIds && issue.seatIds.length > 0 && (
-              <span className="ml-1 font-mono text-[10px] text-beige-kem/50">(ghế #{issue.seatIds.join(", #")})</span>
+              <span className="ml-1 font-meta text-eyebrow text-beige-kem/50">
+                (ghế #{issue.seatIds.join(", #")})
+              </span>
             )}
             {issue.sectionIds && issue.sectionIds.length > 0 && (
-              <span className="ml-1 font-mono text-[10px] text-beige-kem/50">(khu vực #{issue.sectionIds.join(", #")})</span>
+              <span className="ml-1 font-meta text-eyebrow text-beige-kem/50">
+                (khu vực #{issue.sectionIds.join(", #")})
+              </span>
             )}
           </li>
         ))}

@@ -17,8 +17,10 @@ import type { Me } from "@/shared/auth/types";
 import type { EventDetail as CatalogEventDetail, Showtime } from "@/shared/catalog/types";
 import { authClient } from "./services/authClient";
 import { catalogClient } from "./services/catalogClient";
+import { aiClient } from "./services/aiClient";
 import { cardToMovie, detailToMovie } from "./services/catalogAdapter";
 import { applyEventSeo, clearEventSeo } from "./services/seo";
+import { matchesDateFilter, type DateFilter } from "./services/dateFilter";
 import {
   ACCOUNT_PATH,
   isOverlayPath,
@@ -35,22 +37,29 @@ import {
   sessionFromReservation,
 } from "./services/holdSession";
 import { HoldError, holdsClient } from "./services/holdsClient";
-import { walletClient, WalletError, type Topup } from "./services/walletClient";
+import { walletClient, WalletError, type OrderListItem, type Topup } from "./services/walletClient";
 import WalletPanel from "./components/wallet/WalletPanel";
 import VnpayReturn from "./components/wallet/VnpayReturn";
 import { useHoldCountdown } from "./hooks/useHoldCountdown";
 import BookingHistory from "./components/BookingHistory";
+import AIChatPanel from "./components/AIChatPanel";
 import ToastStack, { type ToastKind, type ToastMessage } from "./components/ToastStack";
 import ConfirmDialog, { type ConfirmRequest } from "./components/ConfirmDialog";
 import CheckoutForm from "./components/CheckoutForm";
-import EventDetail, { TierSelection } from "./components/EventDetail";
+import EventDetail from "./components/EventDetail";
 import EventFilters from "./components/EventFilters";
 import EventGrid from "./components/EventGrid";
+import EventTicker from "./components/EventTicker";
+import Footer from "./components/Footer";
 import Header from "./components/Header";
 import HeroVideo from "./components/HeroVideo";
 import SeatLayout from "./components/SeatLayout";
 import TicketTicket from "./components/TicketTicket";
-import { ArrowUp } from "lucide-react";
+import LegalPage from "./components/LegalPage";
+import aboutUsMd from "./content/legal/about-us.md?raw";
+import termsOfServiceMd from "./content/legal/terms-of-service.md?raw";
+import websiteTermsMd from "./content/legal/website-terms.md?raw";
+import refundPolicyMd from "./content/legal/refund-policy.md?raw";
 
 type ThemeMode = "dark" | "light";
 
@@ -59,6 +68,28 @@ type ThemeMode = "dark" | "light";
  * inside these three screens; stepping between them keeps the selection and the countdown, and only
  * leaving the flow (or the TTL) releases it.
  */
+/**
+ * What the price slider spans in the seconds before the catalog answers, and only then.
+ *
+ * Not a business rule and not a cap — the moment `events` arrives, the dearest real ticket replaces
+ * it. It exists because a slider whose two ends are both zero has no positions on it.
+ */
+const PRICE_CEILING_BEFORE_CATALOG = 1_000_000;
+
+/**
+ * What clicking one row of a multi-select filter does to the set.
+ *
+ * `"all"` is a control rather than a value, so it clears; anything else flips its own membership.
+ * Returned as an updater so the three call sites read `setX(toggleFilterValue(v))` and none of them
+ * has to close over the current array.
+ */
+const toggleFilterValue =
+  (value: string) =>
+  (current: string[]): string[] => {
+    if (value === "all") return [];
+    return current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
+  };
+
 const FLOW_SCREENS: Screen[] = ["detail", "seats", "checkout"];
 
 const LEAVE_FLOW_WARNING =
@@ -139,6 +170,69 @@ function getInitialTheme(): ThemeMode {
   }
 }
 
+/**
+ * Turn a server order into the `Booking` the ticket screens read.
+ *
+ * The two shapes disagree because they were built for different worlds: `Booking` was designed when
+ * an order only ever existed in this browser, so it carries a whole `MovieEvent` and the buyer's
+ * contact details. The server row carries neither — the event is referenced, and the contact fields
+ * were never persisted on the order at all.
+ *
+ * So the event is reconstructed from what the list does return, and the contact fields come back
+ * empty. Nothing on the tickets or ticket-detail screen prints them; they exist on the type because
+ * checkout collects them, not because a saved order remembers them.
+ */
+function bookingFromOrder(order: OrderListItem, known?: MovieEvent): Booking {
+  const startsAt = new Date(order.startsAt);
+  const iso = order.startsAt.slice(0, 10);
+  const time = order.startsAt.slice(11, 16);
+
+  // The catalog's own copy wins when the page happens to have it — it carries the genre, the
+  // description and the rest that a poster and a title cannot supply.
+  const movie: MovieEvent =
+    known ??
+    ({
+      ...SAMPLE_MOVIES[0],
+      id: order.eventSlug,
+      title: order.eventTitle,
+      imageUrl: order.eventImageUrl ?? "",
+      venueName: order.venueName,
+      city: order.city,
+      location: order.venueName,
+      dates: [iso],
+      times: [time],
+    } as MovieEvent);
+
+  return {
+    id: String(order.id),
+    movie,
+    selectedDate: iso,
+    selectedTime: time,
+    selectedSeats: order.tickets.map((ticket, index) => ({
+      id: ticket.seatLabel ?? ticket.tierLabel,
+      row: ticket.seatLabel?.[0] ?? "",
+      number: index + 1,
+      type: "single" as const,
+      price: ticket.unitPriceAmount,
+      isBooked: true,
+    })),
+    customerName: "",
+    customerEmail: "",
+    customerPhone: "",
+    totalPrice: order.totalAmount,
+    serviceFee: 0,
+    discount: 0,
+    finalPrice: order.totalAmount,
+    paymentMethod: "Ví TixHub",
+    deliveryChannel: "email_sms",
+    // A refunded order is one the holder can no longer use, which is what `cancelled` means to them.
+    status: order.status === "paid" ? "paid" : "cancelled",
+    qrStatus: order.tickets.some((t) => t.status === "used") ? "checked_in" : "unused",
+    bookingTime: startsAt.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" }),
+    qrPayload: order.tickets[0]?.ticketCode ?? "",
+  };
+}
+
 export default function App() {
   const [activeScreen, setActiveScreen] = useState<Screen>("home");
   const [theme, setTheme] = useState<ThemeMode>(getInitialTheme);
@@ -148,11 +242,27 @@ export default function App() {
   const [showtimes, setShowtimes] = useState<Showtime[]>([]);
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeCategory, setActiveCategory] = useState("all");
-  const [activeDate, setActiveDate] = useState("all");
-  const [activeCity, setActiveCity] = useState("all");
-  const [maxPrice, setMaxPrice] = useState(1500000);
-  const [availability, setAvailability] = useState("all");
+  /**
+   * The three list filters, each as the set of values in force. Empty means the filter is off.
+   *
+   * Empty rather than a `"all"` sentinel: the sentinel would have to be excluded from every
+   * membership test, and "everything" would then be sayable two ways — the token, or all four
+   * members ticked — that behave identically and look different.
+   */
+  const [activeCategories, setActiveCategories] = useState<string[]>([]);
+  const [activeDate, setActiveDate] = useState<DateFilter>(null);
+  const [activeCities, setActiveCities] = useState<string[]>([]);
+  /**
+   * The price ceiling, or `null` for no ceiling at all.
+   *
+   * Null rather than a large opening number, because there is no such thing as a price too high to
+   * exist: `ticket_types.price_amount` is a bare `BIGINT` and the organizer API only refuses
+   * negatives, so any figure picked here would be a guess that quietly filters out every event
+   * above it. The catalog's own dearest ticket is what the slider opens on (see `priceCeiling`), and
+   * until the reader moves it nothing is excluded.
+   */
+  const [maxPrice, setMaxPrice] = useState<number | null>(null);
+  const [availabilities, setAvailabilities] = useState<string[]>([]);
 
   const [bookingDate, setBookingDate] = useState("");
   const [bookingTime, setBookingTime] = useState("");
@@ -184,6 +294,18 @@ export default function App() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [userName, setUserName] = useState("");
   const [isSignedIn, setIsSignedIn] = useState(false);
+  /*
+   * What this account is allowed to see in the nav.
+   *
+   * Both come from the server on every identity read — `isOrganizer` is derived per request from an
+   * *approved* organizers row, so a pending or rejected application does not open the door. These
+   * only decide what is offered: every route behind them is enforced server-side regardless, since
+   * hiding a link is not access control (Principle II, SEC-04).
+   */
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isOrganizer, setIsOrganizer] = useState(false);
+  /** Whether `authClient.restore()` has answered yet. See the restore effect below. */
+  const [authReady, setAuthReady] = useState(false);
   /**
    * What the visitor was trying to do when we stopped them to sign in. Browsing, picking a showtime
    * and choosing seats are all open to guests; only the step that creates an order needs an
@@ -218,6 +340,14 @@ export default function App() {
   const bookingShowtimeIdRef = useLatest(bookingShowtimeId);
   const finalBookingRef = useLatest(finalBooking);
   const bookingsHistoryRef = useLatest(bookingsHistory);
+  /*
+   * Read by the ticket loader, which must not re-run when the catalog arrives.
+   *
+   * The catalog only enriches a rebuilt booking — it supplies the genre and description a server
+   * order does not carry. Listing `events` as a dependency would refetch every ticket the moment
+   * the catalog landed, for a detail nothing on the list even prints.
+   */
+  const eventsRef = useLatest(events);
 
   /** An overlay route (see routes.ts): the address bar is the only state the account page needs. */
   const showAccountPage = location.pathname === ACCOUNT_PATH;
@@ -256,12 +386,63 @@ export default function App() {
   const applyIdentity = useCallback((user: Me | null) => {
     const name = user ? user.nickname || user.email : "";
     setUserName(name);
+    // Roles ride along with the identity rather than being fetched separately, so they cannot lag
+    // behind a sign-out and leave an admin link on screen for a visitor.
+    setIsAdmin(user?.isAdmin ?? false);
+    setIsOrganizer(user?.isOrganizer ?? false);
     setAvatarUrl(user?.avatarUrl ?? null);
     setUserEmail(user?.email ?? null);
     cacheValue(USER_CACHE_KEY, name || null);
     cacheValue(AVATAR_CACHE_KEY, user?.avatarUrl ?? null);
     cacheValue(EMAIL_CACHE_KEY, user?.email ?? null);
   }, []);
+
+  useEffect(() => {
+    if (!isSignedIn) return;
+    void aiClient
+      .bookmarks()
+      .then(setWishlistedIds)
+      .catch(() => {});
+  }, [isSignedIn]);
+
+  /*
+   * The tickets, from the account rather than from the browser.
+   *
+   * They used to exist only in `localStorage`, written at checkout and never read from anywhere
+   * else — so a purchase made on a phone was invisible on a laptop, and clearing site data wiped
+   * the only copy the buyer could see while the wallet, which reads the server, still showed the
+   * debit. The database always held the order; there was no endpoint to ask for the list.
+   *
+   * The cache stays, one step down: it is what paints the page on the first frame and what survives
+   * an offline reload. The server overwrites it as soon as it answers, so a stale local copy can
+   * never outlive the truth.
+   *
+   * A failure is left alone deliberately. Whatever the cache holds is better than an empty page,
+   * and a network blip should not read as "your tickets are gone".
+   */
+  useEffect(() => {
+    if (!isSignedIn) return;
+    let cancelled = false;
+    void walletClient
+      .orders()
+      .then((orders) => {
+        if (cancelled) return;
+        const catalog = new Map(eventsRef.current.map((event) => [event.id, event]));
+        const rebuilt = orders.map((order) =>
+          bookingFromOrder(order, catalog.get(order.eventSlug)),
+        );
+        setBookingsHistory(rebuilt);
+        try {
+          localStorage.setItem(BOOKINGS_CACHE_KEY, JSON.stringify(rebuilt));
+        } catch (err) {
+          console.error("Failed to cache the ticket list:", err);
+        }
+      })
+      .catch((err) => console.error("Failed to load tickets from the server:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn]);
 
   const dismissToast = useCallback((id: number) => {
     setToasts((current) => current.filter((toast) => toast.id !== id));
@@ -549,7 +730,11 @@ export default function App() {
         setIsSignedIn(Boolean(user));
         applyIdentity(user);
       })
-      .catch(() => {});
+      .catch(() => {})
+      // Even a failed restore is an answer. Screens that require an identity must be able to tell
+      // "not signed in" from "not known yet", or a reload of /wallet flashes a sign-in prompt at
+      // someone who is already signed in.
+      .finally(() => setAuthReady(true));
   }, [applyIdentity]);
 
   // Load the real catalog (replaces the mock browse source). Maps API cards → MovieEvent.
@@ -579,9 +764,9 @@ export default function App() {
     };
 
     catalogClient
-      .listEvents({ page: 1 })
-      .then((res) => {
-        const mapped = res.events.map(cardToMovie);
+      .listAllEvents()
+      .then((cards) => {
+        const mapped = cards.map(cardToMovie);
         if (mapped.length === 0) {
           useSamplesInDev("returned no events");
           return;
@@ -596,7 +781,15 @@ export default function App() {
       });
   }, []);
 
-  const filteredEvents = useMemo(() => {
+  /**
+   * Everything that survives every filter except the price one.
+   *
+   * Split out because the price slider's far end is the dearest of *these*, and the price filter
+   * cannot be one of the things that decides it — drag the ceiling down, the dearest survivor drops
+   * with it, the rule shrinks to match, and the thumb is at the far end again with more to cut. The
+   * filter has to be excluded from its own scale or it eats itself.
+   */
+  const eventsBeforePriceFilter = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
 
     return events.filter((movie) => {
@@ -616,22 +809,43 @@ export default function App() {
         .toLowerCase();
 
       const matchesSearch = !normalizedQuery || searchBlob.includes(normalizedQuery);
-      const matchesCategory = activeCategory === "all" || movie.category === activeCategory;
-      const matchesDate = activeDate === "all" || movie.dates.includes(activeDate);
-      const matchesCity = activeCity === "all" || movie.city === activeCity;
-      const matchesPrice = movie.price <= maxPrice;
-      const matchesAvailability = availability === "all" || movie.status === availability;
+      const matchesCategory =
+        activeCategories.length === 0 || activeCategories.includes(movie.category);
+      const matchesDate = matchesDateFilter(movie.dates, activeDate);
+      const matchesCity = activeCities.length === 0 || activeCities.includes(movie.city);
+      const matchesAvailability =
+        availabilities.length === 0 || availabilities.includes(movie.status);
 
-      return (
-        matchesSearch &&
-        matchesCategory &&
-        matchesDate &&
-        matchesCity &&
-        matchesPrice &&
-        matchesAvailability
-      );
+      return matchesSearch && matchesCategory && matchesDate && matchesCity && matchesAvailability;
     });
-  }, [events, activeCategory, activeCity, activeDate, availability, maxPrice, searchQuery]);
+  }, [events, activeCategories, activeCities, activeDate, availabilities, searchQuery]);
+
+  /**
+   * How far the price slider reaches: the dearest ticket still on the table.
+   *
+   * Read off the events rather than written down, because nothing in the system caps a price —
+   * `ticket_types.price_amount` is an unconstrained `BIGINT` and the organizer API refuses only
+   * negatives and fractions. Any number hardcoded here would be a guess, and the day an event was
+   * listed above it the slider would bottom out with no way to reach the top of the catalog.
+   *
+   * Taken from the other filters' survivors, so the rule always spans exactly the prices that are
+   * still reachable. The cost is that narrowing by city or by date rescales it, and a ceiling set
+   * before that narrowing lands somewhere else on the rule afterwards — the number is unchanged,
+   * the ruler under it is not.
+   */
+  const priceCeiling = useMemo(() => {
+    const dearest = eventsBeforePriceFilter.reduce(
+      (top, evt) => (evt.price > top ? evt.price : top),
+      0,
+    );
+    // A span of zero has no fractions in it, so the rule needs *something* until the catalog lands.
+    return dearest > 0 ? dearest : PRICE_CEILING_BEFORE_CATALOG;
+  }, [eventsBeforePriceFilter]);
+
+  const filteredEvents = useMemo(
+    () => eventsBeforePriceFilter.filter((movie) => maxPrice === null || movie.price <= maxPrice),
+    [eventsBeforePriceFilter, maxPrice],
+  );
 
   /**
    * The date filter's options, taken from the catalog itself. They are compared verbatim against
@@ -642,6 +856,27 @@ export default function App() {
     () => [...new Set(events.flatMap((event) => event.dates))].sort(),
     [events],
   );
+
+  /*
+   * The categories this catalogue actually contains, most populous first.
+   *
+   * Derived, like the dates above, because the alternative was tried and failed silently: a fixed
+   * list of three could not describe a catalogue of a dozen, so "Phim" matched nothing and "Ca nhạc"
+   * matched everything the adapter had quietly relabelled — 461 events of 503. A list built from
+   * the events themselves cannot drift from them.
+   */
+  const categoryOptions = useMemo(() => {
+    const counts = new Map<string, { id: string; label: string; n: number }>();
+    for (const event of events) {
+      if (!event.category) continue;
+      const seen = counts.get(event.category);
+      if (seen) seen.n += 1;
+      else counts.set(event.category, { id: event.category, label: event.categoryLabel || event.category, n: 1 });
+    }
+    return [...counts.values()]
+      .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label, "vi"))
+      .map(({ id, label }) => ({ id, label }));
+  }, [events]);
 
   const relatedEvents = useMemo(() => {
     return events
@@ -712,7 +947,8 @@ export default function App() {
   const goHomeAfterFilter = async (update: () => void) => {
     // The filter itself always applies; only the jump back to the catalog leaves the flow.
     update();
-    if (activeScreen === "home") return;
+    // Both catalog screens show the grid the filter acts on, so neither needs to be left.
+    if (activeScreen === "home" || activeScreen === "browse") return;
     if (hold && inFlow) {
       if (exitDeclinedRef.current) return;
       if (!(await confirmLeaveFlow())) {
@@ -734,43 +970,30 @@ export default function App() {
     }
   };
 
-  const clearHistory = async () => {
-    const wiping = await askConfirm({
-      title: "Xóa lịch sử đặt vé?",
-      message:
-        "Toàn bộ lịch sử đặt vé lưu trên trình duyệt này sẽ bị xóa và không khôi phục được. " +
-        "Vé đã mua không bị ảnh hưởng.",
-      confirmLabel: "Xóa lịch sử",
-      cancelLabel: "Giữ lại",
-      tone: "danger",
-    });
-    if (!wiping) return;
-
-    setBookingsHistory([]);
+  const handleToggleWishlist = async (eventId: string) => {
+    if (!isSignedIn) {
+      pushToast("warning", "Đăng nhập để lưu sự kiện và nhận gợi ý cá nhân hóa.");
+      return;
+    }
     try {
-      localStorage.removeItem(BOOKINGS_CACHE_KEY);
-      LEGACY_BOOKINGS_CACHE_KEYS.forEach((key) => localStorage.removeItem(key));
-    } catch (err) {
-      console.error("Failed to clear local storage:", err);
+      const { saved } = await aiClient.bookmark(eventId);
+      setWishlistedIds((current) => {
+        const next = saved
+          ? current.includes(eventId)
+            ? current
+            : [...current, eventId]
+          : current.filter((id) => id !== eventId);
+        try {
+          localStorage.setItem(WISHLIST_CACHE_KEY, JSON.stringify(next));
+        } catch (err) {
+          console.error("Failed to save wishlist:", err);
+        }
+        return next;
+      });
+    } catch (error) {
+      pushToast("error", error instanceof Error ? error.message : "Không thể lưu sự kiện.");
     }
   };
-
-  const handleToggleWishlist = (eventId: string) => {
-    setWishlistedIds((current) => {
-      const next = current.includes(eventId)
-        ? current.filter((id) => id !== eventId)
-        : [...current, eventId];
-
-      try {
-        localStorage.setItem(WISHLIST_CACHE_KEY, JSON.stringify(next));
-      } catch (err) {
-        console.error("Failed to save wishlist:", err);
-      }
-
-      return next;
-    });
-  };
-
   const handleSelectEventForTrailer = (movie: MovieEvent) => {
     setHeroMovie(movie);
     const heroSection = document.getElementById("hero-trailer-section");
@@ -851,6 +1074,110 @@ export default function App() {
   };
 
   /**
+   * Every way out of a step, once the order exists: cancel it.
+   *
+   * Going back used to keep the hold and let the buyer return to it, which meant a selection
+   * could be half-committed on the server while the buyer was three screens away editing it.
+   * The rule now is the one the ticketing sites use, and it is simpler to hold in the head:
+   * forward commits, backward cancels. One way to take seats or tickets, one way to stop.
+   *
+   * Nothing to cancel — the buyer stepped back off the very first screen — is not a question
+   * worth asking, so the confirmation only appears when a hold actually exists.
+   */
+  const confirmCancelOrder = () =>
+    askConfirm({
+      title: "Hủy đơn hàng?",
+      message: "Bạn có chắc chắn muốn tiếp tục?\nBạn sẽ mất vị trí mình đã lựa chọn.",
+      confirmLabel: "Hủy đơn",
+      cancelLabel: "Giữ đơn",
+      tone: "danger",
+    });
+
+  /** Forget the showtime the flow was working on. The server side is `releaseHold`. */
+  const clearBookingSelection = () => {
+    setBookingShowtimeId(null);
+    setBookingDate("");
+    setBookingTime("");
+  };
+
+  /**
+   * Where the address bar was, so a backward move can be told from a forward one.
+   *
+   * Only the flow screens are ranked. Anything outside the purchase is 0, which makes "left the
+   * flow entirely" the same kind of move as "went back a step" — both release the hold.
+   */
+  const flowRank = (path: string): number => {
+    const route = pathToRoute(path);
+    if (!route) return 0;
+    if (route.screen === "detail") return 1;
+    if (route.screen === "seats") return 2;
+    if (route.screen === "checkout") return 3;
+    return 0;
+  };
+  const lastFlowPathRef = useRef(location.pathname);
+  /** True while a restore navigation is in flight, so the guard does not react to its own undo. */
+  const restoringRef = useRef(false);
+
+  /**
+   * The browser's back button, held to the same rule as the in-app one.
+   *
+   * Cancelling on the back *link* only was a rule the buyer could step around without meaning to:
+   * a browser back out of checkout left the seats held on the server with no screen left showing
+   * them, and they stayed held until the TTL swept them. The address bar is a way out of the flow
+   * whoever pressed it.
+   *
+   * It cannot be intercepted before the fact — by the time React hears about it the history entry
+   * has already moved — so a refusal is undone by navigating forward again rather than by
+   * preventing the move. `restoringRef` stops that undo from reading as a new backward move.
+   */
+  useEffect(() => {
+    const from = lastFlowPathRef.current;
+    const to = location.pathname;
+    lastFlowPathRef.current = to;
+
+    if (restoringRef.current) {
+      restoringRef.current = false;
+      return;
+    }
+    if (isOverlayPath(to) || from === to) return;
+
+    const live = holdRef.current;
+    // Only a *backward* move out of a step that had something held. Going deeper into the flow, or
+    // moving around outside it, is not a cancel.
+    if (!live || flowRank(from) < 2 || flowRank(to) >= flowRank(from)) return;
+
+    void (async () => {
+      if (await confirmCancelOrder()) {
+        await releaseHold(live);
+        clearBookingSelection();
+        return;
+      }
+      // Kept: put the buyer back where they were. `replace` so the declined step does not pile a
+      // second entry onto the history they just used.
+      restoringRef.current = true;
+      lastFlowPathRef.current = from;
+      navigate(from, { replace: true });
+    })();
+    // `location.pathname` is the whole trigger; the rest are stable refs and setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
+
+  const cancelBookingFlow = async () => {
+    const live = holdRef.current;
+
+    if (live) {
+      if (!(await confirmCancelOrder())) return;
+      await releaseHold(live);
+    }
+
+    // Back to the first step carrying nothing. The selection is gone on the server, so leaving
+    // it on screen would offer the buyer a resume that no longer exists.
+    clearBookingSelection();
+    goTo("detail", { eventSlug: selectedMovie.id });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  /**
    * Picking or dropping a seat — a real server hold, not local state. The window starts at the first
    * held seat and adding another never extends it (FR-006); dropping the last seat ends the
    * reservation, so the next pick starts a fresh window.
@@ -894,64 +1221,83 @@ export default function App() {
   };
 
   /**
-   * General admission has no seat map to walk through — a chosen quantity per tier is the whole
-   * selection, so checkout is the next screen. Each ticket becomes one line item; the seat shape is
-   * what the (cinema-derived) checkout and ticket screens still render.
+   * A general-admission stepper press, straight through to the server.
+   *
+   * The quantity is not local state any more. It used to be picked on the event page and only
+   * turned into a hold when the buyer pressed through to checkout, which meant the number on screen
+   * was a wish rather than a claim: two buyers could both step to 5 of a tier with 6 left and only
+   * discover the conflict at the very end. Holding on the press is what T023 asked for and what
+   * makes the remaining count on everyone else's screen true (FR-018).
+   *
+   * Every press is a round trip, so `holdBusy` disables the steppers in between — two presses racing
+   * would both read the same reservation and one would be lost.
    */
-  const handleProceedToQuantityCheckout = (
-    selection: TierSelection[],
+  const handleAdjustGaQuantity = (
+    tier: { id: string; label: string },
+    delta: number,
     showtimeId: number | null,
     date: string,
     time: string,
   ) => {
     runSignedIn(async () => {
-      if (showtimeId === null) return;
+      if (showtimeId === null || holdBusy) return;
+
+      // A hold belongs to one showtime (FR-011). Stepping a tier on a different one is a new
+      // selection, and the old seats/tickets have to go back before it starts.
+      const current = holdRef.current;
+      if (current && current.showtimeId !== showtimeId) {
+        const switching = await askConfirm({
+          title: "Đổi sang suất khác?",
+          message:
+            "Bạn đang giữ vé cho một suất khác. Chọn suất này sẽ hủy số vé đang giữ và trả lại " +
+            "cho người khác.",
+          confirmLabel: "Đổi suất",
+          cancelLabel: "Giữ suất cũ",
+          tone: "danger",
+        });
+        if (!switching) return;
+        await releaseHold(current);
+      }
+
+      const live = holdRef.current;
+      if (delta < 0 && !live) return;
+
+      const context = {
+        eventId: selectedMovie.id,
+        eventTitle: selectedMovie.title,
+        selectedDate: date,
+        selectedTime: time,
+        mode: "ga" as const,
+      };
 
       setHoldBusy(true);
       try {
-        // Any earlier selection for this showtime is replaced wholesale: the tier steppers express
-        // an absolute quantity, and the server would otherwise add to what is already held.
-        if (hold) await releaseHold(hold);
-
-        let reservation = null;
-        for (const line of selection) {
-          reservation = await holdsClient.hold({
-            showtimeId,
-            ticketTierId: Number(line.tierId),
-            quantity: line.quantity,
-          });
-        }
-        if (!reservation) return;
+        const tierId = Number(tier.id);
+        const updated =
+          delta > 0
+            ? live
+              ? await holdsClient.add(live.reservationId, { ticketTierId: tierId, quantity: delta })
+              : await holdsClient.hold({ showtimeId, ticketTierId: tierId, quantity: delta })
+            : await holdsClient.releaseQuantity(live!.reservationId, tierId, -delta);
 
         setBookingDate(date);
         setBookingTime(time);
         setBookingShowtimeId(showtimeId);
-        setHold(
-          sessionFromReservation(reservation, {
-            eventId: selectedMovie.id,
-            eventTitle: selectedMovie.title,
-            selectedDate: date,
-            selectedTime: time,
-            mode: "ga",
-            quantities: Object.fromEntries(selection.map((line) => [line.tierId, line.quantity])),
-          }),
-        );
-        goTo("checkout");
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        // Stepping the last ticket off closes the reservation server-side, which is the signal that
+        // there is nothing left to hold — not an error.
+        setHold(updated.status === "active" ? sessionFromReservation(updated, context) : null);
       } catch (e) {
         pushToast(
           "error",
           e instanceof HoldError ? e.message : "Không giữ được vé. Vui lòng thử lại.",
         );
+        if (e instanceof HoldError && e.status === 404) setHold(null);
       } finally {
         setHoldBusy(false);
       }
     });
   };
 
-  // Checkout is where an order starts existing, so it is the first step that needs an account.
-  // The seats are already held by this point, so this only moves the screen — the hold, its items
-  // and its countdown carry straight through.
   const handleProceedToCheckout = () => {
     runSignedIn(() => {
       goTo("checkout");
@@ -1045,9 +1391,24 @@ export default function App() {
   };
 
   /** Clears everything this browser remembers about the signed-in account. */
+  /**
+   * Signing out has to drop the per-account caches too, not just the identity. They key on nothing
+   * but the browser, and the mount effect reads them back unconditionally — so leaving them behind
+   * shows the next account to sign in on this machine the previous one's tickets and wishlist.
+   */
   const clearSignedInState = () => {
     setIsSignedIn(false);
     applyIdentity(null);
+    setBookingsHistory([]);
+    setWishlistedIds([]);
+    try {
+      localStorage.removeItem(BOOKINGS_CACHE_KEY);
+      LEGACY_BOOKINGS_CACHE_KEYS.forEach((key) => localStorage.removeItem(key));
+      localStorage.removeItem(WISHLIST_CACHE_KEY);
+      localStorage.removeItem(LEGACY_WISHLIST_CACHE_KEY);
+    } catch (err) {
+      console.error("Failed to clear cached account data on sign-out:", err);
+    }
   };
 
   const handleLogout = async () => {
@@ -1074,71 +1435,178 @@ export default function App() {
       <Header
         searchQuery={searchQuery}
         onSearchChange={(value) => void goHomeAfterFilter(() => setSearchQuery(value))}
+        /*
+         * The nav menu is a one-of-N list and stays that way — picking "Phim" up there means
+         * "show me films", not "add films to whatever is already ticked down in the filter bar".
+         * So it reads the set only when the set holds exactly one thing, and writes by replacing.
+         */
+        activeCategory={activeCategories.length === 1 ? activeCategories[0] : "all"}
+        /*
+         * And it lands on the catalog, not on the landing page.
+         *
+         * These are shortcuts into a filtered listing — the same promise Ticketbox's "Nhạc sống /
+         * Sân khấu / Phim" row makes. They used to set the filter and leave the reader where they
+         * were, which on the landing page meant the change happened somewhere below the hero, the
+         * ticker and the featured pair: a menu that appeared to do nothing. `/events` is the screen
+         * that is nothing but the filtered grid, so that is where a category shortcut belongs.
+         */
+        onCategoryChange={(value) =>
+          void leaveFlow(() => {
+            setActiveCategories(value === "all" ? [] : [value]);
+            goTo("browse");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          })
+        }
         onViewHistory={() => void leaveFlow(() => goTo("history"))}
         onViewWallet={() => void leaveFlow(() => goTo("wallet"))}
         onHomeClick={goHome}
         onLoginClick={() => (userName ? navigate(ACCOUNT_PATH) : setShowAuthModal(true))}
-        onAdminClick={() =>
+        onOrganizerClick={() =>
           leaveFlow(() => {
-            goTo("moderation");
+            goTo("organizer");
             window.scrollTo({ top: 0, behavior: "smooth" });
           })
         }
+        onAdminClick={() =>
+          leaveFlow(() => {
+            goTo("admin");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          })
+        }
+        isOrganizer={isOrganizer}
+        isAdmin={isAdmin}
+        onBrowse={() => void leaveFlow(() => goTo("browse"))}
+        onViewGuide={() => void leaveFlow(() => goTo("about-us"))}
+        onViewAbout={() => void leaveFlow(() => goTo("terms-of-service"))}
+        onViewPolicy={() => void leaveFlow(() => goTo("refund-policy"))}
         userName={userName}
         userEmail={userEmail}
         avatarUrl={avatarUrl}
+        overlay={activeScreen === "home"}
         theme={theme}
         onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
       />
 
-      <main className="w-full max-w-full flex-grow overflow-x-hidden">
+      {/*
+        `overflow-x-clip`, not `overflow-x-hidden`. Both stop a stray wide child from producing a
+        horizontal scrollbar, but `hidden` also makes this element a scroll container — and a scroll
+        container here is the scrollport every `position: sticky` descendant measures itself
+        against. The hero's sticky stage therefore never engaged. `clip` refuses scrolling outright,
+        so it clips without capturing the page's scroll.
+      */}
+      <main className="w-full max-w-full flex-grow overflow-x-clip">
         {activeScreen === "home" && (
-          <div className="space-y-4">
+          <>
             <HeroVideo
               movie={heroMovie}
               onBookNow={() => void handleStartBookingInput(heroMovie)}
             />
-
-            <EventFilters
-              activeCategory={activeCategory}
-              onCategoryChange={(value) => void goHomeAfterFilter(() => setActiveCategory(value))}
-              activeDate={activeDate}
-              dateOptions={dateOptions}
-              onDateChange={(value) => void goHomeAfterFilter(() => setActiveDate(value))}
-              activeCity={activeCity}
-              onCityChange={(value) => void goHomeAfterFilter(() => setActiveCity(value))}
-              maxPrice={maxPrice}
-              onMaxPriceChange={(value) => void goHomeAfterFilter(() => setMaxPrice(value))}
-              availability={availability}
-              onAvailabilityChange={(value) => void goHomeAfterFilter(() => setAvailability(value))}
-              wishlistCount={wishlistedIds.length}
+            <EventTicker
+              events={events}
+              onSelect={(movie) => void handleStartBookingInput(movie)}
+              onViewAll={() => void leaveFlow(() => goTo("browse"))}
             />
+          </>
+        )}
 
-            <EventGrid
-              events={filteredEvents}
-              selectedEvent={heroMovie}
-              onSelectEvent={handleSelectEventForTrailer}
-              onBookNow={(movie) => void handleStartBookingInput(movie)}
-              wishlistedIds={wishlistedIds}
-              onToggleWishlist={handleToggleWishlist}
-            />
+        {/*
+         * The catalog page opens on the same trailer the landing page does, in its plain variant:
+         * one big picture in a fixed band, no television around it and no scroll choreography. It
+         * is what the reference puts at the top of a collection — a full-bleed image carrying the
+         * section's title — and it means `/events` no longer starts cold on a row of filters.
+         */}
+        {activeScreen === "browse" && (
+          <HeroVideo
+            variant="plain"
+            movie={heroMovie}
+            onBookNow={() => void handleStartBookingInput(heroMovie)}
+          />
+        )}
 
-            <section className="border-t border-beige-kem/25 bg-xanh-pho px-4 py-20 sm:px-6 lg:px-8">
-              <div className="mx-auto grid max-w-7xl grid-flow-dense grid-cols-1 gap-5 md:grid-cols-3">
-                <TrustCard
-                  title="Wishlist và nhắc lịch"
-                  text="Lưu sự kiện yêu thích, nhắc gần ngày diễn và xử lý case hết vé bằng dữ liệu local mock."
+        {/*
+         * The catalog is the same on both screens, and so are the filters — only where they sit
+         * differs. `/` leads with the hero and runs the filters as a strip under it; `/events` is
+         * the catalog on its own and runs them as a rail down the left of the grid, which is the
+         * shape the reference collection page uses and the reason `EventFilters` has a variant.
+         */}
+        {(activeScreen === "home" || activeScreen === "browse") && (
+          <div className="space-y-4">
+            {(() => {
+              const filters = (
+                <EventFilters
+                  variant={activeScreen === "browse" ? "rail" : "bar"}
+                  resultCount={filteredEvents.length}
+                  activeCategories={activeCategories}
+                  onCategoryChange={(value) =>
+                    void goHomeAfterFilter(() => setActiveCategories(toggleFilterValue(value)))
+                  }
+                  activeDate={activeDate}
+                  dateOptions={dateOptions}
+                  categoryOptions={categoryOptions}
+                  onDateChange={(value) => void goHomeAfterFilter(() => setActiveDate(value))}
+                  activeCities={activeCities}
+                  onCityChange={(value) =>
+                    void goHomeAfterFilter(() => setActiveCities(toggleFilterValue(value)))
+                  }
+                  maxPrice={maxPrice}
+                  priceCeiling={priceCeiling}
+                  onMaxPriceChange={(value) => void goHomeAfterFilter(() => setMaxPrice(value))}
+                  availabilities={availabilities}
+                  onAvailabilityChange={(value) =>
+                    void goHomeAfterFilter(() => setAvailabilities(toggleFilterValue(value)))
+                  }
+                  /*
+                   * The search box is deliberately not cleared here. It lives in the nav, above
+                   * this bar and outside it, and wiping a query the reader can still see typed up
+                   * there from a control down here reads as a bug rather than as a reset.
+                   */
+                  onResetFilters={() =>
+                    void goHomeAfterFilter(() => {
+                      setActiveCategories([]);
+                      setActiveDate(null);
+                      setActiveCities([]);
+                      setAvailabilities([]);
+                      setMaxPrice(null);
+                    })
+                  }
                 />
-                <TrustCard
-                  title="Email/SMS xác nhận"
-                  text="Sau thanh toán, vé QR có thể in, tải lại hoặc gửi lại qua email/SMS ở màn vé."
+              );
+
+              const grid = (
+                <EventGrid
+                  events={filteredEvents}
+                  // The landing band keeps the ruled card it has always had; only `/events` takes
+                  // the borderless catalog one.
+                  variant={activeScreen === "browse" ? "catalog" : "landing"}
+                  // `/events` splits the catalog into pages of 24 — two full rows of four with the
+                  // rail, eight without. The landing band takes the first 20 and draws no controls,
+                  // which is exactly the length it showed back when the API only ever sent one page.
+                  pageSize={activeScreen === "browse" ? 24 : 20}
+                  selectedEvent={heroMovie}
+                  onSelectEvent={handleSelectEventForTrailer}
+                  onBookNow={(movie) => void handleStartBookingInput(movie)}
+                  wishlistedIds={wishlistedIds}
+                  onToggleWishlist={handleToggleWishlist}
+                  // Offered on the landing page only. `/events` is where the link would go, so on
+                  // that screen it would point at itself.
+                  onViewAll={
+                    activeScreen === "home" ? () => void leaveFlow(() => goTo("browse")) : undefined
+                  }
+                  // The rail is handed to the grid rather than placed beside it, so the two share
+                  // one measure instead of two that have to be kept equal by hand.
+                  sidebar={activeScreen === "browse" ? filters : undefined}
                 />
-                <TrustCard
-                  title="QR một lần"
-                  text="UI thể hiện trạng thái QR unused/checked-in để backend triển khai khóa vé thật."
-                />
-              </div>
-            </section>
+              );
+
+              return activeScreen === "browse" ? (
+                grid
+              ) : (
+                <>
+                  {filters}
+                  {grid}
+                </>
+              );
+            })()}
           </div>
         )}
 
@@ -1153,17 +1621,17 @@ export default function App() {
             onToggleWishlist={handleToggleWishlist}
             onBookRelated={(movie) => void handleStartBookingInput(movie)}
             onProceedToSeatSelection={handleProceedToSeats}
-            onProceedToQuantityCheckout={handleProceedToQuantityCheckout}
-            restoreHold={
-              hold && hold.eventId === selectedMovie.id
-                ? {
-                    selectedDate: hold.selectedDate,
-                    selectedTime: hold.selectedTime,
-                    quantities: hold.quantities ?? {},
-                  }
-                : null
+            onProceedToCheckout={handleProceedToCheckout}
+            // General admission holds as it steps, so this screen owns a live reservation and needs
+            // the clock and the busy flag that used to belong only to the seat map.
+            heldQuantities={
+              hold?.mode === "ga" && hold.eventId === selectedMovie.id
+                ? (hold.quantities ?? {})
+                : {}
             }
-            holdRemainingMs={holdRemainingMs}
+            onAdjustQuantity={handleAdjustGaQuantity}
+            holdBusy={holdBusy}
+            holdRemainingMs={hold?.mode === "ga" ? holdRemainingMs : 0}
           />
         )}
 
@@ -1177,8 +1645,9 @@ export default function App() {
             remainingMs={holdRemainingMs}
             busy={holdBusy}
             onToggleSeat={(seat) => void handleToggleSeat(seat)}
-            // Stepping back to the showtime picker stays inside the flow: the hold is kept.
-            onBack={() => goTo("detail", { eventSlug: selectedMovie.id })}
+            // Backward is a cancel, here and everywhere else in the flow.
+            onBack={() => void cancelBookingFlow()}
+            onGoToStep={() => void cancelBookingFlow()}
             onProceedToCheckout={handleProceedToCheckout}
           />
         )}
@@ -1191,11 +1660,12 @@ export default function App() {
             selectedSeats={bookingSeats}
             totalPrice={bookingTotalPrice}
             remainingMs={holdRemainingMs}
-            backLabel={hold?.mode === "ga" ? "Quay lại chọn số lượng vé" : "Quay lại chọn ghế"}
-            // Also inside the flow — the selection and the countdown are still there when they return.
-            onBack={() =>
-              goTo(hold?.mode === "ga" ? "detail" : "seats", { eventSlug: selectedMovie.id })
-            }
+            // Named for what it does. It used to say "Quay lại chọn ghế" and keep the hold; it now
+            // releases the order, and a back link that quietly destroys the purchase while promising
+            // to return to the seat map is the wrong label.
+            backLabel="Hủy đơn và quay lại"
+            onBack={() => void cancelBookingFlow()}
+            onGoToStep={() => void cancelBookingFlow()}
             reservationId={hold?.reservationId ?? null}
             shortfall={shortfall}
             onConfirmBooking={handleConfirmPurchase}
@@ -1214,7 +1684,6 @@ export default function App() {
               setFinalBooking(normalizeBooking(booking));
               goTo("ticket", { bookingId: booking.id });
             }}
-            onClearHistory={() => void clearHistory()}
           />
         )}
 
@@ -1222,46 +1691,102 @@ export default function App() {
           <AdminPanel events={SAMPLE_MOVIES} bookings={bookingsHistory} onBack={goHome} />
         )}
 
-        {activeScreen === "wallet" && <WalletPanel onBack={goHome} />}
+        {/*
+         * The wallet is the one screen with nothing to show a stranger. Without this guard its own
+         * fetch 401s and the panel reports "Không tải được ví." over a retry button that can never
+         * succeed — a dead end that reads as a broken page rather than as a locked one.
+         */}
+        {activeScreen === "wallet" &&
+          (!authReady ? (
+            <p className="mx-auto max-w-4xl px-4 py-16 font-meta text-body text-ink-soft sm:px-6 lg:px-8">
+              Đang kiểm tra phiên đăng nhập…
+            </p>
+          ) : isSignedIn ? (
+            <WalletPanel onBack={goHome} />
+          ) : (
+            <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6 lg:px-8">
+              <h2 className="font-display text-title-m font-black text-beige-kem">Ví TixHub</h2>
+              <p className="mt-3 text-body leading-6 text-beige-kem/70">
+                Ví gắn với tài khoản của bạn. Đăng nhập để xem số dư và lịch sử giao dịch.
+              </p>
+              <div className="mt-6 flex flex-wrap items-center gap-6">
+                <button
+                  onClick={() => runSignedIn(() => goTo("wallet"))}
+                  className="label-eyebrow inline-flex items-center gap-2 text-beige-kem transition hover:text-burgundy-ink"
+                >
+                  Đăng nhập
+                  <span aria-hidden="true">&gt;</span>
+                </button>
+                <button
+                  onClick={goHome}
+                  className="label-eyebrow text-ink-soft transition hover:text-beige-kem"
+                >
+                  Về trang chủ
+                </button>
+              </div>
+            </div>
+          ))}
         {activeScreen === "organizer" && <OrganizerPanel onBack={goHome} />}
         {activeScreen === "moderation" && <AdminModeration onBack={goHome} />}
+
+        {activeScreen === "about-us" && (
+          <LegalPage title="Về chúng tôi" content={aboutUsMd} onBack={goHome} />
+        )}
+        {activeScreen === "terms-of-service" && (
+          <LegalPage title="Điều khoản sử dụng" content={termsOfServiceMd} onBack={goHome} />
+        )}
+        {activeScreen === "website-terms" && (
+          <LegalPage title="Điều khoản website" content={websiteTermsMd} onBack={goHome} />
+        )}
+        {activeScreen === "refund-policy" && (
+          <LegalPage title="Chính sách hoàn vé" content={refundPolicyMd} onBack={goHome} />
+        )}
       </main>
 
-      <footer className="border-t border-beige-kem/25 bg-xanh-pho px-4 py-12 font-mono text-xs sm:px-6 lg:px-8">
-        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-6 md:flex-row">
-          <div className="space-y-1 text-center md:text-left">
-            <h5 className="font-display text-sm font-bold tracking-normal text-beige-kem">
-              TIXHUB FRONTEND MVP
-            </h5>
-            <p className="text-[10px] text-ink-soft">
-              Mock data cho vé ca nhạc, hòa nhạc, kịch và phim
-            </p>
-          </div>
+      {/*
+       * `wallet` needs an identity, so a guest clicking it in the footer gets the sign-in prompt
+       * and is carried through to the wallet afterwards — rather than landing on a screen that can
+       * only report a failure.
+       */}
+      <Footer
+        onNavigate={(screen) =>
+          void leaveFlow(() =>
+            screen === "wallet" ? runSignedIn(() => goTo(screen)) : goTo(screen),
+          )
+        }
+        /*
+         * Straight to the application form, and through the sign-in gate if there is one: applying
+         * needs an identity, and `runSignedIn` parks the click and replays it afterwards rather
+         * than dropping the reader on a login screen with nothing to return to.
+         */
+        onApplyAsOrganizer={() =>
+          void leaveFlow(() => runSignedIn(() => navigate(`${ACCOUNT_PATH}?section=organizer`)))
+        }
+      />
 
-          <div className="flex flex-wrap justify-center gap-6 text-beige-kem/60">
-            <span className="cursor-pointer transition hover:text-ink-soft">
-              Chính sách hoàn vé
-            </span>
-            <span className="cursor-pointer transition hover:text-ink-soft">
-              Điều khoản sử dụng
-            </span>
-            <span className="cursor-pointer transition hover:text-ink-soft">Hỗ trợ email/SMS</span>
-          </div>
-
-          <p className="text-center text-[10px] text-beige-kem/40 md:text-right">
-            © 2026 TixHub Mock. Frontend only.
-          </p>
-        </div>
-      </footer>
-
-      <button
-        onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-        className="fixed bottom-6 right-6 z-30 grid h-12 w-12 place-items-center rounded-xl border border-cam-dat/20 bg-burgundy text-white shadow-hard transition-all hover:scale-105 hover:brightness-95"
-        aria-label="Cuộn lên đầu trang"
-        title="Cuộn lên đầu trang"
-      >
-        <ArrowUp className="h-5 w-5" />
-      </button>
+      {/*
+       * The assistant, mounted once for the whole app rather than inside the browse screen.
+       *
+       * It used to be a full-width bar wedged between the filters and the results, which pushed
+       * them apart on every visit whether or not anyone wanted to ask anything, and vanished the
+       * moment you opened an event. As a launcher it is available on every screen and costs no
+       * layout — and because it is mounted here, the conversation survives moving between screens.
+       */}
+      <AIChatPanel
+        signedIn={isSignedIn}
+        /*
+         * In-application navigation, not an `<a href>`.
+         *
+         * The whole catalog is in `events` now, and a recommendation is by construction a publicly
+         * visible event, so the lookup effectively always hits. It went through a raw anchor
+         * before, which reloaded the entire SPA — losing the conversation the reader had just had,
+         * along with every other piece of session state.
+         */
+        onOpenEvent={(slug) => {
+          const movie = eventsRef.current.find((event) => event.id === slug);
+          if (movie) void handleStartBookingInput(movie);
+        }}
+      />
 
       {showAuthModal && <AuthModal onClose={dismissAuthModal} onLogin={handleLogin} />}
       {showAccountPage && userName && (
@@ -1276,6 +1801,17 @@ export default function App() {
             closeAccountPage();
           }}
           onProfileUpdated={applyIdentity}
+          /*
+           * `/account?section=organizer` lands on the organizer section, which is what the footer's
+           * application link opens. Read once, as the initial value — the sidebar owns the section
+           * after that, and writing every click back to the address bar would make each one a
+           * history entry the Back button has to walk through before it can close the page.
+           */
+          initialSection={
+            new URLSearchParams(location.search).get("section") === "organizer"
+              ? "organizer"
+              : "profile"
+          }
           onManageEvents={() =>
             leaveFlow(() => {
               // One navigation, not a close followed by a move: `/organizer` replaces `/account`.
@@ -1296,15 +1832,6 @@ export default function App() {
         />
       )}
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
-    </div>
-  );
-}
-
-function TrustCard({ title, text }: { title: string; text: string }) {
-  return (
-    <div className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-6">
-      <h4 className="font-display text-lg font-black text-beige-kem">{title}</h4>
-      <p className="mt-2 text-sm leading-6 text-beige-kem/65">{text}</p>
     </div>
   );
 }

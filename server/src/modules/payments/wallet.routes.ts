@@ -10,11 +10,14 @@ import {
   checkout,
   createTopup,
   getOrder,
+  listOrders,
   getStatement,
   getTopup,
   getWallet,
 } from "./wallet.service.js";
 import { buildPaymentUrl, hasValidVnpaySignature, type VnpayParams } from "./vnpay.js";
+import { queueTicketResend } from "../notifications/notifications.service.js";
+import { cancelTicket } from "./tickets.service.js";
 
 export const walletRouter = Router();
 
@@ -44,6 +47,36 @@ walletRouter.get(
       ...wallet,
       limits: { min: TOPUP_MIN_AMOUNT, max: TOPUP_MAX_AMOUNT, balanceCap: WALLET_BALANCE_CAP },
     });
+  }),
+);
+
+walletRouter.post(
+  "/tickets/:id/cancel",
+  requireAuth,
+  asyncH(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) throw err.notFound("ticket_not_found");
+    await cancelTicket(req.auth!.userId, id);
+    res.json({ ok: true });
+  }),
+);
+
+walletRouter.post(
+  "/orders/:id/resend",
+  requireAuth,
+  asyncH(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) throw err.notFound("order_not_found");
+    const queued = await queueTicketResend(req.auth!.userId, id);
+    if (!queued) {
+      const owner = await getOrder(req.auth!.userId, id);
+      if (!owner) throw err.notFound("order_not_found");
+      throw err.tooMany(
+        "resend_rate_limited",
+        "Bạn chỉ có thể gửi lại tối đa 3 lần mỗi giờ cho đơn vé này.",
+      );
+    }
+    res.status(202).json({ ok: true });
   }),
 );
 
@@ -130,6 +163,16 @@ walletRouter.post(
   asyncH(async (req, res) => {
     const { reservationId } = req.body as z.infer<typeof checkoutSchema>;
     res.status(201).json(await checkout(req.auth!.userId, reservationId));
+  }),
+);
+
+// GET /api/orders — the buyer's own tickets. Registered before `/orders/:id` so the bare path is
+// never read as an order whose id happens to be missing.
+walletRouter.get(
+  "/orders",
+  requireAuth,
+  asyncH(async (req, res) => {
+    res.json(await listOrders(req.auth!.userId));
   }),
 );
 

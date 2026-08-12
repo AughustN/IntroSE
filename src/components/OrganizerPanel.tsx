@@ -6,7 +6,8 @@
 import { FormEvent, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { pathToRoute, screenToPath } from "../routes";
-import { EVENT_CATEGORIES, organizerApi } from "../services/catalogClient";
+import { organizerApi } from "../services/catalogClient";
+import { useEventCategories } from "../hooks/useEventCategories";
 import OrganizerConsole from "./organizer/OrganizerConsole";
 import { Refusal } from "./organizer/states";
 import SeatMapBuilder from "./SeatMapBuilder";
@@ -44,6 +45,7 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
 
   const [title, setTitle] = useState("");
   const [categoryCode, setCategoryCode] = useState("music");
+  const categories = useEventCategories();
   const [eventType, setEventType] = useState<"general_admission" | "seated">("general_admission");
   const [description, setDescription] = useState("");
 
@@ -125,9 +127,9 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
                 onChange={(e) => setCategoryCode(e.target.value)}
                 className={input}
               >
-                {EVENT_CATEGORIES.map((c) => (
+                {categories.map((c) => (
                   <option key={c.code} value={c.code} className="bg-xanh-pho">
-                    {c.label}
+                    {c.labelVi}
                   </option>
                 ))}
               </select>

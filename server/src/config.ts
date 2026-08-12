@@ -18,6 +18,25 @@ function normalizeDbUrl(url: string): string {
   return url.replace(/([?&])channel_binding=[^&]*/i, "").replace(/[?&]$/, "");
 }
 
+const openaiBaseUrl = (process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/+$/, "");
+const defaultOpenaiChatUrl = openaiBaseUrl.endsWith("/chat/completions")
+  ? openaiBaseUrl
+  : `${openaiBaseUrl}/chat/completions`;
+
+/*
+ * Two variables can name the same endpoint, and `OPENAI_CHAT_URL` wins.
+ *
+ * That is a deliberate escape hatch for a gateway whose path is not `/chat/completions`, but it is
+ * also a way to spend an afternoon editing `OPENAI_BASE_URL` and watching nothing change. It is not
+ * in `.env.example`, so anyone who has it has it by choice or by inheritance — say so once at
+ * startup rather than letting the override be invisible.
+ */
+if (process.env.OPENAI_CHAT_URL?.trim() && process.env.OPENAI_BASE_URL?.trim()) {
+  console.warn(
+    `[config] OPENAI_CHAT_URL is set and overrides OPENAI_BASE_URL. Editing OPENAI_BASE_URL will have no effect. Unset one of them.`,
+  );
+}
+
 /**
  * The project runs against three Neon branches, one per job:
  *
@@ -39,6 +58,10 @@ export const config = {
   isTest,
   port: Number(process.env.PORT ?? 4000),
   appUrl: process.env.APP_URL ?? "http://localhost:3000",
+  corsOrigins: (process.env.CORS_ORIGINS ?? "https://tixhub.fit,http://localhost:3000")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
 
   databaseUrl: normalizeDbUrl(required(isTest ? "TEST_DATABASE_URL" : "DATABASE_URL")),
   /** Empty until the demo branch URL is filled in. Only ever compared against, never connected to. */
@@ -50,6 +73,11 @@ export const config = {
   resendApiKey: process.env.RESEND_API_KEY ?? "", // empty → ConsoleMailer
   geminiApiKey: process.env.GEMINI_API_KEY ?? "", // empty → FakeListingModel (UC-22 degrades, never fails)
   mailFrom: process.env.MAIL_FROM ?? "TixHub <no-reply@tixhub.fit>",
+
+  // AI is optional: the request path falls back to database-ranked events when no provider is set.
+  openaiApiKey: process.env.OPENAI_API_KEY ?? "",
+  openaiChatUrl: process.env.OPENAI_CHAT_URL?.trim() || defaultOpenaiChatUrl,
+  openaiModel: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
 
   // VNPay is optional at boot so local catalog/hold development does not require gateway secrets.
   vnpayTmnCode: process.env.VNPAY_TMN_CODE ?? "",
@@ -87,14 +115,63 @@ const ms = (name: string, fallback: number): number => {
   return Number.isFinite(v) && v > 0 ? v : fallback;
 };
 
+/**
+ * Seeded defaults for the `system_settings` table (feature 007). SettingService is the runtime
+ * source of truth for anything an admin can adjust; these are the values it falls back to.
+ */
+export const DEFAULT_SYSTEM_SETTINGS = {
+  seat_hold_ttl_minutes: 7,
+  topup_grace_minutes: 7,
+  absolute_ceiling_minutes: 14,
+  max_tickets_per_buyer: 8,
+  wallet_topup_min: 5_000,
+  wallet_topup_max: 10_000_000,
+  wallet_balance_ceiling: 20_000_000,
+  ai_features_enabled: true,
+  // The automatic quota guard beneath the manual switch above (UC-10 A3, UC-22 A3, SCAL-03). Model-
+  // backed requests permitted per window across all attendees; at the ceiling every AI operation
+  // serves cache or a non-AI fallback and makes no external call. Zero is a valid emergency value.
+  ai_platform_request_ceiling: 2_000,
+  ai_platform_window_hours: 24,
+} as const;
+
+export const AI_REQUEST_LIMIT = 10;
+/**
+ * How long a model call may run before it is abandoned for the non-AI fallback.
+ *
+ * UC-10 and UC-22 alternative flow A4 say roughly eight seconds, and eight is what this was. The
+ * number was written when the AI row of the technology table still said Gemini; the gateway the
+ * team actually configured serves reasoning models, and measured against the real prompt every one
+ * of them is slower than that budget:
+ *
+ *   alic/deepseek-v4-flash (configured)  18.8 s, 19.8 s   (~1100 reasoning tokens)
+ *   deepseek-v4-flash                    23.1 s
+ *   MiniMax-M2.7                         14.5 s
+ *   Minimax-M3                           3.3 s – 8.7 s    (fastest, but swings ~2.5x)
+ *
+ * At eight seconds every real question timed out and the assistant answered from the non-AI
+ * fallback every time — working exactly as designed, and useless. Twenty-five clears the configured
+ * model with headroom for its variance. Switching the model to `Minimax-M3` would allow ten.
+ *
+ * This is a deliberate, recorded deviation from PERF-05: see the Complexity Tracking table in
+ * specs/008-ai-chatbot/plan.md. The guarantee PERF-05 actually protects is that AI never blocks a
+ * purchase, and that still holds — the call is off the critical path, the page stays interactive,
+ * and the wait is legible because the panel shows a typing indicator throughout.
+ */
+export const AI_REQUEST_TIMEOUT_MS = ms("AI_REQUEST_TIMEOUT_MS", 25_000);
+
+// The env-derived constants below remain for process-only consumers (the sweep, throttles, startup
+// checks) that run outside a request and so have no SettingService cache to read. Request paths —
+// holds, top-ups — must read SettingService, not these.
+
 /** Hold window from the reservation's first hold (Vision REL-02, FR-006). */
-export const HOLD_TTL_MS = ms("HOLD_TTL_MS", 7 * 60 * 1000);
+export const HOLD_TTL_MS = ms("HOLD_TTL_MS", DEFAULT_SYSTEM_SETTINGS.seat_hold_ttl_minutes * 60 * 1000);
 /** One-time grace granted when a wallet top-up carries the reservation (FR-010, schema D2 amendment). */
-export const HOLD_GRACE_MS = ms("HOLD_GRACE_MS", 7 * 60 * 1000);
+export const HOLD_GRACE_MS = ms("HOLD_GRACE_MS", DEFAULT_SYSTEM_SETTINGS.topup_grace_minutes * 60 * 1000);
 /** Absolute ceiling measured from `reservations.created_at` — the window can never exceed it. */
-export const HOLD_ABSOLUTE_MS = ms("HOLD_ABSOLUTE_MS", 14 * 60 * 1000);
+export const HOLD_ABSOLUTE_MS = ms("HOLD_ABSOLUTE_MS", DEFAULT_SYSTEM_SETTINGS.absolute_ceiling_minutes * 60 * 1000);
 /** Tickets one attendee may hold at once for one showtime: seats (seated) or quantity (GA) (FR-016). */
-export const SEAT_CAP = ms("SEAT_CAP", 8);
+export const SEAT_CAP = ms("SEAT_CAP", DEFAULT_SYSTEM_SETTINGS.max_tickets_per_buyer);
 /** How often the release sweep runs. Expiry is exact; the sweep is what acts on it (REL-02). */
 export const HOLD_SWEEP_INTERVAL_MS = ms("HOLD_SWEEP_INTERVAL_MS", 60 * 1000);
 /** Hold/release requests allowed per user per window — anti hold-spam (FR-017). */

@@ -6,7 +6,8 @@
 import { useEffect, useState } from "react";
 import { QueueItem, adminApi } from "../services/catalogClient";
 
-const ghost = "rounded-xl border-2 border-beige-kem px-3 py-2 text-xs font-bold text-beige-kem/80 transition";
+const ghost =
+  "rounded-xl border-2 border-beige-kem px-3 py-2 text-eyebrow font-bold text-beige-kem/80 transition";
 
 export default function AdminModeration({ onBack }: { onBack: () => void }) {
   const [queue, setQueue] = useState<QueueItem[]>([]);
@@ -18,7 +19,11 @@ export default function AdminModeration({ onBack }: { onBack: () => void }) {
     try {
       setQueue(await adminApi.queue());
     } catch (e) {
-      setErr((e as Error).message === "forbidden" ? "Chỉ admin mới truy cập được." : (e as Error).message);
+      setErr(
+        (e as Error).message === "forbidden"
+          ? "Chỉ admin mới truy cập được."
+          : (e as Error).message,
+      );
     }
   };
   useEffect(() => {
@@ -40,36 +45,53 @@ export default function AdminModeration({ onBack }: { onBack: () => void }) {
   return (
     <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8 text-beige-kem">
       <div className="flex items-center justify-between">
-        <h1 className="font-display text-3xl font-black">Kiểm duyệt sự kiện</h1>
-        <button onClick={onBack} className={ghost}>← Về trang chủ</button>
+        <h1 className="font-display text-title-l font-black">Kiểm duyệt sự kiện</h1>
+        <button onClick={onBack} className={ghost}>
+          ← Về trang chủ
+        </button>
       </div>
-      {notice && <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-xs text-on-tint">{notice}</div>}
-      {err && <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-xs">{err}</div>}
+      {notice && (
+        <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-eyebrow text-on-tint">
+          {notice}
+        </div>
+      )}
+      {err && (
+        <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-eyebrow">
+          {err}
+        </div>
+      )}
 
-      <p className="font-mono text-xs text-beige-kem/60">Hàng chờ duyệt ({queue.length}) — duyệt để hiển thị công khai cho người mua.</p>
+      <p className="font-meta text-eyebrow text-beige-kem/60">
+        Hàng chờ duyệt ({queue.length}) — duyệt để hiển thị công khai cho người mua.
+      </p>
 
       <div className="space-y-3">
-        {queue.length === 0 && !err && <p className="text-sm text-beige-kem/60">Không có sự kiện nào chờ duyệt.</p>}
+        {queue.length === 0 && !err && (
+          <p className="text-body text-beige-kem/60">Không có sự kiện nào chờ duyệt.</p>
+        )}
         {queue.map((e) => (
           <div key={e.id} className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <div className="font-display text-lg font-bold">{e.title}</div>
-                <div className="font-mono text-[11px] text-beige-kem/50">Tổ chức: {e.organizer} · {e.slug}</div>
+                <div className="font-display text-title-s font-bold">{e.title}</div>
+                <div className="font-meta text-meta text-beige-kem/50">
+                  Tổ chức: {e.organizer} · {e.slug}
+                </div>
               </div>
               <div className="flex gap-2">
                 <button
                   onClick={() => act(() => adminApi.approve(e.id).then(() => {}), "Đã duyệt.")}
-                  className="rounded-xl bg-la-co px-4 py-2 text-sm font-black text-on-tint transition hover:brightness-95"
+                  className="rounded-xl bg-la-co px-4 py-2 text-body font-black text-on-tint transition hover:brightness-95"
                 >
                   Duyệt
                 </button>
                 <button
                   onClick={() => {
                     const reason = window.prompt("Lý do từ chối:");
-                    if (reason) act(() => adminApi.reject(e.id, reason).then(() => {}), "Đã từ chối.");
+                    if (reason)
+                      act(() => adminApi.reject(e.id, reason).then(() => {}), "Đã từ chối.");
                   }}
-                  className="rounded-xl bg-bubblegum px-4 py-2 text-sm font-black text-on-tint transition hover:brightness-95"
+                  className="rounded-xl bg-bubblegum px-4 py-2 text-body font-black text-on-tint transition hover:brightness-95"
                 >
                   Từ chối
                 </button>
