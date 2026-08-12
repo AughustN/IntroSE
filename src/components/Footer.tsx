@@ -31,6 +31,7 @@ const COLUMNS: ReadonlyArray<{ title: string; links: ReadonlyArray<[string, Scre
     title: "Của tôi",
     links: [
       ["Vé của tôi", "history"],
+      ["Đã lưu", "saved"],
       ["Ví TixHub", "wallet"],
     ],
   },

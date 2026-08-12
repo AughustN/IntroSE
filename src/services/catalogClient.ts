@@ -272,6 +272,17 @@ export const catalogClient = {
     );
     return [first.events, ...rest.map((r) => r.events)].flat();
   },
+  /**
+   * The homepage's curated row, in the Admin's order (UC-35).
+   *
+   * Deliberately its own request rather than a flag on the browse listing: the order is editorial
+   * and lives in `featured_events`, so the only way the browser can honour it is to be told it. The
+   * endpoint applies the same visibility predicate as everything else, so an event pulled from the
+   * catalogue disappears from this row too without anyone editing the curation.
+   */
+  featuredEvents(): Promise<EventCard[]> {
+    return get<EventCard[]>("/events/featured");
+  },
   listCategories(): Promise<EventCategory[]> {
     return get<EventCategory[]>("/categories");
   },

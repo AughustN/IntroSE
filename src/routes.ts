@@ -21,6 +21,8 @@ export type Screen =
   | "checkout"
   | "ticket"
   | "history"
+  /** The events this account has bookmarked — the hearts, on a page of their own. */
+  | "saved"
   | "wallet"
   | "admin"
   | "organizer"
@@ -48,6 +50,7 @@ const STATIC_PATHS: ReadonlyArray<readonly [Screen, string]> = [
   ["browse", "/events"],
   ["checkout", "/checkout"],
   ["history", "/bookings"],
+  ["saved", "/saved"],
   ["wallet", "/wallet"],
   ["admin", "/admin"],
   ["organizer", "/organizer"],

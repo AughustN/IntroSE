@@ -5,9 +5,17 @@
 
 import { useEffect, useState } from "react";
 import { QueueItem, adminApi } from "../services/catalogClient";
+import Section, { SectionHead } from "./Section";
 
-const ghost =
-  "rounded-xl border-2 border-beige-kem px-3 py-2 text-eyebrow font-bold text-beige-kem/80 transition";
+/*
+ * Same four controls the console next door uses, for the same reason: this screen and `/admin` are
+ * one job split across two routes, and they were drawn with two different vocabularies — 2px borders
+ * and rounded-2xl here, hairlines and squares there.
+ */
+const ACTION_PRIMARY =
+  "label-eyebrow inline-flex h-9 items-center bg-burgundy px-4 text-white transition hover:brightness-110";
+const ACTION_GHOST =
+  "label-eyebrow inline-flex h-9 items-center gap-2 border border-beige-kem/40 px-3 text-beige-kem transition hover:border-beige-kem hover:bg-bubblegum/20";
 
 export default function AdminModeration({ onBack }: { onBack: () => void }) {
   const [queue, setQueue] = useState<QueueItem[]>([]);
@@ -43,45 +51,65 @@ export default function AdminModeration({ onBack }: { onBack: () => void }) {
   };
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8 text-beige-kem">
-      <div className="flex items-center justify-between">
-        <h1 className="font-display text-title-l font-black">Kiểm duyệt sự kiện</h1>
-        <button onClick={onBack} className={ghost}>
-          ← Về trang chủ
-        </button>
-      </div>
-      {notice && (
-        <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-eyebrow text-on-tint">
-          {notice}
+    /*
+      The spacing goes on a wrapper inside, not on `Section`: its `className` lands on the outer
+      band element, whose only child is the measure — `space-y-*` there would have nothing to space.
+    */
+    <Section divided={false}>
+      <div className="space-y-6 text-beige-kem">
+        <div className="space-y-5">
+          <button onClick={onBack} className={ACTION_GHOST}>
+            <span aria-hidden="true">&lt;</span>
+            Về trang chủ
+          </button>
+          <SectionHead
+            variant="bar"
+            eyebrow="Kiểm duyệt"
+            title="Hàng chờ duyệt sự kiện"
+            meta={`${queue.length} sự kiện`}
+          />
         </div>
-      )}
-      {err && (
-        <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-eyebrow">
-          {err}
-        </div>
-      )}
 
-      <p className="font-meta text-eyebrow text-beige-kem/60">
-        Hàng chờ duyệt ({queue.length}) — duyệt để hiển thị công khai cho người mua.
-      </p>
-
-      <div className="space-y-3">
-        {queue.length === 0 && !err && (
-          <p className="text-body text-beige-kem/60">Không có sự kiện nào chờ duyệt.</p>
+        {/* Both notices are a stroke and a wash, never a filled block — the same shape the console uses. */}
+        {notice && (
+          <div className="border-l-2 border-la-co bg-la-co/10 px-4 py-3 font-meta text-body">
+            {notice}
+          </div>
         )}
-        {queue.map((e) => (
-          <div key={e.id} className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="font-display text-title-s font-bold">{e.title}</div>
-                <div className="font-meta text-meta text-beige-kem/50">
+        {err && (
+          <div className="border-l-2 border-burgundy bg-bubblegum/25 px-4 py-3 font-meta text-body">
+            {err}
+          </div>
+        )}
+
+        <p className="font-meta text-body text-ink-soft">
+          Duyệt để hiển thị công khai cho người mua.
+        </p>
+
+        <div className="border-t border-beige-kem/25">
+          {queue.length === 0 && !err && (
+            <div className="hud-dashed mt-6 p-12 text-center font-meta text-body text-ink-soft">
+              Không có sự kiện nào chờ duyệt.
+            </div>
+          )}
+          {queue.map((e) => (
+            <div
+              key={e.id}
+              className="flex flex-wrap items-center justify-between gap-3 border-b border-beige-kem/25 py-4"
+            >
+              <div className="min-w-0">
+                <div className="font-display text-title-s font-black uppercase leading-tight">
+                  {e.title}
+                </div>
+                <div className="mt-1 font-meta text-meta text-ink-soft">
                   Tổ chức: {e.organizer} · {e.slug}
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex shrink-0 gap-2">
+                {/* One filled action per row — approving is the outcome this queue exists to produce. */}
                 <button
                   onClick={() => act(() => adminApi.approve(e.id).then(() => {}), "Đã duyệt.")}
-                  className="rounded-xl bg-la-co px-4 py-2 text-body font-black text-on-tint transition hover:brightness-95"
+                  className={ACTION_PRIMARY}
                 >
                   Duyệt
                 </button>
@@ -91,15 +119,15 @@ export default function AdminModeration({ onBack }: { onBack: () => void }) {
                     if (reason)
                       act(() => adminApi.reject(e.id, reason).then(() => {}), "Đã từ chối.");
                   }}
-                  className="rounded-xl bg-bubblegum px-4 py-2 text-body font-black text-on-tint transition hover:brightness-95"
+                  className={ACTION_GHOST}
                 >
                   Từ chối
                 </button>
               </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
-    </div>
+    </Section>
   );
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { reviewsClient, type Review, type ReviewPage } from "../../services/reviewsClient";
 import { formatEventDate } from "../../services/formatDate";
+import { DEFAULT_AVATAR_FG, avatarColor } from "../../services/defaultAvatar";
 import ReviewForm from "./ReviewForm";
 import StarRating from "./StarRating";
 
@@ -11,16 +12,49 @@ interface ReviewSectionProps {
 
 /** Why the form is not offered, in words the reader can act on. */
 const BLOCKED: Record<string, string> = {
-  no_ticket: "Chỉ người đã mua vé sự kiện này mới đánh giá được.",
-  event_not_started: "Sự kiện chưa diễn ra nên chưa thể đánh giá.",
+  no_ticket: "Chỉ tài khoản đã mua vé sự kiện này mới bình luận được.",
+  event_not_started: "Sự kiện chưa diễn ra. Bình luận mở sau khi sự kiện bắt đầu.",
 };
 
 /**
- * Ratings and reviews for one event.
+ * The commenter's picture, or their initial on a colour.
  *
- * Reading is open to everyone — a rating exists to inform the next buyer, so gating it behind an
- * account would defeat the point. The write side appears only for someone the server says may use
- * it, and when it does not appear the reason is shown rather than the control silently missing.
+ * Seeded from the nickname rather than from the email the rest of the app uses, because a review
+ * carries no address — the API deliberately does not hand one out. The consequence is that renaming
+ * yourself recolours your past comments, which is a fair trade for not publishing an email.
+ */
+function CommenterAvatar({ nickname, avatarUrl }: { nickname: string; avatarUrl: string | null }) {
+  if (avatarUrl) {
+    return (
+      <img
+        src={avatarUrl}
+        alt=""
+        aria-hidden="true"
+        referrerPolicy="no-referrer"
+        loading="lazy"
+        className="h-10 w-10 shrink-0 rounded-full object-cover"
+      />
+    );
+  }
+  return (
+    <span
+      aria-hidden="true"
+      className="grid h-10 w-10 shrink-0 place-items-center rounded-full font-bold"
+      style={{ backgroundColor: avatarColor(nickname), color: DEFAULT_AVATAR_FG }}
+    >
+      {nickname.charAt(0).toUpperCase()}
+    </span>
+  );
+}
+
+/**
+ * The comment wall for one event: what other buyers said, and a box for anyone holding a ticket.
+ *
+ * Reading is open to everyone — a comment exists to inform the next buyer, so gating it behind an
+ * account would defeat the point. Writing is not: the server only accepts a comment from an account
+ * with a ticket to this event, and only once the event has started, and it says which of the two
+ * rules stopped you. So when the box is missing the page prints the reason instead of leaving a
+ * hole where a control should be.
  *
  * One request carries the summary, the first page and the viewer's own state, so the section has a
  * single loading condition instead of three that can disagree.
@@ -47,7 +81,7 @@ export default function ReviewSection({ eventId, isSignedIn }: ReviewSectionProp
       })
       .catch((e: unknown) => {
         if (cancelled) return;
-        setError(e instanceof Error ? e.message : "Không tải được đánh giá.");
+        setError(e instanceof Error ? e.message : "Không tải được bình luận.");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -71,7 +105,7 @@ export default function ReviewSection({ eventId, isSignedIn }: ReviewSectionProp
       setOlder([]);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Không tải được đánh giá.");
+      setError(e instanceof Error ? e.message : "Không tải được bình luận.");
     } finally {
       setLoading(false);
     }
@@ -85,7 +119,7 @@ export default function ReviewSection({ eventId, isSignedIn }: ReviewSectionProp
     if (!last || loadingMore) return;
     setLoadingMore(true);
     try {
-      // Keyed on the oldest row we hold, not on an offset: a review posted while the reader scrolls
+      // Keyed on the oldest row we hold, not on an offset: a comment posted while the reader scrolls
       // would shift every offset by one and make them see one twice and miss another.
       const next = await reviewsClient.list(eventId, { before: last.createdAt });
       setOlder((prior) => [...prior, ...next.reviews]);
@@ -110,11 +144,11 @@ export default function ReviewSection({ eventId, isSignedIn }: ReviewSectionProp
   };
 
   const report = async (review: Review) => {
-    const reason = window.prompt("Vì sao bạn báo cáo đánh giá này?");
+    const reason = window.prompt("Vì sao bạn báo cáo bình luận này?");
     if (!reason?.trim()) return;
     try {
       const result = await reviewsClient.report(review.id, reason.trim());
-      setNotice(result.alreadyReported ? "Bạn đã báo cáo đánh giá này rồi." : "Đã gửi báo cáo.");
+      setNotice(result.alreadyReported ? "Bạn đã báo cáo bình luận này rồi." : "Đã gửi báo cáo.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không gửi được báo cáo.");
     }
@@ -122,85 +156,131 @@ export default function ReviewSection({ eventId, isSignedIn }: ReviewSectionProp
 
   const summary = page?.summary;
   const viewer = page?.viewer;
+  const canWrite = Boolean(viewer?.canReview || viewer?.myReview);
 
   return (
     <section className="mt-16 border-t border-beige-kem/25 pt-10">
-      <div className="flex flex-wrap items-baseline justify-between gap-4">
-        <h2 className="font-display text-title-m font-black uppercase tracking-[0.02em] text-beige-kem">
-          Đánh giá
-        </h2>
-        {summary && summary.rating !== null && (
-          <div className="flex items-center gap-3">
-            <StarRating value={summary.rating} />
-            <span className="font-meta text-body text-beige-kem">
+      <h2 className="font-display text-title-m font-black uppercase tracking-[0.02em] text-beige-kem">
+        Bình luận
+      </h2>
+
+      {/*
+        The score, at the size a score is worth reading.
+
+        The average used to sit on the same baseline as the heading, in body type, next to a count —
+        the one number a buyer scans a comment section for, set smaller than the section's title. It
+        now leads the block, with the stars and the count as its caption.
+
+        An unrated event says so in words rather than showing five empty stars, which reads as a bad
+        score rather than as no score.
+      */}
+      <div className="mt-6 flex flex-col gap-6 border border-beige-kem/25 bg-surface-2 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+        {summary && summary.rating !== null ? (
+          <div className="flex items-center gap-5">
+            <span className="font-display text-title-l font-black leading-none tabular-nums text-beige-kem">
               {summary.rating.toFixed(1)}
-              <span className="text-ink-soft"> · {summary.reviewCount} đánh giá</span>
             </span>
+            <div>
+              <StarRating value={summary.rating} size={22} />
+              <p className="mt-1.5 font-meta text-meta text-ink-soft">
+                {summary.reviewCount} bình luận từ người đã mua vé
+              </p>
+            </div>
           </div>
+        ) : (
+          <p className="font-meta text-body text-ink-soft">
+            {loading ? "Đang tải bình luận…" : "Chưa có bình luận nào cho sự kiện này."}
+          </p>
         )}
+
+        {/*
+          What this reader may do, said in one line beside the score rather than as a control that
+          silently is or is not there. The box itself opens underneath.
+        */}
+        {!isSignedIn ? (
+          <p className="font-meta text-meta text-ink-soft sm:max-w-[18rem] sm:text-right">
+            Đăng nhập bằng tài khoản đã mua vé để bình luận.
+          </p>
+        ) : !canWrite && viewer?.reason ? (
+          <p className="font-meta text-meta text-ink-soft sm:max-w-[18rem] sm:text-right">
+            {BLOCKED[viewer.reason]}
+          </p>
+        ) : null}
       </div>
 
-      {/* An unrated event is not a zero-star event, so it says so in words rather than showing five
-          empty stars, which reads as a bad score. */}
-      {summary && summary.rating === null && !loading && (
-        <p className="mt-3 font-meta text-body text-ink-soft">Chưa có đánh giá nào cho sự kiện này.</p>
-      )}
-
-      <div className="mt-6">
-        {!isSignedIn ? (
-          <p className="font-meta text-meta text-ink-soft">Đăng nhập để đánh giá sự kiện bạn đã tham dự.</p>
-        ) : viewer?.canReview || viewer?.myReview ? (
+      {canWrite && (
+        <div className="mt-5">
           <ReviewForm
             existing={viewer?.myReview ?? null}
             onSubmit={submit}
             onDelete={viewer?.myReview ? withdraw : undefined}
           />
-        ) : viewer?.reason ? (
-          <p className="font-meta text-meta text-ink-soft">{BLOCKED[viewer.reason]}</p>
-        ) : null}
-      </div>
+        </div>
+      )}
 
       {notice && <p className="mt-4 font-meta text-meta text-ink-soft">{notice}</p>}
       {error && <p className="mt-4 font-meta text-meta text-burgundy-ink">{error}</p>}
 
       {loading ? (
-        <p className="mt-8 font-meta text-meta text-ink-soft">Đang tải đánh giá…</p>
+        <p className="mt-8 font-meta text-meta text-ink-soft">Đang tải bình luận…</p>
       ) : (
-        <ul className="mt-8 space-y-6">
-          {all.map((review) => (
-            <li key={review.id} className="border-t border-beige-kem/20 pt-5">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <StarRating value={review.rating} size={16} />
-                  <span className="font-meta text-meta font-bold text-beige-kem">
-                    {/* A deleted account keeps its review — the rating is a claim about the event,
-                        not about whether its author still has a login. */}
-                    {review.author?.nickname ?? "Tài khoản đã xoá"}
-                  </span>
-                  <span className="font-meta text-eyebrow text-ink-soft">
-                    {formatEventDate(review.createdAt.slice(0, 10), true)}
-                    {review.edited && " · đã sửa"}
-                  </span>
+        <ul className="mt-10">
+          {all.map((review) => {
+            /* A deleted account keeps its comment — the rating is a claim about the event, not
+               about whether its author still has a login. */
+            const nickname = review.author?.nickname ?? "Tài khoản đã xoá";
+            return (
+              <li
+                key={review.id}
+                className="flex gap-4 border-t border-beige-kem/20 py-6 first:border-t-0 first:pt-0"
+              >
+                <CommenterAvatar nickname={nickname} avatarUrl={review.author?.avatarUrl ?? null} />
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                    <div className="min-w-0">
+                      <p className="flex flex-wrap items-center gap-2">
+                        <span className="font-display text-body font-bold uppercase tracking-[0.04em] text-beige-kem">
+                          {nickname}
+                        </span>
+                        {review.mine && (
+                          <span className="label-eyebrow border border-beige-kem/40 px-2 py-0.5 text-ink-soft">
+                            Bạn
+                          </span>
+                        )}
+                      </p>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-3">
+                        <StarRating value={review.rating} size={15} />
+                        <span className="font-meta text-meta text-ink-soft">
+                          {formatEventDate(review.createdAt.slice(0, 10), true)}
+                          {review.edited && " · đã sửa"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {isSignedIn && !review.mine && (
+                      <button
+                        type="button"
+                        onClick={() => void report(review)}
+                        className="font-meta text-meta text-ink-soft transition hover:text-burgundy-ink"
+                      >
+                        Báo cáo
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Rendered as a text node. React escapes it, which is the whole of the
+                      output-encoding story — nothing here may ever reach for
+                      `dangerouslySetInnerHTML`. */}
+                  {review.body && (
+                    <p className="mt-3 whitespace-pre-wrap font-meta text-body leading-7 text-beige-kem/85">
+                      {review.body}
+                    </p>
+                  )}
                 </div>
-                {isSignedIn && !review.mine && (
-                  <button
-                    type="button"
-                    onClick={() => void report(review)}
-                    className="font-meta text-eyebrow text-ink-soft transition hover:text-burgundy-ink"
-                  >
-                    Báo cáo
-                  </button>
-                )}
-              </div>
-              {/* Rendered as a text node. React escapes it, which is the whole of the output-encoding
-                  story — nothing here may ever reach for `dangerouslySetInnerHTML`. */}
-              {review.body && (
-                <p className="mt-2 whitespace-pre-wrap font-meta text-body leading-7 text-beige-kem/85">
-                  {review.body}
-                </p>
-              )}
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       )}
 
@@ -209,9 +289,9 @@ export default function ReviewSection({ eventId, isSignedIn }: ReviewSectionProp
           type="button"
           onClick={() => void loadMore()}
           disabled={loadingMore}
-          className="label-eyebrow mt-8 border border-beige-kem/30 px-5 py-2 text-beige-kem transition hover:border-burgundy disabled:opacity-50"
+          className="label-eyebrow mt-6 border border-beige-kem/30 px-5 py-2.5 text-beige-kem transition hover:border-burgundy hover:bg-bubblegum/20 disabled:opacity-50"
         >
-          {loadingMore ? "Đang tải…" : "Xem thêm đánh giá"}
+          {loadingMore ? "Đang tải…" : "Xem thêm bình luận"}
         </button>
       )}
     </section>
