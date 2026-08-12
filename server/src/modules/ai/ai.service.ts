@@ -7,7 +7,7 @@ import type {
   ListingResponse,
   RecommendationContext,
 } from '@shared/ai/types.js';
-import { AI_CACHE_TTL_MS } from '../../config.js';
+import { AI_CACHE_TTL_MS, AI_REQUEST_LIMIT } from '../../config.js';
 import { err } from '../../http.js';
 import { getSettings } from '../admin/settings.service.js';
 import * as repo from './ai.repo.js';
@@ -141,7 +141,10 @@ export async function chat(
   );
   if (!allowance.ok) {
     if (allowance.reason === 'user') {
-      throw err.tooMany('ai_rate_limited', 'Bạn đã dùng hết 10 yêu cầu AI trong giờ này.');
+      throw err.tooMany(
+        'ai_rate_limited',
+        `Bạn đã dùng hết ${AI_REQUEST_LIMIT} yêu cầu AI trong giờ này.`,
+      );
     }
     return fallback(list, FALLBACK_REPLY, 'Hệ thống đang tạm giới hạn AI, đây là gợi ý thay thế.');
   }
@@ -250,7 +253,10 @@ export async function generateEventListing(userId: number, input: ListingInput):
   );
   if (!allowance.ok) {
     if (allowance.reason === 'user') {
-      throw err.tooMany('ai_rate_limited', 'Bạn đã dùng hết 10 yêu cầu AI trong giờ này.');
+      throw err.tooMany(
+        'ai_rate_limited',
+        `Bạn đã dùng hết ${AI_REQUEST_LIMIT} yêu cầu AI trong giờ này.`,
+      );
     }
     return {
       source: 'fallback',

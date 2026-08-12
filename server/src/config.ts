@@ -134,7 +134,7 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   ai_platform_window_hours: 24,
 } as const;
 
-export const AI_REQUEST_LIMIT = 10;
+export const AI_REQUEST_LIMIT = 50;
 export const AI_CACHE_TTL_MS = 60 * 60 * 1000;
 /**
  * How long a model call may run before it is abandoned for the non-AI fallback.

@@ -64,7 +64,7 @@ describe('AI allowance and platform ceiling', () => {
     expect(await usedBy(userId)).toBe(1);
   });
 
-  it('allows ten model-backed requests an hour and refuses the eleventh (FR-008, SC-007)', async () => {
+  it('allows AI_REQUEST_LIMIT model-backed requests an hour and refuses the next (FR-008, SC-007)', async () => {
     await seedVisibleGaEvent();
     const { token, userId } = await registerUser();
     install(answering());

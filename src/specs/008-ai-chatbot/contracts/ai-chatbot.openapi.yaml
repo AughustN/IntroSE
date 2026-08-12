@@ -61,7 +61,7 @@ paths:
                 $ref: "#/components/schemas/Error"
               example:
                 code: ai_rate_limited
-                message: Bạn đã dùng hết 10 yêu cầu AI trong giờ này.
+                message: Bạn đã dùng hết 50 yêu cầu AI trong giờ này.
 
   /event-assistant:
     post:
