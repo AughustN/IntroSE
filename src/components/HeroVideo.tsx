@@ -167,11 +167,24 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
    */
   const [paused, setPaused] = useState(false);
 
+  /*
+   * Whether the *reader* stopped it, as opposed to the browser or the observer below.
+   *
+   * `paused` cannot answer that: it is true for a tab in the background and for a trailer scrolled
+   * off screen as well, so resuming off it would restart a video somebody deliberately silenced.
+   */
+  const userPausedRef = useRef(false);
+
   const togglePlayback = () => {
     const video = videoRef.current;
     if (!video) return;
-    if (video.paused) void video.play().catch(() => setPaused(true));
-    else video.pause();
+    if (video.paused) {
+      userPausedRef.current = false;
+      void video.play().catch(() => setPaused(true));
+    } else {
+      userPausedRef.current = true;
+      video.pause();
+    }
   };
 
   /*
@@ -207,6 +220,10 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
       // small screen, and this branch never has one.
       shell.style.setProperty("--tv-opacity", "0");
       shell.style.setProperty("--tv-events", "none");
+      // No cabinet means no tuning dial, so the overlay control is the only one there is.
+      shell.style.setProperty("--player-opacity", "1");
+      shell.style.setProperty("--player-events", "auto");
+      shell.style.setProperty("--player-vis", "visible");
       stage.style.clipPath = "none";
       type.style.setProperty("--type-opacity", "1");
       type.style.setProperty("--type-events", "auto");
@@ -244,6 +261,20 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
       const chromeOpacity = clamp01(1 - p / CHROME_FADE_END);
       shell.style.setProperty("--tv-opacity", `${chromeOpacity}`);
       shell.style.setProperty("--tv-events", chromeOpacity > 0.05 ? "auto" : "none");
+
+      /*
+       * The overlay control is the exact complement of the cabinet: the tuning dial is the pause
+       * button while there is a television to hold it, and once the set has thinned away the dial
+       * goes with it — including its hit target, which `--tv-events` switches off. Handing the
+       * opened screen no control at all is what left the trailer running, at full bleed and with
+       * sound, until the reader scrolled the whole section off the page.
+       */
+      const playerOpacity = 1 - chromeOpacity;
+      shell.style.setProperty("--player-opacity", `${playerOpacity}`);
+      shell.style.setProperty("--player-events", playerOpacity > 0.05 ? "auto" : "none");
+      // `visibility` as well as opacity, so the hidden one of the two controls is out of the tab
+      // order and out of the accessibility tree instead of being a second "Tạm dừng trailer".
+      shell.style.setProperty("--player-vis", playerOpacity > 0.05 ? "visible" : "hidden");
 
       stage.style.clipPath = screenPath(
         w,
@@ -287,6 +318,8 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
     video.currentTime = 0;
     video.load();
     setShowPoster(true);
+    // A pause the reader pressed applied to the trailer that was loaded then, not to this one.
+    userPausedRef.current = false;
     video
       .play()
       .then(() => {
@@ -298,6 +331,40 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
         setPaused(true);
       });
   }, [movie.id]);
+
+  /*
+   * Stop the trailer once it has left the page, and pick it up again when it comes back.
+   *
+   * Nothing above this did: the video is `loop`, so scrolling past the hero used to leave a trailer
+   * playing out of sight and — after the first gesture unmutes it — audible over whatever the reader
+   * had scrolled down to read. Off screen it is decoding frames nobody is looking at either.
+   *
+   * `userPausedRef` is what keeps the resume honest. A reader who pressed pause and scrolled on gets
+   * a paused trailer when they scroll back, not a video that restarts itself behind their decision.
+   */
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        const video = videoRef.current;
+        if (!video) return;
+        if (entry.isIntersecting) {
+          if (!userPausedRef.current && video.paused) {
+            void video.play().catch(() => setPaused(true));
+          }
+        } else if (!video.paused) {
+          video.pause();
+        }
+      },
+      // Any sliver on screen counts as watching; the section is two viewports tall in the cinema
+      // variant, so a fraction-of-the-element threshold would stop it while it was still in view.
+      { threshold: 0 },
+    );
+    observer.observe(section);
+    return () => observer.disconnect();
+  }, []);
 
   /*
    * Sound, as far as the browser will allow it.
@@ -650,6 +717,36 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
               aria-label={paused ? "Phát trailer" : "Tạm dừng trailer"}
               title={paused ? "Phát trailer" : "Tạm dừng trailer"}
               className="absolute bottom-5 right-5 z-[5] grid h-11 w-11 place-items-center border border-white/45 bg-black/30 text-white/85 backdrop-blur-sm transition hover:border-white hover:text-white"
+            >
+              {paused ? (
+                <Play className="h-4 w-4" fill="currentColor" strokeWidth={0} />
+              ) : (
+                <Pause className="h-4 w-4" fill="currentColor" strokeWidth={0} />
+              )}
+            </button>
+          )}
+
+          {/*
+            The opened screen's control, and the hand-off partner of the tuning dial.
+
+            Same button, same two states, drawn where a player's controls live rather than on a
+            chin that no longer exists. It cross-fades in on `--player-opacity` exactly as the
+            cabinet fades out, so there is a control on the picture at every point of the scroll and
+            never two at once. Inside the screen, so the clip path carries it — by the time it is
+            visible the bow has gone and the path is a rectangle.
+          */}
+          {!plain && (
+            <button
+              type="button"
+              onClick={togglePlayback}
+              aria-label={paused ? "Phát trailer" : "Tạm dừng trailer"}
+              title={paused ? "Phát trailer" : "Tạm dừng trailer"}
+              style={{
+                opacity: "var(--player-opacity, 0)",
+                visibility: "var(--player-vis, hidden)" as React.CSSProperties["visibility"],
+                pointerEvents: "var(--player-events, none)" as React.CSSProperties["pointerEvents"],
+              }}
+              className="absolute bottom-6 right-6 z-[5] grid h-12 w-12 place-items-center rounded-full border border-white/45 bg-black/40 text-white/85 backdrop-blur-sm transition hover:border-white hover:text-white sm:bottom-8 sm:right-8"
             >
               {paused ? (
                 <Play className="h-4 w-4" fill="currentColor" strokeWidth={0} />

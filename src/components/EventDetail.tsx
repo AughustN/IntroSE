@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Showtime } from "@/shared/catalog/types";
 import { MovieEvent, TicketTier } from "../types";
-import ReviewSection from "./reviews/ReviewSection";
+import ReviewPreview from "./reviews/ReviewPreview";
 import { catalogClient } from "../services/catalogClient";
 import { formatEventDate } from "../services/formatDate";
 import { watchShowtime } from "../services/seatSocket";
@@ -41,6 +41,8 @@ interface EventDetailProps {
   relatedEvents: MovieEvent[];
   wishlistedIds: string[];
   onBack: () => void;
+  /** Opens this event's own comments page, `/events/:slug/reviews`. */
+  onOpenReviews: () => void;
   onToggleWishlist: (eventId: string) => void;
   onBookRelated: (event: MovieEvent) => void;
   /** Seated events: hand off to the seat picker. */
@@ -112,6 +114,7 @@ export default function EventDetail({
   relatedEvents,
   wishlistedIds,
   onBack,
+  onOpenReviews,
   onToggleWishlist,
   onBookRelated,
   onProceedToSeatSelection,
@@ -937,7 +940,11 @@ export default function EventDetail({
           attach reviews to, and asking the API about id `null` would be a 400 on every sample.
         */}
         {event.eventId !== null && (
-          <ReviewSection eventId={event.eventId} isSignedIn={isSignedIn} />
+          <ReviewPreview
+            eventId={event.eventId}
+            isSignedIn={isSignedIn}
+            onOpenAll={onOpenReviews}
+          />
         )}
       </BookingLayout>
     </div>

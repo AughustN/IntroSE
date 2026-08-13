@@ -1,11 +1,17 @@
-import type { Review, ReviewInput, ReviewPage } from "@/shared/reviews/types";
+import type {
+  ReplyPage,
+  Review,
+  ReviewInput,
+  ReviewPage,
+  ReviewSummary,
+} from "@/shared/reviews/types";
 import { withAuthRetry } from "./authClient";
 import { apiUrl } from "./api";
 import { readApiError } from "./apiError";
 
 // Types are imported, never re-declared: the server builds these responses from the same file, so a
 // shape change that breaks this client fails at compile time rather than in the browser.
-export type { Review, ReviewInput, ReviewPage };
+export type { ReplyPage, Review, ReviewInput, ReviewPage, ReviewSummary };
 
 async function call<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
   const response = await withAuthRetry((token) =>
@@ -40,6 +46,17 @@ export const reviewsClient = {
     if (options.before) query.set("before", options.before);
     const suffix = query.toString();
     return call<ReviewPage>(`/events/${eventId}/reviews${suffix ? `?${suffix}` : ""}`);
+  },
+  /**
+   * The rest of one comment's thread. Public. `after` is the **id** of the last reply already on
+   * screen — a listing carries only the opening of each thread.
+   */
+  replies: (reviewId: number, options: { limit?: number; after?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (options.limit) query.set("limit", String(options.limit));
+    if (options.after) query.set("after", String(options.after));
+    const suffix = query.toString();
+    return call<ReplyPage>(`/reviews/${reviewId}/replies${suffix ? `?${suffix}` : ""}`);
   },
   /** Creates, or replaces the caller's existing review of this event. */
   submit: (eventId: number, input: ReviewInput) =>

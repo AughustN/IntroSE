@@ -17,6 +17,8 @@ export type Screen =
   /** The catalog on its own, without the landing hero in front of it. */
   | "browse"
   | "detail"
+  /** One event's comments in full, on their own page — the event page carries a summary only. */
+  | "reviews"
   | "seats"
   | "checkout"
   | "ticket"
@@ -95,6 +97,8 @@ export function screenToPath(
       return params.eventSlug ? `/events/${encodeURIComponent(params.eventSlug)}` : "/";
     case "seats":
       return params.eventSlug ? `/events/${encodeURIComponent(params.eventSlug)}/seats` : "/";
+    case "reviews":
+      return params.eventSlug ? `/events/${encodeURIComponent(params.eventSlug)}/reviews` : "/";
     case "ticket":
       return params.bookingId ? `/tickets/${encodeURIComponent(params.bookingId)}` : "/bookings";
     default: {
@@ -123,6 +127,9 @@ export function pathToRoute(pathname: string): Route | null {
     if (segments.length === 2) return { screen: "detail", eventSlug: segments[1] };
     if (segments.length === 3 && segments[2] === "seats") {
       return { screen: "seats", eventSlug: segments[1] };
+    }
+    if (segments.length === 3 && segments[2] === "reviews") {
+      return { screen: "reviews", eventSlug: segments[1] };
     }
   }
 

@@ -23,7 +23,7 @@ An attendee who went to an event opens it afterwards, gives it one to five stars
 
 **Acceptance Scenarios**:
 
-1. **Given** an attendee holding a paid ticket for an event that has already started, **When** they open that event, **Then** a control to write a review is offered.
+1. **Given** an attendee holding a paid ticket for an event, started or not, **When** they open that event, **Then** a control to write a review is offered.
 2. **Given** the review form, **When** they choose a star value and submit, **Then** the review is stored and shown, and the event's average rating and review count update to include it.
 3. **Given** the review form, **When** they submit without choosing a star value, **Then** submission is refused and the reason is stated.
 4. **Given** review text containing markup such as `<script>` or `<b>`, **When** it is displayed anywhere, **Then** it appears as literal characters and no markup is interpreted.
@@ -51,11 +51,11 @@ An attendee who already reviewed an event can edit what they wrote or take it do
 
 **Why this priority**: UC-18 A2 requires editing rather than duplicating. Withdrawal matters because a review is a person's published opinion about a named business.
 
-**Independent Test**: Review an event, then reopen it and confirm the form is pre-filled for editing rather than offering a second review; edit it and confirm one review remains with the new content.
+**Independent Test**: Comment on an event, then open the comment's own menu and confirm it offers editing and deletion; edit it and confirm the content changed and the average followed the new star value.
 
 **Acceptance Scenarios**:
 
-1. **Given** an attendee who has already reviewed an event, **When** they open it again, **Then** their existing review is offered for editing and no second review can be created.
+1. **Given** an attendee who has already commented on an event, **When** they open it again, **Then** the box is offered again for a further comment, and their existing one is edited from its own menu rather than by writing over it.
 2. **Given** an edited review, **When** it is saved, **Then** the event's average reflects the new star value and the review shows that it was edited.
 3. **Given** an attendee's own review, **When** they delete it, **Then** it disappears from the event and the average and count are recalculated without it.
 4. **Given** somebody else's review, **When** an attendee attempts to edit or delete it, **Then** the attempt is refused.
@@ -70,8 +70,8 @@ Someone who did not buy a ticket cannot rate the event, whether through the inte
 
 **Acceptance Scenarios**:
 
-1. **Given** a signed-in attendee with no ticket for the event, **When** they open it, **Then** no review control is offered and a direct submission is refused.
-2. **Given** an attendee holding a ticket for an event that has not started yet, **When** they try to review it, **Then** the attempt is refused and the reason names the event not having happened.
+1. **Given** a signed-in attendee with no ticket for the event, **When** they open it, **Then** no review control is offered, nothing explains its absence, and a direct submission is refused.
+2. **Given** an attendee holding a ticket for an event that has not started yet, **When** they review it, **Then** it is accepted like any other.
 3. **Given** an attendee whose ticket was refunded or cancelled, **When** they try to review, **Then** the attempt is refused.
 4. **Given** a visitor who is not signed in, **When** they try to submit a review, **Then** the attempt is refused.
 
@@ -92,7 +92,7 @@ A reader who finds a review abusive, fake or off-topic reports it, and an admin 
 
 ### Edge Cases
 
-- An attendee attended several showtimes of the same event: they get one review for the event, not one per showtime.
+- An attendee attended several showtimes of the same event: they get one rating for the event, not one per showtime.
 - An attendee attended, reviewed, and the event was later cancelled: the review stays, since it describes something that happened.
 - Every review of an event is removed by moderation: the event returns to showing no rating rather than a zero.
 - Two devices submit a first review for the same attendee and event at the same instant: exactly one is stored.
@@ -106,13 +106,16 @@ A reader who finds a review abusive, fake or off-topic reports it, and an admin 
 - **FR-001**: An attendee MUST be able to give an event a whole-number rating from one to five stars, with optional accompanying text.
 - **FR-002**: The system MUST refuse any review from someone who does not hold a paid ticket for that event, and MUST enforce this on the server independently of what the interface offers.
 - **FR-003**: Eligibility MUST be established from the attendee's own paid ticket for that event, and a ticket that was refunded, cancelled or voided MUST NOT confer it. Turning up is not required; a no-show still paid and still has an opinion worth recording.
-- **FR-003a**: The event MUST have started before it can be reviewed. Nobody can have a view on something that has not happened.
-- **FR-004**: An attendee MUST have at most one review per event. A second attempt MUST offer to edit the existing review, never create another.
+- **FR-003a**: A ticket holder MUST be able to review the event whether or not it has started. (Superseded on 2026-08-13 the earlier rule requiring the event to have started: a buyer forms a view of the listing, the price and the booking long before the night itself, and waiting muted the comments on exactly the events a prospective buyer is still deciding about.)
+- **FR-004**: An attendee MUST have at most one *rating* per event: their first comment carries the stars, and every comment they write afterwards is text only. (Superseded on 2026-08-13 the earlier rule of one review per event, which upserted a second submission into the first and so silently overwrote what they had said. The scarce thing is the vote, not the right to speak.)
+- **FR-004a**: An attendee MUST be able to post any number of comments on an event, and to reply to a comment. Replies MUST be one level deep — a reply aimed at a reply belongs to the comment they are both under — and MUST require the same paid ticket a comment does.
+- **FR-004b**: Deleting a comment MUST delete the replies under it, which have no meaning without what they answer.
 - **FR-005**: The author of a review MUST be able to edit its rating and text, and to delete it. Nobody else MUST be able to do either.
 - **FR-006**: A star rating MUST be required; text alone MUST NOT be submittable.
 - **FR-007**: Review text MUST be limited to a stated maximum length, and that limit MUST be enforced on the server.
 - **FR-008**: All review text MUST be displayed as literal characters. No part of it may ever be interpreted as markup.
-- **FR-009**: Each event MUST expose its average rating and total number of ratings, derived from its live, non-removed reviews.
+- **FR-009**: Each event MUST expose its average rating, its total number of ratings, and the count of ratings at each star value, derived from its live, non-removed **rated** comments — so the average counts people who came, never how often any of them wrote, and a divided audience is distinguishable from an indifferent one.
+- **FR-009a**: An event's page MUST carry the rating summary and the newest few comments only; the full wall, and every control that writes to it, MUST live on the event's own comments page at `/events/:slug/reviews`. An unbounded list under the thing being sold pushes the showtimes and the lineup off the page.
 - **FR-010**: An event with no reviews MUST be presented as unrated, never as rated zero.
 - **FR-011**: Reviews MUST be readable by anyone who can see the event, including visitors who are not signed in.
 - **FR-012**: Reviews MUST be listed most recent first and MUST be retrievable in pages, so an event with many reviews does not have to deliver all of them at once.
@@ -133,8 +136,8 @@ A reader who finds a review abusive, fake or off-topic reports it, and an admin 
 ### Measurable Outcomes
 
 - **SC-001**: An attendee who attended an event can publish a rating in under one minute from opening the event.
-- **SC-002**: No review is ever stored for an account without a paid ticket to that event, or for an event that has not started — verified by automated test, zero tolerance.
-- **SC-003**: No account ever holds two reviews for one event, including when two submissions arrive simultaneously.
+- **SC-002**: No review is ever stored for an account without a paid ticket to that event — verified by automated test, zero tolerance.
+- **SC-003**: No account ever holds two ratings for one event, including when two submissions arrive simultaneously.
 - **SC-004**: Text submitted with markup in it is rendered as literal characters in 100% of display locations.
 - **SC-005**: An event's displayed average always equals the mean of its live reviews' ratings, including immediately after an edit, a deletion, or a moderation removal.
 - **SC-006**: Reviews are visible to a signed-out visitor on every event that has them.

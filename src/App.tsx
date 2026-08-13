@@ -48,9 +48,11 @@ import BookingHistory from "./components/BookingHistory";
 import AIChatPanel from "./components/AIChatPanel";
 import ToastStack, { type ToastKind, type ToastMessage } from "./components/ToastStack";
 import ConfirmDialog, { type ConfirmRequest } from "./components/ConfirmDialog";
+import HoldExpiredDialog from "./components/HoldExpiredDialog";
 import CheckoutForm from "./components/CheckoutForm";
 import CategoryRow from "./components/CategoryRow";
 import EventDetail from "./components/EventDetail";
+import ReviewsPage from "./components/reviews/ReviewsPage";
 import EventFilters from "./components/EventFilters";
 import EventGrid from "./components/EventGrid";
 import EventTicker from "./components/EventTicker";
@@ -302,6 +304,8 @@ export default function App() {
   /** The question on screen; its pending answer lives in a ref so no render can strand it. */
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
   const pendingConfirmRef = useRef<((answer: boolean) => void) | null>(null);
+  /** The hold ran out and the buyer has not acknowledged it yet — see `HoldExpiredDialog`. */
+  const [holdExpiredNotice, setHoldExpiredNotice] = useState(false);
   /** A hold/release round trip is in flight; seat clicks are disabled so two do not race. */
   const [holdBusy, setHoldBusy] = useState(false);
   const [finalBooking, setFinalBooking] = useState<Booking | null>(null);
@@ -540,11 +544,13 @@ export default function App() {
     if (!expired) return;
 
     // UC-11 A2: the whole selection lapses together and the buyer is returned to pick again.
-    pushToast("warning", "Đã hết thời gian giữ chỗ. Ghế đã được trả lại, vui lòng chọn lại.", 9000);
+    // Announced by a modal rather than a toast — the selection is gone and the flow has moved the
+    // buyer off checkout, which is too large a change to leave in a corner that fades on its own.
     const current = activeScreenRef.current;
     if (current === "seats" || current === "checkout") {
       goTo(expired.mode === "ga" ? "detail" : "seats", { eventSlug: expired.eventId });
     }
+    setHoldExpiredNotice(true);
   }, [activeScreenRef, goTo]);
 
   const holdRemainingMs = useHoldCountdown(hold?.expiresAt ?? null, handleHoldExpired);
@@ -1746,6 +1752,7 @@ export default function App() {
             relatedEvents={relatedEvents}
             wishlistedIds={wishlistedIds}
             onBack={goHome}
+            onOpenReviews={() => goTo("reviews", { eventSlug: selectedMovie.id })}
             onToggleWishlist={handleToggleWishlist}
             onBookRelated={(movie) => void handleStartBookingInput(movie)}
             onProceedToSeatSelection={handleProceedToSeats}
@@ -1762,6 +1769,29 @@ export default function App() {
             holdRemainingMs={hold?.mode === "ga" ? holdRemainingMs : 0}
           />
         )}
+
+        {/*
+          The comments in full, on their own route.
+
+          `eventId` is the catalogue's numeric id, which a deep link does not carry: on F5 the slug
+          is resolved by the effect above and this waits rather than asking the API about `null`.
+          The dev-only sample data has no server row either, and sits in the same branch.
+        */}
+        {activeScreen === "reviews" &&
+          (selectedMovie.eventId !== null ? (
+            <ReviewsPage
+              event={selectedMovie}
+              eventId={selectedMovie.eventId}
+              isSignedIn={isSignedIn}
+              relatedEvents={relatedEvents}
+              onBack={() => goTo("detail", { eventSlug: selectedMovie.id })}
+              onOpenEvent={(movie) => void handleStartBookingInput(movie)}
+            />
+          ) : (
+            <div className="mx-auto w-full max-w-6xl px-5 py-16 sm:px-8">
+              <p className="font-meta text-body text-ink-soft">Đang tải bình luận…</p>
+            </div>
+          ))}
 
         {activeScreen === "seats" && (
           <SeatLayout
@@ -2012,6 +2042,17 @@ export default function App() {
       )}
       {resetToken && <ResetPassword token={resetToken} />}
       {onVnpayReturn && <VnpayReturn onDone={finishVnpayReturn} />}
+
+      {holdExpiredNotice && (
+        <HoldExpiredDialog
+          onStay={() => setHoldExpiredNotice(false)}
+          onGoHome={() => {
+            setHoldExpiredNotice(false);
+            // No exit prompt: the hold is already gone, so there is nothing left to lose by leaving.
+            goTo("home");
+          }}
+        />
+      )}
 
       {confirmRequest && (
         <ConfirmDialog
