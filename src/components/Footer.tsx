@@ -16,6 +16,8 @@ interface FooterProps {
   onSubscribe?: (email: string) => void;
   /** Opens the account page on its "Nhà tổ chức" section, where the application form lives. */
   onApplyAsOrganizer: () => void;
+  /** If the currently authenticated user has the ORGANIZER role, hide the registration CTA. */
+  isOrganizer?: boolean;
 }
 
 /** A column of destinations. Every entry here is a route that exists. */
@@ -73,7 +75,7 @@ function NavColumn({
   );
 }
 
-export default function Footer({ onNavigate, onSubscribe, onApplyAsOrganizer }: FooterProps) {
+export default function Footer({ onNavigate, onSubscribe, onApplyAsOrganizer, isOrganizer = false }: FooterProps) {
   const [email, setEmail] = useState("");
 
   return (
@@ -152,24 +154,26 @@ export default function Footer({ onNavigate, onSubscribe, onApplyAsOrganizer }: 
           them an empty event list and no way to find out what to do about it. The console has its
           own way in, from the nav menu, and only once an application has been approved.
         */}
-        <div className="hud-dashed mt-14 flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="font-display text-title-m font-black text-beige-kem">
-              Bán vé cùng TixHub
-            </p>
-            <p className="mt-1 text-body text-beige-kem/70">
-              Đăng sự kiện, dựng sơ đồ ghế và theo dõi doanh thu trong một trang.
-            </p>
+        {!isOrganizer && (
+          <div className="hud-dashed mt-14 flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-display text-title-m font-black text-beige-kem">
+                Bán vé cùng TixHub
+              </p>
+              <p className="mt-1 text-body text-beige-kem/70">
+                Đăng sự kiện, dựng sơ đồ ghế và theo dõi doanh thu trong một trang.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onApplyAsOrganizer}
+              className="label-eyebrow inline-flex shrink-0 items-center gap-2 text-beige-kem transition hover:text-burgundy-ink"
+            >
+              Đăng ký làm nhà tổ chức
+              <span aria-hidden="true">&gt;</span>
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onApplyAsOrganizer}
-            className="label-eyebrow inline-flex shrink-0 items-center gap-2 text-beige-kem transition hover:text-burgundy-ink"
-          >
-            Đăng ký làm nhà tổ chức
-            <span aria-hidden="true">&gt;</span>
-          </button>
-        </div>
+        )}
 
         {/*
           Copyright alone. "Điều khoản website" used to sit here as well, opening a second terms

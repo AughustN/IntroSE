@@ -24,6 +24,8 @@ export type Screen =
   | "wallet"
   | "admin"
   | "organizer"
+  | "organizer-events"
+  | "organizer-event-detail"
   | "moderation"
   | "about-us"
   | "terms-of-service"
@@ -36,6 +38,8 @@ export interface Route {
   eventSlug?: string;
   /** From `/tickets/:bookingId`. */
   bookingId?: string;
+  /** From `/organizer/events/:eventId`. */
+  organizerEventId?: string;
 }
 
 /** Screens whose URL carries no parameter. Order is irrelevant; lookup goes both ways. */
@@ -51,6 +55,7 @@ const STATIC_PATHS: ReadonlyArray<readonly [Screen, string]> = [
   ["wallet", "/wallet"],
   ["admin", "/admin"],
   ["organizer", "/organizer"],
+  ["organizer-events", "/organizer/events"],
   ["moderation", "/moderation"],
   ["about-us", "/about-us"],
   ["terms-of-service", "/terms-of-service"],
@@ -85,7 +90,7 @@ export function isOverlayPath(pathname: string): boolean {
  */
 export function screenToPath(
   screen: Screen,
-  params: { eventSlug?: string | null; bookingId?: string | null } = {},
+  params: { eventSlug?: string | null; bookingId?: string | null; organizerEventId?: string | null } = {},
 ): string {
   switch (screen) {
     case "detail":
@@ -94,6 +99,8 @@ export function screenToPath(
       return params.eventSlug ? `/events/${encodeURIComponent(params.eventSlug)}/seats` : "/";
     case "ticket":
       return params.bookingId ? `/tickets/${encodeURIComponent(params.bookingId)}` : "/bookings";
+    case "organizer-event-detail":
+      return params.organizerEventId ? `/organizer/events/${encodeURIComponent(params.organizerEventId)}` : "/organizer/events";
     default: {
       const match = STATIC_PATHS.find(([candidate]) => candidate === screen);
       return match ? match[1] : "/";
@@ -127,5 +134,13 @@ export function pathToRoute(pathname: string): Route | null {
     return { screen: "ticket", bookingId: segments[1] };
   }
 
+  if (segments[0] === "organizer") {
+    if (segments.length === 1) return { screen: "organizer" };
+    if (segments.length === 2 && segments[1] === "events") return { screen: "organizer" };
+    if (segments.length === 2) return { screen: "organizer-event-detail", organizerEventId: segments[1] };
+    if (segments.length === 3 && segments[1] === "events") return { screen: "organizer-event-detail", organizerEventId: segments[2] };
+  }
+
   return null;
 }
+

@@ -11,6 +11,8 @@ import AdminPanel from "./components/AdminPanel";
 import AuthModal from "./components/AuthModal";
 import AccountPage from "./components/account/AccountPage";
 import OrganizerPanel from "./components/OrganizerPanel";
+import { OrganizerEventsPage } from "./pages/organizer/OrganizerEventsPage";
+import { SingleEventPage } from "./pages/organizer/SingleEventPage";
 import AdminModeration from "./components/AdminModeration";
 import ResetPassword from "./components/ResetPassword";
 import type { Me } from "@/shared/auth/types";
@@ -1726,7 +1728,8 @@ export default function App() {
               </div>
             </div>
           ))}
-        {activeScreen === "organizer" && <OrganizerPanel onBack={goHome} />}
+        {activeScreen === "organizer" && <OrganizerEventsPage />}
+        {activeScreen === "organizer-event-detail" && <SingleEventPage />}
         {activeScreen === "moderation" && <AdminModeration onBack={goHome} />}
 
         {activeScreen === "about-us" && (
@@ -1762,6 +1765,7 @@ export default function App() {
         onApplyAsOrganizer={() =>
           void leaveFlow(() => runSignedIn(() => navigate(`${ACCOUNT_PATH}?section=organizer`)))
         }
+        isOrganizer={isOrganizer}
       />
 
       {/*

@@ -73,6 +73,9 @@ export interface TicketTier {
   badge?: string;
   /** General admission only: capacity − sold − reserved. `null` for seated or uncapped tiers. */
   remaining?: number | null;
+  capacity?: number;
+  soldCount?: number;
+  isArchived?: boolean;
 }
 
 export interface PromoVoucher {
@@ -157,3 +160,58 @@ export interface CheckoutPayload {
   finalPrice: number;
   promoCode?: string;
 }
+
+export type OrganizerEventStatus = "draft" | "pending_review" | "published" | "canceled" | "completed";
+
+export interface OrganizerEvent {
+  eventId: string;
+  organizerId: string;
+  title: string;
+  description: string;
+  category: string;
+  categoryLabel: string;
+  bannerUrl: string;
+  videoUrl?: string;
+  venueName: string;
+  venueAddress: string;
+  city: "TP.HCM" | "Hà Nội" | "Đà Nẵng";
+  startDatetime: string;
+  endDatetime: string;
+  salesStartDatetime: string;
+  salesEndDatetime: string;
+  status: OrganizerEventStatus;
+  computedStatus: OrganizerEventStatus;
+  rejectionReason?: string | null;
+  cancellationReason?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  ticketTiers: TicketTier[];
+  times: string[];
+  dates: string[];
+}
+
+export interface OrganizerPortfolioSummary {
+  eventId: string;
+  organizerId: string;
+  title: string;
+  bannerUrl: string;
+  status: OrganizerEventStatus;
+  startDatetime: string;
+  endDatetime: string;
+  locationName: string;
+  totalCapacity: number;
+  soldTickets: number;
+  remainingTickets: number;
+  totalRevenueVnd: number;
+}
+
+export interface EventCancellationAuditRecord {
+  cancellationId: string;
+  eventId: string;
+  organizerId: string;
+  canceledAt: string;
+  reason: string;
+  ticketsAffectedCount: number;
+  totalRefundAmountVnd: number;
+}
+
