@@ -12,11 +12,15 @@ interface ReviewFormProps {
 const MAX_BODY = 2000;
 
 /**
- * The write side: five stars and an optional sentence.
+ * The write side: five stars and a comment.
  *
  * One form for both writing and editing, because to the reader they are the same act — UC-18 A2
- * says a second attempt edits rather than duplicates, and showing a blank "write a review" box to
- * somebody who already reviewed would promise a second one the server will never create.
+ * says a second attempt edits rather than duplicates, and showing a blank "write a comment" box to
+ * somebody who already commented would promise a second one the server will never create.
+ *
+ * The stars are required and the text is not, which is the server's rule (`rating` 1–5, `body`
+ * optional) and not this form's invention. It is stated on the control rather than discovered by
+ * pressing a disabled button.
  */
 export default function ReviewForm({ existing, onSubmit, onDelete }: ReviewFormProps) {
   const [rating, setRating] = useState(existing?.rating ?? 0);
@@ -33,7 +37,7 @@ export default function ReviewForm({ existing, onSubmit, onDelete }: ReviewFormP
     try {
       await onSubmit(rating, body);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Không gửi được đánh giá.");
+      setError(e instanceof Error ? e.message : "Không gửi được bình luận.");
     } finally {
       setBusy(false);
     }
@@ -42,26 +46,26 @@ export default function ReviewForm({ existing, onSubmit, onDelete }: ReviewFormP
   const remaining = MAX_BODY - body.length;
 
   return (
-    <form onSubmit={submit} className="border border-beige-kem/25 bg-surface-2 p-5">
-      <p className="label-eyebrow text-ink-soft">
-        {existing ? "Sửa đánh giá của bạn" : "Đánh giá sự kiện này"}
+    <form onSubmit={submit} className="border-l-2 border-burgundy bg-surface-2 p-5 sm:p-6">
+      <p className="font-display text-lede font-black uppercase tracking-[0.03em] text-beige-kem">
+        {existing ? "Sửa bình luận của bạn" : "Viết bình luận"}
       </p>
 
-      <div className="mt-3 flex flex-wrap items-center gap-4">
-        <StarRating value={rating} onChange={setRating} size={26} label="Số sao" />
-        <span className="font-meta text-meta text-ink-soft">
-          {rating ? `${rating}/5` : "Chọn số sao để gửi"}
+      <div className="mt-4 flex flex-wrap items-center gap-4">
+        <StarRating value={rating} onChange={setRating} size={30} label="Số sao" />
+        <span className="font-meta text-body text-ink-soft">
+          {rating ? `${rating}/5 sao` : "Chọn số sao (bắt buộc)"}
         </span>
       </div>
 
       <label className="mt-4 block">
-        <span className="sr-only">Nhận xét</span>
+        <span className="sr-only">Nội dung bình luận</span>
         <textarea
           value={body}
           onChange={(event) => setBody(event.target.value.slice(0, MAX_BODY))}
           rows={4}
           placeholder="Bạn thấy sự kiện thế nào? (không bắt buộc)"
-          className="w-full border border-beige-kem/30 bg-xanh-pho p-3 font-meta text-body text-beige-kem outline-none transition focus:border-burgundy"
+          className="w-full border border-beige-kem/30 bg-xanh-pho p-3 font-meta text-body leading-7 text-beige-kem outline-none transition focus:border-burgundy"
         />
       </label>
 
@@ -79,15 +83,15 @@ export default function ReviewForm({ existing, onSubmit, onDelete }: ReviewFormP
               disabled={busy}
               className="font-meta text-meta text-ink-soft transition hover:text-burgundy-ink disabled:opacity-50"
             >
-              Xoá đánh giá
+              Xoá bình luận
             </button>
           )}
           <button
             type="submit"
             disabled={!rating || busy}
-            className="label-eyebrow bg-burgundy px-5 py-2 text-white transition hover:bg-burgundy-ink disabled:cursor-not-allowed disabled:opacity-50"
+            className="label-eyebrow h-10 bg-burgundy px-6 text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {busy ? "Đang gửi…" : existing ? "Cập nhật" : "Gửi đánh giá"}
+            {busy ? "Đang gửi…" : existing ? "Cập nhật" : "Gửi bình luận"}
           </button>
         </div>
       </div>

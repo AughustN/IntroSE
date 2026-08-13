@@ -20,11 +20,29 @@
 const MEASURE = "mx-auto w-full max-w-7xl";
 const GUTTER = "px-4 sm:px-6 lg:px-8";
 
-type Density = "normal" | "tight";
+/**
+ * The wider measure the card bands share — the landing stack and the `/events` grid.
+ *
+ * Four landscape cards on `MEASURE` leave each about 300px, narrower than the 16/9 still it has to
+ * hold, so those bands run wider. Exported as one string because it was written out by hand in
+ * `EventGrid` and `CategoryRow` and left out of `EventTicker` entirely: the ticker's heading sat on
+ * `MEASURE` while the headings under it sat on this one, so on any screen past 1600px the first
+ * title in the stack was indented 160px further in than the four below it.
+ */
+export const BAND = `mx-auto w-full max-w-[1600px] ${GUTTER}`;
+
+type Density = "normal" | "tight" | "row";
 
 interface SectionProps {
   children: React.ReactNode;
-  /** `tight` is for control strips — filter bars, toolbars — not for content. */
+  /**
+   * `tight` is for control strips — filter bars, toolbars — not for content.
+   *
+   * `row` is for a band in a stack of bands. The landing page runs five of them one after another,
+   * and at `normal` the 80px each contributes puts 160px of empty page between two headings: the
+   * reader scrolls past a screenful of nothing to reach the next row of cards. At `row` the gap
+   * between neighbours is ~32px, close enough that the stack reads as one page.
+   */
   density?: Density;
   /** Draw the hairline that separates this band from the one above. */
   divided?: boolean;
@@ -52,7 +70,7 @@ export default function Section({
   ruled = false,
   className = "",
 }: SectionProps) {
-  const pad = density === "tight" ? "py-8" : "py-20";
+  const pad = density === "row" ? "py-4" : density === "tight" ? "py-8" : "py-20";
 
   return (
     <section
@@ -83,8 +101,18 @@ export function SectionMeasure({
 }
 
 /**
- * The masthead every section opens with: stacked rules, then an eyebrow and heading on the left
- * with a count and at most one link pushed to the far right of the same baseline.
+ * The masthead a section opens with: an eyebrow and heading on the left, with a count and at most
+ * one link pushed to the far right of the same baseline.
+ *
+ * Two ways of announcing itself, because the page now has two jobs for a heading:
+ *
+ *  - `ruled` is the original — stacked rules above, a hairline below. It suits a section that owns
+ *    the screen it is on (`/events`, the ticker), where the rules are the only thing marking where
+ *    one band ends.
+ *  - `bar` carries a short burgundy stroke down its left edge and draws no rules at all. It is for a
+ *    *stack* of bands, where a ruled head repeated five times down one page turns the page into a
+ *    ledger: three lines above every title and one below, at 32px intervals, is more rule than
+ *    content. The stroke marks a new band in one glyph's worth of ink.
  */
 export function SectionHead({
   eyebrow,
@@ -92,36 +120,80 @@ export function SectionHead({
   meta,
   actionLabel,
   onAction,
+  variant = "ruled",
+  /**
+   * The band's own mark, set on the eyebrow line rather than beside the title — e.g. the flame on
+   * "Sự kiện xu hướng". Up there it sits next to the words it qualifies at eyebrow size; beside a
+   * `text-title-l` heading it has to be drawn at 28px to keep up, which makes the glyph, not the
+   * heading, the loudest thing in the band.
+   */
+  icon,
 }: {
   eyebrow: string;
   title: string;
   meta?: string;
   actionLabel?: string;
   onAction?: () => void;
+  variant?: "ruled" | "bar";
+  icon?: React.ReactNode;
 }) {
+  const bar = variant === "bar";
+
+  const right = (
+    <div className="flex items-center gap-5">
+      {meta && <span className="font-meta text-eyebrow text-ink-soft">{meta}</span>}
+      {actionLabel && onAction && (
+        <button
+          type="button"
+          onClick={onAction}
+          className="label-eyebrow inline-flex items-center gap-2 text-beige-kem transition hover:text-burgundy-ink"
+        >
+          {actionLabel}
+          <span aria-hidden="true">&gt;</span>
+        </button>
+      )}
+    </div>
+  );
+
+  if (bar) {
+    return (
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex items-stretch gap-4">
+          {/*
+            The stroke is the divider, moved into the heading. `self-stretch` rather than a fixed
+            height so it always spans exactly the eyebrow and the title, at whatever size the type
+            scale renders them.
+          */}
+          <span aria-hidden="true" className="w-1 shrink-0 self-stretch bg-burgundy" />
+          <div>
+            <p className="label-eyebrow flex items-center gap-2 text-ink-soft">
+              {icon}
+              {eyebrow}
+            </p>
+            <h2 className="mt-2 font-display text-title-l font-black leading-none text-beige-kem">
+              {title}
+            </h2>
+          </div>
+        </div>
+        {right}
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="hud-rule-stack" />
       <div className="mt-5 flex flex-col gap-3 border-b border-beige-kem/25 pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="label-eyebrow text-ink-soft">{eyebrow}</p>
+          <p className="label-eyebrow flex items-center gap-2 text-ink-soft">
+            {icon}
+            {eyebrow}
+          </p>
           <h2 className="mt-2 font-display text-title-l font-black leading-none text-beige-kem sm:text-title-l">
             {title}
           </h2>
         </div>
-        <div className="flex items-center gap-5">
-          {meta && <span className="font-meta text-eyebrow text-ink-soft">{meta}</span>}
-          {actionLabel && onAction && (
-            <button
-              type="button"
-              onClick={onAction}
-              className="label-eyebrow inline-flex items-center gap-2 text-beige-kem transition hover:text-burgundy-ink"
-            >
-              {actionLabel}
-              <span aria-hidden="true">&gt;</span>
-            </button>
-          )}
-        </div>
+        {right}
       </div>
     </div>
   );

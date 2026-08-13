@@ -23,6 +23,9 @@ import { aiClient } from "./services/aiClient";
 import { cardToMovie, detailToMovie } from "./services/catalogAdapter";
 import { applyEventSeo, clearEventSeo } from "./services/seo";
 import { matchesDateFilter, type DateFilter } from "./services/dateFilter";
+import { matchesQuery, searchEvents } from "./services/eventSearch";
+import { formatEventDate } from "./services/formatDate";
+import { formatVnd } from "./services/currency";
 import {
   ACCOUNT_PATH,
   isOverlayPath,
@@ -48,10 +51,12 @@ import AIChatPanel from "./components/AIChatPanel";
 import ToastStack, { type ToastKind, type ToastMessage } from "./components/ToastStack";
 import ConfirmDialog, { type ConfirmRequest } from "./components/ConfirmDialog";
 import CheckoutForm from "./components/CheckoutForm";
+import CategoryRow from "./components/CategoryRow";
 import EventDetail from "./components/EventDetail";
 import EventFilters from "./components/EventFilters";
 import EventGrid from "./components/EventGrid";
 import EventTicker from "./components/EventTicker";
+import { buildLandingSections, isCatchAllCategory } from "./services/eventSections";
 import Footer from "./components/Footer";
 import Header from "./components/Header";
 import HeroVideo from "./components/HeroVideo";
@@ -91,6 +96,17 @@ const toggleFilterValue =
     if (value === "all") return [];
     return current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
   };
+
+/** How many curated events the trending band runs. An editorial shortlist, the length Ticketbox uses. */
+const TRENDING_COUNT = 10;
+
+/**
+ * Rows in the nav's search dropdown.
+ *
+ * Six, because the panel hangs under a floating pill and has to stay inside the viewport on a
+ * laptop; past that the list is a page, and the page already exists at `/events`.
+ */
+const SEARCH_SUGGESTION_COUNT = 6;
 
 const FLOW_SCREENS: Screen[] = ["detail", "seats", "checkout"];
 
@@ -241,6 +257,13 @@ export default function App() {
   const [selectedMovie, setSelectedMovie] = useState<MovieEvent>(SAMPLE_MOVIES[0]);
   const [heroMovie, setHeroMovie] = useState<MovieEvent>(SAMPLE_MOVIES[0]);
   const [events, setEvents] = useState<MovieEvent[]>([]);
+  /**
+   * The trending row, in the order an Admin put it in (`featured_events`, UC-35).
+   *
+   * Kept apart from `events` rather than derived from it, because the ordering is the whole point
+   * and `events` arrives in the catalogue's own order. Nothing else on the page reads it.
+   */
+  const [trendingEvents, setTrendingEvents] = useState<MovieEvent[]>([]);
   const [showtimes, setShowtimes] = useState<Showtime[]>([]);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -328,11 +351,18 @@ export default function App() {
    * carry a parameter (`/events/:slug`, `/tickets/:id`) know it at the call site, while an effect
    * would have to read it back out of state that is still catching up — and would push the stale
    * value over a deep link before the URL had been read.
+   *
+   * Every move also returns to the top of the page. Nothing here is a scroll container, so without
+   * it a new screen inherits the last one's scroll position: opening "Về chúng tôi" from the footer
+   * — which is at the very bottom of a long landing page — landed on the legal page already scrolled
+   * past its own heading, as did every other link down there. Call sites that needed this used to
+   * ask for it one at a time, and the ones nobody had tried simply did not.
    */
   const goTo = useCallback(
     (screen: Screen, params?: { eventSlug?: string | null; bookingId?: string | null }) => {
       setActiveScreen(screen);
       navigate(screenToPath(screen, params));
+      window.scrollTo({ top: 0, behavior: "smooth" });
     },
     [navigate],
   );
@@ -783,6 +813,83 @@ export default function App() {
       });
   }, []);
 
+  /*
+   * The curated trending row — the moving band under the hero, and nothing else on the page.
+   *
+   * Its own request, because its order is editorial and the browse listing cannot carry it. An event
+   * whose showtimes are all behind it is dropped here rather than server-side: the curation is a
+   * list of events, and "hot sắp/đang diễn ra" is a property of the moment, not of the choice an
+   * Admin made weeks ago.
+   *
+   * Ten, because that is what the band is: an editorial shortlist. The API allows fifty entries, so
+   * the cap belongs on the reading side — a console that let an Admin add an eleventh and then never
+   * showed it would be worse than one that refuses.
+   */
+  useEffect(() => {
+    catalogClient
+      .featuredEvents()
+      .then((cards) => {
+        const upcoming = cards
+          .map(cardToMovie)
+          .filter((movie) => movie.status !== "finished")
+          .slice(0, TRENDING_COUNT);
+        if (upcoming.length === 0 && import.meta.env.DEV) {
+          setTrendingEvents(SAMPLE_MOVIES.slice(0, TRENDING_COUNT));
+          return;
+        }
+        setTrendingEvents(upcoming);
+      })
+      .catch((err) => {
+        console.error("Failed to load the curated trending row:", err);
+        // Same dev-only reasoning as the catalog above: with no API server the landing page would
+        // otherwise lose its first band entirely and be impossible to work on.
+        if (import.meta.env.DEV) setTrendingEvents(SAMPLE_MOVIES.slice(0, TRENDING_COUNT));
+      });
+  }, []);
+
+  /** The landing page's four bands. Unfiltered — the landing page no longer carries any filter. */
+  const landingSections = useMemo(() => buildLandingSections(events), [events]);
+
+  /**
+   * The bookmarked events, in the order the catalog holds them.
+   *
+   * Derived from `events` rather than fetched, because `wishlistedIds` is a list of slugs and the
+   * cards need whole events — and the catalog is already in memory for the browse page. The cost is
+   * that a bookmark whose event has since been hidden simply does not appear, which is the right
+   * outcome anyway: the API would not return it either.
+   */
+  const savedEvents = useMemo(
+    () => events.filter((event) => wishlistedIds.includes(event.id)),
+    [events, wishlistedIds],
+  );
+
+  /*
+   * What the nav's search dropdown shows while the reader types.
+   *
+   * Deliberately off `events` rather than off `filteredEvents`: the box is asked a question about
+   * the whole catalogue, and answering it through whatever filters happen to be set on `/events`
+   * would hide matching events for reasons the reader cannot see from the nav.
+   */
+  const searchMatchCount = useMemo(
+    () =>
+      searchQuery.trim() ? events.filter((event) => matchesQuery(event, searchQuery)).length : 0,
+    [events, searchQuery],
+  );
+
+  const searchSuggestions = useMemo(
+    () =>
+      searchEvents(events, searchQuery, SEARCH_SUGGESTION_COUNT).map((event) => ({
+        id: event.id,
+        title: event.title,
+        imageUrl: event.imageUrl,
+        meta: [event.dates[0] && formatEventDate(event.dates[0], true), event.city, event.venueName]
+          .filter(Boolean)
+          .join(" · "),
+        price: event.price > 0 ? formatVnd(event.price) : "",
+      })),
+    [events, searchQuery],
+  );
+
   /**
    * Everything that survives every filter except the price one.
    *
@@ -792,25 +899,15 @@ export default function App() {
    * filter has to be excluded from its own scale or it eats itself.
    */
   const eventsBeforePriceFilter = useMemo(() => {
-    const normalizedQuery = searchQuery.trim().toLowerCase();
-
     return events.filter((movie) => {
-      const searchBlob = [
-        movie.title,
-        movie.originalTitle,
-        movie.genre.join(" "),
-        movie.director,
-        movie.cast.join(" "),
-        movie.tags.join(" "),
-        movie.location,
-        movie.venueName,
-        movie.city,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      const matchesSearch = !normalizedQuery || searchBlob.includes(normalizedQuery);
+      /*
+       * The same test the nav's dropdown runs, imported rather than written twice.
+       *
+       * It was written out here, accent-sensitive and lowercase-only, which is now a difference
+       * that shows: the dropdown offers a row, the reader presses "Xem tất cả", and the grid it
+       * lands on is missing the very event they were pointing at.
+       */
+      const matchesSearch = matchesQuery(movie, searchQuery);
       const matchesCategory =
         activeCategories.length === 0 || activeCategories.includes(movie.category);
       const matchesDate = matchesDateFilter(movie.dates, activeDate);
@@ -873,10 +970,27 @@ export default function App() {
       if (!event.category) continue;
       const seen = counts.get(event.category);
       if (seen) seen.n += 1;
-      else counts.set(event.category, { id: event.category, label: event.categoryLabel || event.category, n: 1 });
+      else
+        counts.set(event.category, {
+          id: event.category,
+          label: event.categoryLabel || event.category,
+          n: 1,
+        });
     }
+    /*
+     * Most populous first, except "Khác", which is last however many events it holds.
+     *
+     * It is the catalogue's catch-all, so it names nothing: a reader scanning the list for what they
+     * want can skip it, and a list that ends in it reads as complete where one that opens with it
+     * reads as unsorted.
+     */
     return [...counts.values()]
-      .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label, "vi"))
+      .sort((a, b) => {
+        const catchAllA = isCatchAllCategory(a.id, a.label);
+        const catchAllB = isCatchAllCategory(b.id, b.label);
+        if (catchAllA !== catchAllB) return catchAllA ? 1 : -1;
+        return b.n - a.n || a.label.localeCompare(b.label, "vi");
+      })
       .map(({ id, label }) => ({ id, label }));
   }, [events]);
 
@@ -942,15 +1056,22 @@ export default function App() {
     void leaveFlow(() => {
       deepLinkedEventRef.current = null;
       goTo("home");
-      window.scrollTo({ top: 0, behavior: "smooth" });
     });
   };
 
-  const goHomeAfterFilter = async (update: () => void) => {
-    // The filter itself always applies; only the jump back to the catalog leaves the flow.
+  /**
+   * Apply a filter (or a search) and make sure the reader can see what it did.
+   *
+   * `/events` is the only screen with a grid on it now — the landing page is a stack of curated
+   * bands and carries no filter of its own — so every filter change lands there. It used to land on
+   * `/` because `/` was also a grid; a query typed into the nav from the landing page would now
+   * change a list nobody was looking at.
+   */
+  const goCatalogAfterFilter = async (update: () => void) => {
+    // The filter itself always applies; only the jump to the catalog leaves the flow.
     update();
-    // Both catalog screens show the grid the filter acts on, so neither needs to be left.
-    if (activeScreen === "home" || activeScreen === "browse") return;
+    // Already on the screen the filter acts on: nothing to leave, nothing to navigate to.
+    if (activeScreen === "browse") return;
     if (hold && inFlow) {
       if (exitDeclinedRef.current) return;
       if (!(await confirmLeaveFlow())) {
@@ -959,7 +1080,19 @@ export default function App() {
       }
     }
     deepLinkedEventRef.current = null;
-    goTo("home");
+    goTo("browse");
+  };
+
+  /**
+   * A landing band's "Xem thêm": the catalog, filtered to exactly the categories that band drew
+   * from. The band and the listing therefore ask the same question — the codes come from the same
+   * grouping, not from a second list written by hand.
+   */
+  const openCategorySection = (codes: string[]) => {
+    void leaveFlow(() => {
+      setActiveCategories(codes);
+      goTo("browse");
+    });
   };
 
   const saveBookingToHistory = (newBooking: Booking) => {
@@ -1012,7 +1145,6 @@ export default function App() {
     setShowtimes([]);
     deepLinkedEventRef.current = movie.id;
     goTo("detail", { eventSlug: movie.id });
-    window.scrollTo({ top: 0, behavior: "smooth" });
     // enrich with full detail from the API (movie.id carries the event slug)
     catalogClient
       .getEvent(movie.id)
@@ -1051,7 +1183,6 @@ export default function App() {
       setBookingTime(time);
       setBookingShowtimeId(showtimeId);
       goTo("seats", { eventSlug: selectedMovie.id });
-      window.scrollTo({ top: 0, behavior: "smooth" });
 
       // A returning owner must see their own live holds, not an empty map (FR-022).
       if (showtimeId !== null && !hold) {
@@ -1176,7 +1307,6 @@ export default function App() {
     // it on screen would offer the buyer a resume that no longer exists.
     clearBookingSelection();
     goTo("detail", { eventSlug: selectedMovie.id });
-    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   /**
@@ -1303,7 +1433,6 @@ export default function App() {
   const handleProceedToCheckout = () => {
     runSignedIn(() => {
       goTo("checkout");
-      window.scrollTo({ top: 0, behavior: "smooth" });
     });
   };
 
@@ -1346,7 +1475,6 @@ export default function App() {
       setFinalBooking(newBooking);
       setHold(null);
       goTo("ticket", { bookingId: newBooking.id });
-      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e) {
       // A short balance is not a failed purchase — it is a step the buyer can complete. The server
       // sends the exact numbers, which the checkout screen turns into a pre-filled top-up (UC-12 A2).
@@ -1436,43 +1564,41 @@ export default function App() {
     <div className="flex min-h-screen flex-col bg-xanh-pho text-white selection:bg-burgundy selection:text-white transition-colors duration-300">
       <Header
         searchQuery={searchQuery}
-        onSearchChange={(value) => void goHomeAfterFilter(() => setSearchQuery(value))}
         /*
-         * The nav menu is a one-of-N list and stays that way — picking "Phim" up there means
-         * "show me films", not "add films to whatever is already ticked down in the filter bar".
-         * So it reads the set only when the set holds exactly one thing, and writes by replacing.
+         * Typing changes the query and nothing else. It used to carry the reader to `/events` on
+         * the first keystroke — before they had finished saying what they wanted — and the answer
+         * now comes to them, in the dropdown under the box.
          */
-        activeCategory={activeCategories.length === 1 ? activeCategories[0] : "all"}
+        onSearchChange={setSearchQuery}
+        // Pressing × means "I am done searching", not "take me to the results of an empty search".
+        onSearchClear={() => setSearchQuery("")}
+        searchResults={searchSuggestions}
+        searchResultCount={searchMatchCount}
+        onSelectResult={(slug) => {
+          const movie = events.find((event) => event.id === slug);
+          if (movie) void handleStartBookingInput(movie);
+        }}
+        // Enter, or "Xem tất cả": the whole result set, on the screen that can page through it.
+        onSubmitSearch={() => void goCatalogAfterFilter(() => {})}
         /*
-         * And it lands on the catalog, not on the landing page.
-         *
-         * These are shortcuts into a filtered listing — the same promise Ticketbox's "Nhạc sống /
-         * Sân khấu / Phim" row makes. They used to set the filter and leave the reader where they
-         * were, which on the landing page meant the change happened somewhere below the hero, the
-         * ticker and the featured pair: a menu that appeared to do nothing. `/events` is the screen
-         * that is nothing but the filtered grid, so that is where a category shortcut belongs.
+         * The category shortcuts the menu used to carry are gone with the rows that held them. They
+         * were a filtered `/events` under a different name, and the landing page's own bands make
+         * the same offer with the events themselves visible under each heading.
          */
-        onCategoryChange={(value) =>
-          void leaveFlow(() => {
-            setActiveCategories(value === "all" ? [] : [value]);
-            goTo("browse");
-            window.scrollTo({ top: 0, behavior: "smooth" });
-          })
-        }
         onViewHistory={() => void leaveFlow(() => goTo("history"))}
         onViewWallet={() => void leaveFlow(() => goTo("wallet"))}
+        onViewSaved={() => void leaveFlow(() => runSignedIn(() => goTo("saved")))}
+        onLogout={() => void leaveFlow(() => void handleLogout())}
         onHomeClick={goHome}
         onLoginClick={() => (userName ? navigate(ACCOUNT_PATH) : setShowAuthModal(true))}
         onOrganizerClick={() =>
           leaveFlow(() => {
             goTo("organizer");
-            window.scrollTo({ top: 0, behavior: "smooth" });
           })
         }
         onAdminClick={() =>
           leaveFlow(() => {
             goTo("admin");
-            window.scrollTo({ top: 0, behavior: "smooth" });
           })
         }
         isOrganizer={isOrganizer}
@@ -1503,11 +1629,39 @@ export default function App() {
               movie={heroMovie}
               onBookNow={() => void handleStartBookingInput(heroMovie)}
             />
+            {/*
+             * The curated ten on the moving band, then one band per kind of event.
+             *
+             * The landing page used to be a filter strip over one long grid, which made the first
+             * thing on it a form: the reader had to say what they wanted before the page would show
+             * them anything worth wanting. Named bands answer in the other direction, and the filter
+             * work moves to `/events` — the screen a reader who already knows goes to.
+             */}
             <EventTicker
-              events={events}
+              events={trendingEvents}
               onSelect={(movie) => void handleStartBookingInput(movie)}
               onViewAll={() => void leaveFlow(() => goTo("browse"))}
             />
+
+            {landingSections.map((section) => (
+              <CategoryRow
+                key={section.id}
+                title={section.title}
+                eyebrow={section.eyebrow}
+                events={section.events}
+                emptyNote={section.emptyNote}
+                // No link out of an empty band: `/events` filtered to nothing is a blank page with
+                // no way to tell it from a broken one.
+                onViewMore={
+                  section.codes.length > 0 ? () => openCategorySection(section.codes) : undefined
+                }
+                selectedEvent={heroMovie}
+                onSelectEvent={handleSelectEventForTrailer}
+                onBookNow={(movie) => void handleStartBookingInput(movie)}
+                wishlistedIds={wishlistedIds}
+                onToggleWishlist={handleToggleWishlist}
+              />
+            ))}
           </>
         )}
 
@@ -1526,90 +1680,64 @@ export default function App() {
         )}
 
         {/*
-         * The catalog is the same on both screens, and so are the filters — only where they sit
-         * differs. `/` leads with the hero and runs the filters as a strip under it; `/events` is
-         * the catalog on its own and runs them as a rail down the left of the grid, which is the
-         * shape the reference collection page uses and the reason `EventFilters` has a variant.
+         * The filtered catalog, and the only screen that carries a filter at all.
+         *
+         * The landing page used to run the same grid under a horizontal filter strip. It no longer
+         * does — it is a stack of curated bands — so the rail beside this grid is the whole filter
+         * surface of the app, and `EventFilters` has one shape in use rather than two.
          */}
-        {(activeScreen === "home" || activeScreen === "browse") && (
-          <div className="space-y-4">
-            {(() => {
-              const filters = (
-                <EventFilters
-                  variant={activeScreen === "browse" ? "rail" : "bar"}
-                  resultCount={filteredEvents.length}
-                  activeCategories={activeCategories}
-                  onCategoryChange={(value) =>
-                    void goHomeAfterFilter(() => setActiveCategories(toggleFilterValue(value)))
-                  }
-                  activeDate={activeDate}
-                  dateOptions={dateOptions}
-                  categoryOptions={categoryOptions}
-                  onDateChange={(value) => void goHomeAfterFilter(() => setActiveDate(value))}
-                  activeCities={activeCities}
-                  onCityChange={(value) =>
-                    void goHomeAfterFilter(() => setActiveCities(toggleFilterValue(value)))
-                  }
-                  maxPrice={maxPrice}
-                  priceCeiling={priceCeiling}
-                  onMaxPriceChange={(value) => void goHomeAfterFilter(() => setMaxPrice(value))}
-                  availabilities={availabilities}
-                  onAvailabilityChange={(value) =>
-                    void goHomeAfterFilter(() => setAvailabilities(toggleFilterValue(value)))
-                  }
-                  /*
-                   * The search box is deliberately not cleared here. It lives in the nav, above
-                   * this bar and outside it, and wiping a query the reader can still see typed up
-                   * there from a control down here reads as a bug rather than as a reset.
-                   */
-                  onResetFilters={() =>
-                    void goHomeAfterFilter(() => {
-                      setActiveCategories([]);
-                      setActiveDate(null);
-                      setActiveCities([]);
-                      setAvailabilities([]);
-                      setMaxPrice(null);
-                    })
-                  }
-                />
-              );
-
-              const grid = (
-                <EventGrid
-                  events={filteredEvents}
-                  // The landing band keeps the ruled card it has always had; only `/events` takes
-                  // the borderless catalog one.
-                  variant={activeScreen === "browse" ? "catalog" : "landing"}
-                  // `/events` splits the catalog into pages of 24 — two full rows of four with the
-                  // rail, eight without. The landing band takes the first 20 and draws no controls,
-                  // which is exactly the length it showed back when the API only ever sent one page.
-                  pageSize={activeScreen === "browse" ? 24 : 20}
-                  selectedEvent={heroMovie}
-                  onSelectEvent={handleSelectEventForTrailer}
-                  onBookNow={(movie) => void handleStartBookingInput(movie)}
-                  wishlistedIds={wishlistedIds}
-                  onToggleWishlist={handleToggleWishlist}
-                  // Offered on the landing page only. `/events` is where the link would go, so on
-                  // that screen it would point at itself.
-                  onViewAll={
-                    activeScreen === "home" ? () => void leaveFlow(() => goTo("browse")) : undefined
-                  }
-                  // The rail is handed to the grid rather than placed beside it, so the two share
-                  // one measure instead of two that have to be kept equal by hand.
-                  sidebar={activeScreen === "browse" ? filters : undefined}
-                />
-              );
-
-              return activeScreen === "browse" ? (
-                grid
-              ) : (
-                <>
-                  {filters}
-                  {grid}
-                </>
-              );
-            })()}
-          </div>
+        {activeScreen === "browse" && (
+          <EventGrid
+            events={filteredEvents}
+            variant="catalog"
+            // Pages of 24 — two full rows of four beside the rail, eight without it.
+            pageSize={24}
+            selectedEvent={heroMovie}
+            onSelectEvent={handleSelectEventForTrailer}
+            onBookNow={(movie) => void handleStartBookingInput(movie)}
+            wishlistedIds={wishlistedIds}
+            onToggleWishlist={handleToggleWishlist}
+            // The rail is handed to the grid rather than placed beside it, so the two share one
+            // measure instead of two that have to be kept equal by hand.
+            sidebar={
+              <EventFilters
+                resultCount={filteredEvents.length}
+                activeCategories={activeCategories}
+                onCategoryChange={(value) =>
+                  void goCatalogAfterFilter(() => setActiveCategories(toggleFilterValue(value)))
+                }
+                activeDate={activeDate}
+                dateOptions={dateOptions}
+                categoryOptions={categoryOptions}
+                onDateChange={(value) => void goCatalogAfterFilter(() => setActiveDate(value))}
+                activeCities={activeCities}
+                onCityChange={(value) =>
+                  void goCatalogAfterFilter(() => setActiveCities(toggleFilterValue(value)))
+                }
+                maxPrice={maxPrice}
+                priceCeiling={priceCeiling}
+                onMaxPriceChange={(value) => void goCatalogAfterFilter(() => setMaxPrice(value))}
+                availabilities={availabilities}
+                onAvailabilityChange={(value) =>
+                  void goCatalogAfterFilter(() => setAvailabilities(toggleFilterValue(value)))
+                }
+                /*
+                 * The search box is deliberately not cleared here. It lives in the nav, above this
+                 * rail and outside it, and wiping a query the reader can still see typed up there
+                 * from a control down here reads as a bug rather than as a reset.
+                 */
+                onResetFilters={() =>
+                  void goCatalogAfterFilter(() => {
+                    setActiveCategories([]);
+                    setActiveDate(null);
+                    setActiveCities([]);
+                    setAvailabilities([]);
+                    setMaxPrice(null);
+                  })
+                }
+              />
+            }
+          />
         )}
 
         {activeScreen === "detail" && (
@@ -1689,6 +1817,64 @@ export default function App() {
           />
         )}
 
+        {/*
+         * The bookmarks, as a page.
+         *
+         * The same catalog grid over a different list, rather than a bespoke layout: a saved event
+         * is an event, and the reader who saved it wants to compare, open and un-save it exactly as
+         * they would on `/events`. Un-saving here removes the card, because the list *is* the set of
+         * hearts — there is nothing else for the control to mean on this screen.
+         *
+         * Guarded like the wallet: the bookmarks belong to an account, so a stranger gets the
+         * sign-in prompt instead of an empty page that looks like "you have saved nothing".
+         */}
+        {activeScreen === "saved" &&
+          (!authReady ? (
+            <p className="mx-auto max-w-4xl px-4 py-16 font-meta text-body text-ink-soft sm:px-6 lg:px-8">
+              Đang kiểm tra phiên đăng nhập…
+            </p>
+          ) : isSignedIn ? (
+            <EventGrid
+              events={savedEvents}
+              variant="catalog"
+              pageSize={24}
+              eyebrow="Của bạn"
+              title="Sự kiện đã lưu"
+              emptyTitle="Chưa có sự kiện nào được lưu"
+              emptyHint="Bấm trái tim trên ảnh sự kiện để lưu lại và xem sau."
+              selectedEvent={heroMovie}
+              onSelectEvent={handleSelectEventForTrailer}
+              onBookNow={(movie) => void handleStartBookingInput(movie)}
+              wishlistedIds={wishlistedIds}
+              onToggleWishlist={handleToggleWishlist}
+            />
+          ) : (
+            <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6 lg:px-8">
+              <h2 className="font-display text-title-m font-black text-beige-kem">
+                Sự kiện đã lưu
+              </h2>
+              <p className="mt-3 text-body leading-6 text-beige-kem/70">
+                Sự kiện đã lưu gắn với tài khoản của bạn, nên xem được trên mọi thiết bị. Đăng nhập
+                để mở danh sách.
+              </p>
+              <div className="mt-6 flex flex-wrap items-center gap-6">
+                <button
+                  onClick={() => runSignedIn(() => goTo("saved"))}
+                  className="label-eyebrow inline-flex items-center gap-2 text-beige-kem transition hover:text-burgundy-ink"
+                >
+                  Đăng nhập
+                  <span aria-hidden="true">&gt;</span>
+                </button>
+                <button
+                  onClick={goHome}
+                  className="label-eyebrow text-ink-soft transition hover:text-beige-kem"
+                >
+                  Về trang chủ
+                </button>
+              </div>
+            </div>
+          ))}
+
         {activeScreen === "admin" && (
           <AdminPanel events={SAMPLE_MOVIES} bookings={bookingsHistory} onBack={goHome} />
         )}
@@ -1754,7 +1940,11 @@ export default function App() {
       <Footer
         onNavigate={(screen) =>
           void leaveFlow(() =>
-            screen === "wallet" ? runSignedIn(() => goTo(screen)) : goTo(screen),
+            // Both of these belong to an account, so a guest is asked to sign in and carried
+            // through rather than landing on a screen that can only report a failure.
+            screen === "wallet" || screen === "saved"
+              ? runSignedIn(() => goTo(screen))
+              : goTo(screen),
           )
         }
         /*
@@ -1820,7 +2010,6 @@ export default function App() {
             leaveFlow(() => {
               // One navigation, not a close followed by a move: `/organizer` replaces `/account`.
               goTo("organizer");
-              window.scrollTo({ top: 0, behavior: "smooth" });
             })
           }
         />

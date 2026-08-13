@@ -6,7 +6,7 @@
 import { useState } from "react";
 import { Check, Tag, X } from "lucide-react";
 import { formatVnd } from "../services/currency";
-import Select from "./Select";
+import { formatEventDate } from "../services/formatDate";
 import DatePicker from "./DatePicker";
 import Disclosure from "./Disclosure";
 import type { DateFilter } from "../services/dateFilter";
@@ -34,18 +34,15 @@ interface EventFiltersProps {
   onMaxPriceChange: (price: number) => void;
   availabilities: string[];
   onAvailabilityChange: (status: string) => void;
-  /** Puts every control in this bar back to its opening state in one go. */
+  /** Puts every control in this rail back to its opening state in one go. */
   onResetFilters: () => void;
   /**
-   * Which shape to take.
+   * How many events survive the filters, printed above the first group.
    *
-   * `bar` is the horizontal strip the landing page runs under its hero. `rail` is the vertical
-   * column the catalog page runs beside its grid, after the reference's collection layout: a count,
-   * then one collapsed accordion per filter. Same controls and the same state either way — only the
-   * furniture around them changes, which is why this is a variant rather than a second component.
+   * There used to be a second shape of this component — a horizontal `bar` the landing page ran
+   * under its hero. The landing page is a stack of curated bands now and carries no filter at all,
+   * so the rail beside the catalog grid is the only one left and the variant went with the bar.
    */
-  variant?: "bar" | "rail";
-  /** Shown at the top of the rail. Ignored by the bar, which has no room for it. */
   resultCount?: number;
   /**
    * Every date the loaded events actually run on, ISO and ascending. Derived from the catalog rather
@@ -63,8 +60,6 @@ interface EventFiltersProps {
    */
   categoryOptions: ReadonlyArray<{ id: string; label: string }>;
 }
-
-
 
 const cityOptions = ["TP.HCM", "Hà Nội", "Đà Nẵng"];
 
@@ -84,27 +79,6 @@ const availabilityOptions = [
  * one is the dearest ticket in the catalog, and it arrives as `priceCeiling`.
  */
 const PRICE_FLOOR = 0;
-
-/**
- * A filter chip. Flat and square — selection is carried by fill, not by a border or a shadow, so a
- * row of these reads as one ruled strip rather than a row of separate objects.
- */
-function Chip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={`px-3.5 py-2 font-meta text-body uppercase tracking-[0.1em] transition ${
-        active
-          ? "bg-beige-kem text-xanh-pho"
-          : "text-ink-soft hover:bg-bubblegum/40 hover:text-beige-kem"
-      }`}
-    >
-      {label}
-    </button>
-  );
-}
 
 /**
  * One option in the rail, as a row with a tick.
@@ -166,7 +140,6 @@ export default function EventFilters({
   onAvailabilityChange,
   onResetFilters,
   dateOptions,
-  variant = "bar",
   resultCount = 0,
   categoryOptions,
 }: EventFiltersProps) {
@@ -228,9 +201,6 @@ export default function EventFilters({
    */
   const effectiveMax = Math.min(priceCeiling, maxPrice ?? priceCeiling);
 
-  /** Only the price control is shared with the rail, and only its label needs hiding there. */
-  const srOnly = variant === "rail";
-
   /**
    * What the rail prints beside a closed group. `undefined` where the filter is not in force.
    *
@@ -243,62 +213,19 @@ export default function EventFilters({
   const categorySummary = summarise(
     categoryOptions.filter((c) => activeCategories.includes(c.id)).map((c) => c.label),
   );
+  /** One day prints as itself; a span prints as its two ends, which is all a 240px header holds. */
+  const dateSummary = !activeDate
+    ? undefined
+    : activeDate.from === activeDate.to
+      ? formatEventDate(activeDate.from)
+      : `${formatEventDate(activeDate.from)} – ${formatEventDate(activeDate.to)}`;
   const citySummary = summarise(activeCities);
   const availabilitySummary = summarise(
     availabilityOptions.filter(([value]) => availabilities.includes(value)).map(([, l]) => l),
   );
 
-  /*
-   * "Tất cả" is lit when nothing else is, which is what makes it read as the off switch for the row
-   * rather than as a fifth thing you can have on at the same time as "Phim".
-   */
-  const categoryChips = [
-    <Chip
-      key="all"
-      label="Tất cả"
-      active={activeCategories.length === 0}
-      onClick={() => onCategoryChange("all")}
-    />,
-    ...categoryOptions.map((cat) => (
-      <Chip
-        key={cat.id}
-        label={cat.label}
-        active={activeCategories.includes(cat.id)}
-        onClick={() => onCategoryChange(cat.id)}
-      />
-    )),
-  ];
-
   const dateControl = (
     <DatePicker label="Ngày" value={activeDate} available={dateOptions} onChange={onDateChange} />
-  );
-
-  const cityControl = (
-    <Select
-      label="Thành phố"
-      value=""
-      selectedValues={activeCities}
-      emptyLabel="Mọi thành phố"
-      onChange={onCityChange}
-      options={[
-        { value: "all", label: "Mọi thành phố" },
-        ...cityOptions.map((city) => ({ value: city, label: city })),
-      ]}
-    />
-  );
-
-  const statusControl = (
-    <Select
-      label="Trạng thái"
-      value=""
-      selectedValues={availabilities}
-      emptyLabel="Mọi trạng thái"
-      onChange={onAvailabilityChange}
-      options={[
-        { value: "all", label: "Mọi trạng thái" },
-        ...availabilityOptions.map(([value, label]) => ({ value, label })),
-      ]}
-    />
   );
 
   /*
@@ -311,19 +238,12 @@ export default function EventFilters({
   */
   const priceControl = (
     <div className="flex min-w-0 flex-col gap-1.5">
-      <label
-        htmlFor="filter-max-price"
-        className={srOnly ? "sr-only" : "label-eyebrow text-ink-soft"}
-      >
+      {/* The group it sits in is already headed "Giá tối đa"; the second copy is for screen readers. */}
+      <label htmlFor="filter-max-price" className="sr-only">
         Giá tối đa
       </label>
 
-      {/*
-        The box carries the same hairline the three triggers beside it do, and the same `h-8`, so in
-        the bar the four controls sit on one ruled line across the page. It used to be a short
-        underline tucked up on the label row, which is what made this cell read as an afterthought
-        next to three full-width fields.
-      */}
+      {/* The same hairline and `h-8` the other triggers carry, so the rail's controls stay one family. */}
       <div className="flex h-8 items-center gap-2 border-b border-beige-kem/40 pr-1 transition focus-within:border-burgundy hover:border-beige-kem">
         {/*
           `type="text"` with `inputMode="numeric"`, not `type="number"`: a number input refuses to
@@ -412,115 +332,95 @@ export default function EventFilters({
     </button>
   ) : null;
 
-  if (variant === "rail") {
-    /*
-     * The collection rail, after the reference: a count, then one accordion per filter, each a row
-     * of type over a hairline with a `+` at the far end.
-     *
-     * Every group starts closed, which is also what the reference does. On a rail this narrow, five
-     * open controls would run past the fold and the reader would be scrolling the filters to reach
-     * the grid; closed, the whole vocabulary of the page fits in one glance and only the group being
-     * used takes any room.
-     */
-    return (
-      <div>
-        <p className="font-meta text-body text-ink-soft">{resultCount} kết quả</p>
-
-        <div className="mt-5 border-t border-beige-kem/30">
-          <Disclosure label="Loại" summary={categorySummary}>
-            <OptionRow
-              label="Tất cả"
-              active={activeCategories.length === 0}
-              onClick={() => onCategoryChange("all")}
-            />
-            {categoryOptions.map((cat) => (
-              <OptionRow
-                key={cat.id}
-                label={cat.label}
-                active={activeCategories.includes(cat.id)}
-                onClick={() => onCategoryChange(cat.id)}
-              />
-            ))}
-          </Disclosure>
-
-          {/*
-            No date group here.
-
-            The catalog page has a calendar's worth of controls in a 240px column and the picker
-            needs three times that to draw a month, so it opened as a panel floating over the grid —
-            the one thing this rewrite was meant to get rid of. The landing bar keeps it, where
-            there is a full row to open into.
-          */}
-
-          <Disclosure label="Thành phố" summary={citySummary}>
-            <OptionRow
-              label="Mọi thành phố"
-              active={activeCities.length === 0}
-              onClick={() => onCityChange("all")}
-            />
-            {cityOptions.map((city) => (
-              <OptionRow
-                key={city}
-                label={city}
-                active={activeCities.includes(city)}
-                onClick={() => onCityChange(city)}
-              />
-            ))}
-          </Disclosure>
-
-          <Disclosure label="Trạng thái" summary={availabilitySummary}>
-            <OptionRow
-              label="Mọi trạng thái"
-              active={availabilities.length === 0}
-              onClick={() => onAvailabilityChange("all")}
-            />
-            {availabilityOptions.map(([value, label]) => (
-              <OptionRow
-                key={value}
-                label={label}
-                active={availabilities.includes(value)}
-                onClick={() => onAvailabilityChange(value)}
-              />
-            ))}
-          </Disclosure>
-
-          <Disclosure
-            label="Giá tối đa"
-            summary={maxPrice === null ? undefined : formatVnd(maxPrice)}
-          >
-            {priceControl}
-          </Disclosure>
-        </div>
-
-        {resetButton && <div className="mt-6">{resetButton}</div>}
-      </div>
-    );
-  }
-
+  /*
+   * The collection rail, after the reference: a count, then one accordion per filter, each a row
+   * of type over a hairline with a `+` at the far end.
+   *
+   * Every group starts closed, which is also what the reference does. On a rail this narrow, five
+   * open controls would run past the fold and the reader would be scrolling the filters to reach
+   * the grid; closed, the whole vocabulary of the page fits in one glance and only the group being
+   * used takes any room.
+   */
   return (
-    /*
-     * No eyebrow override any more. This bar carried one because 12px eyebrows were too small to
-     * read here; the scale's floor is 14px now, so the override said nothing the token did not.
-     */
-    <section className="border-y border-beige-kem/25 bg-xanh-pho px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-7xl">
-        {/*
-         * Categories on their own rule, the four remaining controls on the next. Doron separates
-         * its "shop by type" row from the rest the same way — one decision per line.
-         */}
-        <div className="flex flex-wrap items-center gap-x-1 gap-y-2 border-b border-beige-kem/25 pb-4">
-          <span className="label-eyebrow mr-3 text-ink-soft">Loại</span>
-          {categoryChips}
-          {resetButton && <div className="ml-auto">{resetButton}</div>}
-        </div>
+    <div>
+      <p className="font-meta text-body text-ink-soft">{resultCount} kết quả</p>
 
-        <div className="grid gap-6 pt-5 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-5 border-t border-beige-kem/30">
+        {/*
+            "Thể loại", not "Loại". The rows under it are the catalogue's own categories — Phim, Ca
+            nhạc, Sân khấu & Nghệ thuật, Khác — which is what a Vietnamese reader calls a thể loại;
+            "loại" on its own could as easily be asking about the kind of ticket.
+          */}
+        <Disclosure label="Thể loại" summary={categorySummary}>
+          <OptionRow
+            label="Tất cả"
+            active={activeCategories.length === 0}
+            onClick={() => onCategoryChange("all")}
+          />
+          {categoryOptions.map((cat) => (
+            <OptionRow
+              key={cat.id}
+              label={cat.label}
+              active={activeCategories.includes(cat.id)}
+              onClick={() => onCategoryChange(cat.id)}
+            />
+          ))}
+        </Disclosure>
+
+        {/*
+            The date group, which the rail used to leave to the landing page's filter bar.
+
+            That bar is gone — the landing page is a stack of curated bands now and carries no
+            filter at all — so a group left out here is a filter the app no longer has. The picker
+            still needs three times this column's width to draw a month, so its panel opens over the
+            grid; that is the cost of keeping the filter, and it is a popover that dismisses itself
+            rather than a permanent obstruction.
+          */}
+        <Disclosure label="Ngày" summary={dateSummary}>
           {dateControl}
-          {cityControl}
-          {statusControl}
+        </Disclosure>
+
+        <Disclosure label="Thành phố" summary={citySummary}>
+          <OptionRow
+            label="Mọi thành phố"
+            active={activeCities.length === 0}
+            onClick={() => onCityChange("all")}
+          />
+          {cityOptions.map((city) => (
+            <OptionRow
+              key={city}
+              label={city}
+              active={activeCities.includes(city)}
+              onClick={() => onCityChange(city)}
+            />
+          ))}
+        </Disclosure>
+
+        <Disclosure label="Trạng thái" summary={availabilitySummary}>
+          <OptionRow
+            label="Mọi trạng thái"
+            active={availabilities.length === 0}
+            onClick={() => onAvailabilityChange("all")}
+          />
+          {availabilityOptions.map(([value, label]) => (
+            <OptionRow
+              key={value}
+              label={label}
+              active={availabilities.includes(value)}
+              onClick={() => onAvailabilityChange(value)}
+            />
+          ))}
+        </Disclosure>
+
+        <Disclosure
+          label="Giá tối đa"
+          summary={maxPrice === null ? undefined : formatVnd(maxPrice)}
+        >
           {priceControl}
-        </div>
+        </Disclosure>
       </div>
-    </section>
+
+      {resetButton && <div className="mt-6">{resetButton}</div>}
+    </div>
   );
 }

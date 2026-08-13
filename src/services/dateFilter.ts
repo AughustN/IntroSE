@@ -48,6 +48,30 @@ export function weekRange(iso: string): DateRange {
   return { from: fmt(monday), to: fmt(sunday) };
 }
 
+/**
+ * `iso` shifted by whole days, in UTC for the reason `weekRange` gives: civil dates have no time of
+ * day to preserve, and local-time arithmetic lands on the same day twice across a DST boundary.
+ */
+export function addDays(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const at = new Date(Date.UTC(y, m - 1, d));
+  at.setUTCDate(at.getUTCDate() + days);
+  return at.toISOString().slice(0, 10);
+}
+
+/** The seven civil days of the Monday-first week containing `iso`, in order. */
+export function weekDays(iso: string): string[] {
+  const monday = weekRange(iso).from;
+  return Array.from({ length: 7 }, (_, index) => addDays(monday, index));
+}
+
+/** Today as a civil date, read in the reader's own zone — the day their calendar shows. */
+export function todayISO(): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
 /** Ends in ascending order, whichever way round they were clicked. */
 export function orderedRange(a: string, b: string): DateRange {
   return a <= b ? { from: a, to: b } : { from: b, to: a };

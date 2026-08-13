@@ -10,7 +10,8 @@ import ReviewSection from "./reviews/ReviewSection";
 import { catalogClient } from "../services/catalogClient";
 import { formatEventDate } from "../services/formatDate";
 import { watchShowtime } from "../services/seatSocket";
-import { Clock3, Tag, Ticket, Users } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock3, Heart, Tag, Ticket, Users } from "lucide-react";
+import { addDays, todayISO, weekDays, weekRange } from "../services/dateFilter";
 import Disclosure from "./Disclosure";
 import {
   BookingHeader,
@@ -92,6 +93,17 @@ interface Slot {
 
 const MAX_PER_TIER = 10;
 const MAX_TIERS = 4;
+
+/** The day strip's column headers. Monday-first, matching `weekDays`. */
+const WEEKDAY_LABELS = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"] as const;
+
+/**
+ * Up to this many dates are drawn as themselves; past it the strip becomes a week calendar.
+ *
+ * Seven because that is one row of the same grid: at the threshold both layouts occupy exactly one
+ * line, so crossing it changes what the row means without changing how much room it takes.
+ */
+const MAX_FLAT_DATES = 7;
 
 export default function EventDetail({
   event,
@@ -341,6 +353,58 @@ export default function EventDetail({
     slots.filter((slot) => slot.date === date).every((slot) => slot.soldOut);
 
   /*
+   * Two day pickers, chosen by how many days there are — never by what kind of event it is.
+   *
+   * A film runs three or four weeks, so listing every date is a choice between a sideways scroller
+   * whose far end nobody finds and a six-row wall of buttons. The calendar solves that: seven
+   * Monday-first columns, one week at a time, so the panel is the same height whether the run is
+   * four days or eight weeks and the weekday of every date is readable off the column it sits in.
+   *
+   * But a three-night concert in a calendar is four empty cells and a pair of arrows that do
+   * nothing — furniture around three buttons. So a short run keeps the plain grid of its own dates.
+   *
+   * The test is the count, not the category: an admin-created category can be called anything (the
+   * catalogue already holds `custom_phim_anh_…`), so branching on its name would put a two-day film
+   * in the calendar and a twenty-night residency in the wall of buttons. The count is the thing
+   * that actually causes the problem, so the count is what decides.
+   */
+  const useWeekCalendar = slotDates.length > MAX_FLAT_DATES;
+
+  /**
+   * Which week the calendar shows. `null` means "follow the selection": it stays on whichever week
+   * holds the chosen showtime until the reader pages away from it deliberately.
+   */
+  const [weekStartOverride, setWeekStartOverride] = useState<string | null>(null);
+  const today = todayISO();
+
+  const firstSlotDate = slotDates[0] ?? today;
+  const lastSlotDate = slotDates[slotDates.length - 1] ?? today;
+
+  const weekStart = weekStartOverride ?? weekRange(activeDate || firstSlotDate).from;
+  const weekCells = useMemo(() => weekDays(weekStart), [weekStart]);
+
+  // The run's own first and last weeks are the ends of the strip — there is nothing to page to
+  // beyond them, so the arrows stop rather than scrolling through empty months.
+  const canGoBack = weekStart > weekRange(firstSlotDate).from;
+  const canGoForward = weekStart < weekRange(lastSlotDate).from;
+
+  /**
+   * The day the "hôm nay" shortcut lands on: today while the run covers it, otherwise the nearest
+   * date the run actually has. A button that jumps to an empty week would be a dead control.
+   */
+  const shortcutDate =
+    today <= firstSlotDate ? firstSlotDate : today >= lastSlotDate ? lastSlotDate : today;
+  const shortcutIsToday = shortcutDate === today;
+
+  const goToWeekOf = (date: string) => {
+    setWeekStartOverride(weekRange(date).from);
+    // …and select something on the way, so the times below follow the strip instead of staying on a
+    // showtime the reader can no longer see.
+    const onOrAfter = slots.find((slot) => slot.date >= date && !slot.soldOut) ?? slots[0];
+    if (onOrAfter) setSelectedSlotKey(onOrAfter.key);
+  };
+
+  /*
    * The event's particulars, moved out of the page's tail and into the booking panel.
    *
    * They were a two-column definition list below the blurb, below the policies — under the button
@@ -455,6 +519,33 @@ export default function EventDetail({
               referrerPolicy="no-referrer"
               className="relative h-full w-full object-contain"
             />
+
+            {/*
+              The bookmark, on the artwork — the same control, in the same corner, at the same size
+              as the one on every catalog card. It is the only place it appears on this page now.
+
+              Always visible, unlike the card's, which only surfaces under the pointer: a card is one
+              of twenty and its furniture has to stay out of the way, while this is the single event
+              the reader opened.
+            */}
+            <button
+              type="button"
+              onClick={() => onToggleWishlist(event.id)}
+              aria-pressed={isWishlisted}
+              title={isWishlisted ? "Bỏ khỏi mục đã lưu" : "Lưu sự kiện"}
+              aria-label={isWishlisted ? "Bỏ khỏi mục đã lưu" : "Lưu sự kiện"}
+              className={`absolute right-3 top-3 z-20 grid h-11 w-11 place-items-center transition ${
+                isWishlisted
+                  ? "bg-burgundy text-white"
+                  : "bg-black/45 text-white backdrop-blur-sm hover:bg-black/70"
+              }`}
+            >
+              <Heart
+                className="h-5 w-5"
+                strokeWidth={2}
+                fill={isWishlisted ? "currentColor" : "none"}
+              />
+            </button>
           </figure>
         </div>
 
@@ -474,38 +565,119 @@ export default function EventDetail({
               Chưa có suất nào đang mở bán.
             </p>
           ) : (
-            <div className="space-y-8">
+            /*
+              The picker sits in its own panel now, and everything in it is a size up.
+
+              It is the only part of this screen the buyer has to operate, and it was set in the same
+              small caps as the page's captions: an 11px "Ngày" over 14px chips, competing with the
+              artwork beside it. Lifting it onto its own surface and giving each group a real heading
+              makes the three decisions — day, time, tier — read as the work of the page.
+            */
+            <div className="space-y-9 border border-beige-kem/25 bg-surface-2 p-5 sm:p-6">
               <div>
-                <p className="label-eyebrow text-ink-soft">Ngày</p>
+                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+                  <p className="font-display text-lede font-black uppercase tracking-[0.03em] text-beige-kem">
+                    Ngày
+                  </p>
+
+                  {/* The week controls belong to the calendar; a short run has one row of dates
+                      and nowhere to page to. */}
+                  <div className={useWeekCalendar ? "flex items-center gap-1" : "hidden"}>
+                    <button
+                      type="button"
+                      onClick={() => setWeekStartOverride(addDays(weekStart, -7))}
+                      disabled={!canGoBack}
+                      aria-label="Tuần trước"
+                      className="grid h-9 w-9 place-items-center border border-beige-kem/35 text-beige-kem transition hover:border-beige-kem hover:bg-bubblegum/20 disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    {/* The week being shown, as its two ends — "tuần 2" would need a rule about
+                        which week is the first, and the dates say it without one. */}
+                    <span className="min-w-[8.5rem] text-center font-meta text-meta tabular-nums text-ink-soft">
+                      {formatEventDate(weekStart)} – {formatEventDate(addDays(weekStart, 6))}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setWeekStartOverride(addDays(weekStart, 7))}
+                      disabled={!canGoForward}
+                      aria-label="Tuần sau"
+                      className="grid h-9 w-9 place-items-center border border-beige-kem/35 text-beige-kem transition hover:border-beige-kem hover:bg-bubblegum/20 disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => goToWeekOf(shortcutDate)}
+                      className="label-eyebrow ml-2 h-9 border border-beige-kem/35 px-3 text-beige-kem transition hover:border-beige-kem hover:bg-bubblegum/20"
+                    >
+                      {shortcutIsToday ? "Hôm nay" : "Suất gần nhất"}
+                    </button>
+                  </div>
+                </div>
+
                 {/*
-                  The day strip scrolls sideways rather than wrapping. A run of dates that wraps to a
-                  second line stops reading as a calendar and starts reading as a paragraph of
-                  numbers, and the order is no longer obvious at a glance.
+                  The calendar keeps seven Monday-first columns, always — including the days this
+                  run does not play, so a date holds the same column all the way down a four-week
+                  run and the weekday header above is true of every cell under it. A grid that only
+                  held the days with showtimes would shuffle its columns from week to week.
+
+                  The flat grid has no such promise to keep, so it draws only real dates and prints
+                  the whole `dd/MM` in each: with a handful of buttons there is room for it, and a
+                  bare day number would be ambiguous across a month boundary.
                 */}
-                <div className="-mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1">
-                  {slotDates.map((date) => {
+                <div
+                  className={`mt-4 grid gap-1.5 sm:gap-2 ${
+                    useWeekCalendar
+                      ? "grid-cols-7"
+                      : "grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7"
+                  }`}
+                >
+                  {useWeekCalendar &&
+                    WEEKDAY_LABELS.map((weekday) => (
+                      <span
+                        key={weekday}
+                        aria-hidden="true"
+                        className="pb-1 text-center font-meta text-meta text-ink-soft"
+                      >
+                        {weekday}
+                      </span>
+                    ))}
+
+                  {(useWeekCalendar ? weekCells : slotDates).map((date) => {
+                    const count = slots.filter((slot) => slot.date === date).length;
                     const isActive = date === activeDate;
-                    const gone = dateSoldOut(date);
+                    const gone = count > 0 && dateSoldOut(date);
+                    const unavailable = count === 0 || gone;
                     return (
                       <button
                         key={date}
                         type="button"
                         onClick={() => chooseDate(date)}
-                        disabled={gone}
+                        disabled={unavailable}
                         aria-pressed={isActive}
-                        className={`shrink-0 border px-4 py-2.5 text-center transition ${
+                        aria-label={`${formatEventDate(date, true)}${
+                          count === 0 ? " — không có suất" : gone ? " — hết vé" : ` — ${count} suất`
+                        }`}
+                        className={`border-2 px-1 py-3 text-center transition ${
                           isActive
                             ? "border-burgundy bg-burgundy text-white"
-                            : gone
-                              ? "cursor-not-allowed border-beige-kem/20 text-ink-soft/50"
-                              : "border-beige-kem/35 text-beige-kem hover:border-beige-kem"
-                        }`}
+                            : unavailable
+                              ? "cursor-not-allowed border-beige-kem/15 text-ink-soft/40"
+                              : "border-beige-kem/35 text-beige-kem hover:border-beige-kem hover:bg-bubblegum/20"
+                        } ${date === today && !isActive ? "border-beige-kem/70" : ""}`}
                       >
-                        <span className="block font-meta text-body font-bold leading-none">
-                          {formatEventDate(date)}
+                        <span className="block font-display text-title-s font-black leading-none tabular-nums">
+                          {useWeekCalendar ? date.slice(8) : formatEventDate(date)}
                         </span>
-                        <span className="mt-1 block font-meta text-eyebrow leading-none opacity-70">
-                          {gone ? "hết vé" : `${slots.filter((s) => s.date === date).length} suất`}
+                        {/*
+                          The count is the only thing that says which days are worth pressing, so it
+                          stays on a phone; only the word after it goes, since seven columns on a
+                          360px screen leave about 44px each.
+                        */}
+                        <span className="mt-1.5 block font-meta text-meta leading-none opacity-75">
+                          {count === 0 ? "—" : gone ? "hết" : count}
+                          {count > 0 && !gone && <span className="hidden sm:inline"> suất</span>}
                         </span>
                       </button>
                     );
@@ -514,8 +686,15 @@ export default function EventDetail({
               </div>
 
               <div>
-                <p className="label-eyebrow text-ink-soft">Giờ</p>
-                <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                <p className="font-display text-lede font-black uppercase tracking-[0.03em] text-beige-kem">
+                  Giờ
+                </p>
+                {/*
+                  Three across at most, not four: the time is the largest thing in the cell now, and
+                  a four-column grid inside a half-width column left each one narrower than the venue
+                  name printed under it.
+                */}
+                <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
                   {slotsOnActiveDate.map((slot) => {
                     const isSelected = slot.key === selectedSlotKey;
                     return (
@@ -525,22 +704,22 @@ export default function EventDetail({
                         onClick={() => setSelectedSlotKey(slot.key)}
                         disabled={slot.soldOut}
                         aria-pressed={isSelected}
-                        className={`border p-3 text-left transition ${
+                        className={`border-2 p-4 text-left transition ${
                           isSelected
                             ? "border-burgundy bg-burgundy/10 text-beige-kem"
                             : slot.soldOut
                               ? "cursor-not-allowed border-beige-kem/20 text-ink-soft/60"
-                              : "border-beige-kem/35 text-beige-kem hover:border-beige-kem"
+                              : "border-beige-kem/35 text-beige-kem hover:border-beige-kem hover:bg-bubblegum/20"
                         }`}
                       >
-                        <span className="block font-display text-title-s font-black leading-none">
+                        <span className="block font-display text-title-m font-black leading-none">
                           {slot.time}
                         </span>
-                        <span className="mt-1.5 block truncate font-meta text-eyebrow text-ink-soft">
+                        <span className="mt-2 block truncate font-meta text-meta text-ink-soft">
                           {slot.venue}
                         </span>
                         <span
-                          className={`mt-0.5 block font-meta text-eyebrow ${
+                          className={`mt-1 block font-meta text-meta font-bold ${
                             slot.soldOut ? "text-ink-soft" : "text-burgundy-ink"
                           }`}
                         >
@@ -559,13 +738,15 @@ export default function EventDetail({
               */}
               {!isSeated && (
                 <div>
-                  <p className="label-eyebrow text-ink-soft">Hạng vé</p>
+                  <p className="font-display text-lede font-black uppercase tracking-[0.03em] text-beige-kem">
+                    Hạng vé
+                  </p>
                   {/*
                     One tier per row, ruled apart. A grid of bordered cards made each tier an object
                     to compare side by side, which is the wrong reading — this is a price list, and a
                     price list is a column.
                   */}
-                  <ul className="mt-3 border-t border-beige-kem/25">
+                  <ul className="mt-4 border-t border-beige-kem/25">
                     {tiers.map((tier) => {
                       const cap = tierCap(tier);
                       const quantity = quantities[tier.id] ?? 0;
@@ -579,21 +760,21 @@ export default function EventDetail({
                         >
                           <div className="min-w-[12rem] flex-1">
                             <div className="flex items-center gap-2">
-                              <span className="font-display text-lede font-black uppercase tracking-[0.03em] text-beige-kem">
+                              <span className="font-display text-title-s font-black uppercase tracking-[0.03em] text-beige-kem">
                                 {tier.label}
                               </span>
                               {tier.badge && (
-                                <span className="border border-beige-kem/50 px-2 py-0.5 font-meta text-eyebrow text-beige-kem">
+                                <span className="border border-beige-kem/50 px-2 py-0.5 font-meta text-meta text-beige-kem">
                                   {tier.badge}
                                 </span>
                               )}
                             </div>
                             {tier.description && (
-                              <p className="mt-1 text-meta leading-5 text-beige-kem/70">
+                              <p className="mt-1.5 font-meta text-meta leading-5 text-beige-kem/70">
                                 {tier.description}
                               </p>
                             )}
-                            <p className="mt-1 font-meta text-eyebrow text-ink-soft">
+                            <p className="mt-1.5 font-meta text-meta text-ink-soft">
                               {remaining === null || remaining === undefined
                                 ? "Còn vé"
                                 : soldOut
@@ -602,21 +783,26 @@ export default function EventDetail({
                             </p>
                           </div>
 
-                          <span className="shrink-0 font-display text-title-s font-black text-beige-kem">
+                          <span className="shrink-0 font-display text-title-m font-black text-beige-kem">
                             {formatVnd(tier.price)}
                           </span>
 
+                          {/*
+                            The steppers carry the same weight as the price beside them. At 36px with
+                            a `font-meta` glyph they read as annotations on the row rather than as
+                            the controls that decide what is bought.
+                          */}
                           <div className="flex shrink-0 items-center gap-3">
                             <button
                               type="button"
                               onClick={() => adjustQuantity(tier, -1)}
                               disabled={quantity === 0 || holdBusy}
                               aria-label={`Bớt vé ${tier.label}`}
-                              className="grid h-9 w-9 place-items-center border border-beige-kem/50 font-meta text-beige-kem transition hover:border-beige-kem disabled:cursor-not-allowed disabled:opacity-30"
+                              className="grid h-11 w-11 place-items-center border-2 border-beige-kem/50 font-display text-title-s font-black leading-none text-beige-kem transition hover:border-beige-kem hover:bg-bubblegum/20 disabled:cursor-not-allowed disabled:opacity-30"
                             >
                               −
                             </button>
-                            <span className="w-6 text-center font-meta text-body font-bold text-beige-kem">
+                            <span className="w-8 text-center font-display text-title-s font-black tabular-nums text-beige-kem">
                               {quantity}
                             </span>
                             <button
@@ -624,7 +810,7 @@ export default function EventDetail({
                               onClick={() => adjustQuantity(tier, 1)}
                               disabled={soldOut || quantity >= cap || holdBusy}
                               aria-label={`Thêm vé ${tier.label}`}
-                              className="grid h-9 w-9 place-items-center border border-beige-kem/50 font-meta text-beige-kem transition hover:border-beige-kem disabled:cursor-not-allowed disabled:opacity-30"
+                              className="grid h-11 w-11 place-items-center border-2 border-beige-kem/50 font-display text-title-s font-black leading-none text-beige-kem transition hover:border-beige-kem hover:bg-bubblegum/20 disabled:cursor-not-allowed disabled:opacity-30"
                             >
                               +
                             </button>
@@ -704,25 +890,13 @@ export default function EventDetail({
                 </div>
               ))}
 
-            <div className="flex flex-col gap-2 border-b border-beige-kem/30 py-4 sm:flex-row sm:items-center sm:gap-8">
-              <dt className="shrink-0 font-display text-body font-bold uppercase tracking-[0.04em] text-beige-kem sm:w-56">
-                Nhắc lịch
-              </dt>
-              <dd className="min-w-0 flex-1">
-                <button
-                  type="button"
-                  onClick={() => onToggleWishlist(event.id)}
-                  aria-pressed={isWishlisted}
-                  className={`border px-3 py-1.5 font-meta text-meta transition ${
-                    isWishlisted
-                      ? "border-burgundy bg-burgundy text-white"
-                      : "border-beige-kem/50 text-beige-kem hover:border-beige-kem"
-                  }`}
-                >
-                  {isWishlisted ? "Đã lưu" : "Lưu sự kiện"}
-                </button>
-              </dd>
-            </div>
+            {/*
+              No "Nhắc lịch" row any more.
+
+              It was the same bookmark the heart on every card writes, three screens down the page,
+              under a label that promised a reminder nothing sends. One control, in the one place a
+              reader already looks for it — on the artwork, exactly where the catalog puts it.
+            */}
           </dl>
         </div>
 
