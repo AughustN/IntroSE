@@ -130,6 +130,8 @@ export const SingleEventPage: React.FC = () => {
     setShowTierModal(true);
   };
 
+  const isFreeTierModal = tierLabel.trim().toLowerCase() === "miễn phí" || tierLabel.trim().toLowerCase() === "free";
+
   const handleSaveTierForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!eventId) return;
@@ -138,7 +140,7 @@ export const SingleEventPage: React.FC = () => {
       await saveTicketTier(eventId, {
         id: editingTier?.id,
         label: tierLabel,
-        price: Number(tierPrice),
+        price: isFreeTierModal ? 0 : Number(tierPrice),
         capacity: Number(tierCapacity),
         description: tierDesc
       });
@@ -378,26 +380,56 @@ export const SingleEventPage: React.FC = () => {
 
             <form onSubmit={handleSaveTierForm} className="space-y-3 text-xs">
               <div>
-                <label className="block text-ink-soft mb-1 font-semibold">Tên Hạng Vé *</label>
+                <label className="block text-ink-soft mb-1.5 font-semibold">Tên Hạng Vé * (Chọn mẫu nhanh hoặc nhập tùy chỉnh)</label>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {[
+                    { label: "Vé Tiêu Chuẩn", defaultPrice: 200000 },
+                    { label: "Miễn Phí", defaultPrice: 0 },
+                    { label: "VIP", defaultPrice: 500000 }
+                  ].map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => {
+                        setTierLabel(preset.label);
+                        if (preset.label === "Miễn Phí") setTierPrice(0);
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                        tierLabel === preset.label
+                          ? "bg-burgundy text-white border-burgundy shadow-sm"
+                          : "bg-surface-2 text-beige-kem border-beige-kem/20 hover:border-beige-kem/40"
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
                 <input
                   type="text"
                   value={tierLabel}
                   onChange={(e) => setTierLabel(e.target.value)}
-                  placeholder="Vd: Vé VIP, Vé Phổ Thông"
+                  placeholder="Vd: Vé VIP, Vé Phổ Thông, Vé Tiêu Chuẩn..."
                   required
                   className="w-full bg-xanh-pho border border-beige-kem/30 rounded-xl p-2.5 text-beige-kem outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-ink-soft mb-1 font-semibold">Giá Vé (VND) *</label>
+                <label className="block text-ink-soft mb-1 font-semibold">
+                  Giá Vé (VND) * {isFreeTierModal && <span className="text-la-co font-bold">(Cố định 0đ cho Vé Miễn Phí)</span>}
+                </label>
                 <input
                   type="number"
-                  value={tierPrice}
+                  value={isFreeTierModal ? 0 : tierPrice}
                   onChange={(e) => setTierPrice(Number(e.target.value))}
                   step={10000}
+                  disabled={isFreeTierModal}
                   required
-                  className="w-full bg-xanh-pho border border-beige-kem/30 rounded-xl p-2.5 text-beige-kem outline-none font-meta"
+                  className={`w-full border rounded-xl p-2.5 outline-none font-meta ${
+                    isFreeTierModal
+                      ? "bg-xanh-pho/50 border-la-co/40 text-beige-kem cursor-not-allowed opacity-80 font-bold"
+                      : "bg-xanh-pho border-beige-kem/30 text-beige-kem"
+                  }`}
                 />
               </div>
 

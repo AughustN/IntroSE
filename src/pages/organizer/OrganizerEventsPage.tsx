@@ -40,9 +40,67 @@ export const OrganizerEventsPage: React.FC = () => {
   const [createStartDatetime, setCreateStartDatetime] = useState("2026-09-20T19:30");
   const [createEndDatetime, setCreateEndDatetime] = useState("2026-09-20T22:30");
   const [createDescription, setCreateDescription] = useState("");
-  const [createTierLabel, setCreateTierLabel] = useState("Vé Standard");
-  const [createTierPrice, setCreateTierPrice] = useState(200000);
-  const [createTierCapacity, setCreateTierCapacity] = useState(100);
+
+  // Multi Ticket Tier State for Event Creation
+  const [createTicketTiers, setCreateTicketTiers] = useState<Array<{
+    id: string;
+    preset: "Vé Tiêu Chuẩn" | "Miễn Phí" | "VIP" | "custom";
+    customLabel: string;
+    price: number;
+    capacity: number;
+    description?: string;
+  }>>([
+    {
+      id: "tier-init-1",
+      preset: "Vé Tiêu Chuẩn",
+      customLabel: "",
+      price: 200000,
+      capacity: 100,
+      description: "Hạng vé tiêu chuẩn mặc định"
+    }
+  ]);
+
+  const getTierResolvedLabel = (tier: typeof createTicketTiers[0]): string => {
+    if (tier.preset === "custom") {
+      return tier.customLabel.trim() || "Hạng vé tùy chỉnh";
+    }
+    return tier.preset;
+  };
+
+  const handleAddTierItem = () => {
+    setCreateTicketTiers((prev) => [
+      ...prev,
+      {
+        id: `tier-${Date.now()}-${prev.length + 1}`,
+        preset: "Vé Tiêu Chuẩn",
+        customLabel: "",
+        price: 200000,
+        capacity: 100,
+        description: ""
+      }
+    ]);
+  };
+
+  const handleRemoveTierItem = (id: string) => {
+    if (createTicketTiers.length <= 1) {
+      showToast("error", "Sự kiện phải có ít nhất 1 hạng vé.");
+      return;
+    }
+    setCreateTicketTiers((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const handleUpdateTierItem = (id: string, updates: Partial<typeof createTicketTiers[0]>) => {
+    setCreateTicketTiers((prev) =>
+      prev.map((t) => {
+        if (t.id !== id) return t;
+        const updated = { ...t, ...updates };
+        if (updated.preset === "Miễn Phí") {
+          updated.price = 0;
+        }
+        return updated;
+      })
+    );
+  };
 
   // AI Description Assistant State
   const [aiBrief, setAiBrief] = useState("");
@@ -80,10 +138,29 @@ export const OrganizerEventsPage: React.FC = () => {
     if (aiSuggestion.title) setCreateTitle(aiSuggestion.title);
     if (aiSuggestion.description) setCreateDescription(aiSuggestion.description);
     if (aiSuggestion.ticketPriceSuggestions && aiSuggestion.ticketPriceSuggestions.length > 0) {
-      setCreateTierLabel(aiSuggestion.ticketPriceSuggestions[0].name);
-      setCreateTierPrice(aiSuggestion.ticketPriceSuggestions[0].price);
+      setCreateTicketTiers(
+        aiSuggestion.ticketPriceSuggestions.map((item, idx) => {
+          let preset: "Vé Tiêu Chuẩn" | "Miễn Phí" | "VIP" | "custom" = "custom";
+          const lowerName = item.name.toLowerCase();
+          if (lowerName.includes("tiêu chuẩn") || lowerName.includes("standard")) {
+            preset = "Vé Tiêu Chuẩn";
+          } else if (item.price === 0 || lowerName.includes("miễn phí") || lowerName.includes("free")) {
+            preset = "Miễn Phí";
+          } else if (lowerName.includes("vip")) {
+            preset = "VIP";
+          }
+          return {
+            id: `ai-tier-${Date.now()}-${idx}`,
+            preset,
+            customLabel: preset === "custom" ? item.name : "",
+            price: item.price,
+            capacity: 100,
+            description: "Gợi ý bởi AI"
+          };
+        })
+      );
     }
-    showToast("success", "Đã áp dụng tiêu đề & mô tả từ AI vào biểu mẫu!");
+    showToast("success", "Đã áp dụng thông tin & hạng vé từ AI vào biểu mẫu!");
   };
 
   const loadPortfolio = async () => {
@@ -117,6 +194,29 @@ export const OrganizerEventsPage: React.FC = () => {
       return;
     }
 
+    // Process & validate all ticket tiers
+    const processedTiers = createTicketTiers.map((t) => {
+      const label = getTierResolvedLabel(t);
+      const isFree = t.preset === "Miễn Phí" || label.trim().toLowerCase() === "miễn phí" || label.trim().toLowerCase() === "free";
+      return {
+        label,
+        price: isFree ? 0 : (Number(t.price) || 0),
+        capacity: Number(t.capacity) || 1,
+        description: t.description || undefined
+      };
+    });
+
+    for (const tier of processedTiers) {
+      if (!tier.label.trim()) {
+        showToast("error", "Tất cả các hạng vé đều phải có tên (hoặc chọn tên mặc định).");
+        return;
+      }
+      if (tier.capacity < 1) {
+        showToast("error", "Sức chứa của từng hạng vé phải tối thiểu từ 1 trở lên.");
+        return;
+      }
+    }
+
     try {
       const input: CreateEventInput = {
         title: createTitle,
@@ -130,14 +230,7 @@ export const OrganizerEventsPage: React.FC = () => {
         startDatetime: createStartDatetime.includes("Z") ? createStartDatetime : `${createStartDatetime}:00Z`,
         endDatetime: createEndDatetime.includes("Z") ? createEndDatetime : `${createEndDatetime}:00Z`,
         description: createDescription,
-        ticketTiers: [
-          {
-            label: createTierLabel,
-            price: Number(createTierPrice),
-            capacity: Number(createTierCapacity),
-            description: "Hạng vé khởi tạo mặc định"
-          }
-        ]
+        ticketTiers: processedTiers
       };
 
       const newEvt = await createOrganizerEvent(input);
@@ -150,6 +243,16 @@ export const OrganizerEventsPage: React.FC = () => {
       setCreateVenueName("");
       setCreateVenueAddress("");
       setCreateDescription("");
+      setCreateTicketTiers([
+        {
+          id: "tier-init-1",
+          preset: "Vé Tiêu Chuẩn",
+          customLabel: "",
+          price: 200000,
+          capacity: 100,
+          description: "Hạng vé tiêu chuẩn mặc định"
+        }
+      ]);
 
       // Switch to Management view & navigate to newly created event
       setActiveTab("manage");
@@ -291,7 +394,7 @@ export const OrganizerEventsPage: React.FC = () => {
             {/* Title & Category */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="sm:col-span-2">
-                <label className="block font-meta text-beige-kem font-semibold mb-1">Tên Sự Kiện *</label>
+                <label className="block font-meta text-beige-kem font-semibold mb-1">Tên Sự Kiện</label>
                 <input
                   type="text"
                   value={createTitle}
@@ -302,7 +405,7 @@ export const OrganizerEventsPage: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="block font-meta text-beige-kem font-semibold mb-1">Thể Loại *</label>
+                <label className="block font-meta text-beige-kem font-semibold mb-1">Thể Loại</label>
                 <select
                   value={createCategory}
                   onChange={(e) => {
@@ -334,7 +437,7 @@ export const OrganizerEventsPage: React.FC = () => {
               {/* Required Picture Upload */}
               <div>
                 <label className="block font-meta text-beige-kem font-semibold mb-1">
-                  Hình Ảnh Sự Kiện (Picture / Banner Cover) <span className="text-burgundy-ink">* (Bắt buộc)</span>
+                  Hình Ảnh Sự Kiện (Picture / Banner Cover) <span className="text-burgundy-ink"> (Bắt buộc)</span>
                 </label>
                 <input
                   type="url"
@@ -372,7 +475,7 @@ export const OrganizerEventsPage: React.FC = () => {
             {/* Location & City */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="sm:col-span-2">
-                <label className="block font-meta text-beige-kem font-semibold mb-1">Tên Địa Điểm / Nhà Hát *</label>
+                <label className="block font-meta text-beige-kem font-semibold mb-1">Tên Địa Điểm / Nhà Hát</label>
                 <input
                   type="text"
                   value={createVenueName}
@@ -398,7 +501,7 @@ export const OrganizerEventsPage: React.FC = () => {
 
             {/* Address */}
             <div>
-              <label className="block font-meta text-beige-kem font-semibold mb-1">Địa Chỉ Chi Tiết *</label>
+              <label className="block font-meta text-beige-kem font-semibold mb-1">Địa Chỉ Chi Tiết</label>
               <input
                 type="text"
                 value={createVenueAddress}
@@ -412,7 +515,7 @@ export const OrganizerEventsPage: React.FC = () => {
             {/* Schedule */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block font-meta text-beige-kem font-semibold mb-1">Thời Gian Bắt Đầu *</label>
+                <label className="block font-meta text-beige-kem font-semibold mb-1">Thời Gian Bắt Đầu</label>
                 <input
                   type="datetime-local"
                   value={createStartDatetime}
@@ -492,7 +595,7 @@ export const OrganizerEventsPage: React.FC = () => {
 
             {/* Description */}
             <div>
-              <label className="block font-meta text-beige-kem font-semibold mb-1">Mô Tả Chi Tiết Sự Kiện *</label>
+              <label className="block font-meta text-beige-kem font-semibold mb-1">Mô Tả Chi Tiết Sự Kiện</label>
               <textarea
                 rows={4}
                 value={createDescription}
@@ -503,44 +606,135 @@ export const OrganizerEventsPage: React.FC = () => {
               />
             </div>
 
-            {/* Initial Ticket Tier Setup */}
-            <div className="bg-xanh-pho p-4 rounded-xl border border-beige-kem/25 space-y-3">
-              <h3 className="font-meta text-xs font-bold text-burgundy uppercase tracking-wider">
-                🎟️ Hạng Vé Đầu Tiên (Khởi tạo)
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* Multi Ticket Tier Setup Section */}
+            <div className="bg-xanh-pho p-5 rounded-xl border border-beige-kem/25 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-beige-kem/20 pb-3">
                 <div>
-                  <label className="block text-ink-soft mb-1">Tên Hạng Vé</label>
-                  <input
-                    type="text"
-                    value={createTierLabel}
-                    onChange={(e) => setCreateTierLabel(e.target.value)}
-                    required
-                    className="w-full bg-surface-2 border border-beige-kem/30 rounded-lg p-2 text-beige-kem outline-none"
-                  />
+                  <h3 className="font-meta text-xs font-bold text-burgundy uppercase tracking-wider flex items-center gap-1.5">
+                    <span>🎟️</span> Danh Sách Hạng Vé & Sức Chứa (Ticket Tiers)
+                  </h3>
+                  <p className="text-[11px] text-ink-soft mt-0.5">
+                    Khởi tạo nhiều hạng vé cùng lúc. Lựa chọn nhanh mẫu tên (Vé Tiêu Chuẩn, Miễn Phí, VIP) hoặc tự nhập tùy chỉnh. Giá vé & sức chứa do bạn tự nhập.
+                  </p>
                 </div>
-                <div>
-                  <label className="block text-ink-soft mb-1">Giá Vé (VND)</label>
-                  <input
-                    type="number"
-                    value={createTierPrice}
-                    onChange={(e) => setCreateTierPrice(Number(e.target.value))}
-                    step={10000}
-                    required
-                    className="w-full bg-surface-2 border border-beige-kem/30 rounded-lg p-2 text-beige-kem outline-none font-meta"
-                  />
-                </div>
-                <div>
-                  <label className="block text-ink-soft mb-1">Sức Chứa (Capacity)</label>
-                  <input
-                    type="number"
-                    value={createTierCapacity}
-                    onChange={(e) => setCreateTierCapacity(Number(e.target.value))}
-                    min={1}
-                    required
-                    className="w-full bg-surface-2 border border-beige-kem/30 rounded-lg p-2 text-beige-kem outline-none font-meta"
-                  />
-                </div>
+                <button
+                  type="button"
+                  onClick={handleAddTierItem}
+                  className="px-3.5 py-2 bg-la-co/20 hover:bg-la-co/30 text-on-tint border border-la-co/50 rounded-xl text-xs font-bold transition-all shadow-sm shrink-0 flex items-center gap-1 self-start sm:self-auto"
+                >
+                  <span>+</span> Thêm Hạng Vé
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {createTicketTiers.map((tier, index) => {
+                  const resolvedName = getTierResolvedLabel(tier);
+                  return (
+                    <div
+                      key={tier.id}
+                      className="bg-surface-2 border border-beige-kem/30 rounded-xl p-4 space-y-3 relative shadow-md transition-all"
+                    >
+                      <div className="flex items-center justify-between border-b border-beige-kem/15 pb-2">
+                        <span className="font-bold text-beige-kem text-xs flex items-center gap-2">
+                          <span className="w-5 h-5 rounded-full bg-burgundy/30 border border-burgundy/50 flex items-center justify-center text-[10px] text-burgundy-ink font-bold">
+                            {index + 1}
+                          </span>
+                          Hạng Vé #{index + 1}: <span className="text-burgundy font-black">{resolvedName}</span>
+                        </span>
+
+                        {createTicketTiers.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveTierItem(tier.id)}
+                            className="text-rose-400 hover:text-rose-300 text-xs font-semibold px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded-lg transition-colors"
+                          >
+                            🗑️ Xóa hạng vé
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Name Preset Selection Chips */}
+                      <div>
+                        <label className="block text-ink-soft mb-1.5 font-semibold text-[11px]">
+                          Tên Hạng Vé 
+                        </label>
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          {[
+                            { key: "Vé Tiêu Chuẩn", label: "Vé Tiêu Chuẩn" },
+                            { key: "Miễn Phí", label: "Miễn Phí" },
+                            { key: "VIP", label: "Vé VIP" },
+                            { key: "custom", label: "Tùy Chỉnh" }
+                          ].map((opt) => (
+                            <button
+                              key={opt.key}
+                              type="button"
+                              onClick={() =>
+                                handleUpdateTierItem(tier.id, { preset: opt.key as any })
+                              }
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                                tier.preset === opt.key
+                                  ? "bg-burgundy text-white border-burgundy shadow-md"
+                                  : "bg-xanh-pho text-beige-kem border-beige-kem/25 hover:border-burgundy/50"
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* If Custom selected, show free-text input */}
+                        {tier.preset === "custom" && (
+                          <div className="mt-2">
+                            <input
+                              type="text"
+                              value={tier.customLabel}
+                              onChange={(e) => handleUpdateTierItem(tier.id, { customLabel: e.target.value })}
+                              placeholder="Nhập tên hạng vé tùy chỉnh (Vd: Vé Early Bird, Vé Student, Vé VVIP...)"
+                              required
+                              className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy rounded-xl p-2.5 text-beige-kem outline-none text-xs"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Price & Capacity Inputs */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-ink-soft mb-1 font-semibold text-[11px]">
+                            Giá Vé (VND) {tier.preset === "Miễn Phí"}
+                          </label>
+                          <input
+                            type="number"
+                            value={tier.preset === "Miễn Phí" ? 0 : tier.price}
+                            onChange={(e) => handleUpdateTierItem(tier.id, { price: Number(e.target.value) })}
+                            step={10000}
+                            min={0}
+                            disabled={tier.preset === "Miễn Phí"}
+                            required
+                            className={`w-full border rounded-xl p-2.5 outline-none font-meta text-xs ${
+                              tier.preset === "Miễn Phí"
+                                ? "bg-xanh-pho/50 border-la-co/40 text-beige-kem cursor-not-allowed opacity-80 font-bold"
+                                : "bg-xanh-pho border-beige-kem/30 text-beige-kem focus:border-burgundy"
+                            }`}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-ink-soft mb-1 font-semibold text-[11px]">
+                            Tổng số vé
+                          </label>
+                          <input
+                            type="number"
+                            value={tier.capacity}
+                            onChange={(e) => handleUpdateTierItem(tier.id, { capacity: Number(e.target.value) })}
+                            min={1}
+                            required
+                            className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy rounded-xl p-2.5 text-beige-kem outline-none font-meta text-xs"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 

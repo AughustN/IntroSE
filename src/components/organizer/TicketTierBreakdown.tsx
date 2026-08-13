@@ -75,7 +75,7 @@ export const TicketTierBreakdown: React.FC<TicketTierBreakdownProps> = ({
                   <td className="py-3 px-4">
                     {isArchived ? (
                       <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] bg-zinc-800 text-zinc-400 border border-zinc-700">
-                        📁 Đã Lưu Trữ (Archived)
+                        Đã Lưu Trữ
                       </span>
                     ) : (
                       <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
