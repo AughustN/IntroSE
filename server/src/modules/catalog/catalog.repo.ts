@@ -178,7 +178,9 @@ export async function getEventDetail(slug: string, db: Db = pool): Promise<Event
    * Null when nobody has rated it — an unrated event is not a zero-star event.
    */
   const ratingRow = await db.query<{ n: string; avg: string | null }>(
-    `SELECT count(*)::text AS n, avg(rating)::text AS avg
+    // Rated rows only. Since 0021 an author's later comments and every reply carry no stars, so a
+    // bare `count(*)` would report an event as rated by more people than voted on it.
+    `SELECT count(*) FILTER (WHERE rating IS NOT NULL)::text AS n, avg(rating)::text AS avg
        FROM event_reviews WHERE event_id = $1 AND status = 'visible'`,
     [r.id],
   );

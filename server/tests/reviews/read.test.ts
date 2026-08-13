@@ -70,6 +70,31 @@ describe('reading reviews', () => {
     expect((await mean()).reviewCount).toBe(1);
   });
 
+  it('reports how the votes fell, not only their mean', async () => {
+    const event = await seedPastEvent();
+    for (const stars of [5, 5, 3]) {
+      const account = await reviewer(event);
+      await write(account.token, event.eventId, stars).expect(200);
+    }
+    // A later comment from one of them carries no stars and must not appear in any bucket.
+    const talker = await reviewer(event);
+    await write(talker.token, event.eventId, 1, 'Một sao.').expect(200);
+    await request(app)
+      .post(`/api/events/${event.eventId}/reviews`)
+      .set(bearer(talker.token))
+      .send({ body: 'Nói thêm câu nữa.' })
+      .expect(200);
+
+    const { summary } = (await request(app).get(`/api/events/${event.eventId}/reviews`).expect(200))
+      .body;
+
+    // [1★, 2★, 3★, 4★, 5★] — and it sums to the number of people, never to the number of comments.
+    expect(summary.distribution).toEqual([1, 0, 1, 0, 2]);
+    expect(summary.reviewCount).toBe(4);
+    expect(summary.commentCount).toBe(5);
+    expect(summary.rating).toBeCloseTo(3.5, 1); // (5+5+3+1)/4
+  });
+
   it('lists newest first and pages without repeating or losing one (FR-012)', async () => {
     const event = await seedPastEvent();
     for (let i = 0; i < 12; i += 1) {
@@ -138,15 +163,19 @@ describe('reading reviews', () => {
       .get(`/api/events/${event.eventId}/reviews`)
       .set(bearer(stranger.token))
       .expect(200);
-    expect(asStranger.body.viewer).toEqual({ canReview: false, reason: 'no_ticket', myReview: null });
+    expect(asStranger.body.viewer).toEqual({
+      canReview: false,
+      reason: 'no_ticket',
+      hasRated: false,
+    });
 
-    const created = await write(eligible.token, event.eventId, 4).expect(200);
+    await write(eligible.token, event.eventId, 4).expect(200);
     const asAuthor = await request(app)
       .get(`/api/events/${event.eventId}/reviews`)
       .set(bearer(eligible.token))
       .expect(200);
-    expect(asAuthor.body.viewer.canReview).toBe(true);
-    expect(asAuthor.body.viewer.myReview.id).toBe(created.body.id);
+    // Still allowed to write — the box stays — but their stars are cast, so it asks for prose only.
+    expect(asAuthor.body.viewer).toEqual({ canReview: true, reason: null, hasRated: true });
     expect(asAuthor.body.reviews[0].mine).toBe(true);
   });
 

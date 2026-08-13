@@ -83,6 +83,106 @@ describe('reporting a review (UC-39)', () => {
   });
 });
 
+/**
+ * The reader's report and the admin's decision, joined up.
+ *
+ * The queue has accepted reports against reviews since feature 004 and resolving one used to close
+ * the report while leaving the comment on the page — the admin was told they had acted when they
+ * had not, and the reader who reported it saw nothing change.
+ */
+describe('acting on a reported review from the queue', () => {
+  async function reportedReview() {
+    const seeded = await eventWithReview();
+    const reader = await registerUser();
+    await request(app)
+      .post(`/api/reviews/${seeded.reviewId}/report`)
+      .set(bearer(reader.token))
+      .send({ reason: 'Nội dung xúc phạm' })
+      .expect(201);
+    const { rows } = await pool.query<{ id: number }>(
+      `SELECT id FROM content_reports WHERE target_type = 'review' AND target_id = $1`,
+      [seeded.reviewId],
+    );
+    return { ...seeded, reportId: rows[0]!.id };
+  }
+
+  it('shows the admin what was written, not just an id', async () => {
+    const { reviewId } = await reportedReview();
+    const admin = await registerUser();
+    await makeAdmin(admin.userId);
+
+    const queue = await request(app)
+      .get('/api/admin/moderation/queue')
+      .set(bearer(admin.token))
+      .expect(200);
+
+    const row = queue.body.reports.find(
+      (r: { targetType: string; targetId: number }) =>
+        r.targetType === 'review' && r.targetId === reviewId,
+    );
+    // Deciding whether a comment comes down means reading the comment.
+    expect(row.targetBody).toBe('Nội dung bị báo cáo.');
+    expect(row.targetAuthor).toBeTruthy();
+    expect(row.reason).toBe('Nội dung xúc phạm');
+  });
+
+  it('takes the comment down when the report is upheld, and audits it', async () => {
+    const { event, reviewId, reportId } = await reportedReview();
+    const admin = await registerUser();
+    await makeAdmin(admin.userId);
+
+    await request(app)
+      .post(`/api/admin/reports/${reportId}/resolve`)
+      .set(bearer(admin.token))
+      .send({ decision: 'remove', reason: 'Xúc phạm người khác' })
+      .expect(200);
+
+    const page = await request(app).get(`/api/events/${event.eventId}/reviews`).expect(200);
+    expect(page.body.reviews).toHaveLength(0);
+    expect(page.body.summary.reviewCount).toBe(0);
+
+    const { rows } = await pool.query<{ status: string }>(
+      'SELECT status FROM event_reviews WHERE id = $1',
+      [reviewId],
+    );
+    // Hidden, not deleted: the report and the audit row keep a subject an admin can still read.
+    expect(rows[0]!.status).toBe('removed');
+
+    const audit = await pool.query(
+      `SELECT 1 FROM audit_logs WHERE action = 'review_removed' AND target_id = $1`,
+      [reviewId],
+    );
+    expect(audit.rows).toHaveLength(1);
+  });
+
+  it('leaves the comment up when the report is dismissed', async () => {
+    const { event, reportId } = await reportedReview();
+    const admin = await registerUser();
+    await makeAdmin(admin.userId);
+
+    await request(app)
+      .post(`/api/admin/reports/${reportId}/dismiss`)
+      .set(bearer(admin.token))
+      .send({ reason: 'Không vi phạm' })
+      .expect(200);
+
+    const page = await request(app).get(`/api/events/${event.eventId}/reviews`).expect(200);
+    expect(page.body.reviews).toHaveLength(1);
+  });
+
+  it('refuses to "flag" a comment — it stays or it goes', async () => {
+    const { reportId } = await reportedReview();
+    const admin = await registerUser();
+    await makeAdmin(admin.userId);
+
+    await request(app)
+      .post(`/api/admin/reports/${reportId}/resolve`)
+      .set(bearer(admin.token))
+      .send({ decision: 'flag', reason: 'Chưa chắc' })
+      .expect(400);
+  });
+});
+
 describe('removing a review as an admin (FR-015)', () => {
   it('hides it, drops it from the aggregate, and records who did it', async () => {
     const { event, reviewId } = await eventWithReview();

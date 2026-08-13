@@ -74,6 +74,21 @@ export interface QueueItem {
   organizer: string;
 }
 
+/** An open report, carrying enough of what was reported for an admin to judge it without leaving. */
+export interface ReportItem {
+  id: number;
+  targetType: "event" | "review";
+  targetId: number;
+  reason: string;
+  createdAt: string;
+  /** The event's title — its own for an event report, the host event's for a review. */
+  targetTitle: string | null;
+  /** Reviews only: what was written, who wrote it, and whether it is still visible. */
+  targetBody: string | null;
+  targetAuthor: string | null;
+  targetStatus: string | null;
+}
+
 export interface Section {
   id: number;
   name: string;
@@ -206,6 +221,21 @@ export const layoutApi = {
 
 export const adminApi = {
   queue: () => authed<QueueItem[]>("/admin/moderation"),
+  /** The open content reports — readers flagging a comment or an event (UC-39). */
+  reports: () =>
+    authed<{ reports: ReportItem[] }>("/admin/moderation/queue").then((all) => all.reports),
+  /** Uphold it: the comment comes down, or the event is flagged/removed, in one transaction. */
+  resolveReport: (id: number, decision: "flag" | "remove", reason: string) =>
+    authed<{ ok: true }>(`/admin/reports/${id}/resolve`, {
+      method: "POST",
+      body: { decision, reason },
+    }),
+  /** Nothing wrong with it: the report closes and the content is untouched. */
+  dismissReport: (id: number, reason?: string) =>
+    authed<{ ok: true }>(`/admin/reports/${id}/dismiss`, {
+      method: "POST",
+      body: { reason: reason ?? null },
+    }),
   approve: (id: number) => authed<{ ok: true }>(`/admin/events/${id}/approve`, { method: "POST" }),
   reject: (id: number, reason: string) =>
     authed<{ ok: true }>(`/admin/events/${id}/reject`, { method: "POST", body: { reason } }),

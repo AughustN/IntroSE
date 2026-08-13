@@ -4,8 +4,8 @@ info:
   version: 1.0.0
   description: >
     UC-18 (rate & review) and the review half of UC-39 (report). Reading is public; writing needs a
-    session and a paid ticket to an event that has already started, re-derived on the server for
-    every write. Review bodies are plain text in both directions — never markup, never escaped in
+    session and a paid ticket to the event — started or not — re-derived on the server for every
+    write. Review bodies are plain text in both directions — never markup, never escaped in
     storage; the renderer encodes at the boundary.
 
 servers:
@@ -47,11 +47,14 @@ paths:
 
     post:
       operationId: submitReview
-      summary: Write or replace your review of an event
+      summary: Post a comment on an event, or a reply under one
       description: >
-        Idempotent per person per event: a second submission edits the first rather than creating a
-        duplicate (UC-18 A2). Enforced by a unique index, so two simultaneous first submissions
-        cannot both succeed.
+        One entry point for three writes, told apart by what the caller already has. With no
+        `parentId`: the caller's first comment about this event must carry `rating` and casts their
+        one vote; every later comment must carry `body` and is stored without stars, whatever
+        `rating` the request sends. With `parentId`: a reply, text only, flattened onto the
+        top-level comment if it aimed at another reply. One *rating* per person per event is held by
+        a partial unique index, so two simultaneous first comments cannot both be rated.
       parameters:
         - name: eventId
           in: path
@@ -69,7 +72,9 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Review" }
         "400":
-          description: Missing or out-of-range rating, or body over the length limit.
+          description: >
+            No rating on a first comment, no text on a later comment or a reply, an out-of-range
+            rating, or a body over the length limit.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -80,16 +85,60 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "403":
           description: >
-            Not eligible. `code` distinguishes the two rules so the reader is told which one they
-            failed: `no_ticket` or `event_not_started`.
+            Not eligible: no paid, non-void ticket to this event. `code` is `no_ticket`. Replies are
+            gated the same way. Whether the event has started is not part of the rule.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
               examples:
                 noTicket:
                   value: { code: no_ticket, message: Bạn cần có vé đã thanh toán cho sự kiện này để đánh giá. }
-                notStarted:
-                  value: { code: event_not_started, message: Sự kiện chưa diễn ra nên chưa thể đánh giá. }
+        "404":
+          description: "`parentId` names no visible comment on this event."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /reviews/{id}/replies:
+    get:
+      operationId: listReplies
+      summary: The rest of one comment's thread
+      description: >
+        Public, like the listing it continues. Oldest first, keyset-paged on the last reply's **id**
+        — not its timestamp, which the JSON carries at millisecond precision against a
+        microsecond-precision column and so cannot address a row exactly. 404 if the comment is
+        missing or hidden, so a removed comment does not hand out its thread through a second door.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: after
+          in: query
+          description: Id of the last reply already on screen. Omit for the start of the thread.
+          schema: { type: integer, format: int64 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+      responses:
+        "200":
+          description: A batch of replies.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [replies, hasMore]
+                properties:
+                  replies:
+                    type: array
+                    items: { $ref: "#/components/schemas/Review" }
+                  hasMore: { type: boolean }
+        "404":
+          description: No such visible comment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /reviews/{id}:
     patch:
@@ -234,29 +283,56 @@ security:
     ReviewInput:
       type: object
       additionalProperties: false
-      required: [rating]
+      description: >
+        Which fields are required depends on rows the server already holds, so nothing here is
+        required by the schema alone: stars on a first comment, text on every later comment and on
+        every reply. `parentId` is accepted on POST only — an edit changes what a comment says,
+        never what it is.
       properties:
         rating:
-          type: integer
+          type: [integer, "null"]
           minimum: 1
           maximum: 5
-          description: Whole stars. Required — text alone is not a review (UC-18 A3).
+          description: >
+            Whole stars, and one vote per person per event. Required on the author's first comment
+            about an event; ignored (stored as null) on every one after it and on every reply.
         body:
           type: [string, "null"]
           maxLength: 2000
           description: >
-            Optional. Sent and stored as the characters the author typed; whitespace-only is treated
-            as absent. Never contains markup, because it is never rendered as any.
+            Sent and stored as the characters the author typed; whitespace-only is treated as
+            absent. Never contains markup, because it is never rendered as any.
+        parentId:
+          type: [integer, "null"]
+          format: int64
+          description: >
+            Post as a reply under this comment. Aimed at a reply, it is flattened onto the top-level
+            comment they are both under — threads are one level deep.
 
     Review:
       type: object
       additionalProperties: false
-      required: [id, eventId, rating, body, author, createdAt, edited]
+      required: [id, eventId, rating, body, parentId, author, createdAt, edited]
       properties:
         id: { type: integer, format: int64 }
         eventId: { type: integer, format: int64 }
-        rating: { type: integer, minimum: 1, maximum: 5 }
+        rating:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 5
+          description: Null on a later comment and on every reply — only the first one carries the vote.
         body: { type: [string, "null"] }
+        parentId:
+          type: [integer, "null"]
+          format: int64
+          description: The comment this answers, or null for one on the wall itself.
+        replyCount:
+          type: integer
+          minimum: 0
+          description: >
+            Visible replies to this comment. Present on a listing's top-level comments. The replies
+            themselves never travel with a listing — the wall is comments, and a thread is opened by
+            the reader who wants it through `GET /reviews/{id}/replies`.
         author:
           oneOf:
             - $ref: "#/components/schemas/ReviewAuthor"
@@ -281,12 +357,27 @@ security:
     ReviewSummary:
       type: object
       additionalProperties: false
-      required: [rating, reviewCount]
+      required: [rating, reviewCount, commentCount]
       properties:
         rating:
           type: [number, "null"]
           description: Mean of visible ratings. **Null when there are none** — an unrated event is not a zero-star one.
-        reviewCount: { type: integer, minimum: 0 }
+        reviewCount:
+          type: integer
+          minimum: 0
+          description: How many people rated it — rated comments only, so it counts votes and not talk.
+        commentCount:
+          type: integer
+          minimum: 0
+          description: Everything visible on the wall, replies included.
+        distribution:
+          type: array
+          minItems: 5
+          maxItems: 5
+          items: { type: integer, minimum: 0 }
+          description: >
+            How the votes fell, as `[1★, 2★, 3★, 4★, 5★]`, summing to `reviewCount`. The mean alone
+            cannot tell a divided audience from an indifferent one.
 
     ReviewPage:
       type: object
@@ -308,18 +399,19 @@ security:
       additionalProperties: false
       description: >
         Present only for a signed-in reader. Returned with the listing so the page can decide in one
-        call whether to show the form, the reader's existing review, or the reason neither applies.
-      required: [canReview]
+        call whether to show the box and what shape it takes.
+      required: [canReview, hasRated]
       properties:
         canReview: { type: boolean }
         reason:
           type: [string, "null"]
-          enum: [no_ticket, event_not_started, null]
-          description: Why `canReview` is false, so the interface can explain rather than just omit.
-        myReview:
-          oneOf:
-            - $ref: "#/components/schemas/Review"
-            - type: "null"
+          enum: [no_ticket, null]
+          description: Why `canReview` is false. The interface omits the form rather than printing this.
+        hasRated:
+          type: boolean
+          description: >
+            Their stars are already cast, so the box asks for text alone and the next comment is
+            stored without a rating.
 
     Error:
       type: object

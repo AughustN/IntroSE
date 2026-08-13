@@ -55,13 +55,13 @@ describe('who may write a review', () => {
     await post(token, event.eventId, { rating: 5 }).expect(403);
   });
 
-  it('refuses an event that has not started (FR-003a)', async () => {
+  it('accepts a ticket holder for an event that has not started yet (FR-003a)', async () => {
     const event = await seedFutureEvent();
     const { token, userId } = await registerUser();
     await giveTicket(userId, event);
 
-    const res = await post(token, event.eventId, { rating: 5 }).expect(403);
-    expect(res.body.error ?? res.body.code).toBe('event_not_started');
+    const res = await post(token, event.eventId, { rating: 5 }).expect(200);
+    expect(res.body.rating).toBe(5);
   });
 
   it('refuses an unauthenticated caller and stores nothing', async () => {
@@ -117,41 +117,209 @@ describe('what a review may contain', () => {
   });
 });
 
-describe('one review per person per event (FR-004)', () => {
-  it('edits rather than duplicating on a second submission', async () => {
+/**
+ * Many comments, one vote.
+ *
+ * 0020 allowed one review per person and upserted a second into the first, which silently
+ * overwrote whatever they had said. Talking as often as you like is now the point of the section;
+ * what stays scarce is the rating, so the average still counts people and not remarks.
+ */
+describe('many comments, one rating per person per event (FR-004)', () => {
+  it('keeps a second comment as a comment, not as an edit of the first', async () => {
     const event = await seedPastEvent();
     const { token, userId } = await registerUser();
     await giveTicket(userId, event);
 
-    await post(token, event.eventId, { rating: 2, body: 'Tạm được.' }).expect(200);
-    const second = await post(token, event.eventId, { rating: 5, body: 'Nghĩ lại thấy hay.' }).expect(200);
+    const first = await post(token, event.eventId, { rating: 2, body: 'Tạm được.' }).expect(200);
+    const second = await post(token, event.eventId, { body: 'Nghĩ lại thấy hay.' }).expect(200);
 
-    expect(second.body.rating).toBe(5);
-    expect(second.body.edited).toBe(true);
+    expect(second.body.id).not.toBe(first.body.id);
+    expect(first.body.rating).toBe(2);
+    // The stars are already cast, so the later comment carries none and the average cannot move.
+    expect(second.body.rating).toBeNull();
+    expect(second.body.edited).toBe(false);
+
+    const page = await request(app).get(`/api/events/${event.eventId}/reviews`).expect(200);
+    expect(page.body.reviews).toHaveLength(2);
+    expect(page.body.summary.rating).toBe(2);
+    expect(page.body.summary.reviewCount).toBe(1);
+    expect(page.body.summary.commentCount).toBe(2);
+  });
+
+  it('drops stars sent with a later comment rather than counting them twice', async () => {
+    const event = await seedPastEvent();
+    const { token, userId } = await registerUser();
+    await giveTicket(userId, event);
+
+    await post(token, event.eventId, { rating: 1, body: 'Chán.' }).expect(200);
+    const second = await post(token, event.eventId, { rating: 5, body: 'Đổi ý.' }).expect(200);
+
+    expect(second.body.rating).toBeNull();
+    const page = await request(app).get(`/api/events/${event.eventId}/reviews`).expect(200);
+    expect(page.body.summary.rating).toBe(1);
+  });
+
+  it('requires stars on the first comment and refuses an empty later one', async () => {
+    const event = await seedPastEvent();
+    const { token, userId } = await registerUser();
+    await giveTicket(userId, event);
+
+    await post(token, event.eventId, { body: 'Không sao nào.' }).expect(400);
+    await post(token, event.eventId, { rating: 4 }).expect(200);
+    // Rated already: a second comment with neither stars nor text would be an empty row.
+    await post(token, event.eventId, {}).expect(400);
+  });
+
+  it('leaves exactly one rated row when two first submissions arrive together (SC-003)', async () => {
+    const event = await seedPastEvent();
+    const { token, userId } = await registerUser();
+    await giveTicket(userId, event);
+
+    // A read-then-insert would let both find nothing and both insert a rated row. The partial
+    // unique index is what makes this deterministic, and only a concurrent case tells them apart.
+    await Promise.all([
+      post(token, event.eventId, { rating: 4, body: 'Một.' }),
+      post(token, event.eventId, { rating: 5, body: 'Hai.' }),
+    ]);
+
     const { rows } = await pool.query<{ n: string }>(
-      'SELECT count(*)::text AS n FROM event_reviews WHERE event_id = $1',
+      `SELECT count(*)::text AS n FROM event_reviews
+        WHERE event_id = $1 AND rating IS NOT NULL`,
       [event.eventId],
     );
     expect(rows[0]!.n).toBe('1');
   });
+});
 
-  it('leaves exactly one row when two first submissions arrive together (SC-003)', async () => {
+/** Replies: the same wall, one level deep, behind the same ticket. */
+describe('replying to a comment', () => {
+  it('hangs a reply under its parent and leaves the score alone', async () => {
+    const event = await seedPastEvent();
+    const author = await registerUser();
+    await giveTicket(author.userId, event);
+    const answerer = await registerUser();
+    await giveTicket(answerer.userId, event);
+
+    const parent = await post(author.token, event.eventId, { rating: 5, body: 'Đáng đi.' }).expect(200);
+    const reply = await post(answerer.token, event.eventId, {
+      body: 'Đồng ý luôn.',
+      parentId: parent.body.id,
+    }).expect(200);
+
+    expect(reply.body.parentId).toBe(parent.body.id);
+    expect(reply.body.rating).toBeNull();
+
+    const page = await request(app).get(`/api/events/${event.eventId}/reviews`).expect(200);
+    // One comment on the wall and a count beside it — a reply is not a second entry on the wall,
+    // and it does not ride along with one either.
+    expect(page.body.reviews).toHaveLength(1);
+    expect(page.body.reviews[0].replies).toBeUndefined();
+    expect(page.body.reviews[0].replyCount).toBe(1);
+
+    const thread = await request(app).get(`/api/reviews/${parent.body.id}/replies`).expect(200);
+    expect(thread.body.replies.map((r: { body: string }) => r.body)).toEqual(['Đồng ý luôn.']);
+    expect(page.body.summary.rating).toBe(5);
+    expect(page.body.summary.reviewCount).toBe(1);
+    expect(page.body.summary.commentCount).toBe(2);
+  });
+
+  it('flattens a reply to a reply onto the comment they are both under', async () => {
     const event = await seedPastEvent();
     const { token, userId } = await registerUser();
     await giveTicket(userId, event);
 
-    // A read-then-insert would let both find nothing and both insert. The unique index is what
-    // makes this deterministic, and only a concurrent case can tell the two designs apart.
-    await Promise.all([
-      post(token, event.eventId, { rating: 4 }),
-      post(token, event.eventId, { rating: 5 }),
-    ]);
+    const parent = await post(token, event.eventId, { rating: 4, body: 'Gốc.' }).expect(200);
+    const first = await post(token, event.eventId, { body: 'Trả lời.', parentId: parent.body.id }).expect(200);
+    const nested = await post(token, event.eventId, { body: 'Trả lời của trả lời.', parentId: first.body.id }).expect(200);
 
+    expect(nested.body.parentId).toBe(parent.body.id);
+    const page = await request(app).get(`/api/events/${event.eventId}/reviews`).expect(200);
+    expect(page.body.reviews[0].replyCount).toBe(2);
+  });
+
+  it('refuses an empty reply, a reply to nothing, and a reply from somebody with no ticket', async () => {
+    const event = await seedPastEvent();
+    const author = await registerUser();
+    await giveTicket(author.userId, event);
+    const parent = await post(author.token, event.eventId, { rating: 4, body: 'Gốc.' }).expect(200);
+
+    await post(author.token, event.eventId, { parentId: parent.body.id }).expect(400);
+    await post(author.token, event.eventId, { body: 'Ai đó?', parentId: 999_999 }).expect(404);
+
+    const stranger = await registerUser();
+    const refused = await post(stranger.token, event.eventId, {
+      body: 'Cho tôi nói với.',
+      parentId: parent.body.id,
+    }).expect(403);
+    expect(refused.body.error ?? refused.body.code).toBe('no_ticket');
+  });
+
+  it('keeps every reply off the listing and pages the thread on request', async () => {
+    const event = await seedPastEvent();
+    const { token, userId } = await registerUser();
+    await giveTicket(userId, event);
+
+    const parent = await post(token, event.eventId, { rating: 4, body: 'Gốc.' }).expect(200);
+    for (let i = 1; i <= 5; i += 1) {
+      await post(token, event.eventId, { body: `Trả lời ${i}`, parentId: parent.body.id }).expect(200);
+    }
+
+    const page = await request(app).get(`/api/events/${event.eventId}/reviews`).expect(200);
+    const listed = page.body.reviews[0];
+    // A count and nothing else: one argument cannot decide the size of everybody else's page.
+    expect(listed.replies).toBeUndefined();
+    expect(listed.replyCount).toBe(5);
+
+    const first = await request(app)
+      .get(`/api/reviews/${parent.body.id}/replies?limit=2`)
+      .expect(200);
+    expect(first.body.replies.map((r: { body: string }) => r.body)).toEqual(['Trả lời 1', 'Trả lời 2']);
+    expect(first.body.hasMore).toBe(true);
+
+    // The cursor is the last reply's id — a millisecond-truncated timestamp cannot address a
+    // microsecond-precision column, and every batch used to repeat its first reply because of it.
+    const next = await request(app)
+      .get(`/api/reviews/${parent.body.id}/replies?limit=2&after=${first.body.replies[1].id}`)
+      .expect(200);
+    expect(next.body.replies.map((r: { body: string }) => r.body)).toEqual(['Trả lời 3', 'Trả lời 4']);
+    expect(next.body.hasMore).toBe(true);
+
+    const last = await request(app)
+      .get(`/api/reviews/${parent.body.id}/replies?limit=2&after=${next.body.replies[1].id}`)
+      .expect(200);
+    expect(last.body.replies.map((r: { body: string }) => r.body)).toEqual(['Trả lời 5']);
+    expect(last.body.hasMore).toBe(false);
+  });
+
+  it('refuses to hand out the thread of a comment that is not visible', async () => {
+    const event = await seedPastEvent();
+    const { token, userId } = await registerUser();
+    await giveTicket(userId, event);
+    const parent = await post(token, event.eventId, { rating: 4, body: 'Gốc.' }).expect(200);
+    await post(token, event.eventId, { body: 'Dưới nó.', parentId: parent.body.id }).expect(200);
+
+    await pool.query(`UPDATE event_reviews SET status = 'removed' WHERE id = $1`, [parent.body.id]);
+
+    await request(app).get(`/api/reviews/${parent.body.id}/replies`).expect(404);
+    await request(app).get(`/api/reviews/999999/replies`).expect(404);
+  });
+
+  it('takes the thread with the comment when its author deletes it', async () => {
+    const event = await seedPastEvent();
+    const { token, userId } = await registerUser();
+    await giveTicket(userId, event);
+
+    const parent = await post(token, event.eventId, { rating: 3, body: 'Gốc.' }).expect(200);
+    await post(token, event.eventId, { body: 'Dưới nó.', parentId: parent.body.id }).expect(200);
+
+    await request(app).delete(`/api/reviews/${parent.body.id}`).set(bearer(token)).expect(204);
+
+    // A reply reads as nonsense without what it answers, so the parent key cascades.
     const { rows } = await pool.query<{ n: string }>(
       'SELECT count(*)::text AS n FROM event_reviews WHERE event_id = $1',
       [event.eventId],
     );
-    expect(rows[0]!.n).toBe('1');
+    expect(rows[0]!.n).toBe('0');
   });
 });
 

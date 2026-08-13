@@ -2,6 +2,8 @@ import { err } from '../../http.js';
 import type { Db } from '../../db/pool.js';
 import { withTransaction } from '../../db/pool.js';
 import { insertAudit } from './audit.js';
+// The reviews module owns what a review row may become; moderation only decides that it should.
+import { setStatus as setReviewStatus } from '../reviews/reviews.repo.js';
 import { eventQueue, insertNotification, listCategories, listFeatured, deleteCategory, insertCategory, lockEvent, lockOrganizer, organizerQueue, reportQueue, replaceFeatured, resolveReport, updateCategory, updateEvent, updateOrganizer } from './admin.repo.js';
 
 const categoryCode = (label: string) => `custom_${label.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'category'}_${Date.now()}`;
@@ -103,9 +105,25 @@ export async function resolveReportedEvent(actorUserId: number, reportId: number
     const report = await resolveReport(reportId, decision === 'flag' ? 'flagged' : 'resolved', reason, actorUserId, db);
     if (!report) throw err.conflict('moderation_conflict');
     // The decision must actually bite the target, in this same transaction (FR-015/016, FR-024).
-    // Review removal (FR-019) waits on the review schema — reports against reviews only record here.
     if (report.target_type === 'event') {
       await moderateEventIn(db, actorUserId, report.target_id, decision === 'flag' ? 'flagged' : 'removed', reason);
+    } else if (report.target_type === 'review') {
+      /*
+       * A comment has one outcome — it stays or it goes. There is no "flagged" state for one, and
+       * silently resolving the report while leaving the comment up would tell the admin they had
+       * acted when they had not.
+       *
+       * Hidden, not deleted: the report and the audit row must keep a subject an admin can still
+       * read afterwards (FR-019, SEC-09). The transaction is what makes the removal and its audit
+       * entry inseparable.
+       */
+      if (decision !== 'remove') {
+        throw err.badRequest('validation_failed', 'Bình luận chỉ có thể gỡ hoặc bỏ qua báo cáo.');
+      }
+      if (!(await setReviewStatus(report.target_id, 'removed', db))) {
+        throw err.notFound('not_found', 'Không tìm thấy bình luận này.');
+      }
+      await insertAudit(db, { actorUserId, action: 'review_removed', targetType: 'review', targetId: report.target_id, outcome: 'applied', detail: { reason, reportId } });
     }
     await insertAudit(db, { actorUserId, action: `report_${decision}`, targetType: 'report', targetId: reportId, outcome: 'applied', detail: { reason, targetType: report.target_type, targetId: report.target_id } });
     return { ok: true };

@@ -10,8 +10,29 @@ export async function eventQueue(db: Db = pool) {
   return (await db.query(`SELECT e.id, e.slug, e.title, e.status, e.moderation_status AS moderation, o.display_name AS organizer, e.review_note AS "reviewNote", e.created_at AS "createdAt" FROM events e JOIN organizers o ON o.id = e.organizer_id WHERE e.moderation_status IN ('pending_review', 'flagged', 'removed') ORDER BY e.created_at`)).rows;
 }
 
+/*
+ * The open reports, each carrying enough of what was reported to be judged on the spot.
+ *
+ * A queue of ids and reasons is not reviewable: deciding whether a comment should come down means
+ * reading the comment, and an admin who has to go and find it on the event page will either guess
+ * or not act. The two joins are `LEFT` because a target may since have been deleted by its own
+ * author, and a report whose subject is gone still has to be dismissible rather than invisible.
+ */
 export async function reportQueue(db: Db = pool) {
-  return (await db.query(`SELECT id, target_type AS "targetType", target_id AS "targetId", reason, status, created_at AS "createdAt" FROM content_reports WHERE status = 'open' ORDER BY created_at`)).rows;
+  return (await db.query(`
+    SELECT c.id, c.target_type AS "targetType", c.target_id AS "targetId", c.reason, c.status,
+           c.created_at AS "createdAt",
+           COALESCE(e.title, ev.title) AS "targetTitle",
+           r.body AS "targetBody",
+           r.status AS "targetStatus",
+           u.nickname AS "targetAuthor"
+      FROM content_reports c
+      LEFT JOIN events e ON c.target_type = 'event' AND e.id = c.target_id
+      LEFT JOIN event_reviews r ON c.target_type = 'review' AND r.id = c.target_id
+      LEFT JOIN users u ON u.id = r.user_id
+      LEFT JOIN events ev ON ev.id = r.event_id
+     WHERE c.status = 'open'
+     ORDER BY c.created_at`)).rows;
 }
 
 export async function lockOrganizer(id: number, db: Db) {
