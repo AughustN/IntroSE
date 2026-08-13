@@ -83,7 +83,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
           onClick={onBack}
           className="font-meta text-body text-ink-soft transition hover:text-beige-kem"
         >
-          Quay lại
+          Quay về trang chủ
         </button>
         <h2 className="font-display text-title-m font-black text-beige-kem">Ví TixHub</h2>
       </div>

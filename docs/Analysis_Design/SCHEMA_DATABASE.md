@@ -1014,6 +1014,15 @@ Refunds go to the **wallet**, per **ticket**, **once only** — rationale in [D3
 - When inventory frees, notify the earliest-joined waiters by `joined_at` — the first **5** if the list holds more than 5, otherwise all of them — with a `waitlist_open` notification; **no seat is reserved** — they race to buy.
 - `status`: `waiting → notified → converted` (bought) or `expired` (showtime started). `notified` is not terminal: a waiter who loses the race stays eligible and keeps `joined_at` priority at the next release, so order by `joined_at` regardless of status. `notified_at` records the most recent notification, not a one-shot burn.
 
+**As built (feature 011).** The table and its indexes are unchanged; what follows records the decisions the implementation settled:
+
+- **Open** means `status IN ('waiting','notified')`. That pair is what the cap of 10 counts, what a position counts over, what the notifier reads, and what leaving deletes — a notified waiter still holds one of the ten places.
+- **Position is derived, never stored**: `count(open entries of the same (showtime, tier) with an earlier joined_at) + 1`, computed per read. So a departure moves everyone behind up with no rewrite, and two rows can never both claim third place. `idx_waitlists_open` already serves the count.
+- **Availability is judged at the joined scope**, by one shared function used by both the join gate and the release notifier — a tier join needs that tier exhausted, an any-tier join needs every tier of the showtime exhausted. The join route previously ran its own showtime-wide test, which refused a sold-out tier whenever a sibling tier still sold (contradicting UC-09 A2).
+- **`converted`** is written inside the checkout transaction that issues the tickets, so a buyer never holds both a ticket and a place in the queue for it. It closes the buyer's place for each tier purchased and their any-tier place for that showtime.
+- **`expired`** is swept by the notification worker's existing 15-minute tick, not a scheduler of its own. Lateness is invisible: the notifier already refuses to notify a showtime that has started.
+- `waitlist_open` notifications carry `event_id`, so the in-app list can lead back to the event without trusting `payload`. Their `dedupe_key` deliberately includes a timestamp, because re-notification is required.
+
 ## SEO
 
 Each event should have:

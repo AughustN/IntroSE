@@ -1,0 +1,222 @@
+openapi: 3.1.0
+info:
+  title: TixHub — Waitlist & in-app notifications (feature 011, UC-17 + UC-19)
+  version: 1.0.0
+  description: >
+    Mirrors shared/waitlist/types.ts and shared/notifications/types.ts, which are the single
+    declaration of these payloads for both server and client. Every path below is mounted on the
+    existing notification router, which applies requireAuth to all of them — there is no anonymous
+    access to any waitlist or notification data.
+
+servers:
+  - url: /api
+
+security:
+  - sessionCookie: []
+
+paths:
+  /waitlists:
+    post:
+      summary: Join the waitlist of a sold-out scope
+      description: >
+        Joins the queue for one ticket tier, or for the whole showtime when ticketTierId is omitted
+        or null. Refused unless the joined scope itself is exhausted: a tier join needs that tier
+        sold out, an any-tier join needs every tier of the showtime sold out. Idempotent — a caller
+        already in the queue gets their existing entry back with 200.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WaitlistJoinInput' }
+      responses:
+        '201':
+          description: Entry created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WaitlistJoinResult' }
+        '200':
+          description: Caller was already in this queue; existing entry returned
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WaitlistJoinResult' }
+        '400':
+          description: validation_failed — tier does not belong to this showtime
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '401': { description: Not signed in }
+        '404':
+          description: showtime_not_found — unknown, already started, or cancelled
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '409':
+          description: >
+            tickets_available — stock exists in the joined scope, buy instead (UC-17 A3);
+            or waitlist_full — the queue already holds 10 open entries (UC-17 A2).
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+    get:
+      summary: The caller's own open waitlist entries
+      description: >
+        Open entries only (waiting or notified), newest queue first, each carrying its live
+        position. Filter to one showtime to drive the controls on an event page.
+      parameters:
+        - in: query
+          name: showtimeId
+          required: false
+          schema: { type: integer, format: int64, minimum: 1 }
+      responses:
+        '200':
+          description: The caller's entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/WaitlistEntry' }
+        '401': { description: Not signed in }
+
+  /waitlists/{id}:
+    delete:
+      summary: Leave a waitlist (UC-17 A4)
+      description: >
+        Removes the caller's own entry. Entries behind it move up a position automatically, since
+        position is derived from joined_at and never stored. An entry belonging to another account
+        is indistinguishable from one that does not exist.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+      responses:
+        '204': { description: Removed }
+        '401': { description: Not signed in }
+        '404':
+          description: waitlist_entry_not_found — unknown entry, or not the caller's
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  /notifications:
+    get:
+      summary: The caller's in-app notifications
+      description: Newest first, capped at 50. Unread ones carry readAt = null.
+      responses:
+        '200':
+          description: Notification list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/NotificationItem' }
+        '401': { description: Not signed in }
+
+  /notifications/{id}/read:
+    post:
+      summary: Mark one notification read
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+      responses:
+        '204': { description: Marked read, or already was }
+        '401': { description: Not signed in }
+        '404':
+          description: notification_not_found — unknown, or not the caller's
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  /notifications/read-all:
+    post:
+      summary: Mark every unread notification read
+      responses:
+        '200':
+          description: How many rows changed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [updated]
+                properties:
+                  updated: { type: integer, minimum: 0 }
+        '401': { description: Not signed in }
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: tix_access
+
+  schemas:
+    WaitlistStatus:
+      type: string
+      enum: [waiting, notified, expired, converted]
+      description: >
+        waiting and notified are the open states — both count against the cap of 10, both hold a
+        position, both are notified in joined_at order. notified is not terminal (UC-17 A5).
+
+    WaitlistEntry:
+      type: object
+      required: [id, showtimeId, ticketTierId, status, position, joinedAt, notifiedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        showtimeId: { type: integer, format: int64 }
+        ticketTierId:
+          type: [integer, 'null']
+          format: int64
+          description: null means the entry covers any tier of the showtime.
+        status: { $ref: '#/components/schemas/WaitlistStatus' }
+        position:
+          type: integer
+          minimum: 1
+          description: 1-based place among open entries of this queue, ordered by joinedAt. Derived, never stored.
+        joinedAt: { type: string, format: date-time }
+        notifiedAt:
+          type: [string, 'null']
+          format: date-time
+          description: Most recent notification, not a one-shot burn.
+
+    WaitlistJoinInput:
+      type: object
+      required: [showtimeId]
+      properties:
+        showtimeId: { type: integer, format: int64, minimum: 1 }
+        ticketTierId:
+          type: [integer, 'null']
+          format: int64
+          minimum: 1
+          description: Omit or send null to queue for any tier of the showtime.
+
+    WaitlistJoinResult:
+      type: object
+      required: [entry, existing]
+      properties:
+        entry: { $ref: '#/components/schemas/WaitlistEntry' }
+        existing:
+          type: boolean
+          description: true when the caller was already queued and nothing was created (UC-17 A1).
+
+    NotificationType:
+      type: string
+      enum:
+        [order_confirmed, ticket_resend, reminder_7d, reminder_1d, event_changed, event_cancelled, waitlist_open, announcement]
+
+    NotificationItem:
+      type: object
+      required: [id, type, title, body, payload, readAt, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        type: { $ref: '#/components/schemas/NotificationType' }
+        title: { type: string }
+        body: { type: string }
+        payload:
+          type: object
+          additionalProperties: true
+          description: For waitlist_open — eventTitle and showtimeId.
+        eventSlug:
+          type: [string, 'null']
+          description: Resolved server-side from event_id so the row can link to the event page.
+        readAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string, description: Machine-readable code, e.g. waitlist_full }
+        message: { type: string, description: Vietnamese sentence safe to show the user }

@@ -24,7 +24,7 @@ export default function LegalPage({ title, content, onBack }: LegalPageProps) {
               className="inline-flex items-center gap-2 text-eyebrow font-medium text-beige-kem/70 transition hover:text-beige-kem"
             >
               <ArrowLeft className="h-4 w-4" />
-              Quay lại Trang chủ
+              Quay về trang chủ
             </button>
           )}
           <h1 className="font-display text-title-m font-black tracking-tight text-beige-kem sm:text-title-m lg:text-title-l">

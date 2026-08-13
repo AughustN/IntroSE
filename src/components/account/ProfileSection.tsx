@@ -10,7 +10,6 @@ import { authClient } from "../../services/authClient";
 import { errorMessage } from "./errors";
 import {
   AvatarWithBadge,
-  Badge,
   EditButton,
   Field,
   FieldGrid,
@@ -146,7 +145,7 @@ export default function ProfileSection({ me, onSaved, onError, onDirtyChange }: 
   return (
     <div className="space-y-4">
       {/* Summary: who this is, at a glance. The old screen never showed the email at all. */}
-      <section className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-5 shadow-black/20 sm:p-6">
+      <section className="ticket-corners bg-beige-kem/[0.05] p-5 sm:p-6">
         <div className="flex flex-wrap items-center gap-5">
           <AvatarWithBadge
             url={shownAvatar}
@@ -286,18 +285,6 @@ export default function ProfileSection({ me, onSaved, onError, onDirtyChange }: 
             <Field label="Email" value={me.email} />
             <Field label="Hình thức đăng nhập" value={PROVIDER_LABEL[me.provider]} />
             <Field label="Quyền" value={roleLabel(me)} />
-            <Field
-              label="Trạng thái"
-              value={
-                me.status === "active" ? (
-                  <Badge tone="good">Hoạt động</Badge>
-                ) : (
-                  <Badge tone="warn" icon={<AlertTriangle className="h-3 w-3" aria-hidden />}>
-                    Bị đình chỉ
-                  </Badge>
-                )
-              }
-            />
           </FieldGrid>
         )}
       </InfoCard>

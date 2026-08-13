@@ -52,11 +52,17 @@ function Stepper({ current }: { current: 0 | 1 | 2 }) {
           <li key={label} className="flex flex-1 items-center gap-2">
             <span
               aria-current={active ? "step" : undefined}
+              /*
+               * Done is the page's ink inverted, the way a chosen row is marked in every rail in
+               * this app; the step being waited on is burgundy, the colour that commits. Neither
+               * used to be: they were a lavender and a peach lozenge, two fills nothing else on the
+               * site paints at full strength.
+               */
               className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border font-meta text-meta font-bold ${
                 done
-                  ? "border-la-co bg-la-co text-on-tint"
+                  ? "border-beige-kem bg-beige-kem text-xanh-pho"
                   : active
-                    ? "border-cam-dat bg-cam-dat text-on-tint"
+                    ? "border-burgundy bg-burgundy text-white"
                     : "border-beige-kem/25 text-beige-kem/70"
               }`}
             >
@@ -71,7 +77,7 @@ function Stepper({ current }: { current: 0 | 1 | 2 }) {
             </span>
             {i < steps.length - 1 && (
               <span
-                className={`hidden h-0.5 flex-1 sm:block ${done ? "bg-la-co" : "bg-beige-kem/30"}`}
+                className={`hidden h-0.5 flex-1 sm:block ${done ? "bg-beige-kem/60" : "bg-beige-kem/30"}`}
               />
             )}
           </li>
@@ -243,7 +249,7 @@ export default function OrganizerSection({
           <Field label="Ngày gửi đơn" value={formatDate(latest.applied_at)} />
           <Field label="Mô tả" value={latest.description} full />
         </FieldGrid>
-        <div className="mt-5 flex items-start gap-3 rounded-xl border-2 border-beige-kem bg-cam-dat p-4">
+        <div className="mt-5 flex items-start gap-3 border-l-2 border-beige-kem/40 bg-beige-kem/[0.06] p-4">
           <Clock className="mt-0.5 h-4 w-4 shrink-0 text-ink-soft" aria-hidden />
           <p className="text-eyebrow leading-5 text-beige-kem/80">
             Bạn không cần làm gì thêm. Khi được duyệt, mục này sẽ mở ra trang quản lý sự kiện. Trong

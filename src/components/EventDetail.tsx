@@ -24,6 +24,8 @@ import {
 } from "./booking/BookingChrome";
 import { formatVnd } from "../services/currency";
 import { aiClient } from "../services/aiClient";
+import { WaitlistError, waitlistClient, type WaitlistEntry } from "../services/waitlistClient";
+import WaitlistControl from "./WaitlistControl";
 
 export interface TierSelection {
   tierId: string;
@@ -67,6 +69,15 @@ interface EventDetailProps {
   ) => void;
   /** A hold round trip is in flight; the steppers are inert so two presses cannot race. */
   holdBusy: boolean;
+  /**
+   * Run something only for a signed-in reader, asking them to sign in first if they are not.
+   *
+   * The waitlist needs it because a place in a queue belongs to an account — unlike browsing, and
+   * unlike the steppers, which hold against a session the parent already established.
+   */
+  onRequireSignIn: (action: () => void) => void;
+  /** Something worth saying out loud — a refused join, a place taken, a place given up. */
+  onNotice: (tone: "ok" | "error", message: string) => void;
   /** Milliseconds left on the general-admission hold this screen now owns. */
   holdRemainingMs: number;
 }
@@ -123,6 +134,8 @@ export default function EventDetail({
   onAdjustQuantity,
   holdBusy,
   holdRemainingMs,
+  onRequireSignIn,
+  onNotice,
 }: EventDetailProps) {
   const isSeated = event.eventType === "seated";
 
@@ -212,6 +225,13 @@ export default function EventDetail({
   // `finished` joins the other two: the event is still readable, but nothing on it is buyable.
   const eventUnavailable =
     event.status === "sold_out" || event.status === "finished" || event.status === "cancelled";
+  /**
+   * Over for good, as opposed to merely out of stock.
+   *
+   * The distinction is what the waitlist turns on. "Sold out" is the *reason a queue exists*; a
+   * cancelled or finished event has nothing to wait for, and no release can ever come.
+   */
+  const eventClosed = event.status === "finished" || event.status === "cancelled";
 
   /**
    * Live tier availability for the selected showtime (US3): when anyone reserves or releases a
@@ -312,6 +332,123 @@ export default function EventDetail({
     );
   };
 
+  /*
+   * ── The waitlist (UC-17) ──────────────────────────────────────────────────────────────────
+   *
+   * The reader's own places in this showtime's queues, keyed the way the server scopes them: a
+   * tier id, or `any` for the queue that covers the whole showtime. Loaded once per showtime and
+   * per session, because a place is an account's, so a signed-out reader has none to load.
+   */
+  /*
+   * Carries the showtime it was loaded for, rather than being emptied when the reader moves to
+   * another one. Clearing it would mean writing state from inside the effect that loads it, and a
+   * stale map read through `entryFor` below is indistinguishable from an empty one anyway.
+   */
+  const [myWaitlist, setMyWaitlist] = useState<{
+    showtimeId: number | null;
+    entries: Record<string, WaitlistEntry>;
+  }>({ showtimeId: null, entries: {} });
+  const [waitlistBusy, setWaitlistBusy] = useState<string | null>(null);
+
+  const waitlistKey = (tierId: number | null) => (tierId === null ? "any" : String(tierId));
+
+  /** This reader's place in one queue of the *selected* showtime, or null. */
+  const entryFor = (tierId: number | null): WaitlistEntry | null => {
+    if (!selectedSlot || myWaitlist.showtimeId !== selectedSlot.showtimeId) return null;
+    return myWaitlist.entries[waitlistKey(tierId)] ?? null;
+  };
+
+  useEffect(() => {
+    const showtimeId = selectedSlot?.showtimeId;
+    if (!isSignedIn || !showtimeId) return;
+    let cancelled = false;
+    waitlistClient
+      .listMine(showtimeId)
+      .then((entries) => {
+        if (cancelled) return;
+        const next: Record<string, WaitlistEntry> = {};
+        for (const entry of entries) next[waitlistKey(entry.ticketTierId)] = entry;
+        setMyWaitlist({ showtimeId, entries: next });
+      })
+      // A queue that cannot be read is not worth an alarm on a page whose job is selling tickets:
+      // the controls simply offer joining, and the server refuses a duplicate harmlessly.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn, selectedSlot?.showtimeId]);
+
+  const joinWaitlist = (ticketTierId: number | null) => {
+    const showtimeId = selectedSlot?.showtimeId;
+    if (!showtimeId) return;
+    onRequireSignIn(() => {
+      const key = waitlistKey(ticketTierId);
+      setWaitlistBusy(key);
+      waitlistClient
+        .join({ showtimeId, ticketTierId })
+        .then((result) => {
+          setMyWaitlist((current) => ({
+            showtimeId,
+            entries: {
+              ...(current.showtimeId === showtimeId ? current.entries : {}),
+              [key]: result.entry,
+            },
+          }));
+          onNotice(
+            "ok",
+            result.existing
+              ? `Bạn đã ở trong danh sách chờ, vị trí ${result.entry.position}.`
+              : `Đã vào danh sách chờ — vị trí ${result.entry.position}. Chúng tôi sẽ báo khi có vé.`,
+          );
+        })
+        .catch((error: unknown) => {
+          const code = error instanceof WaitlistError ? error.code : "";
+          // Stock came back between the page being drawn and the button being pressed. The reader
+          // does not want a queue any more — they want the tickets (UC-17 A3).
+          if (code === "tickets_available") {
+            onNotice("ok", "Vé đã có lại! Bạn có thể mua ngay bên dưới.");
+          } else {
+            onNotice(
+              "error",
+              error instanceof Error ? error.message : "Không vào được danh sách chờ.",
+            );
+          }
+        })
+        .finally(() => setWaitlistBusy(null));
+    });
+  };
+
+  const leaveWaitlist = (ticketTierId: number | null) => {
+    const key = waitlistKey(ticketTierId);
+    const entry = entryFor(ticketTierId);
+    if (!entry) return;
+    setWaitlistBusy(key);
+    waitlistClient
+      .leave(entry.id)
+      .then(() => {
+        setMyWaitlist((current) => {
+          const entries = { ...current.entries };
+          delete entries[key];
+          return { ...current, entries };
+        });
+        onNotice("ok", "Đã rời danh sách chờ.");
+      })
+      .catch((error: unknown) =>
+        onNotice("error", error instanceof Error ? error.message : "Không rời được danh sách chờ."),
+      )
+      .finally(() => setWaitlistBusy(null));
+  };
+
+  /**
+   * Nothing on this showtime can be bought, and something might free up — so the queue is offered.
+   *
+   * Guarded on `eventClosed`, not on `eventUnavailable`: the latter counts `sold_out`, which is
+   * precisely the state this control exists for. Guarding on it meant a sold-out event — the only
+   * kind anybody would ever want to queue for — showed a dead "Hết vé" button and no way in.
+   */
+  const showtimeSoldOut =
+    !eventClosed && (event.status === "sold_out" || Boolean(selectedSlot?.soldOut));
+
   const handlePrimaryAction = () => {
     if (!selectedSlot) return;
     // The showtime id is what the hold API locks against — carry it, not just the display strings.
@@ -322,11 +459,26 @@ export default function EventDetail({
     else onProceedToCheckout();
   };
 
+  /*
+   * A disabled button has to say *why* it is disabled.
+   *
+   * "Chưa thể đặt vé" covered sold out, cancelled and finished alike — three different pieces of
+   * news in one sentence that says none of them, on the one control a reader looks at to find out.
+   * The event's own status already has a word for each, printed on the card they arrived from, so
+   * the button prints the same word.
+   *
+   * A slot that is gone on an event still listed as bookable gets it too: the strip above says
+   * "Hết vé" against that time, and the button must not go on offering to continue.
+   */
   const primaryLabel = eventUnavailable
-    ? "Chưa thể đặt vé"
-    : isSeated
-      ? "Tiếp tục chọn ghế"
-      : "Tiếp tục thanh toán";
+    ? statusLabels[event.status]
+    : !selectedSlot
+      ? "Chưa có suất nào"
+      : selectedSlot.soldOut
+        ? statusLabels.sold_out
+        : isSeated
+          ? "Tiếp tục chọn ghế"
+          : "Tiếp tục thanh toán";
 
   /*
    * The showtimes, split into a strip of days and a grid of times.
@@ -442,7 +594,12 @@ export default function EventDetail({
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
-      <BookingHeader backLabel="Quay lại danh sách" onBack={onBack} current={1} seated={isSeated} />
+      <BookingHeader
+        backLabel="Quay về trang chủ"
+        onBack={onBack}
+        current={1}
+        seated={isSeated}
+      />
 
       <BookingLayout
         aside={
@@ -464,6 +621,23 @@ export default function EventDetail({
             ctaLabel={primaryLabel}
             onCta={handlePrimaryAction}
             ctaDisabled={bookingDisabled}
+            /*
+              Nothing on this showtime can be bought, so the panel's action becomes the queue
+              instead of a greyed-out label. Seated showtimes queue for the showtime as a whole
+              (`null`): a seat is chosen on the next screen, not a tier on this one, and with no
+              free seat left no tier has stock — which is exactly the any-tier rule.
+            */
+            ctaReplacement={
+              showtimeSoldOut ? (
+                <WaitlistControl
+                  tone="cta"
+                  entry={entryFor(null)}
+                  busy={waitlistBusy === "any"}
+                  onJoin={() => joinWaitlist(null)}
+                  onLeave={() => leaveWaitlist(null)}
+                />
+              ) : undefined
+            }
             note={
               !isSignedIn && !eventUnavailable
                 ? isSeated
@@ -791,10 +965,23 @@ export default function EventDetail({
                           </span>
 
                           {/*
+                            A tier with nothing left offers the queue where its steppers would be
+                            (UC-09 A2). Only this tier: the ones beside it are still for sale, and
+                            the server judges the join at exactly this scope.
+                          */}
+                          {soldOut && !eventClosed ? (
+                            <WaitlistControl
+                              entry={entryFor(Number(tier.id))}
+                              busy={waitlistBusy === String(tier.id)}
+                              onJoin={() => joinWaitlist(Number(tier.id))}
+                              onLeave={() => leaveWaitlist(Number(tier.id))}
+                            />
+                          ) : (
+                          /*
                             The steppers carry the same weight as the price beside them. At 36px with
                             a `font-meta` glyph they read as annotations on the row rather than as
                             the controls that decide what is bought.
-                          */}
+                          */
                           <div className="flex shrink-0 items-center gap-3">
                             <button
                               type="button"
@@ -818,6 +1005,7 @@ export default function EventDetail({
                               +
                             </button>
                           </div>
+                          )}
                         </li>
                       );
                     })}

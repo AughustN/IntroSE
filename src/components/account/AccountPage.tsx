@@ -3,12 +3,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { AlertTriangle, CheckCircle2, LogOut, ShieldCheck, Store, User } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  LogOut,
+  MoonStar,
+  ShieldCheck,
+  Store,
+  Sun,
+  Ticket,
+  User,
+  Wallet,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Me } from "@/shared/auth/types";
 import type { OrganizerApplicationView } from "../../services/authClient";
 import { authClient } from "../../services/authClient";
-import { DEFAULT_AVATAR_FG, avatarColor } from "../../services/defaultAvatar";
 import ConfirmDialog, { ConfirmRequest } from "../ConfirmDialog";
 import OrganizerSection from "./OrganizerSection";
 import ProfileSection from "./ProfileSection";
@@ -22,6 +32,26 @@ interface Props {
   onLogoutAll: () => void;
   onProfileUpdated: (user: Me) => void;
   onManageEvents: () => void;
+  /** `/bookings` — the buyer's own tickets. A rail shortcut, not a section of this page. */
+  onViewTickets: () => void;
+  /** `/wallet` — the balance and its statement. */
+  onViewWallet: () => void;
+  /**
+   * The landing page. What the screen's own back control does, in step with every other page of the
+   * site: they all say "Quay về trang chủ" and they all land there.
+   *
+   * Separate from `onClose`, which is what Escape and the browser's Back still do — those are a
+   * *dismissal*, and dropping the reader on the screen underneath is the honest answer to them.
+   */
+  onGoHome: () => void;
+  /**
+   * The reader's light/dark setting, and the switch for it.
+   *
+   * The site's only theme switch lives in the header's ticket stub, and this screen covers the
+   * header — so without one here the setting is unreachable for as long as the account is open.
+   */
+  theme: "dark" | "light";
+  onToggleTheme: () => void;
   /**
    * Which section to land on.
    *
@@ -39,6 +69,33 @@ const SECTIONS: { id: SectionId; label: string; icon: typeof User }[] = [
   { id: "security", label: "Bảo mật", icon: ShieldCheck },
   { id: "organizer", label: "Nhà tổ chức", icon: Store },
 ];
+
+/**
+ * The rail's second group: two pages of this account that are not sections of this one.
+ *
+ * They replace the avatar-and-name chip that used to sit at the foot of the rail. The chip was a
+ * label for the identity the profile card already prints, where the two destinations a signed-in
+ * reader actually reaches for — their tickets and their wallet — were reachable only from the site
+ * header this overlay covers.
+ */
+const SHORTCUTS: { id: "tickets" | "wallet"; label: string; icon: typeof User }[] = [
+  { id: "tickets", label: "Vé", icon: Ticket },
+  { id: "wallet", label: "Ví", icon: Wallet },
+];
+
+/**
+ * One rail row. Sections light up when current; shortcuts never do — they leave the page.
+ *
+ * The selected fill is the page's own ink, inverted — the same treatment the admin console's rail
+ * and the `/events` filter rail use for a chosen row. Square, because nothing in this app's rails
+ * is a rounded chip.
+ */
+const railRow = (active: boolean) =>
+  `relative flex h-11 w-full items-center gap-2.5 whitespace-nowrap px-3.5 font-display text-body font-bold uppercase tracking-[0.04em] transition ${
+    active
+      ? "bg-beige-kem text-xanh-pho"
+      : "text-ink-soft hover:bg-bubblegum/25 hover:text-beige-kem"
+  }`;
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -61,6 +118,11 @@ export default function AccountPage({
   onLogoutAll,
   onProfileUpdated,
   onManageEvents,
+  onViewTickets,
+  onViewWallet,
+  onGoHome,
+  theme,
+  onToggleTheme,
   initialSection = "profile",
 }: Props) {
   const [me, setMe] = useState<Me | null>(null);
@@ -103,21 +165,37 @@ export default function AccountPage({
    */
   const pushedRef = useRef(false);
 
-  /** Drops our history entry, if any, so leaving does not cost the user a dead Back press. */
-  const consumeHistoryEntry = useCallback(() => {
-    if (!pushedRef.current) return;
-    pushedRef.current = false;
-    if (window.history.state?.tixAccount) window.history.back();
-  }, []);
+  /** True while a `history.back()` we asked for is still in flight. */
+  const leavingRef = useRef(false);
 
-  /** Leave for good: give the entry back, then let the parent unmount us. */
-  const leave = useCallback(
-    (after: () => void) => {
-      consumeHistoryEntry();
+  /**
+   * Give our history entry back, *then* let the caller navigate.
+   *
+   * The order is the whole point. `history.back()` is asynchronous: the entry is not gone when the
+   * call returns, it is gone one task later. The previous version fired it and navigated in the
+   * same tick, so the parent's `replace` overwrote the entry we were still standing on and the
+   * `popstate` that arrived afterwards walked the reader straight back onto `/account` — which is
+   * what made "Quay lại" look broken.
+   *
+   * `leavingRef` keeps the screen's own `popstate` listener out of the way while that happens,
+   * otherwise the same event would fire a second, competing close.
+   */
+  const leave = useCallback((after: () => void) => {
+    if (!pushedRef.current || !window.history.state?.tixAccount) {
+      pushedRef.current = false;
       after();
-    },
-    [consumeHistoryEntry],
-  );
+      return;
+    }
+    pushedRef.current = false;
+    leavingRef.current = true;
+    const onPop = () => {
+      window.removeEventListener("popstate", onPop);
+      leavingRef.current = false;
+      after();
+    };
+    window.addEventListener("popstate", onPop);
+    window.history.back();
+  }, []);
 
   /** Guarded close: unsaved edits are worth one question (principle: recoverability). */
   const requestClose = useCallback(() => {
@@ -155,6 +233,28 @@ export default function AccountPage({
     });
   };
 
+  /**
+   * Leaving for another page of the site — the rail's Vé and Ví rows.
+   *
+   * Same guard as a section switch, because the unsaved form is lost either way, and the same
+   * `leave` as the close paths so the history entry this screen pushed is handed back instead of
+   * stranding a dead Back press on the page we navigate to.
+   */
+  const goToPage = (action: () => void) => {
+    if (!dirtyRef.current) {
+      leave(action);
+      return;
+    }
+    setConfirm({
+      title: "Bỏ thay đổi chưa lưu?",
+      message: "Bạn đã sửa hồ sơ nhưng chưa lưu. Rời khỏi trang này sẽ bỏ những thay đổi đó.",
+      confirmLabel: "Bỏ thay đổi",
+      cancelLabel: "Ở lại",
+      tone: "danger",
+      onConfirm: () => leave(action),
+    });
+  };
+
   // Browser Back closes the screen instead of leaving the site. The cleanup only detaches the
   // listener: history is mutated exclusively from user-initiated paths, never from here.
   useEffect(() => {
@@ -163,6 +263,8 @@ export default function AccountPage({
       pushedRef.current = true;
     }
     const onPop = () => {
+      // Our own `leave` asked for this one and is already handling it.
+      if (leavingRef.current) return;
       // Back has already dropped our entry.
       pushedRef.current = false;
       if (dirtyRef.current) {
@@ -255,8 +357,6 @@ export default function AccountPage({
       onConfirm: () => leave(onLogoutAll),
     });
 
-  const initial = (me?.nickname || me?.email || "?").charAt(0).toUpperCase();
-
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-xanh-pho text-beige-kem">
       {/*
@@ -268,24 +368,39 @@ export default function AccountPage({
         role="dialog"
         aria-modal="true"
         aria-labelledby="account-title"
-        className="w-full px-4 py-5 sm:px-6 sm:py-7 lg:px-8"
+        className="w-full px-4 py-6 sm:px-6 lg:px-8 lg:py-10"
       >
-        <div className="flex items-center justify-between gap-4 border-b border-beige-kem/25 pb-4">
-          <h2 id="account-title" className="font-display text-title-m font-black sm:text-title-l">
-            Tài khoản
-          </h2>
+        {/*
+          The masthead every other page of the site wears: a quiet text Back above the title, the
+          title itself in the display face, uppercase, over one hairline rule. It used to be a
+          sentence-case heading beside a bordered button, which made this the only screen where
+          "back" was a boxed control and the only one whose title was set two steps down the scale.
+
+          Nothing rides the right of the rule: the address was printed there for a moment and it was
+          the profile card repeating itself two hundred pixels higher up.
+        */}
+        <div>
           <button
-            onClick={requestClose}
-            className="grid h-10 place-items-center rounded-xl border-2 border-beige-kem px-4 font-meta text-meta font-bold uppercase text-beige-kem/80 transition hover:text-beige-kem"
+            type="button"
+            onClick={() => goToPage(onGoHome)}
+            className="font-meta text-meta text-ink-soft transition hover:text-beige-kem"
           >
-            ← Quay lại
+            ← Quay về trang chủ
           </button>
+          <div className="mt-4 border-b border-beige-kem/30 pb-5">
+            <h1
+              id="account-title"
+              className="font-display text-title-m font-black uppercase leading-none tracking-[0.02em] text-beige-kem sm:text-title-l"
+            >
+              Tài khoản
+            </h1>
+          </div>
         </div>
 
         {/* One live region for both outcomes, so a screen reader announces either without duplicates. */}
         <div aria-live="polite" className="mt-4 space-y-2 empty:mt-0">
           {notice && (
-            <div className="flex items-start gap-2 rounded-xl border-2 border-beige-kem bg-la-co p-3 text-eyebrow leading-5 text-on-tint">
+            <div className="flex items-start gap-2 border-l-2 border-la-co bg-la-co/10 p-3 text-eyebrow leading-5 text-beige-kem">
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
               {notice}
             </div>
@@ -293,7 +408,7 @@ export default function AccountPage({
           {err && (
             <div
               role="alert"
-              className="flex items-start gap-2 rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-eyebrow leading-5 text-on-tint"
+              className="flex items-start gap-2 border-l-2 border-burgundy bg-bubblegum/25 p-3 text-eyebrow leading-5 text-beige-kem"
             >
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-burgundy-ink" aria-hidden />
               {err}
@@ -305,84 +420,95 @@ export default function AccountPage({
           {/* Menu selection for navigation: little typing, hard to get wrong (lecture, slide 14). */}
           <nav
             aria-label="Mục tài khoản"
-            className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-3 shadow-black/20 lg:sticky lg:top-10"
+            className="ticket-corners bg-beige-kem/[0.05] p-3 lg:sticky lg:top-10"
           >
             {/*
               The overlay covers the site header, so the wordmark is what keeps the screen anchored
-              to TixHub. Same treatment as the header, one size down.
+              to TixHub — same face, weight and tracking the header sets it in, one size up because
+              here it has a rail to head rather than a hero to float over.
+
+              The "Music / Stage / Film" strapline that used to sit under it is gone. The header
+              dropped it, and a wordmark identifies the site; it does not have to describe it.
+
+              The theme switch sits at the other end of the same line, where the header keeps it —
+              on the stub, beside the account. It has to be somewhere on this screen: the header is
+              underneath the overlay, and its switch is the only one the site has.
             */}
-            <div className="mb-3 border-b border-beige-kem/25 px-2 pb-3">
-              <p className="font-display text-title-m font-black leading-none text-beige-kem">
+            <div className="mb-3 flex items-center justify-between gap-2 border-b border-beige-kem/25 px-2 pb-3">
+              <p className="font-display text-title-s font-black leading-none tracking-normal text-beige-kem">
                 TixHub
               </p>
-              <p className="mt-1.5 text-meta font-semibold uppercase tracking-[0.22em] text-ink-soft">
-                Music / Stage / Film
-              </p>
+              <button
+                type="button"
+                onClick={onToggleTheme}
+                title={theme === "dark" ? "Giao diện sáng" : "Giao diện tối"}
+                aria-label={theme === "dark" ? "Giao diện sáng" : "Giao diện tối"}
+                className="grid h-9 w-9 shrink-0 place-items-center text-ink-soft transition hover:bg-bubblegum/25 hover:text-beige-kem"
+              >
+                {theme === "dark" ? (
+                  <Sun className="h-4 w-4" aria-hidden />
+                ) : (
+                  <MoonStar className="h-4 w-4" aria-hidden />
+                )}
+              </button>
             </div>
 
-            <ul className="flex gap-1 overflow-x-auto lg:flex-col lg:overflow-visible">
-              {SECTIONS.map(({ id, label, icon: Icon }) => {
-                const active = section === id;
-                return (
+            {/*
+              Two groups, one scrolling row below `lg` and one column above it: the sections of this
+              page, then the two pages it links out to. The divider turns with them — a vertical
+              hairline between the groups on a phone, a horizontal one on the desktop rail.
+            */}
+            <div className="flex gap-1 overflow-x-auto lg:block lg:overflow-visible">
+              <ul className="flex gap-1 lg:flex-col">
+                {SECTIONS.map(({ id, label, icon: Icon }) => {
+                  const active = section === id;
+                  return (
+                    <li key={id} className="shrink-0 lg:shrink">
+                      <button
+                        type="button"
+                        onClick={() => selectSection(id)}
+                        aria-current={active ? "page" : undefined}
+                        className={railRow(active)}
+                      >
+                        <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                        {label}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+
+              <div
+                className="mx-1 w-px shrink-0 bg-beige-kem/25 lg:mx-0 lg:my-3 lg:h-px lg:w-auto"
+                aria-hidden
+              />
+
+              <ul className="flex gap-1 lg:flex-col">
+                {SHORTCUTS.map(({ id, label, icon: Icon }) => (
                   <li key={id} className="shrink-0 lg:shrink">
                     <button
                       type="button"
-                      onClick={() => selectSection(id)}
-                      aria-current={active ? "page" : undefined}
-                      className={`relative flex h-11 w-full items-center gap-2.5 whitespace-nowrap rounded-xl px-3.5 text-body font-bold transition ${
-                        active
-                          ? "bg-cam-dat text-on-tint"
-                          : "text-beige-kem/70 hover:bg-surface-2 hover:text-beige-kem"
-                      }`}
+                      onClick={() => goToPage(id === "wallet" ? onViewWallet : onViewTickets)}
+                      className={railRow(false)}
                     >
-                      {active && (
-                        <span
-                          className="absolute left-0 top-2.5 hidden h-6 w-0.5 rounded-full bg-cam-dat lg:block"
-                          aria-hidden
-                        />
-                      )}
-                      <Icon
-                        className={`h-4 w-4 shrink-0 ${active ? "text-ink-soft" : ""}`}
-                        aria-hidden
-                      />
+                      <Icon className="h-4 w-4 shrink-0" aria-hidden />
                       {label}
+                      {/* The rows above stay here; these leave, and the chevron is what says so. */}
+                      <span className="ml-auto hidden text-meta text-ink-soft lg:inline" aria-hidden>
+                        ›
+                      </span>
                     </button>
                   </li>
-                );
-              })}
-            </ul>
+                ))}
+              </ul>
+            </div>
 
-            {/* User chip pinned at the foot of the rail, as in the reference design. */}
+            {/* Ending the session is not a destination, so it sits under its own rule. */}
             <div className="mt-3 hidden border-t border-beige-kem/25 pt-3 lg:block">
-              <div className="flex items-center gap-2.5 px-1">
-                {me?.avatarUrl ? (
-                  <img
-                    src={me.avatarUrl}
-                    alt=""
-                    className="h-9 w-9 shrink-0 rounded-full object-cover"
-                  />
-                ) : (
-                  <div
-                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full font-display text-eyebrow font-black"
-                    style={{ backgroundColor: avatarColor(me?.email), color: DEFAULT_AVATAR_FG }}
-                    aria-hidden
-                  >
-                    {initial}
-                  </div>
-                )}
-                <div className="min-w-0">
-                  <p className="truncate text-eyebrow font-bold text-beige-kem">
-                    {me?.nickname || me?.email || "Đang tải…"}
-                  </p>
-                  <p className="truncate font-meta text-eyebrow text-beige-kem/70">
-                    {me?.email ?? "…"}
-                  </p>
-                </div>
-              </div>
               <button
                 type="button"
                 onClick={confirmLogout}
-                className="mt-3 flex h-10 w-full items-center gap-2.5 rounded-xl px-3.5 text-body font-bold text-ink-soft transition hover:bg-bubblegum hover:text-on-tint"
+                className="flex h-11 w-full items-center gap-2.5 px-3.5 font-display text-body font-bold uppercase tracking-[0.04em] text-ink-soft transition hover:bg-bubblegum/25 hover:text-beige-kem"
               >
                 <LogOut className="h-4 w-4 shrink-0" aria-hidden />
                 Đăng xuất
@@ -394,7 +520,7 @@ export default function AccountPage({
             {loadFailed && !me && (
               <div
                 role="alert"
-                className="rounded-2xl border-2 border-beige-kem bg-bubblegum p-5 text-body leading-6"
+                className="ticket-corners border-l-2 border-burgundy bg-bubblegum/25 p-5 text-body leading-6 text-beige-kem"
               >
                 Không tải được thông tin tài khoản. Kiểm tra kết nối rồi thử lại.
               </div>
@@ -402,8 +528,8 @@ export default function AccountPage({
 
             {!me && !loadFailed && (
               <div className="space-y-3" aria-hidden>
-                <div className="h-24 animate-pulse rounded-2xl bg-surface-2" />
-                <div className="h-40 animate-pulse rounded-2xl bg-surface-2" />
+                <div className="ticket-corners h-24 animate-pulse bg-beige-kem/[0.05]" />
+                <div className="ticket-corners h-40 animate-pulse bg-beige-kem/[0.05]" />
               </div>
             )}
 

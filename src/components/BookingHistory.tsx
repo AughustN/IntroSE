@@ -102,7 +102,7 @@ export default function BookingHistory({ bookings, onBack, onSelectBooking }: Bo
           onClick={onBack}
           className="font-meta text-meta text-ink-soft transition hover:text-beige-kem"
         >
-          ← Quay lại trang chủ
+          ← Quay về trang chủ
         </button>
         <div className="mt-4 flex flex-wrap items-end justify-between gap-4 border-b border-beige-kem/30 pb-5">
           <h1 className="font-display text-title-l font-black uppercase leading-none tracking-[0.02em] text-beige-kem">

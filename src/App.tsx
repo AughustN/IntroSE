@@ -65,6 +65,12 @@ import HeroVideo from "./components/HeroVideo";
 import SeatLayout from "./components/SeatLayout";
 import TicketTicket from "./components/TicketTicket";
 import LegalPage from "./components/LegalPage";
+import NotificationsPage from "./components/NotificationsPage";
+import {
+  notificationsClient,
+  unreadCount,
+  type NotificationItem,
+} from "./services/notificationsClient";
 import aboutUsMd from "./content/legal/about-us.md?raw";
 import termsOfServiceMd from "./content/legal/terms-of-service.md?raw";
 import websiteTermsMd from "./content/legal/website-terms.md?raw";
@@ -320,6 +326,19 @@ export default function App() {
 
   const [bookingsHistory, setBookingsHistory] = useState<Booking[]>([]);
   const [wishlistedIds, setWishlistedIds] = useState<string[]>([]);
+  /*
+   * The in-app mailbox (UC-19). One list serves both readers of it: the page, and the unread count
+   * in the nav — so the badge can never disagree with what opening it shows.
+   */
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  /*
+   * Starts true: before the first fetch answers, the mailbox *is* loading. Set this way rather than
+   * flipped on at the start of every load, because the loader runs from an effect and writing state
+   * on an effect's synchronous path is what this codebase's lint rule forbids. Later refreshes
+   * leave it false, which is also the better behaviour — the list is already on screen.
+   */
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
+  const [notificationsError, setNotificationsError] = useState<string | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [userName, setUserName] = useState("");
   const [isSignedIn, setIsSignedIn] = useState(false);
@@ -363,9 +382,17 @@ export default function App() {
    * ask for it one at a time, and the ones nobody had tried simply did not.
    */
   const goTo = useCallback(
-    (screen: Screen, params?: { eventSlug?: string | null; bookingId?: string | null }) => {
+    (
+      screen: Screen,
+      params?: { eventSlug?: string | null; bookingId?: string | null },
+      /*
+       * `replace` is for leaving an overlay: `/account` is its own history entry, so pushing on top
+       * of it would leave the reader one Back press away from the screen they just left.
+       */
+      options?: { replace?: boolean },
+    ) => {
       setActiveScreen(screen);
-      navigate(screenToPath(screen, params));
+      navigate(screenToPath(screen, params), options);
       window.scrollTo({ top: 0, behavior: "smooth" });
     },
     [navigate],
@@ -1526,6 +1553,73 @@ export default function App() {
     setShowAuthModal(true);
   };
 
+  /**
+   * Fetch the mailbox. Signed-in only — a guest has none, and asking would 401 on every load.
+   *
+   * Called once the session is known and again whenever the page is opened, so the count in the nav
+   * and the list on the page are always the same fetch.
+   */
+  const loadNotifications = useCallback(async () => {
+    // A guest has no mailbox to fetch; `clearSignedInState` is what empties it on the way out.
+    if (!isSignedIn) return;
+    try {
+      // Awaited first, so nothing in this function writes state on the effect's synchronous path.
+      const items = await notificationsClient.list();
+      setNotificationsError(null);
+      setNotifications(items);
+    } catch (error) {
+      setNotificationsError(
+        error instanceof Error ? error.message : "Không tải được thông báo.",
+      );
+    } finally {
+      setNotificationsLoading(false);
+    }
+  }, [isSignedIn]);
+
+  // Once when the session is known, and again each time the page itself is opened — so the count
+  // in the nav and the list on the page are always the same fetch, never two ages of the truth.
+  useEffect(() => {
+    // `set-state-in-effect` sees a call to a function that writes state and cannot see that every
+    // write happens after an `await`. Fetching a mailbox from the server is the "subscribe to an
+    // external system" case the rule's own documentation exempts.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (activeScreen === "notifications" || notifications.length === 0) void loadNotifications();
+    // `notifications.length` is deliberately not a dependency: it changes as a *result* of this
+    // effect, and listing it would make the load re-run itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadNotifications, activeScreen]);
+
+  /**
+   * Opening a message: it counts as read, and it goes where it points.
+   *
+   * The read flag is written optimistically. A message the reader is looking at has been read
+   * whatever the server says, and a failed write costs nothing but a badge that clears itself on
+   * the next load.
+   */
+  const openNotification = (item: NotificationItem) => {
+    if (item.readAt === null) {
+      setNotifications((current) =>
+        current.map((row) =>
+          row.id === item.id ? { ...row, readAt: new Date().toISOString() } : row,
+        ),
+      );
+      void notificationsClient.markRead(item.id).catch(() => {});
+    }
+    if (item.eventSlug) {
+      const movie = eventsRef.current.find((event) => event.id === item.eventSlug);
+      if (movie) void handleStartBookingInput(movie);
+      else goTo("detail", { eventSlug: item.eventSlug });
+    }
+  };
+
+  const markAllNotificationsRead = () => {
+    const now = new Date().toISOString();
+    setNotifications((current) =>
+      current.map((row) => (row.readAt === null ? { ...row, readAt: now } : row)),
+    );
+    void notificationsClient.markAllRead().catch(() => {});
+  };
+
   /** Clears everything this browser remembers about the signed-in account. */
   /**
    * Signing out has to drop the per-account caches too, not just the identity. They key on nothing
@@ -1537,6 +1631,9 @@ export default function App() {
     applyIdentity(null);
     setBookingsHistory([]);
     setWishlistedIds([]);
+    // The mailbox is per account too, and it is cleared here rather than from the loader's effect:
+    // writing state synchronously inside an effect is what the loader must not do.
+    setNotifications([]);
     try {
       localStorage.removeItem(BOOKINGS_CACHE_KEY);
       LEGACY_BOOKINGS_CACHE_KEYS.forEach((key) => localStorage.removeItem(key));
@@ -1594,6 +1691,10 @@ export default function App() {
         onViewHistory={() => void leaveFlow(() => goTo("history"))}
         onViewWallet={() => void leaveFlow(() => goTo("wallet"))}
         onViewSaved={() => void leaveFlow(() => runSignedIn(() => goTo("saved")))}
+        onViewNotifications={() =>
+          void leaveFlow(() => runSignedIn(() => goTo("notifications")))
+        }
+        unreadNotifications={unreadCount(notifications)}
         onLogout={() => void leaveFlow(() => void handleLogout())}
         onHomeClick={goHome}
         onLoginClick={() => (userName ? navigate(ACCOUNT_PATH) : setShowAuthModal(true))}
@@ -1754,6 +1855,9 @@ export default function App() {
             relatedEvents={relatedEvents}
             wishlistedIds={wishlistedIds}
             onBack={goHome}
+            /* A place in a queue belongs to an account, so joining asks a guest to sign in first. */
+            onRequireSignIn={runSignedIn}
+            onNotice={(tone, message) => pushToast(tone === "ok" ? "success" : "error", message)}
             onOpenReviews={() => goTo("reviews", { eventSlug: selectedMovie.id })}
             onToggleWishlist={handleToggleWishlist}
             onBookRelated={(movie) => void handleStartBookingInput(movie)}
@@ -1786,7 +1890,9 @@ export default function App() {
               eventId={selectedMovie.eventId}
               isSignedIn={isSignedIn}
               relatedEvents={relatedEvents}
-              onBack={() => goTo("detail", { eventSlug: selectedMovie.id })}
+              /* Home, like every other page-level back on the site — the event itself is one row
+                 down the page, in the aside built for it. */
+              onBack={goHome}
               onOpenEvent={(movie) => void handleStartBookingInput(movie)}
             />
           ) : (
@@ -1899,7 +2005,7 @@ export default function App() {
                   onClick={goHome}
                   className="label-eyebrow text-ink-soft transition hover:text-beige-kem"
                 >
-                  Về trang chủ
+                  Quay về trang chủ
                 </button>
               </div>
             </div>
@@ -1908,6 +2014,49 @@ export default function App() {
         {activeScreen === "admin" && (
           <AdminPanel events={SAMPLE_MOVIES} bookings={bookingsHistory} onBack={goHome} />
         )}
+
+        {/*
+         * The mailbox, guarded like the wallet: its messages belong to an account, so a stranger
+         * would get a 401 dressed up as a broken page instead of a locked one.
+         */}
+        {activeScreen === "notifications" &&
+          (!authReady ? (
+            <p className="mx-auto max-w-4xl px-4 py-16 font-meta text-body text-ink-soft sm:px-6 lg:px-8">
+              Đang kiểm tra phiên đăng nhập…
+            </p>
+          ) : isSignedIn ? (
+            <NotificationsPage
+              items={notifications}
+              loading={notificationsLoading}
+              error={notificationsError}
+              onBack={goHome}
+              onOpen={openNotification}
+              onMarkAllRead={markAllNotificationsRead}
+            />
+          ) : (
+            <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6 lg:px-8">
+              <h2 className="font-display text-title-m font-black text-beige-kem">Thông báo</h2>
+              <p className="mt-3 text-body leading-6 text-beige-kem/70">
+                Thông báo gắn với tài khoản của bạn. Đăng nhập để xem xác nhận mua vé, nhắc lịch và
+                tin báo có vé lại từ danh sách chờ.
+              </p>
+              <div className="mt-6 flex flex-wrap items-center gap-6">
+                <button
+                  onClick={() => runSignedIn(() => goTo("notifications"))}
+                  className="label-eyebrow inline-flex items-center gap-2 text-beige-kem transition hover:text-burgundy-ink"
+                >
+                  Đăng nhập
+                  <span aria-hidden="true">&gt;</span>
+                </button>
+                <button
+                  onClick={goHome}
+                  className="label-eyebrow text-ink-soft transition hover:text-beige-kem"
+                >
+                  Quay về trang chủ
+                </button>
+              </div>
+            </div>
+          ))}
 
         {/*
          * The wallet is the one screen with nothing to show a stranger. Without this guard its own
@@ -1939,7 +2088,7 @@ export default function App() {
                   onClick={goHome}
                   className="label-eyebrow text-ink-soft transition hover:text-beige-kem"
                 >
-                  Về trang chủ
+                  Quay về trang chủ
                 </button>
               </div>
             </div>
@@ -2042,6 +2191,19 @@ export default function App() {
               goTo("organizer");
             })
           }
+          /* The rail's two shortcuts, on the same one-navigation rule as "Quản lý sự kiện". */
+          onViewTickets={() => void leaveFlow(() => goTo("history"))}
+          onViewWallet={() => void leaveFlow(() => goTo("wallet"))}
+          onGoHome={() =>
+            void leaveFlow(() => {
+              deepLinkedEventRef.current = null;
+              // Replaces `/account`, which the screen has just handed back to the browser.
+              goTo("home", undefined, { replace: true });
+            })
+          }
+          /* The overlay covers the header, and the header holds the site's only theme switch. */
+          theme={theme}
+          onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
         />
       )}
       {resetToken && <ResetPassword token={resetToken} />}

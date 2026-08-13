@@ -121,7 +121,7 @@ export default function SecuritySection({ me, onNotice, onError, onConfirmLogout
         {isGoogle ? (
           // An earlier version simply omitted this section for Google accounts, leaving them with no
           // explanation of why they have no password to manage (principle: user diversity).
-          <div className="flex items-start gap-3 rounded-xl border-2 border-beige-kem bg-surface-2 p-4">
+          <div className="flex items-start gap-3 border-l-2 border-beige-kem/40 bg-beige-kem/[0.06] p-4">
             <Info className="mt-0.5 h-4 w-4 shrink-0 text-ink-soft" aria-hidden />
             <p className="text-body leading-6 text-beige-kem/70">
               Tài khoản này đăng nhập bằng Google, nên TixHub không giữ mật khẩu nào. Mật khẩu được
@@ -130,7 +130,7 @@ export default function SecuritySection({ me, onNotice, onError, onConfirmLogout
           </div>
         ) : editing ? (
           <form onSubmit={submit}>
-            <div className="mb-5 flex items-start gap-3 rounded-xl border-2 border-beige-kem bg-cam-dat p-3">
+            <div className="mb-5 flex items-start gap-3 border-l-2 border-burgundy bg-bubblegum/25 p-3">
               <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-ink-soft" aria-hidden />
               <p className="text-eyebrow leading-5 text-beige-kem/80">
                 Sau khi đổi mật khẩu,{" "}
@@ -173,7 +173,7 @@ export default function SecuritySection({ me, onNotice, onError, onConfirmLogout
                     type="button"
                     onClick={() => setReveal((v) => !v)}
                     aria-label={reveal ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
-                    className="absolute right-1 top-1 grid h-9 w-9 place-items-center rounded-lg text-beige-kem/70 transition hover:text-beige-kem"
+                    className="absolute right-1 top-1 grid h-9 w-9 place-items-center text-beige-kem/70 transition hover:text-beige-kem"
                   >
                     {reveal ? (
                       <EyeOff className="h-4 w-4" aria-hidden />

@@ -309,7 +309,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
             className="label-eyebrow inline-flex items-center gap-2 text-ink-soft transition hover:text-beige-kem"
           >
             <span aria-hidden="true">&lt;</span>
-            Quay lại trang bán vé
+            Quay về trang chủ
           </button>
           <SectionHead
             variant="bar"

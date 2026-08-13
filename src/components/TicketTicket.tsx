@@ -451,7 +451,7 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
         </button>
         <button onClick={onHomeClick} className={action}>
           <Home aria-hidden className="h-3.5 w-3.5" />
-          Về trang chủ
+          Quay về trang chủ
         </button>
       </div>
 

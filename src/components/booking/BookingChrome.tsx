@@ -216,6 +216,7 @@ export function OrderSummary({
   ctaLabel,
   onCta,
   ctaDisabled = false,
+  ctaReplacement,
   note,
   reassurance,
   children,
@@ -244,6 +245,13 @@ export function OrderSummary({
   ctaLabel: string;
   onCta: () => void;
   ctaDisabled?: boolean;
+  /**
+   * Something to put where the button goes, when the panel's action is no longer "buy this".
+   *
+   * A sold-out showtime is the case: its button would be a disabled label saying "Hết vé", and the
+   * thing the reader can actually do — take a place in the queue — has nowhere else to live.
+   */
+  ctaReplacement?: React.ReactNode;
   /** Under the button — the sign-in warning, the tax note. */
   note?: string;
   /** Quieter still, under the note. The refund promise, which is reassurance rather than warning. */
@@ -381,14 +389,16 @@ export function OrderSummary({
         </div>
 
         <div>
-          <button
-            type="button"
-            onClick={onCta}
-            disabled={ctaDisabled}
-            className="w-full bg-burgundy px-4 py-3.5 font-display text-body font-black uppercase tracking-[0.05em] text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:bg-beige-kem/20 disabled:text-ink-soft"
-          >
-            {ctaLabel}
-          </button>
+          {ctaReplacement ?? (
+            <button
+              type="button"
+              onClick={onCta}
+              disabled={ctaDisabled}
+              className="w-full bg-burgundy px-4 py-3.5 font-display text-body font-black uppercase tracking-[0.05em] text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:bg-beige-kem/20 disabled:text-ink-soft"
+            >
+              {ctaLabel}
+            </button>
+          )}
 
           {note && <p className="mt-2 font-meta text-eyebrow leading-5 text-ink-soft">{note}</p>}
 

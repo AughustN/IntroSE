@@ -49,7 +49,7 @@ export default function ResetPassword({ token }: { token: string }) {
               href="/"
               className="mt-6 flex w-full items-center justify-center rounded-xl bg-burgundy px-5 py-3 text-body font-black text-white transition hover:brightness-95"
             >
-              Về trang chủ
+              Quay về trang chủ
             </a>
           </>
         ) : (
@@ -92,7 +92,7 @@ export default function ResetPassword({ token }: { token: string }) {
               href="/"
               className="block text-center font-meta text-meta text-beige-kem/60 transition hover:text-ink-soft"
             >
-              Quay lại
+              Quay về trang chủ
             </a>
           </form>
         )}

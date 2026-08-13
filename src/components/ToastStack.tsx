@@ -25,51 +25,77 @@ interface ToastStackProps {
  *
  * Announced politely to screen readers, except errors, which interrupt (WCAG 2.1, USE-02).
  */
-const TONE: Record<ToastKind, { frame: string; accent: string; label: string }> = {
-  info: { frame: "border-beige-kem/25 bg-xanh-pho", accent: "bg-surface-2", label: "Thông báo" },
-  success: { frame: "border-la-co/45 bg-xanh-pho", accent: "bg-la-co", label: "Thành công" },
-  warning: { frame: "border-cam-dat/50 bg-xanh-pho", accent: "bg-cam-dat", label: "Lưu ý" },
-  error: { frame: "border-burgundy/60 bg-xanh-pho", accent: "bg-burgundy", label: "Lỗi" },
+/** What each kind of news calls itself. The heading is the only tone signal the card carries. */
+const LABEL: Record<ToastKind, string> = {
+  info: "Thông báo",
+  success: "Thành công",
+  warning: "Lưu ý",
+  error: "Lỗi",
 };
 
 export default function ToastStack({ toasts, onDismiss }: ToastStackProps) {
   if (toasts.length === 0) return null;
 
   return (
+    /*
+     * Dressed as `ConfirmDialog` — the same scrim, the same centred card, the same border, heading
+     * and body type. The two say different kinds of thing (that one asks a question, this one
+     * reports an outcome), but they are the app's two ways of speaking directly to the reader, and
+     * a notice that looks like a passing corner chip reads as less important than it is.
+     *
+     * One scrim for the whole stack, not one per notice: three outcomes at once would otherwise
+     * stack three washes and darken the page three times over.
+     */
     <div
-      className="pointer-events-none fixed inset-x-3 bottom-3 z-50 flex flex-col gap-2 sm:inset-x-auto sm:right-6 sm:bottom-6 sm:w-[26rem]"
-      aria-live="polite"
-      aria-relevant="additions"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-4 sm:items-center"
+      // Anywhere outside the cards clears them, as the dialog's backdrop cancels it.
+      onClick={() => toasts.forEach((toast) => onDismiss(toast.id))}
+      role="presentation"
     >
-      {toasts.map((toast) => {
-        const tone = TONE[toast.kind];
-        return (
-          <div
-            key={toast.id}
-            role={toast.kind === "error" ? "alert" : "status"}
-            className={`pointer-events-auto flex items-start gap-3 overflow-hidden rounded-xl border ${tone.frame} p-3 pr-2`}
-          >
-            <span
-              className={`mt-0.5 h-full w-1 shrink-0 self-stretch rounded-full ${tone.accent}`}
-            />
-
-            <div className="min-w-0 flex-1">
-              <p className="font-meta text-eyebrow uppercase tracking-wider text-beige-kem/45">
-                {tone.label}
-              </p>
-              <p className="mt-1 text-body leading-5 text-beige-kem">{toast.text}</p>
-            </div>
-
-            <button
-              onClick={() => onDismiss(toast.id)}
-              className="shrink-0 rounded-lg p-1.5 text-beige-kem/40 transition hover:bg-surface-2 hover:text-beige-kem"
-              aria-label="Đóng thông báo"
+      <div
+        className="flex w-full max-w-md flex-col gap-3"
+        aria-live="polite"
+        aria-relevant="additions"
+      >
+        {toasts.map((toast) => {
+          return (
+            <div
+              key={toast.id}
+              role={toast.kind === "error" ? "alert" : "status"}
+              onClick={(e) => e.stopPropagation()}
+              className="rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6"
             >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        );
-      })}
+              <div className="flex items-start gap-3">
+                {/* The heading is the whole signal. A coloured dot beside a word that already says
+                    "Lỗi" or "Thành công" adds nothing a reader was missing. */}
+                <h2 className="flex-1 font-display text-title-m font-black text-beige-kem">
+                  {LABEL[toast.kind]}
+                </h2>
+                <button
+                  onClick={() => onDismiss(toast.id)}
+                  className="-mr-2 -mt-2 grid h-11 w-11 shrink-0 place-items-center rounded-xl text-ink-soft transition hover:bg-bubblegum/25 hover:text-beige-kem"
+                  aria-label="Đóng thông báo"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <p className="mt-3 whitespace-pre-line text-body leading-6 text-beige-kem/70">
+                {toast.text}
+              </p>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => onDismiss(toast.id)}
+                  className="rounded-xl border-2 border-beige-kem px-4 py-2.5 font-meta text-body text-beige-kem/80 transition hover:border-beige-kem/40 hover:text-beige-kem"
+                >
+                  Đóng
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

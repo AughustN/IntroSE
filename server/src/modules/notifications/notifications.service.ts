@@ -1,17 +1,13 @@
 import QRCode from "qrcode";
 import { Resend } from "resend";
+// Declared in `shared/` so the page that renders a notification and the code that enqueues one
+// cannot disagree about what kinds exist (constitution VI).
+import type { NotificationType } from "@shared/notifications/types.js";
 import { config } from "../../config.js";
 import { pool, type Db, withTransaction } from "../../db/pool.js";
-
-type NotificationType =
-  | "order_confirmed"
-  | "ticket_resend"
-  | "reminder_7d"
-  | "reminder_1d"
-  | "event_changed"
-  | "event_cancelled"
-  | "waitlist_open"
-  | "announcement";
+// The catalog's definition of "this showtime still has something to sell". Imported rather than
+// restated so the page that says "Hết vé" and the gate that opens the queue cannot disagree.
+import { SHOWTIME_HAS_AVAILABILITY } from "../catalog/visibility.js";
 
 type TicketMailPayload = {
   eventTitle: string;
@@ -266,28 +262,57 @@ export async function queueAnnouncement(
   return recipients.rowCount ?? 0;
 }
 
-async function availableForWaitlist(
+/**
+ * Is there stock in this exact scope — one tier, or the whole showtime?
+ *
+ * The **single** availability judgement in the app, used both by the join gate and by the notifier
+ * below. They used to have one each: the notifier asked per tier, the join route asked across the
+ * whole showtime, and that disagreement was the defect — a sold-out tier could not be queued for
+ * while any sibling tier still sold (FR-002, UC-09 A2). Two answers to one question is one answer
+ * too many, so the route now calls this.
+ *
+ * `total_quantity IS NULL` means an uncapped tier, which is how seated tiers are written: there the
+ * seat rows are the only truth, and a tier with neither a cap nor a free seat is exhausted.
+ */
+export async function availableForWaitlist(
   db: Db,
   showtimeId: number,
   tierId: number | null,
 ): Promise<boolean> {
   if (tierId !== null) {
     const tier = await db.query<{ available: boolean }>(
-      `SELECT CASE WHEN total_quantity IS NULL
-                   THEN EXISTS (SELECT 1 FROM showtime_seats WHERE showtime_id = $2 AND ticket_tier_id = $1 AND status = 'available')
-                   ELSE sold_quantity + reserved_quantity < total_quantity END AS available
-         FROM ticket_tiers WHERE id = $1 AND showtime_id = $2`,
+      // Branched on the *event's type*, the same axis `SHOWTIME_HAS_AVAILABILITY` branches on. A
+      // seated tier's inventory is its seat rows and nothing else: a seated showtime whose tiers
+      // carry a capacity but whose seat map is empty has nothing to sell, however encouraging the
+      // counters look.
+      `SELECT CASE WHEN e.event_type = 'seated'
+                   THEN EXISTS (SELECT 1 FROM showtime_seats ss
+                                 WHERE ss.showtime_id = s.id AND ss.ticket_tier_id = $1
+                                   AND ss.status = 'available')
+                   ELSE EXISTS (SELECT 1 FROM ticket_tiers tt
+                                 WHERE tt.id = $1 AND tt.showtime_id = s.id
+                                   AND (tt.total_quantity IS NULL
+                                        OR tt.sold_quantity + tt.reserved_quantity < tt.total_quantity))
+              END AS available
+         FROM showtimes s JOIN events e ON e.id = s.event_id
+        WHERE s.id = $2`,
       [tierId, showtimeId],
     );
     return tier.rows[0]?.available ?? false;
   }
+  /*
+   * "Does this showtime still sell anything" is a question the catalog already answers, and the
+   * answer a buyer is shown ("Hết vé") must be the same one the queue is gated on.
+   *
+   * So the catalog's own predicate is used rather than a second version of it here. The two used to
+   * disagree exactly where it mattered: a seated showtime with capped tiers but an empty seat map
+   * read as sold out on the event page and as four hundred tickets in stock at the join gate, so
+   * the button the page offered was refused the moment it was pressed.
+   */
   const available = await db.query<{ available: boolean }>(
-    `SELECT EXISTS (
-       SELECT 1 FROM ticket_tiers WHERE showtime_id = $1
-         AND (total_quantity IS NULL OR sold_quantity + reserved_quantity < total_quantity)
-     ) OR EXISTS (
-       SELECT 1 FROM showtime_seats WHERE showtime_id = $1 AND status = 'available'
-     ) AS available`,
+    `SELECT ${SHOWTIME_HAS_AVAILABILITY} AS available
+       FROM showtimes s JOIN events e ON e.id = s.event_id
+      WHERE s.id = $1`,
     [showtimeId],
   );
   return available.rows[0]?.available ?? false;
@@ -299,12 +324,16 @@ export async function notifyWaitlistForShowtime(showtimeId: number): Promise<voi
       id: number;
       user_id: number;
       ticket_tier_id: number | null;
+      event_id: number;
       title: string;
     }>(
-      `SELECT w.id, w.user_id, w.ticket_tier_id, e.title
+      // `FOR UPDATE OF w` — the lock belongs on the queue rows this run is about to change.
+      // Left unqualified it also took row locks on `showtimes` and `events`, which is a lock on
+      // the event itself taken by a notification pass.
+      `SELECT w.id, w.user_id, w.ticket_tier_id, e.id AS event_id, e.title
          FROM waitlists w JOIN showtimes s ON s.id = w.showtime_id JOIN events e ON e.id = s.event_id
         WHERE w.showtime_id = $1 AND w.status IN ('waiting', 'notified') AND s.starts_at > now()
-        ORDER BY w.joined_at FOR UPDATE`,
+        ORDER BY w.joined_at FOR UPDATE OF w`,
       [showtimeId],
     );
     const selected: typeof entries.rows = [];
@@ -324,7 +353,13 @@ export async function notifyWaitlistForShowtime(showtimeId: number): Promise<voi
       );
       await enqueue(db, {
         userId: entry.user_id,
+        // Carried so the in-app row can lead back to the event it is about. Read from the
+        // notification's own column rather than from `payload`, which is a free-form blob and no
+        // place to keep the destination of a link.
+        eventId: entry.event_id,
         type: "waitlist_open",
+        // The timestamp is deliberate: re-notification is required (UC-17 A5), so this key must
+        // differ every release or the outbox's uniqueness would swallow the second message.
         dedupeKey: `waitlist_open:${entry.id}:${Date.now()}`,
         title: `Đã có vé: ${entry.title}`,
         body: "Vé vừa có lại. Số lượng không được giữ riêng, hãy hoàn tất mua vé sớm.",
@@ -334,6 +369,51 @@ export async function notifyWaitlistForShowtime(showtimeId: number): Promise<voi
     return selected;
   });
   if (allowed.length > 0) kickNotificationWorker();
+}
+
+/**
+ * Close the places that can no longer be served: their occasion has begun.
+ *
+ * One statement on the worker's existing tick rather than a scheduler of its own (research.md §4).
+ * Lateness is invisible — `notifyWaitlistForShowtime` already refuses to notify a showtime that has
+ * started, so a place left open for a few minutes past the start cannot produce a message.
+ */
+export async function sweepExpiredWaitlists(db: Db = pool): Promise<number> {
+  const { rowCount } = await db.query(
+    `UPDATE waitlists w
+        SET status = 'expired'
+       FROM showtimes s
+      WHERE s.id = w.showtime_id
+        AND w.status IN ('waiting', 'notified')
+        AND s.starts_at <= now()`,
+  );
+  return rowCount ?? 0;
+}
+
+/**
+ * Close the buyer's places for what they have just bought.
+ *
+ * Called from inside the checkout transaction, so the ticket and the exit from the queue commit or
+ * roll back together: there is no instant where somebody holds a ticket and a place in the queue
+ * for that same ticket, and no window where a rolled-back purchase has silently cost them their
+ * turn. Their any-tier place for the showtime goes with it — they came for a ticket to this
+ * occasion and now have one.
+ */
+export async function markWaitlistConverted(
+  db: Db,
+  userId: number,
+  showtimeId: number,
+  tierIds: number[],
+): Promise<void> {
+  await db.query(
+    `UPDATE waitlists
+        SET status = 'converted'
+      WHERE user_id = $1
+        AND showtime_id = $2
+        AND status IN ('waiting', 'notified')
+        AND (ticket_tier_id IS NULL OR ticket_tier_id = ANY($3::bigint[]))`,
+    [userId, showtimeId, tierIds],
+  );
 }
 
 export async function queueDueReminders(db: Db = pool): Promise<void> {
@@ -603,6 +683,11 @@ export function startNotificationWorker(): void {
     kickNotificationWorker();
     void queueDueReminders().catch((error) =>
       console.error("[notifications] reminder queue failed:", error),
+    );
+    // Waitlist places whose occasion has begun. Rides this tick rather than owning a timer: it is
+    // one UPDATE, and being late costs nothing (see `sweepExpiredWaitlists`).
+    void sweepExpiredWaitlists().catch((error) =>
+      console.error("[notifications] waitlist expiry sweep failed:", error),
     );
   };
   tick();

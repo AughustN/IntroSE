@@ -254,7 +254,7 @@ export default function ReviewsPage({
             className="flex items-center gap-1 font-meta text-body text-white/70 transition hover:text-white"
           >
             <ChevronLeft className="h-5 w-5" />
-            Quay lại
+            Quay về trang chủ
           </button>
 
           <div className="mt-6 flex items-end gap-5">

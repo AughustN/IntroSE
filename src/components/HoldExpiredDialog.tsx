@@ -99,7 +99,7 @@ export default function HoldExpiredDialog({ onStay, onGoHome }: HoldExpiredDialo
             onClick={onGoHome}
             className="rounded-xl border-2 border-beige-kem px-5 py-2.5 font-meta text-body text-beige-kem/80 transition hover:border-beige-kem/40 hover:text-beige-kem"
           >
-            Về trang chủ
+            Quay về trang chủ
           </button>
           <button
             ref={stayRef}

@@ -283,6 +283,15 @@ interface HeaderProps {
   onViewWallet: () => void;
   /** The bookmarked events, `/saved`. */
   onViewSaved: () => void;
+  /** The in-app mailbox, `/notifications`. */
+  onViewNotifications: () => void;
+  /**
+   * How many of those are unread.
+   *
+   * Printed beside the row rather than as a dot on the ticket: the panel is where the destination
+   * lives, and a badge somewhere else would be a second thing to notice and then hunt for.
+   */
+  unreadNotifications: number;
   /** Ends the session. The last row of the panel, under the rule. */
   onLogout: () => void;
   onHomeClick: () => void;
@@ -332,6 +341,8 @@ export default function Header({
   onViewHistory,
   onViewWallet,
   onViewSaved,
+  onViewNotifications,
+  unreadNotifications,
   onLogout,
   onHomeClick,
   onLoginClick,
@@ -792,6 +803,16 @@ export default function Header({
                     const destinations = userName
                       ? [
                           { label: "Tài khoản", onClick: onLoginClick },
+                          {
+                            // The count rides in the label because these rows are set in the
+                            // display face at 32px — a superscript badge beside one of them would
+                            // be the only ornament in the panel.
+                            label:
+                              unreadNotifications > 0
+                                ? `Thông báo (${unreadNotifications})`
+                                : "Thông báo",
+                            onClick: onViewNotifications,
+                          },
                           { label: "Đã lưu", onClick: onViewSaved },
                           // Only an approved organizer has an event list to manage.
                           ...(isOrganizer

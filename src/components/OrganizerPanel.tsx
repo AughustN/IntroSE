@@ -183,7 +183,7 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
       <div className="flex items-center justify-between">
         <h1 className="font-display text-title-l font-black">Quản lý sự kiện</h1>
         <button onClick={onBack} className={ghost}>
-          ← Về trang chủ
+          ← Quay về trang chủ
         </button>
       </div>
       {notice && (

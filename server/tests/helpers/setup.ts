@@ -28,7 +28,8 @@ beforeEach(async () => {
              reservations, reservation_items, orders, payment_transactions, tickets, wallet_transactions,
              content_reports, moderation_actions, moderation_notifications,
              system_settings, featured_events,
-             ai_usage_windows, event_reviews
+             ai_usage_windows, event_reviews,
+             waitlists, notifications, notification_logs
      RESTART IDENTITY CASCADE`,
   );
   // The hold throttle is process-wide in-memory state (FR-017) — clear it so a spam test cannot

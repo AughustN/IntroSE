@@ -63,7 +63,7 @@ export default function AdminModeration({ onBack }: { onBack: () => void }) {
         <div className="space-y-5">
           <button onClick={onBack} className={ACTION_GHOST}>
             <span aria-hidden="true">&lt;</span>
-            Về trang chủ
+            Quay về trang chủ
           </button>
           <SectionHead
             variant="bar"

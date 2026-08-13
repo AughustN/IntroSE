@@ -6,6 +6,7 @@ import { err } from "../../http.js";
 import { broadcastSeatUpdate } from "../../realtime/io.js";
 import {
   kickNotificationWorker,
+  markWaitlistConverted,
   queueOrderConfirmation,
 } from "../notifications/notifications.service.js";
 
@@ -500,6 +501,14 @@ export async function checkout(userId: number, reservationId: number): Promise<O
     await client.query(`UPDATE reservations SET status = 'converted' WHERE id = $1`, [
       reservationId,
     ]);
+    // The buyer waited for this and now has it, so their place in the queue closes here — inside
+    // the same transaction as the tickets, so the two can never disagree (UC-17, FR-010).
+    await markWaitlistConverted(
+      client,
+      userId,
+      reservation.showtime_id,
+      [...new Set(items.map((item) => item.ticket_tier_id))],
+    );
 
     const orderView: OrderView = {
       id: order.id,

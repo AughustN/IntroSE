@@ -1,0 +1,108 @@
+import request from 'supertest';
+import { describe, expect, it } from 'vitest';
+import { pool } from '../../src/db/pool.js';
+import { sweepExpiredWaitlists } from '../../src/modules/notifications/notifications.service.js';
+import { checkout } from '../../src/modules/payments/wallet.service.js';
+import { app } from '../helpers/app.js';
+import { bearer, registerUser } from '../helpers/authFixture.js';
+import * as wl from '../helpers/waitlistSeed.js';
+
+/** Put money in an account's wallet so a checkout can complete. */
+async function fundWallet(userId: number, amount: number): Promise<void> {
+  await pool.query(
+    `INSERT INTO wallets (user_id, balance_amount) VALUES ($1, $2)
+     ON CONFLICT (user_id) DO UPDATE SET balance_amount = EXCLUDED.balance_amount`,
+    [userId, amount],
+  );
+}
+
+describe('waitlist places close when they can no longer be served (US4, FR-010)', () => {
+  it('expires the places of a showtime that has begun', async () => {
+    const { showtimeId, tierId } = await wl.seedSoldOutGaShowtime();
+    await wl.fillWaitlist(showtimeId, tierId, 3);
+    await wl.beginShowtime(showtimeId);
+
+    const closed = await sweepExpiredWaitlists();
+
+    expect(closed).toBe(3);
+    const rows = await wl.getEntries(showtimeId);
+    expect(rows.every((row) => row.status === 'expired')).toBe(true);
+  });
+
+  it('leaves the places of an upcoming showtime alone', async () => {
+    const { showtimeId, tierId } = await wl.seedSoldOutGaShowtime();
+    await wl.fillWaitlist(showtimeId, tierId, 2);
+
+    await sweepExpiredWaitlists();
+
+    const rows = await wl.getEntries(showtimeId);
+    expect(rows.every((row) => row.status === 'waiting')).toBe(true);
+  });
+
+  it('takes an expired place out of the caller’s list and out of the cap', async () => {
+    const { showtimeId, tierId } = await wl.seedSoldOutGaShowtime();
+    const queued = await wl.fillWaitlistWithSessions(showtimeId, tierId, 1);
+    await wl.beginShowtime(showtimeId);
+    await sweepExpiredWaitlists();
+
+    const mine = await request(app)
+      .get('/api/waitlists')
+      .set(bearer(queued[0].token))
+      .expect(200);
+
+    expect(mine.body).toHaveLength(0);
+  });
+});
+
+describe('a purchase closes the buyer’s place as served (US4, FR-010)', () => {
+  it('converts the place for the tier bought, and the any-tier place with it', async () => {
+    // A tier with room to buy, whose *other* tier is exhausted — so the buyer can legitimately
+    // hold a place in the sold-out queue and still complete a purchase on this showtime.
+    const { showtimeId, soldOutTierId, sellingTierId } = await wl.seedMixedGaShowtime();
+    const buyer = await registerUser();
+    await fundWallet(buyer.userId, 5_000_000);
+
+    await pool.query(
+      `INSERT INTO waitlists (user_id, showtime_id, ticket_tier_id) VALUES ($1, $2, $3), ($1, $2, NULL)`,
+      [buyer.userId, showtimeId, sellingTierId],
+    );
+    const otherWaiter = await wl.fillWaitlist(showtimeId, soldOutTierId, 1);
+
+    const reservation = await request(app)
+      .post('/api/reservations')
+      .set(bearer(buyer.token))
+      .send({ showtimeId, ticketTierId: sellingTierId, quantity: 1 })
+      .expect(201);
+    await checkout(buyer.userId, reservation.body.id);
+
+    const rows = await wl.getEntries(showtimeId);
+    const mine = rows.filter((row) => row.user_id === buyer.userId);
+    expect(mine).toHaveLength(2);
+    expect(mine.every((row) => row.status === 'converted')).toBe(true);
+    // Somebody else's place is untouched by a purchase that was never theirs.
+    const theirs = rows.find((row) => row.id === otherWaiter[0].entryId);
+    expect(theirs?.status).toBe('waiting');
+  });
+
+  it('leaves a place for a different tier of the same showtime open', async () => {
+    const { showtimeId, soldOutTierId, sellingTierId } = await wl.seedMixedGaShowtime();
+    const buyer = await registerUser();
+    await fundWallet(buyer.userId, 5_000_000);
+    await pool.query(`INSERT INTO waitlists (user_id, showtime_id, ticket_tier_id) VALUES ($1, $2, $3)`, [
+      buyer.userId,
+      showtimeId,
+      soldOutTierId,
+    ]);
+
+    const reservation = await request(app)
+      .post('/api/reservations')
+      .set(bearer(buyer.token))
+      .send({ showtimeId, ticketTierId: sellingTierId, quantity: 1 })
+      .expect(201);
+    await checkout(buyer.userId, reservation.body.id);
+
+    const rows = await wl.getEntries(showtimeId);
+    // They bought the cheap tier; they are still waiting for the good one.
+    expect(rows[0].status).toBe('waiting');
+  });
+});

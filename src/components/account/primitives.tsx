@@ -25,31 +25,44 @@ import { DEFAULT_AVATAR_FG, avatarColor } from "../../services/defaultAvatar";
  */
 
 export const inputClass =
-  "h-11 w-full rounded-xl border-2 border-beige-kem bg-surface-2 px-4 text-body text-beige-kem outline-none transition focus:border-burgundy";
+  "h-11 w-full border-2 border-beige-kem bg-surface-2 px-4 text-body text-beige-kem outline-none transition focus:border-burgundy";
 export const inputErrorClass =
-  "h-11 w-full rounded-xl border-2 border-burgundy bg-bubblegum px-4 text-body text-on-tint outline-none transition focus:border-burgundy";
+  "h-11 w-full border-2 border-burgundy bg-bubblegum/25 px-4 text-body text-beige-kem outline-none transition focus:border-burgundy";
 export const textareaClass =
-  "w-full rounded-xl border-2 border-beige-kem bg-surface-2 px-4 py-2.5 text-body leading-6 text-beige-kem outline-none transition focus:border-burgundy";
+  "w-full border-2 border-beige-kem bg-surface-2 px-4 py-2.5 text-body leading-6 text-beige-kem outline-none transition focus:border-burgundy";
 
 export const btnPrimary =
-  "inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-burgundy px-5 text-body font-black text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex h-11 items-center justify-center gap-2 bg-burgundy px-5 text-body font-black text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60";
 export const btnSecondary =
-  "inline-flex h-11 items-center justify-center gap-2 rounded-xl border-2 border-beige-kem px-5 text-body font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex h-11 items-center justify-center gap-2 border-2 border-beige-kem px-5 text-body font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:cursor-not-allowed disabled:opacity-60";
 /*
  * Danger carries its warning in the outline, not the label: tomato as *text* misses 4.5:1 on cream,
  * so the tomato border does the signalling and the fill only arrives on hover, where white text
  * clears AA against it.
  */
 export const btnDanger =
-  "inline-flex h-11 items-center justify-center gap-2 rounded-xl border-2 border-burgundy px-5 text-body font-bold text-beige-kem transition hover:bg-burgundy hover:text-white disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex h-11 items-center justify-center gap-2 border-2 border-burgundy px-5 text-body font-bold text-beige-kem transition hover:bg-burgundy hover:text-white disabled:cursor-not-allowed disabled:opacity-60";
 
 /** Card-header action. Shorter than the body buttons so it reads as secondary to the card's content. */
 export const btnHeader =
-  "inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border-2 border-beige-kem px-3.5 text-eyebrow font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex h-9 items-center justify-center gap-1.5 border-2 border-beige-kem px-3.5 text-eyebrow font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:cursor-not-allowed disabled:opacity-60";
 export const btnHeaderPrimary =
-  "inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-burgundy px-3.5 text-eyebrow font-black text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex h-9 items-center justify-center gap-1.5 bg-burgundy px-3.5 text-eyebrow font-black text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60";
 
-/** An elevated surface with a brand-tinted heading over a hairline rule. */
+/**
+ * A surface with a brand-tinted heading over a hairline rule.
+ *
+ * It lifts off the page with its own fill and the four quarter-circle bites `ticket-corners`
+ * punches — the silhouette the nav's ticket and the stubs on `/bookings` already wear. It used to
+ * be a 2px outline with a 16px radius, which was the one rounded frame left in the app.
+ *
+ * The fill is the page's ink at 5%, the borderless panel `BookingChrome` uses, not `surface-2`:
+ * that token sits at 1.03:1 against the light theme's page, so a card painted in it would have no
+ * edge at all in daylight — the outline was the only thing holding the shape.
+ *
+ * Danger keeps a tomato stripe down the left edge instead of an outline, as the admin console's
+ * notices do: the corner bites would break a full border into four arcs and read as damage.
+ */
 export function InfoCard({
   title,
   action,
@@ -63,8 +76,8 @@ export function InfoCard({
 }) {
   return (
     <section
-      className={`rounded-2xl border-2 bg-surface-2 p-5 sm:p-6 ${
-        tone === "danger" ? "border-burgundy" : "border-beige-kem"
+      className={`ticket-corners bg-beige-kem/[0.05] p-5 sm:p-6 ${
+        tone === "danger" ? "border-l-2 border-burgundy" : ""
       }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-beige-kem/25 pb-4">
@@ -209,7 +222,15 @@ export function AvatarWithBadge({
   );
 }
 
-/** Status pill. Always icon + text, never colour alone (principle: user diversity). */
+/**
+ * Status chip. Always icon + text, never colour alone (principle: user diversity).
+ *
+ * A hairline chip in the page's own palette, set in `label-eyebrow` — the shape the admin console's
+ * event table uses for a status, and the accent tints the admin notices use for an outcome. It was
+ * a solid lavender or bubblegum lozenge with burgundy type: two flat fills that appear nowhere else
+ * in the app at full strength, so "Hoạt động" was the loudest thing on the profile card and read as
+ * a sticker laid on top of the page rather than as part of it.
+ */
 export function Badge({
   tone,
   icon,
@@ -221,13 +242,13 @@ export function Badge({
 }) {
   const toneClass =
     tone === "good"
-      ? "border-beige-kem bg-la-co text-on-tint"
+      ? "border-la-co bg-la-co/10 text-beige-kem"
       : tone === "warn"
-        ? "border-beige-kem bg-bubblegum text-on-tint"
-        : "border-beige-kem/25 bg-surface-2 text-beige-kem/80";
+        ? "border-burgundy bg-burgundy/10 text-beige-kem"
+        : "border-beige-kem/25 text-ink-soft";
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-meta text-meta font-bold uppercase ${toneClass}`}
+      className={`label-eyebrow inline-flex items-center gap-1.5 border px-2.5 py-1 ${toneClass}`}
     >
       {icon}
       {children}
