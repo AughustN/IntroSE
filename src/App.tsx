@@ -1508,6 +1508,14 @@ export default function App() {
       setHold(null);
       goTo("ticket", { bookingId: newBooking.id });
     } catch (e) {
+      if (e instanceof WalletError && e.code === "event_unavailable") {
+        // The hold was valid when it was created, but the server is authoritative at payment time.
+        // Drop the stale local checkout state so the buyer cannot retry a no-longer-sellable event.
+        setHold(null);
+        pushToast("error", e.message);
+        return;
+      }
+
       // A short balance is not a failed purchase — it is a step the buyer can complete. The server
       // sends the exact numbers, which the checkout screen turns into a pre-filled top-up (UC-12 A2).
       if (e instanceof WalletError && e.code === "insufficient_wallet_balance" && e.details) {

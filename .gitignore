@@ -38,6 +38,7 @@ coverage/
 Thumbs.db
 *.tmp
 *.swp
+.codegraph/
 
 # Uploaded avatars (runtime, ADR 0004)
 uploads/

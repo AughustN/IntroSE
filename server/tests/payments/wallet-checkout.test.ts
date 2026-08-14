@@ -89,4 +89,66 @@ describe("wallet checkout (UC-02)", () => {
     expect((await holds.getReservationRow(reservation.body.id)).status).toBe("active");
     expect((await pool.query(`SELECT count(*)::int AS count FROM orders`)).rows[0].count).toBe(0);
   });
+
+  it("rejects checkout when moderation removes an event after the reservation is created", async () => {
+    const fixture = await holds.seedGaShowtime(5, 200_000);
+    const user = await registerUser();
+    await pool.query(`UPDATE wallets SET balance_amount = 500_000 WHERE user_id = $1`, [
+      user.userId,
+    ]);
+    const reservation = await request(app)
+      .post("/api/reservations")
+      .set(bearer(user.token))
+      .send({ showtimeId: fixture.showtimeId, ticketTierId: fixture.tierId, quantity: 2 })
+      .expect(201);
+    await pool.query(`UPDATE events SET moderation_status = 'removed' WHERE id = $1`, [
+      fixture.eventId,
+    ]);
+
+    const response = await request(app)
+      .post("/api/checkout")
+      .set(bearer(user.token))
+      .send({ reservationId: reservation.body.id });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe("event_unavailable");
+    expect(
+      (await pool.query(`SELECT balance_amount FROM wallets WHERE user_id = $1`, [user.userId]))
+        .rows[0].balance_amount,
+    ).toBe(500_000);
+    expect((await pool.query(`SELECT count(*)::int AS count FROM orders`)).rows[0].count).toBe(0);
+    expect((await pool.query(`SELECT count(*)::int AS count FROM tickets`)).rows[0].count).toBe(0);
+    expect(await holds.getTierCounts(fixture.tierId)).toMatchObject({ sold: 0, reserved: 2 });
+    expect((await holds.getReservationRow(reservation.body.id)).status).toBe("active");
+  });
+
+  it("rejects checkout when the showtime is cancelled after the reservation is created", async () => {
+    const fixture = await holds.seedSeatedShowtime(1, 500_000);
+    const user = await registerUser();
+    await pool.query(`UPDATE wallets SET balance_amount = 500_000 WHERE user_id = $1`, [
+      user.userId,
+    ]);
+    const reservation = await request(app)
+      .post("/api/reservations")
+      .set(bearer(user.token))
+      .send({ showtimeId: fixture.showtimeId, seatIds: fixture.seatIds })
+      .expect(201);
+    await holds.cancelShowtime(fixture.showtimeId);
+
+    const response = await request(app)
+      .post("/api/checkout")
+      .set(bearer(user.token))
+      .send({ reservationId: reservation.body.id });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe("event_unavailable");
+    expect(
+      (await pool.query(`SELECT balance_amount FROM wallets WHERE user_id = $1`, [user.userId]))
+        .rows[0].balance_amount,
+    ).toBe(500_000);
+    expect((await pool.query(`SELECT count(*)::int AS count FROM orders`)).rows[0].count).toBe(0);
+    expect((await pool.query(`SELECT count(*)::int AS count FROM tickets`)).rows[0].count).toBe(0);
+    expect((await holds.getSeat(fixture.seatIds[0])).status).toBe("held");
+    expect((await holds.getReservationRow(reservation.body.id)).status).toBe("active");
+  });
 });

@@ -9,6 +9,7 @@ import {
   markWaitlistConverted,
   queueOrderConfirmation,
 } from "../notifications/notifications.service.js";
+import { UPCOMING_SHOWTIME, VISIBLE_JOIN, VISIBLE_WHERE } from "../catalog/visibility.js";
 
 export interface WalletView {
   balanceAmount: number;
@@ -348,6 +349,29 @@ export async function checkout(userId: number, reservationId: number): Promise<O
       throw err.conflict("reservation_expired", "Đơn giữ chỗ đã hết hạn.");
     }
 
+    // A reservation is only a snapshot of inventory, not a permanent right to buy. The event,
+    // organizer, and showtime may have become unavailable while the buyer was reviewing the order.
+    // Lock the sellability rows inside this transaction so moderation/cancellation cannot commit a
+    // state change between this check and the financial writes below.
+    const sellability = (
+      await client.query<{ sellable: boolean }>(
+        `SELECT (${VISIBLE_WHERE} AND ${UPCOMING_SHOWTIME}) AS sellable
+           FROM reservations r
+           JOIN showtimes s ON s.id = r.showtime_id
+           JOIN events e ON e.id = s.event_id
+           ${VISIBLE_JOIN}
+          WHERE r.id = $1
+          FOR UPDATE OF s, e, o`,
+        [reservationId],
+      )
+    ).rows[0];
+    if (!sellability?.sellable) {
+      throw err.conflict(
+        "event_unavailable",
+        "Sự kiện không còn mở bán. Đơn giữ chỗ của bạn chưa bị trừ tiền.",
+      );
+    }
+
     const items = (
       await client.query<{
         id: number;
@@ -503,12 +527,9 @@ export async function checkout(userId: number, reservationId: number): Promise<O
     ]);
     // The buyer waited for this and now has it, so their place in the queue closes here — inside
     // the same transaction as the tickets, so the two can never disagree (UC-17, FR-010).
-    await markWaitlistConverted(
-      client,
-      userId,
-      reservation.showtime_id,
-      [...new Set(items.map((item) => item.ticket_tier_id))],
-    );
+    await markWaitlistConverted(client, userId, reservation.showtime_id, [
+      ...new Set(items.map((item) => item.ticket_tier_id)),
+    ]);
 
     const orderView: OrderView = {
       id: order.id,
