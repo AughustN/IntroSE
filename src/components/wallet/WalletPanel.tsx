@@ -192,7 +192,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
                         </td>
                         <td
                           className={`px-4 py-3 text-right font-bold whitespace-nowrap ${
-                            entry.amount < 0 ? "text-ink-soft" : "text-cam-dat"
+                            entry.amount < 0 ? "text-ink-soft" : "text-cam-dat-ink"
                           }`}
                         >
                           {entry.amount > 0 ? "+" : "−"}

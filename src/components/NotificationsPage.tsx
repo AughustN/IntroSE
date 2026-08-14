@@ -3,12 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { BellRing, CalendarClock, CheckCheck, Inbox, Megaphone, Ticket } from "lucide-react";
+import {
+  BellOff,
+  BellRing,
+  CalendarClock,
+  CheckCheck,
+  Inbox,
+  Megaphone,
+  Ticket,
+} from "lucide-react";
 import type { NotificationItem, NotificationType } from "../services/notificationsClient";
 
 /** What each kind of message is about, at a glance. */
 const ICONS: Record<NotificationType, typeof BellRing> = {
   waitlist_open: BellRing,
+  waitlist_closed: BellOff,
   order_confirmed: Ticket,
   ticket_resend: Ticket,
   reminder_7d: CalendarClock,
@@ -140,7 +149,10 @@ export default function NotificationsPage({
                     </span>
                     <span className="mt-1.5 block font-meta text-meta text-ink-soft">
                       {formatMoment(item.createdAt)}
-                      {item.eventSlug && " · Xem sự kiện"}
+                      {/* A waitlist row leads somewhere with something to do on arrival, so it
+                          says so: "xem" undersells an invitation to race for returned stock. */}
+                      {item.eventSlug &&
+                        (item.type === "waitlist_open" ? " · Mua vé ngay" : " · Xem sự kiện")}
                     </span>
                   </span>
                 </button>

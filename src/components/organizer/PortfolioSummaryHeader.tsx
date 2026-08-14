@@ -66,7 +66,7 @@ export const PortfolioSummaryHeader: React.FC<PortfolioSummaryHeaderProps> = ({
                 onClick={() => onFilterChange(tab.key)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-colors flex items-center space-x-1.5 ${
                   isActive
-                    ? "bg-la-co text-on-tint border border-beige-kem/30 shadow-sm"
+                    ? "border border-la-co bg-la-co/25 text-beige-kem shadow-sm"
                     : "text-ink-soft hover:text-beige-kem hover:bg-beige-kem/10"
                 }`}
               >

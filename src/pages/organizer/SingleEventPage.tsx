@@ -176,7 +176,7 @@ export const SingleEventPage: React.FC = () => {
               <p className="font-bold">● Sự kiện đang được đăng bán công khai</p>
               <p className="opacity-90">Người mua có thể tìm kiếm và đặt vé trên TixHub.</p>
             </div>
-            <span className="px-3 py-1 bg-la-co text-on-tint rounded-full font-bold text-[10px]">ĐÃ DUYỆT</span>
+            <span className="px-3 py-1 border border-la-co bg-la-co/25 text-beige-kem rounded-full font-bold text-[10px]">ĐÃ DUYỆT</span>
           </div>
         );
       case "pending_review":
@@ -260,7 +260,7 @@ export const SingleEventPage: React.FC = () => {
         <div
           className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl border text-xs font-medium shadow-2xl flex items-center space-x-2 animate-bounce ${
             toastMsg.type === "success"
-              ? "bg-la-co text-on-tint border-beige-kem"
+              ? "border-la-co bg-la-co/25 text-beige-kem"
               : toastMsg.type === "warning"
               ? "bg-cam-dat text-on-tint border-beige-kem"
               : "bg-burgundy text-white border-beige-kem"
@@ -289,7 +289,7 @@ export const SingleEventPage: React.FC = () => {
           {eventData.computedStatus === "draft" && (
             <button
               onClick={handleRequestPublish}
-              className="px-4 py-2 bg-la-co hover:brightness-110 text-on-tint font-bold rounded-xl text-xs transition-colors shadow-md"
+              className="px-4 py-2 border border-la-co bg-la-co/25 text-beige-kem hover:bg-la-co/40 font-bold rounded-xl text-xs transition-colors shadow-md"
             >
               🚀 Gửi Yêu Cầu Duyệt (Publish)
             </button>
@@ -416,7 +416,7 @@ export const SingleEventPage: React.FC = () => {
 
               <div>
                 <label className="block text-ink-soft mb-1 font-semibold">
-                  Giá Vé (VND) * {isFreeTierModal && <span className="text-la-co font-bold">(Cố định 0đ cho Vé Miễn Phí)</span>}
+                  Giá Vé (VND) * {isFreeTierModal && <span className="font-bold text-la-co-ink">(Cố định 0đ cho Vé Miễn Phí)</span>}
                 </label>
                 <input
                   type="number"

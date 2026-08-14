@@ -7,6 +7,9 @@ import { validate } from '../../middleware/validate.js';
 import { listAuditLogs } from './audit.js';
 import { removeAsAdmin as removeReviewAsAdmin } from '../reviews/reviews.service.js';
 import { approveOrganizer, categories, createCategory, dismissReport, featured, moderateEvent, queue, removeCategory, rejectOrganizer, replaceFeaturedEvents, renameCategory, resolveReportedEvent, suspendOrganizer } from './admin.service.js';
+import { analytics, orders, overview, reviewReports, walletTransactions } from './analytics.repo.js';
+import { eventReports, reportDetail } from './reports.repo.js';
+import { attendees, checkIn, toCsv } from '../checkin/checkin.service.js';
 import { getSettings, updateSettings } from './settings.service.js';
 
 export const adminRouter = Router();
@@ -54,3 +57,80 @@ adminRouter.get('/homepage/featured', asyncH(async (_req, res) => { res.json(awa
 adminRouter.put('/homepage/featured', validate(featuredBody), asyncH(async (req, res) => { res.json(await replaceFeaturedEvents(req.auth!.userId, req.body.events)); }));
 adminRouter.get('/settings', asyncH(async (_req, res) => { res.json(await getSettings()); }));
 adminRouter.put('/settings', validate(settingsBody), asyncH(async (req, res) => { res.json(await updateSettings(req.auth!.userId, req.body)); }));
+
+/*
+ * ── Read models (UC-31, UC-32) ─────────────────────────────────────────────────────────────────
+ *
+ * Aggregated in SQL, never in the browser. The console's revenue figure used to be summed from the
+ * *viewer's own* booking history, so it changed with whoever was signed in.
+ */
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày phải theo dạng YYYY-MM-DD');
+/** A day count, not a date, so the caller cannot ask for a range with no end. */
+const positiveInt = (max: number) => z.coerce.number().int().min(1).max(max);
+const analyticsQuery = z.object({ from: day.optional(), to: day.optional(), organizerId: z.coerce.number().int().positive().optional(), category: z.string().trim().min(1).max(40).optional() });
+const ordersQuery = z.object({ q: z.string().trim().min(1).max(200).optional(), status: z.enum(['pending', 'paid', 'failed', 'refunded', 'partially_refunded', 'cancelled']).optional(), limit: positiveInt(200).optional(), offset: z.coerce.number().int().nonnegative().optional() });
+const walletQuery = z.object({ kind: z.enum(['topup', 'purchase', 'refund']).optional(), limit: positiveInt(500).optional() });
+const barcodeBody = z.object({ barcode: z.string().trim().min(4).max(120) }).strict();
+const attendeeQuery = z.object({ showtimeId: z.coerce.number().int().positive().optional(), format: z.enum(['json', 'csv']).optional() });
+
+const parseQuery = <T>(schema: z.ZodType<T>, req: Request): T => {
+  const parsed = schema.safeParse(req.query);
+  if (!parsed.success) throw err.badRequest('validation_failed', parsed.error.issues[0]?.message ?? 'Tham số không hợp lệ.');
+  return parsed.data;
+};
+/** `YYYY-MM-DD`, `days` ago — the default range both analytics screens open on. */
+const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+
+adminRouter.get('/overview', asyncH(async (_req, res) => { res.json(await overview()); }));
+adminRouter.get('/analytics', asyncH(async (req, res) => {
+  const q = parseQuery(analyticsQuery, req);
+  res.json(await analytics({ from: q.from ?? daysAgo(30), to: q.to ?? daysAgo(0), organizerId: q.organizerId, category: q.category }));
+}));
+adminRouter.get('/orders', asyncH(async (req, res) => {
+  const q = parseQuery(ordersQuery, req);
+  res.json(await orders({ query: q.q, status: q.status, limit: q.limit ?? 50, offset: q.offset ?? 0 }));
+}));
+/*
+ * Reported comments, decided ones included — the queue endpoint above only lists what is open, and
+ * a moderator checking "did we already handle this?" had nowhere to look.
+ */
+const reviewReportQuery = z.object({ q: z.string().trim().min(1).max(200).optional(), status: z.enum(['open', 'done']).optional(), limit: positiveInt(100).optional(), offset: z.coerce.number().int().nonnegative().optional() });
+adminRouter.get('/review-reports', asyncH(async (req, res) => {
+  const q = parseQuery(reviewReportQuery, req);
+  res.json(await reviewReports({ query: q.q, status: q.status, limit: q.limit ?? 25, offset: q.offset ?? 0 }));
+}));
+/*
+ * Reported events, and one report in full.
+ *
+ * The queue endpoint lists only what is open and carries just the target's id; deciding whether an
+ * event should come down needs the event — its description, its organizer, how many tickets it has
+ * already sold — which is what the detail route serves.
+ */
+const contentReportQuery = z.object({ q: z.string().trim().min(1).max(200).optional(), status: z.enum(['open', 'flagged', 'resolved', 'dismissed']).optional(), limit: positiveInt(100).optional(), offset: z.coerce.number().int().nonnegative().optional() });
+adminRouter.get('/content-reports', asyncH(async (req, res) => {
+  const q = parseQuery(contentReportQuery, req);
+  res.json(await eventReports({ query: q.q, status: q.status, limit: q.limit ?? 25, offset: q.offset ?? 0 }));
+}));
+adminRouter.get('/content-reports/:id', asyncH(async (req, res) => { res.json(await reportDetail(id(req))); }));
+
+adminRouter.get('/wallet-transactions', asyncH(async (req, res) => {
+  const q = parseQuery(walletQuery, req);
+  res.json(await walletTransactions(q.limit ?? 100, q.kind));
+}));
+
+/*
+ * The door, from the console (UC-27, UC-28, UC-29).
+ *
+ * The same two operations are mounted on the organizer router as well. An admin is not necessarily
+ * an approved organizer — `requireOrganizer` derives that from the organizers table — so an admin
+ * reaching for the organizer route would be refused by a rule meant for somebody else. One service,
+ * two doors, ownership decided inside.
+ */
+const actor = (req: Request) => ({ userId: req.auth!.userId, isAdmin: true });
+adminRouter.post('/tickets/check-in', validate(barcodeBody), asyncH(async (req, res) => { res.json(await checkIn(actor(req), req.body.barcode)); }));
+adminRouter.get('/events/:id/attendees', asyncH(async (req, res) => {
+  const q = parseQuery(attendeeQuery, req);
+  const list = await attendees(actor(req), id(req), q.showtimeId);
+  if (q.format !== 'csv') { res.json(list); return; }
+  res.type('text/csv; charset=utf-8').attachment(`khach-tham-du-${list.eventId}.csv`).send(toCsv(list));
+}));

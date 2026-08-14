@@ -244,7 +244,15 @@ export default function EventGrid({
             own content; stretched to the flex row's height it would have nothing to scroll within
             and would never stick.
           */
-          <aside className="lg:sticky lg:top-24 lg:h-fit lg:w-60 lg:shrink-0">{sidebar}</aside>
+          /*
+            `relative z-20` because the rail has things that hang out of it — the date picker's
+            calendar is wider than the 240px column and reaches over the first card. The grid beside
+            it is positioned too, and later in the DOM, so without a stacking order of its own the
+            rail's panels were painted *under* the card art.
+          */
+          <aside className="relative z-20 lg:sticky lg:top-24 lg:h-fit lg:w-60 lg:shrink-0">
+            {sidebar}
+          </aside>
         )}
 
         <div ref={gridRef} className="min-w-0 flex-1 scroll-mt-24">

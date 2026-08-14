@@ -129,7 +129,7 @@ export default function ReviewPreview({ eventId, isSignedIn, onOpenAll }: Review
         <button
           type="button"
           onClick={onOpenAll}
-          className="flex items-center gap-1 font-meta text-meta font-bold text-cam-dat transition hover:brightness-110"
+          className="flex items-center gap-1 font-meta text-meta font-bold text-cam-dat-ink transition hover:brightness-110"
         >
           {total > 0 ? `Xem tất cả ${total} bình luận` : "Viết bình luận"}
           <ChevronRight className="h-4 w-4" />

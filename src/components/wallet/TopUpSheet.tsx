@@ -142,7 +142,7 @@ export default function TopUpSheet({
         </p>
       )}
 
-      <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-meta leading-5 text-on-tint">
+      <div className="rounded-xl border-2 border-la-co bg-la-co/20 p-3 text-meta leading-5 text-beige-kem">
         Bạn sẽ được chuyển sang VNPay. Ví chỉ được cộng tiền khi VNPay xác nhận về máy chủ, nên số
         dư có thể cập nhật chậm vài giây sau khi quay lại.
         {reservationId !== undefined && " Chỗ bạn đang giữ được gia hạn một lần cho lần nạp này."}

@@ -100,22 +100,53 @@
    * carry white. So fills read `--color-burgundy` and text reads this.
    */
   --color-burgundy-ink: #d12a20;
-  --color-cam-dat: #f7a97c;
-  --color-la-co: #bfc0f2;
+  /*
+   * Amber and olive, replacing the peach and periwinkle this palette used to carry.
+   *
+   * The two pastels never belonged to the rest of it: a cool lilac beside a maroon-and-cream page
+   * read as a different product's colour, and at #bfc0f2 as *type* on cream it measured 1.70:1 —
+   * a heading nobody could read. These two share the page's warmth and, more usefully, sit at
+   * opposite ends of the light scale, so one takes dark type and the other takes white.
+   */
+  --color-cam-dat: #f19502;
+  --color-la-co: #897523;
   --color-bubblegum: #fbd0dc;
+
+  /*
+   * The same two hues, tuned for *type* — the split `burgundy` / `burgundy-ink` already makes.
+   *
+   * A fill and a letterform need opposite things from a colour: amber at #f19502 carries dark type
+   * beautifully and measures 2.2:1 as type on cream, which is a warning nobody can read. These are
+   * the values to write words in; the pair above are the values to fill shapes with.
+   */
+  --color-cam-dat-ink: #8a5a00;
+  --color-la-co-ink: #6f5e1c;
 
   /* Large fills. Identical to the tints in light mode, deep shades in dark — see below. */
   --color-tomato-band: #d93025;
   --color-bubblegum-band: #fbd0dc;
-  --color-periwinkle-band: #bfc0f2;
-  --color-peach-band: #f7a97c;
+  --color-periwinkle-band: #897523;
+  --color-peach-band: #f19502;
 
   /*
-   * Text sitting on a tint fill. Constant across modes: the tints stay light in dark mode while
-   * `beige-kem` flips to cream, so `text-beige-kem` on a bubblegum chip is unreadable at night.
-   * Anything filled bubblegum / periwinkle / peach uses this; tomato fills use white.
+   * Text sitting on a *light* tint fill — bubblegum and amber. Constant across modes: those tints
+   * stay light in dark mode while `beige-kem` flips to cream, so `text-beige-kem` on a bubblegum
+   * chip would be unreadable at night.
+   *
+   * Darkened from #8a0c24 when amber replaced peach: the old maroon measured 4.19:1 on #f19502,
+   * just under the bar for the 14px bold labels that sit on these chips. This clears it at 5.4,
+   * and improves bubblegum from 7.0 to 9.0 on the way past.
    */
-  --color-on-tint: #8a0c24;
+  --color-on-tint: #6b0a1c;
+
+  /*
+   * There is deliberately no white-on-olive ink token.
+   *
+   * A solid #897523 chip needs white type to clear 4.5:1, and white type scattered through the
+   * console reads as a different product's UI. So olive appears as a *wash* under the page's own
+   * maroon ink instead — `bg-la-co/25` with `text-beige-kem` — which keeps the hue as the state
+   * marker and the words dark. White is left to the one place it belongs: a filled burgundy button.
+   */
 }
 
 html {
@@ -131,14 +162,16 @@ html {
   --color-ink-soft: #b4566a;
   --color-burgundy: #d93025;
   --color-burgundy-ink: #d12a20;
-  --color-cam-dat: #f7a97c;
-  --color-la-co: #bfc0f2;
+  --color-cam-dat: #f19502;
+  --color-cam-dat-ink: #8a5a00;
+  --color-la-co: #897523;
+  --color-la-co-ink: #6f5e1c;
   --color-bubblegum: #fbd0dc;
   --color-tomato-band: #d93025;
   --color-bubblegum-band: #fbd0dc;
-  --color-periwinkle-band: #bfc0f2;
-  --color-peach-band: #f7a97c;
-  --color-on-tint: #8a0c24;
+  --color-periwinkle-band: #897523;
+  --color-peach-band: #f19502;
+  --color-on-tint: #6b0a1c;
   /*
    * Stable aliases for the two foreground roles. `beige-kem` and `ink-soft` get overridden locally
    * by `.nav-over-hero`; these never are, so anything that has to keep the page's own ink inside
@@ -186,14 +219,25 @@ html {
   --color-burgundy: #d93025;
   /* Fills keep the darker red so white stays legible on them; only type gets the lift. */
   --color-burgundy-ink: #ee6055;
-  --color-cam-dat: #f7a97c;
-  --color-la-co: #bfc0f2;
+  --color-cam-dat: #f19502;
+  /*
+   * Olive keeps its light-mode value rather than being lifted for the dark page.
+   *
+   * Lifting it to #a68f2c looked right against black and broke both texts that sit on it: white
+   * dropped to 3.2:1 and the maroon ink to 3.9:1. At #897523 white clears 4.5 on the fill, and the
+   * colour itself clears 4.6 as type on black — one value serving both jobs in both themes.
+   */
+  --color-la-co: #897523;
+  /* Both inks lift for the black page, the way `burgundy-ink` does. */
+  --color-cam-dat-ink: #f19502;
+  --color-la-co-ink: #a68f2c;
   --color-bubblegum: #fbd0dc;
   --color-tomato-band: #7a1710;
   --color-bubblegum-band: #4a1526;
-  --color-periwinkle-band: #2e2a5c;
-  --color-peach-band: #5a2e1c;
-  --color-on-tint: #8a0c24;
+  /* The deep pair, re-cut for the new hues: olive and amber taken down to band strength. */
+  --color-periwinkle-band: #3a3210;
+  --color-peach-band: #5a3a02;
+  --color-on-tint: #6b0a1c;
   --color-ink: #fdf6ea;
   --color-ink-muted: #d9a8b2;
   --color-nav-surface: #3d0d1a;
@@ -547,6 +591,23 @@ select:focus-visible {
 
 .menu-panel > * {
   overflow: hidden;
+}
+
+/*
+ * Once the reveal has finished, the panel stops clipping.
+ *
+ * `overflow: hidden` is what lets the row grow from nothing — but `Disclosure` uses this same panel,
+ * and a filter row that clips its own content also clips anything *positioned* inside it. The date
+ * picker in the events rail opened into a 10px sliver for exactly that reason: its calendar hung
+ * below the row, and the row cut it off.
+ *
+ * The delay is the whole reveal duration, so nothing spills while the row is still growing;
+ * `overflow` is a discrete property, so it flips at the end of that delay rather than tweening.
+ * Closing drops straight back to the rule above, which is what the animation needs on the way down.
+ */
+.menu-panel[data-open="true"] > * {
+  overflow: visible;
+  transition: overflow 0s var(--menu-panel-duration);
 }
 
 /*

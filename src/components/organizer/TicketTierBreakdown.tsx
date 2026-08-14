@@ -21,11 +21,11 @@ export const TicketTierBreakdown: React.FC<TicketTierBreakdownProps> = ({
   };
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-4">
+    <div className="space-y-4 rounded-xl border border-beige-kem/25 bg-surface-2 p-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-white">Danh Sách Hạng Vé & Sức Chứa</h2>
-          <p className="text-xs text-zinc-400">
+          <h2 className="font-display text-title-s font-black text-beige-kem">Danh Sách Hạng Vé & Sức Chứa</h2>
+          <p className="font-meta text-meta text-ink-soft">
             Quản lý từng hạng vé, giá bán (VND) và theo dõi số lượng vé bán ra.
           </p>
         </div>
@@ -33,7 +33,7 @@ export const TicketTierBreakdown: React.FC<TicketTierBreakdownProps> = ({
         {!isReadonly && (
           <button
             onClick={onAddTier}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 border border-amber-500/30 transition-colors"
+            className="rounded-lg border border-beige-kem/40 px-3 py-1.5 font-meta text-meta font-bold text-beige-kem transition-colors hover:bg-bubblegum/20"
           >
             + Thêm Hạng Vé
           </button>
@@ -42,7 +42,7 @@ export const TicketTierBreakdown: React.FC<TicketTierBreakdownProps> = ({
 
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs">
-          <thead className="bg-zinc-950 text-zinc-400 uppercase tracking-wider text-[10px] border-b border-zinc-800">
+          <thead className="border-b border-beige-kem/25 bg-xanh-pho font-meta text-meta uppercase tracking-wider text-ink-soft">
             <tr>
               <th className="py-3 px-4">Tên Hạng Vé</th>
               <th className="py-3 px-4">Giá Vé (VND)</th>
@@ -53,7 +53,7 @@ export const TicketTierBreakdown: React.FC<TicketTierBreakdownProps> = ({
               {!isReadonly && <th className="py-3 px-4 text-right">Thao Tác</th>}
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-800/60 text-zinc-200">
+          <tbody className="divide-y divide-beige-kem/15 text-beige-kem">
             {ticketTiers.map((tier) => {
               const cap = tier.capacity || 0;
               const sold = tier.soldCount || 0;
@@ -61,24 +61,24 @@ export const TicketTierBreakdown: React.FC<TicketTierBreakdownProps> = ({
               const isArchived = tier.isArchived;
 
               return (
-                <tr key={tier.id} className={isArchived ? "bg-zinc-950/40 text-zinc-500" : "hover:bg-zinc-800/30"}>
-                  <td className="py-3 px-4 font-medium text-white">
+                <tr key={tier.id} className={isArchived ? "bg-beige-kem/5 text-ink-soft" : "hover:bg-bubblegum/15"}>
+                  <td className="px-4 py-3 font-bold text-beige-kem">
                     {tier.label}
                     {tier.description && (
-                      <span className="block text-[10px] text-zinc-400 font-normal">{tier.description}</span>
+                      <span className="block font-meta text-meta font-normal text-ink-soft">{tier.description}</span>
                     )}
                   </td>
-                  <td className="py-3 px-4 font-semibold text-emerald-400">{formatVND(tier.price)}</td>
+                  <td className="px-4 py-3 font-bold tabular-nums text-beige-kem">{formatVND(tier.price)}</td>
                   <td className="py-3 px-4 font-medium">{cap}</td>
-                  <td className="py-3 px-4 font-semibold text-amber-400">{sold}</td>
+                  <td className="px-4 py-3 font-bold tabular-nums text-burgundy-ink">{sold}</td>
                   <td className="py-3 px-4">{remaining}</td>
                   <td className="py-3 px-4">
                     {isArchived ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] bg-zinc-800 text-zinc-400 border border-zinc-700">
+                      <span className="inline-flex items-center rounded border border-beige-kem/30 px-2 py-0.5 font-meta text-meta text-ink-soft">
                         Đã Lưu Trữ
                       </span>
                     ) : (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      <span className="inline-flex items-center rounded border border-la-co bg-la-co/25 px-2 py-0.5 font-meta text-meta text-beige-kem">
                         ● Hoạt động
                       </span>
                     )}
@@ -89,13 +89,13 @@ export const TicketTierBreakdown: React.FC<TicketTierBreakdownProps> = ({
                         <>
                           <button
                             onClick={() => onEditTier(tier)}
-                            className="text-xs text-zinc-400 hover:text-white transition-colors"
+                            className="font-meta text-meta text-ink-soft transition-colors hover:text-beige-kem"
                           >
                             Sửa
                           </button>
                           <button
                             onClick={() => onDeleteOrArchive(tier.id)}
-                            className="text-xs text-rose-400 hover:text-rose-300 transition-colors"
+                            className="font-meta text-meta text-burgundy-ink transition-colors hover:brightness-110"
                             title={
                               sold > 0
                                 ? "Hạng vé đã bán vé nên sẽ được lưu trữ (Archive) thay vì xóa."

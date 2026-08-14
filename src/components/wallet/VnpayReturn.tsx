@@ -81,7 +81,7 @@ export default function VnpayReturn({ onDone }: { onDone: (topup: Topup | null) 
         <p className="font-meta text-eyebrow leading-6 text-ink-soft">{body}</p>
 
         {topup?.status === "paid" && topup.reservationId !== null && (
-          <p className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-meta leading-5 text-on-tint">
+          <p className="rounded-xl border-2 border-la-co bg-la-co/20 p-3 text-meta leading-5 text-beige-kem">
             Nếu chỗ bạn giữ vẫn còn hạn, bạn có thể quay lại thanh toán ngay. Nếu đã hết hạn, tiền
             vẫn nằm an toàn trong ví — chỉ cần chọn lại chỗ.
           </p>

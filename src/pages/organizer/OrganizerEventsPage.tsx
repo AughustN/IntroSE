@@ -269,7 +269,7 @@ export const OrganizerEventsPage: React.FC = () => {
         <div
           className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl border text-xs font-medium shadow-2xl flex items-center space-x-2 animate-bounce ${
             toastMsg.type === "success"
-              ? "bg-la-co text-on-tint border-beige-kem"
+              ? "border-la-co bg-la-co/25 text-beige-kem"
               : "bg-burgundy text-white border-beige-kem"
           }`}
         >
@@ -574,7 +574,7 @@ export const OrganizerEventsPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={applyAiSuggestion}
-                      className="px-3 py-1 bg-la-co text-on-tint font-bold rounded-lg text-[11px] transition-colors shadow-md"
+                      className="px-3 py-1 border border-la-co bg-la-co/25 text-beige-kem font-bold rounded-lg text-[11px] transition-colors shadow-md"
                     >
                       ✨ Áp Dụng Tiêu Đề & Mô Tả Này
                     </button>
@@ -646,7 +646,7 @@ export const OrganizerEventsPage: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => handleRemoveTierItem(tier.id)}
-                            className="text-rose-400 hover:text-rose-300 text-xs font-semibold px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded-lg transition-colors"
+                            className="rounded-lg border border-burgundy/40 bg-bubblegum/25 px-2 py-1 text-xs font-bold text-burgundy-ink transition-colors hover:bg-bubblegum/40"
                           >
                             🗑️ Xóa hạng vé
                           </button>

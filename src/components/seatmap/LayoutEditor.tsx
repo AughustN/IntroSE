@@ -247,7 +247,7 @@ export default function LayoutEditor({
         )}
 
         {status && (
-          <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-eyebrow text-on-tint">
+          <div className="rounded-xl border-2 border-la-co bg-la-co/20 p-3 text-eyebrow text-beige-kem">
             {status}
           </div>
         )}

@@ -1,6 +1,6 @@
-export type OrganizerStatus = 'pending' | 'approved' | 'rejected' | 'suspended';
-export type EventModerationStatus = 'pending_review' | 'approved' | 'flagged' | 'removed';
-export type AuditOutcome = 'applied' | 'conflict' | 'rejected';
+export type OrganizerStatus = "pending" | "approved" | "rejected" | "suspended";
+export type EventModerationStatus = "pending_review" | "approved" | "flagged" | "removed";
+export type AuditOutcome = "applied" | "conflict" | "rejected";
 
 export interface OrganizerQueueItem {
   id: number;
@@ -23,13 +23,25 @@ export interface EventModerationItem {
   createdAt: string;
 }
 
+/**
+ * An open report, carrying enough of what was reported for an admin to judge it without leaving.
+ *
+ * The server has always sent the four fields below; the type stopped at the ids, so the console
+ * showed "Tố cáo review #418" and an admin had to go and find the comment themselves.
+ */
 export interface ContentReportItem {
   id: number;
-  targetType: 'event' | 'review';
+  targetType: "event" | "review";
   targetId: number;
   reason: string;
   status: string;
   createdAt: string;
+  /** The event's title — its own for an event report, the host event's for a review. */
+  targetTitle: string | null;
+  /** Reviews only: what was written, who wrote it, and whether it is still visible. */
+  targetBody: string | null;
+  targetAuthor: string | null;
+  targetStatus: string | null;
 }
 
 export interface AdminModerationQueue {
@@ -90,6 +102,263 @@ export interface SystemSettings {
 }
 
 export type SystemSettingKey = keyof SystemSettings;
+
+/*
+ * ── The console's read models (UC-31, UC-32) ────────────────────────────────────────────────────
+ *
+ * Every figure below is aggregated on the server. The console used to compute revenue from the
+ * browser's own booking history, so two admins signed in at once saw two different numbers and
+ * neither matched the database.
+ *
+ * Money is a whole number of VND đồng, as everywhere else. "Revenue" counts tickets that still
+ * exist: cancelling a ticket voids it (`qr_status = 'void'`), so a refunded seat leaves the total
+ * on its own rather than needing a second subtraction.
+ */
+
+export interface DayPoint {
+  /** `YYYY-MM-DD`, Vietnam calendar day. */
+  day: string;
+  amount: number;
+  tickets: number;
+}
+
+export interface CategorySlice {
+  code: string;
+  label: string;
+  tickets: number;
+}
+
+/** One thing waiting on an admin, and how long it has waited. */
+export interface AttentionItem {
+  kind: "event" | "organizer" | "report";
+  id: number;
+  title: string;
+  waitingHours: number;
+}
+
+export interface AdminOverview {
+  revenue30d: number;
+  revenuePrev30d: number;
+  ticketsSold30d: number;
+  ticketsSoldPrev30d: number;
+  pendingEvents: number;
+  pendingOrganizers: number;
+  openReports: number;
+  /** Share of admitted tickets actually scanned, over showtimes that have started. `null` if none. */
+  checkedInRate: number | null;
+  liveEvents: number;
+  revenueByDay: DayPoint[];
+  ticketsByCategory: CategorySlice[];
+  attention: AttentionItem[];
+}
+
+export interface AnalyticsRow {
+  eventId: number;
+  eventTitle: string;
+  organizerId: number;
+  organizer: string;
+  category: string;
+  tickets: number;
+  revenue: number;
+  checkedIn: number;
+}
+
+export interface AdminAnalytics {
+  from: string;
+  to: string;
+  totals: { tickets: number; revenue: number; checkedIn: number; events: number };
+  rows: AnalyticsRow[];
+  byDay: DayPoint[];
+}
+
+export interface AdminOrderRow {
+  id: number;
+  code: string;
+  createdAt: string;
+  customerName: string;
+  customerEmail: string;
+  eventTitle: string;
+  startsAt: string;
+  tickets: number;
+  voidTickets: number;
+  total: number;
+  paymentStatus: string;
+  paymentMethod: string;
+}
+
+export interface AdminOrderPage {
+  rows: AdminOrderRow[];
+  total: number;
+}
+
+export interface AdminWalletTxRow {
+  id: number;
+  createdAt: string;
+  kind: "topup" | "purchase" | "refund";
+  /** Signed: top-up and refund positive, purchase negative. */
+  amount: number;
+  balanceAfter: number;
+  userEmail: string;
+  orderCode: string | null;
+  /** The gateway leg, when the row has one (top-ups do). */
+  providerRef: string | null;
+  providerStatus: string | null;
+}
+
+/**
+ * One reported comment, with everything needed to judge it in the row (UC-39 → UC-34).
+ *
+ * The moderation queue only ever returned *open* reports, so an admin could not see what had
+ * already been decided — and a report closed by mistake was gone from every screen. This carries
+ * the outcome as well, which is why it has its own type rather than reusing `ContentReportItem`.
+ */
+export interface ReviewReportRow {
+  id: number;
+  /** `open` while it waits; anything else means somebody has decided. */
+  status: "open" | "dismissed" | "flagged" | "resolved";
+  reason: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  resolutionNote: string | null;
+  reviewId: number;
+  reviewBody: string | null;
+  reviewRating: number;
+  /** `removed` means the comment is already hidden from the event page. */
+  reviewStatus: "visible" | "removed";
+  reviewCreatedAt: string;
+  /** Null when the author has since deleted their account — the comment outlives them. */
+  authorName: string | null;
+  eventId: number;
+  eventTitle: string;
+  eventSlug: string;
+  reporterEmail: string;
+}
+
+export interface ReviewReportPage {
+  rows: ReviewReportRow[];
+  total: number;
+  /** How many are still waiting, whatever this page is filtered to. */
+  openCount: number;
+}
+
+/** One reported event in the queue list (UC-39 → UC-34). */
+export interface ContentReportRow {
+  id: number;
+  status: "open" | "dismissed" | "flagged" | "resolved";
+  reason: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  resolutionNote: string | null;
+  reporterEmail: string;
+  eventId: number;
+  eventTitle: string;
+  eventSlug: string;
+  /** The event's own state, so the list says whether the decision has already bitten. */
+  eventStatus: string;
+  eventModeration: "pending_review" | "approved" | "flagged" | "removed";
+  /** How many readers have reported this same event and are still waiting. */
+  openCountForTarget: number;
+}
+
+export interface ContentReportPage {
+  rows: ContentReportRow[];
+  total: number;
+  openCount: number;
+}
+
+/** The event behind a report, as much of it as judging needs — and no booking controls. */
+export interface ReportedEvent {
+  kind: "event";
+  eventId: number;
+  slug: string;
+  title: string;
+  description: string;
+  imageUrl: string | null;
+  category: string;
+  organizer: string;
+  organizerId: number;
+  status: string;
+  moderationStatus: "pending_review" | "approved" | "flagged" | "removed";
+  reviewNote: string | null;
+  ageRestriction: string;
+  createdAt: string;
+  showtimes: Array<{ id: number; startsAt: string; venue: string; city: string }>;
+  priceFrom: number | null;
+  priceTo: number | null;
+  ticketsSold: number;
+}
+
+/** The comment behind a report, with the event it sits under. */
+export interface ReportedReview {
+  kind: "review";
+  reviewId: number;
+  body: string | null;
+  rating: number;
+  status: "visible" | "removed";
+  createdAt: string;
+  authorName: string | null;
+  eventId: number;
+  eventTitle: string;
+  eventSlug: string;
+}
+
+export interface ContentReportDetail {
+  id: number;
+  status: "open" | "dismissed" | "flagged" | "resolved";
+  reason: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  resolutionNote: string | null;
+  reporterEmail: string;
+  /**
+   * Every *other* report against the same target, newest first.
+   *
+   * One complaint is a person; five is a pattern, and an admin deciding on the first of five with
+   * no sight of the other four is deciding on a quarter of the evidence.
+   */
+  otherReports: Array<{
+    id: number;
+    reason: string;
+    createdAt: string;
+    reporterEmail: string;
+    status: string;
+  }>;
+  target: ReportedEvent | ReportedReview;
+}
+
+export interface AttendeeRow {
+  ticketId: number;
+  barcode: string;
+  orderCode: string;
+  buyerName: string;
+  buyerEmail: string;
+  tier: string;
+  seat: string | null;
+  status: "valid" | "checked_in" | "void";
+  checkedInAt: string | null;
+}
+
+export interface AttendeeList {
+  eventId: number;
+  eventTitle: string;
+  showtimeId: number | null;
+  rows: AttendeeRow[];
+  counts: { total: number; checkedIn: number; void: number };
+}
+
+/** What a door scan answers with (UC-27, UC-28). */
+export interface CheckinResult {
+  ticketId: number;
+  barcode: string;
+  eventTitle: string;
+  startsAt: string;
+  tier: string;
+  seat: string | null;
+  buyerName: string;
+  checkedInAt: string;
+  /** True when this scan is the one that admitted them; false when they were already inside. */
+  admitted: boolean;
+}
 
 export interface AdminValidationError {
   error: string;

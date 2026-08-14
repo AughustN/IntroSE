@@ -325,4 +325,17 @@ export const catalogClient = {
   getSeatMap(showtimeId: number): Promise<SeatMap> {
     return get<SeatMap>(`/showtimes/${showtimeId}/seat-map`);
   },
+  /**
+   * Report an event (UC-39).
+   *
+   * Signed in, unlike everything else here: a report is attributed, so the same reader cannot file
+   * the same complaint twice and an admin can see who raised it. A repeat is not an error — they
+   * did the right thing twice — so it comes back with `alreadyReported` rather than a refusal.
+   */
+  reportEvent(eventId: number, reason: string): Promise<{ alreadyReported: boolean }> {
+    return authed<{ alreadyReported: boolean }>(`/events/${eventId}/report`, {
+      method: "POST",
+      body: { reason },
+    });
+  },
 };

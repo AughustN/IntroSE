@@ -21,7 +21,7 @@ const ghost =
 const badge = (m: string) => {
   const map: Record<string, string> = {
     pending_review: "text-on-tint border-beige-kem bg-cam-dat",
-    approved: "text-on-tint border-beige-kem bg-la-co",
+    approved: "border-la-co bg-la-co/25 text-beige-kem",
     removed: "text-beige-kem/60 border-beige-kem/25 bg-surface-2",
     flagged: "text-on-tint border-beige-kem bg-cam-dat",
   };
@@ -187,7 +187,7 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
         </button>
       </div>
       {notice && (
-        <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-eyebrow text-on-tint">
+        <div className="rounded-xl border-2 border-la-co bg-la-co/20 p-3 text-eyebrow text-beige-kem">
           {notice}
         </div>
       )}

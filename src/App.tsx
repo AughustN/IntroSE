@@ -7,13 +7,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { SAMPLE_MOVIES } from "./data";
 import { Booking, CheckoutPayload, HoldSession, MovieEvent, Seat } from "./types";
-import AdminPanel from "./components/AdminPanel";
+import AdminConsole from "./components/admin/AdminConsole";
 import AuthModal from "./components/AuthModal";
 import AccountPage from "./components/account/AccountPage";
 import OrganizerPanel from "./components/OrganizerPanel";
 import { OrganizerEventsPage } from "./pages/organizer/OrganizerEventsPage";
 import { SingleEventPage } from "./pages/organizer/SingleEventPage";
-import AdminModeration from "./components/AdminModeration";
 import ResetPassword from "./components/ResetPassword";
 import type { Me } from "@/shared/auth/types";
 import type { EventDetail as CatalogEventDetail, Showtime } from "@/shared/catalog/types";
@@ -2011,9 +2010,7 @@ export default function App() {
             </div>
           ))}
 
-        {activeScreen === "admin" && (
-          <AdminPanel events={SAMPLE_MOVIES} bookings={bookingsHistory} onBack={goHome} />
-        )}
+        {activeScreen === "admin" && <AdminConsole onBack={goHome} />}
 
         {/*
          * The mailbox, guarded like the wallet: its messages belong to an account, so a stranger
@@ -2095,7 +2092,12 @@ export default function App() {
           ))}
         {activeScreen === "organizer" && <OrganizerEventsPage />}
         {activeScreen === "organizer-event-detail" && <SingleEventPage />}
-        {activeScreen === "moderation" && <AdminModeration onBack={goHome} />}
+        {/*
+         * `/moderation` used to be a second console drawing the same queue as `/admin`, in a
+         * different visual language. It is one screen inside the console now; the old path still
+         * resolves so a bookmark lands somewhere sensible rather than on a blank page.
+         */}
+        {activeScreen === "moderation" && <AdminConsole onBack={goHome} />}
 
         {activeScreen === "about-us" && (
           <LegalPage title="Về chúng tôi" content={aboutUsMd} onBack={goHome} />

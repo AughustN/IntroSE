@@ -26,6 +26,8 @@ import { formatVnd } from "../services/currency";
 import { aiClient } from "../services/aiClient";
 import { WaitlistError, waitlistClient, type WaitlistEntry } from "../services/waitlistClient";
 import WaitlistControl from "./WaitlistControl";
+import ReportDialog from "./reviews/ReportDialog";
+import { Flag } from "lucide-react";
 
 export interface TierSelection {
   tierId: string;
@@ -100,9 +102,19 @@ interface Slot {
   showtimeId: number | null;
   date: string;
   time: string;
+  /** Full instant, kept beside the split date/time because the waitlist cutoff is measured on it. */
+  startsAt: string;
   venue: string;
   soldOut: boolean;
 }
+
+/**
+ * How near the start the queue closes, mirroring the server's `WAITLIST_CUTOFF_HOURS`.
+ *
+ * Duplicated deliberately and in one place: the server is the authority and refuses the join with
+ * `waitlist_closed`, but a button that can only ever fail should not be offered in the first place.
+ */
+const WAITLIST_CUTOFF_HOURS = 24;
 
 const MAX_PER_TIER = 10;
 const MAX_TIERS = 4;
@@ -170,6 +182,7 @@ export default function EventDetail({
         showtimeId: s.id,
         date: s.startsAt.slice(0, 10),
         time: s.startsAt.slice(11, 16),
+        startsAt: s.startsAt,
         venue: s.venue.name,
         soldOut: s.availability !== "available",
       }));
@@ -181,6 +194,7 @@ export default function EventDetail({
         showtimeId: null,
         date,
         time,
+        startsAt: `${date}T${time}`,
         venue: event.venueName,
         soldOut: false,
       })),
@@ -349,8 +363,26 @@ export default function EventDetail({
     entries: Record<string, WaitlistEntry>;
   }>({ showtimeId: null, entries: {} });
   const [waitlistBusy, setWaitlistBusy] = useState<string | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
 
   const waitlistKey = (tierId: number | null) => (tierId === null ? "any" : String(tierId));
+
+  /*
+   * Inside the cutoff there is nothing left to wait for: no ticket of this showtime can be
+   * cancelled any more, so no ticket can come back. The server closes the queues at the same hour
+   * and refuses joins with `waitlist_closed`; this only keeps the page from offering a door that
+   * is already shut.
+   */
+  const waitlistClosed = useMemo(() => {
+    if (!selectedSlot) return false;
+    // Reading the clock is impure, which the lint rule is right about in general — but "is this
+    // showtime within 24 hours" is a question about *now*, and the answer only has to be fresh
+    // when the reader picks a showtime. Memoised on that, so it is read once per choice rather
+    // than once per render.
+    // eslint-disable-next-line react-hooks/purity
+    const remaining = new Date(selectedSlot.startsAt).getTime() - Date.now();
+    return remaining <= WAITLIST_CUTOFF_HOURS * 60 * 60 * 1000;
+  }, [selectedSlot]);
 
   /** This reader's place in one queue of the *selected* showtime, or null. */
   const entryFor = (tierId: number | null): WaitlistEntry | null => {
@@ -397,8 +429,8 @@ export default function EventDetail({
           onNotice(
             "ok",
             result.existing
-              ? `Bạn đã ở trong danh sách chờ, vị trí ${result.entry.position}.`
-              : `Đã vào danh sách chờ — vị trí ${result.entry.position}. Chúng tôi sẽ báo khi có vé.`,
+              ? "Bạn đã ở trong danh sách chờ. Chúng tôi sẽ báo khi có vé."
+              : "Đã vào danh sách chờ. Chúng tôi sẽ báo qua email khi có vé.",
           );
         })
         .catch((error: unknown) => {
@@ -594,12 +626,7 @@ export default function EventDetail({
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
-      <BookingHeader
-        backLabel="Quay về trang chủ"
-        onBack={onBack}
-        current={1}
-        seated={isSeated}
-      />
+      <BookingHeader backLabel="Quay về trang chủ" onBack={onBack} current={1} seated={isSeated} />
 
       <BookingLayout
         aside={
@@ -632,6 +659,7 @@ export default function EventDetail({
                 <WaitlistControl
                   tone="cta"
                   entry={entryFor(null)}
+                  closed={waitlistClosed}
                   busy={waitlistBusy === "any"}
                   onJoin={() => joinWaitlist(null)}
                   onLeave={() => leaveWaitlist(null)}
@@ -972,39 +1000,40 @@ export default function EventDetail({
                           {soldOut && !eventClosed ? (
                             <WaitlistControl
                               entry={entryFor(Number(tier.id))}
+                              closed={waitlistClosed}
                               busy={waitlistBusy === String(tier.id)}
                               onJoin={() => joinWaitlist(Number(tier.id))}
                               onLeave={() => leaveWaitlist(Number(tier.id))}
                             />
                           ) : (
-                          /*
+                            /*
                             The steppers carry the same weight as the price beside them. At 36px with
                             a `font-meta` glyph they read as annotations on the row rather than as
                             the controls that decide what is bought.
                           */
-                          <div className="flex shrink-0 items-center gap-3">
-                            <button
-                              type="button"
-                              onClick={() => adjustQuantity(tier, -1)}
-                              disabled={quantity === 0 || holdBusy}
-                              aria-label={`Bớt vé ${tier.label}`}
-                              className="grid h-11 w-11 place-items-center border-2 border-beige-kem/50 font-display text-title-s font-black leading-none text-beige-kem transition hover:border-beige-kem hover:bg-bubblegum/20 disabled:cursor-not-allowed disabled:opacity-30"
-                            >
-                              −
-                            </button>
-                            <span className="w-8 text-center font-display text-title-s font-black tabular-nums text-beige-kem">
-                              {quantity}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => adjustQuantity(tier, 1)}
-                              disabled={soldOut || quantity >= cap || holdBusy}
-                              aria-label={`Thêm vé ${tier.label}`}
-                              className="grid h-11 w-11 place-items-center border-2 border-beige-kem/50 font-display text-title-s font-black leading-none text-beige-kem transition hover:border-beige-kem hover:bg-bubblegum/20 disabled:cursor-not-allowed disabled:opacity-30"
-                            >
-                              +
-                            </button>
-                          </div>
+                            <div className="flex shrink-0 items-center gap-3">
+                              <button
+                                type="button"
+                                onClick={() => adjustQuantity(tier, -1)}
+                                disabled={quantity === 0 || holdBusy}
+                                aria-label={`Bớt vé ${tier.label}`}
+                                className="grid h-11 w-11 place-items-center border-2 border-beige-kem/50 font-display text-title-s font-black leading-none text-beige-kem transition hover:border-beige-kem hover:bg-bubblegum/20 disabled:cursor-not-allowed disabled:opacity-30"
+                              >
+                                −
+                              </button>
+                              <span className="w-8 text-center font-display text-title-s font-black tabular-nums text-beige-kem">
+                                {quantity}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => adjustQuantity(tier, 1)}
+                                disabled={soldOut || quantity >= cap || holdBusy}
+                                aria-label={`Thêm vé ${tier.label}`}
+                                className="grid h-11 w-11 place-items-center border-2 border-beige-kem/50 font-display text-title-s font-black leading-none text-beige-kem transition hover:border-beige-kem hover:bg-bubblegum/20 disabled:cursor-not-allowed disabled:opacity-30"
+                              >
+                                +
+                              </button>
+                            </div>
                           )}
                         </li>
                       );
@@ -1132,6 +1161,47 @@ export default function EventDetail({
             eventId={event.eventId}
             isSignedIn={isSignedIn}
             onOpenAll={onOpenReviews}
+          />
+        )}
+
+        {/*
+          Reporting the event itself, under everything else on the page.
+          
+          Quiet on purpose, and last: it is the control almost nobody needs, and one drawn as loudly
+          as "Đặt vé" invites presses from people looking for a help desk. It is also the door the
+          moderation queue has been missing — `content_reports` has accepted `target_type = 'event'`
+          since the queue was built, and nothing anywhere could open one.
+        */}
+        {event.eventId !== null && (
+          <div className="mt-10 flex flex-wrap items-center justify-between gap-3 border-t border-beige-kem/20 pt-6">
+            <p className="font-meta text-meta text-ink-soft">
+              Thấy nội dung sai sự thật, lừa đảo hoặc vi phạm pháp luật ở sự kiện này?
+            </p>
+            <button
+              type="button"
+              onClick={() => onRequireSignIn(() => setReportOpen(true))}
+              className="label-eyebrow inline-flex items-center gap-2 text-ink-soft underline-offset-4 transition hover:text-burgundy-ink hover:underline"
+            >
+              <Flag className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              Báo cáo sự kiện
+            </button>
+          </div>
+        )}
+
+        {reportOpen && event.eventId !== null && (
+          <ReportDialog
+            authorName={event.title}
+            onCancel={() => setReportOpen(false)}
+            onSubmit={async (reason) => {
+              const result = await catalogClient.reportEvent(event.eventId!, reason);
+              setReportOpen(false);
+              onNotice(
+                "ok",
+                result.alreadyReported
+                  ? "Bạn đã báo cáo sự kiện này rồi. Ban quản trị đang xem xét."
+                  : "Đã gửi báo cáo. Ban quản trị sẽ xem xét sự kiện này.",
+              );
+            }}
           />
         )}
       </BookingLayout>

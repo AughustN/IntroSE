@@ -17,7 +17,7 @@ export default function ValidationPanel({ issues }: { issues: ValidationIssue[] 
   if (issues.length === 0) {
     return (
       <div className="rounded-2xl border-2 border-la-co bg-surface-2 p-4">
-        <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-la-co">
+        <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-la-co-ink">
           Hợp lệ
         </h3>
         <p className="mt-1 text-eyebrow text-beige-kem/70">Sơ đồ có thể phát hành.</p>

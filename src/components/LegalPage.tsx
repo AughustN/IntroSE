@@ -33,7 +33,13 @@ export default function LegalPage({ title, content, onBack }: LegalPageProps) {
         </div>
 
         {/* Formatted Document Body */}
-        <article className="prose prose-invert max-w-none space-y-4 font-sans text-body leading-relaxed text-beige-kem/85 sm:text-body">
+        {/*
+          `prose-invert` is Tailwind Typography's light-on-dark variant, and it was applied
+          unconditionally — so in light mode the whole legal text rendered pale on cream. Every
+          element inside already carries its own token colour, so the plugin's palette is not needed
+          at all; dropping both classes leaves the type reading `beige-kem` in either theme.
+        */}
+        <article className="max-w-none space-y-4 font-sans text-body leading-relaxed text-beige-kem/85 sm:text-body">
           <ReactMarkdown
             components={{
               h1: ({ children }) => (

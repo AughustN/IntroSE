@@ -1,7 +1,11 @@
 import { type NextFunction, type Request, type Response, Router } from 'express';
+import { z } from 'zod';
 import { err } from '../../http.js';
+import { requireAuth } from '../../middleware/requireAuth.js';
+import { validate } from '../../middleware/validate.js';
 import { listCategories } from '../admin/admin.repo.js';
 import { getEventDetail, getSeatMap, getShowtimes, listEvents, listFeaturedEvents } from './catalog.repo.js';
+import { reportEvent } from './report.service.js';
 
 // Public catalog reads — no auth. Every query composes the live visibility predicate (R-1).
 export const catalogPublicRouter = Router();
@@ -81,5 +85,28 @@ catalogPublicRouter.get(
     const map = await getSeatMap(id);
     if (!map) throw err.notFound('not_found', 'Không tìm thấy suất chiếu.');
     res.json(map);
+  }),
+);
+
+/*
+ * POST /api/events/:id/report (UC-39)
+ *
+ * The one route on this router that needs a session: a report is attributed, both so the same
+ * reader cannot file the same complaint twice and so an admin can see who raised it. Reading the
+ * catalogue stays anonymous.
+ */
+const reportBody = z.object({ reason: z.string().trim().min(1).max(2000) }).strict();
+catalogPublicRouter.post(
+  '/events/:id/report',
+  requireAuth,
+  validate(reportBody),
+  asyncH(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) throw err.notFound('not_found');
+    const result = await reportEvent(req.auth!.userId, id, req.body.reason);
+    // A repeat answers 200 with the fact; only a first report is a 201, the same contract the
+    // review report already uses.
+    if (result.alreadyReported) res.json({ alreadyReported: true });
+    else res.status(201).json({ alreadyReported: false });
   }),
 );

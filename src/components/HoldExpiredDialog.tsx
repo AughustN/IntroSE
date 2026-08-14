@@ -77,7 +77,7 @@ export default function HoldExpiredDialog({ onStay, onGoHome }: HoldExpiredDialo
         className="w-full max-w-lg rounded-2xl border-2 border-cam-dat bg-xanh-pho p-6 text-center sm:p-8"
       >
         <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-cam-dat/15">
-          <TimerOff className="h-7 w-7 text-cam-dat" />
+          <TimerOff className="h-7 w-7 text-cam-dat-ink" />
         </span>
 
         <h2

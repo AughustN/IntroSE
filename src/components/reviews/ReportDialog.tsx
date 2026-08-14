@@ -83,7 +83,7 @@ export default function ReportDialog({ authorName, onSubmit, onCancel }: ReportD
           />
         </label>
 
-        {error && <p className="mt-3 font-meta text-meta text-cam-dat">{error}</p>}
+        {error && <p className="mt-3 font-meta text-meta text-cam-dat-ink">{error}</p>}
 
         <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button

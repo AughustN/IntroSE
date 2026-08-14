@@ -36,6 +36,7 @@ import {
   queueAnnouncement,
 } from "../notifications/notifications.service.js";
 import { cancelEvent } from "../payments/tickets.service.js";
+import { attendees, checkIn, toCsv } from "../checkin/checkin.service.js";
 
 // Organizer catalog management — approved organizer + ownership (D-D). Mounted at /api.
 export const organizerRouter = Router();
@@ -101,6 +102,7 @@ const announcementSchema = z.object({
   title: z.string().trim().min(1).max(120),
   body: z.string().trim().min(1).max(5000),
 });
+const checkinSchema = z.object({ barcode: z.string().trim().min(4).max(120) }).strict();
 
 // ---- events ----
 
@@ -195,6 +197,49 @@ organizerRouter.post(
       throw err.forbidden("not_owner", "Bạn không sở hữu địa điểm này.");
     const showtimeId = await addShowtimeWithTiers(id, body);
     res.status(201).json({ id: showtimeId });
+  }),
+);
+
+// ---- the door (UC-27, UC-28, UC-29) ----
+
+/*
+ * Scanning and the attendee list belong to whoever runs the event, which is why they are here and
+ * not only in the admin console. The service decides ownership from the ticket's own organizer, so
+ * an organizer scanning another organizer's code is answered "not found" — the same answer an
+ * invented code gets, because a scanner at a public door must not confirm which codes exist.
+ */
+organizerRouter.post(
+  "/tickets/check-in",
+  validate(checkinSchema),
+  asyncH(async (req, res) => {
+    const body = req.body as z.infer<typeof checkinSchema>;
+    res.json(
+      await checkIn({ userId: req.auth!.userId, isAdmin: req.auth!.user.isAdmin }, body.barcode),
+    );
+  }),
+);
+
+organizerRouter.get(
+  "/events/:id/attendees",
+  asyncH(async (req, res) => {
+    const eventId = Number(req.params.id);
+    await assertEventOwner(req, eventId);
+    const showtimeId = req.query.showtimeId === undefined ? undefined : Number(req.query.showtimeId);
+    if (showtimeId !== undefined && !Number.isInteger(showtimeId))
+      throw err.badRequest("validation_failed", "Mã suất diễn không hợp lệ.");
+    const list = await attendees(
+      { userId: req.auth!.userId, isAdmin: req.auth!.user.isAdmin },
+      eventId,
+      showtimeId,
+    );
+    if (req.query.format !== "csv") {
+      res.json(list);
+      return;
+    }
+    res
+      .type("text/csv; charset=utf-8")
+      .attachment(`khach-tham-du-${list.eventId}.csv`)
+      .send(toCsv(list));
   }),
 );
 

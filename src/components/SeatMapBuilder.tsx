@@ -102,7 +102,7 @@ export default function SeatMapBuilder({
           </button>
         </div>
         {notice && (
-          <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-eyebrow text-on-tint">
+          <div className="rounded-xl border-2 border-la-co bg-la-co/20 p-3 text-eyebrow text-beige-kem">
             {notice}
           </div>
         )}
@@ -125,7 +125,7 @@ export default function SeatMapBuilder({
               </span>
               <div className="flex items-center gap-2">
                 {st.hasSeatMap && (
-                  <span className="rounded-lg border-2 border-beige-kem bg-la-co px-2 py-0.5 font-meta text-eyebrow text-on-tint">
+                  <span className="rounded-lg border-2 border-la-co bg-la-co/25 px-2 py-0.5 font-meta text-eyebrow text-beige-kem">
                     Đã có sơ đồ ghế
                   </span>
                 )}
