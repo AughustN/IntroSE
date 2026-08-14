@@ -31,6 +31,15 @@ export interface TierForPalette {
   label: string;
   /** Whole Vietnamese đồng (STD-03). */
   price: number;
+  /**
+   * The colour authored on the chart CATEGORY this tier prices, when it prices one.
+   *
+   * Categories put colour in the organizer's hands: they draw "VIP" red and the buyer's map is red
+   * there. Where a tier names no category — every general-admission showtime, and any seated map
+   * generated before categories existed — the price-ordered palette below still applies, so nothing
+   * that worked before loses its colours.
+   */
+  color?: string | null;
 }
 
 export interface TierLegendEntry {
@@ -53,7 +62,8 @@ export function buildTierLegend(tiers: readonly TierForPalette[]): TierLegendEnt
       tierId: tier.id,
       label: tier.label,
       price: tier.price,
-      color: TIER_COLORS[i % TIER_COLORS.length],
+      // An authored category colour wins; otherwise fall back to position by price.
+      color: tier.color || TIER_COLORS[i % TIER_COLORS.length],
     }));
 }
 

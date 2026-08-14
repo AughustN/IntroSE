@@ -296,7 +296,11 @@ export async function refreshSnapshot(showtimeId: number, layoutId: number, db: 
                   'kind', e.kind, 'x', e.pos_x, 'y', e.pos_y,
                   'width', e.width, 'height', e.height, 'rotation', e.rotation, 'label', e.label,
                   -- Shapes carry an ordered point list; every other kind stores null (FR-058).
-                  'points', e.points))
+                  'points', e.points,
+                  -- A capacity zone is INVENTORY the buyer can buy (0027), so the buyer's copy of the
+                  -- map has to carry what makes it one. Without these it drew as an anonymous shape and
+                  -- a standing floor looked like decoration.
+                  'capacity', e.capacity, 'categoryId', e.category_id))
                   FROM layout_elements e WHERE e.layout_id = l.id), '[]'::jsonb),
               -- Tables ride in the SAME snapshot as the elements (FR-081). The snapshot is what stops
               -- a later layout edit reshaping a show that is already selling, and a table sits in the
@@ -307,6 +311,10 @@ export async function refreshSnapshot(showtimeId: number, layoutId: number, db: 
                   'name', t.name, 'shape', t.shape, 'x', t.pos_x, 'y', t.pos_y,
                   'width', t.width, 'height', t.height, 'rotation', t.rotation))
                   FROM layout_tables t WHERE t.layout_id = l.id), '[]'::jsonb),
+              -- Area capacity rides along so a re-shape can regenerate the same headcount.
+              'areas', COALESCE((
+                SELECT jsonb_agg(jsonb_build_object('label', e.label, 'capacity', e.capacity))
+                  FROM layout_elements e WHERE e.layout_id = l.id AND e.kind = 'area'), '[]'::jsonb),
               -- Section STYLE, keyed by name because that is the only section identity a
               -- showtime_seats row carries. Shape and size are snapshotted with the geometry for the
               -- same reason the geometry is: restyling a venue must not re-draw a show already selling.

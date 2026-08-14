@@ -39,6 +39,14 @@ import type {
 const DEFAULT_SPACE: SeatMapSpace = { width: 10000, height: 10000, seatDiameter: 100 };
 
 /**
+ * Seat count above which the canvas draws only what the viewport shows.
+ *
+ * Set well clear of a normal cinema or theatre, so the venues this platform sees every day render
+ * exactly as they did and the optimisation cannot be the cause of a bug reported against them.
+ */
+const CULL_ABOVE = 400;
+
+/**
  * The least a shape has to be to get drawn here.
  *
  * `SeatMapSeat` (the buyer's read contract) satisfies it as-is; the editor adapts its `LayoutSeat`
@@ -56,6 +64,8 @@ export interface CanvasSeat {
   section: string | null;
   shape?: "circle" | "square";
   sizeMultiplier?: number;
+  /** Drawn with a wheelchair mark, on every screen — a buyer needs this more than an organizer. */
+  isAccessible?: boolean;
 }
 
 /** A named group of seats, drawn as a titled hull behind them. */
@@ -126,6 +136,36 @@ export interface SeatCanvasProps<T extends CanvasSeat> {
   /** Cumulative drag offset in LAYOUT units. `end` is the one the editor commits to history. */
   onSeatDrag?: (dx: number, dy: number, phase: "move" | "end") => void;
   /**
+   * Decoration is interactive too, but ONLY while editing.
+   *
+   * Elements and tables are `pointerEvents="none"` for a buyer on purpose — a stage is not something
+   * you can book, and letting it swallow a tap next to the front row is a real misclick. Editing is
+   * the one context where grabbing them is the whole job, so the handlers below are gated on
+   * `editable` rather than always live.
+   */
+  selectedElementIndex?: number | null;
+  onElementPointerDown?: (index: number, additive: boolean) => void;
+  /**
+   * Drag one vertex of the selected polygon (the Nodes tool).
+   *
+   * Optional, and undefined on all three non-authoring screens, so the handles simply do not render
+   * there. That is the rule for anything editor-only in this file: it draws the buyer's map too, and
+   * a control a buyer can reach is a control a buyer can break.
+   */
+  onVertexDrag?: (elementIndex: number, vertex: number, x: number, y: number) => void;
+  onElementDrag?: (dx: number, dy: number, phase: "move" | "end") => void;
+  onTablePointerDown?: (index: number) => void;
+  /**
+   * Drag a whole table, seats and all.
+   *
+   * Paired with `onTablePointerDown`: without a drag handler a table could be selected but not moved,
+   * which is exactly the state this file was left in — every table dropped at the centre of the map
+   * and nothing able to separate them.
+   */
+  onTableDrag?: (dx: number, dy: number, phase: "move" | "end") => void;
+  /** Which table is selected, so the editor can show what Delete would remove. Editor-only. */
+  selectedTableIndex?: number | null;
+  /**
    * A completed drag across empty space. `x1,y1` is where it started and `x2,y2` where it ended —
    * un-normalised on purpose, because a drawing tool cares which end is which and a marquee does not.
    */
@@ -180,7 +220,7 @@ const NUMBER_VISIBILITY_THRESHOLD = 0.022;
 const CLICK_SLOP = 30;
 
 interface Gesture {
-  kind: "pan" | "marquee" | "seat";
+  kind: "pan" | "marquee" | "seat" | "element" | "table";
   clientX: number;
   clientY: number;
   originX: number;
@@ -209,6 +249,13 @@ function SeatCanvasInner<T extends CanvasSeat>(
     selectedIds,
     onSeatPointerDown,
     onSeatDrag,
+    selectedElementIndex = null,
+    onElementPointerDown,
+    onVertexDrag,
+    onElementDrag,
+    onTableDrag,
+    selectedTableIndex = null,
+    onTablePointerDown,
     onMarquee,
     onMarqueeChange,
     marqueeStyle = "rect",
@@ -253,6 +300,32 @@ function SeatCanvasInner<T extends CanvasSeat>(
   const view = useMemo(() => viewOf(bounds, zoom, pan), [bounds, zoom, pan]);
 
   /**
+   * Only draw the seats the viewport can actually show.
+   *
+   * Every seat is an interactive SVG node, so a large venue paid for thousands of them on every render
+   * whether or not they were on screen. Culling to the visible rectangle is what lets the seat ceiling
+   * rise past a couple of thousand.
+   *
+   * Below the threshold nothing is filtered at all: a normal cinema or theatre renders exactly the
+   * nodes it did before, so this cannot change behaviour in the common case — and the interaction code
+   * that reads `seats` (marquee, selection, zoom-to-seat) works off the FULL list its caller holds,
+   * not this one, so nothing off-screen becomes unreachable.
+   */
+  const drawnSeats = useMemo(() => {
+    if (seats.length < CULL_ABOVE) return seats;
+    // A generous margin: a seat whose centre is just outside still has a visible edge, and panning
+    // reveals the next band before the render catches up.
+    const pad = space.seatDiameter * 4;
+    return seats.filter(
+      (s) =>
+        s.x >= view.x - pad &&
+        s.x <= view.x + view.w + pad &&
+        s.y >= view.y - pad &&
+        s.y <= view.y + view.h + pad,
+    );
+  }, [seats, view, space.seatDiameter]);
+
+  /**
    * Zoom and pan are ALSO held in refs, and the refs are the ones a gesture reads.
    *
    * Not an optimisation — a correctness requirement. Wheel and pointer events fire faster than React
@@ -281,18 +354,25 @@ function SeatCanvasInner<T extends CanvasSeat>(
   /** The view a gesture must reason about: built from the refs, never from a render's snapshot. */
   const liveView = useCallback(() => viewOf(boundsRef.current, zoomRef.current, panRef.current), []);
 
-  const toLayout = useCallback(
-    (clientX: number, clientY: number) => {
-      const rect = svgRef.current?.getBoundingClientRect();
-      if (!rect || rect.width === 0 || rect.height === 0) return null;
-      const v = liveView();
-      return {
-        x: v.x + ((clientX - rect.left) / rect.width) * v.w,
-        y: v.y + ((clientY - rect.top) / rect.height) * v.h,
-      };
-    },
-    [liveView],
-  );
+  /**
+   * Client pixels → layout units, via the SVG's own screen matrix.
+   *
+   * Not a bounding-rect division: that assumes the viewBox fills the element exactly, and it does
+   * not. The default `preserveAspectRatio` letterboxes whenever the container's aspect differs from
+   * the viewBox's, so rect-relative maths drifts — and the drift is worst on a wide editor canvas
+   * showing a square floor, which is precisely the shape this component is used in. `getScreenCTM()`
+   * already accounts for the letterboxing, the zoom and the pan.
+   */
+  const toLayout = useCallback((clientX: number, clientY: number) => {
+    const svg = svgRef.current;
+    const ctm = svg?.getScreenCTM();
+    if (!svg || !ctm) return null;
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    const p = pt.matrixTransform(ctm.inverse());
+    return { x: p.x, y: p.y };
+  }, []);
 
   /** Point the view at a rectangle of layout space — the primitive under every zoom-to-* below. */
   const frame = useCallback(
@@ -434,10 +514,10 @@ function SeatCanvasInner<T extends CanvasSeat>(
    * for a pointer it was never given — which strands the gesture and leaves the map dragging after
    * the button is up.
    */
-  const beginGesture = (e: React.PointerEvent, onSeat: boolean) => {
+  const beginGesture = (e: React.PointerEvent, grabbed: "seat" | "element" | "table" | null) => {
     const p = toLayout(e.clientX, e.clientY);
     if (!p) return;
-    const kind: Gesture["kind"] = wantsPan(e) ? "pan" : onSeat ? "seat" : "marquee";
+    const kind: Gesture["kind"] = wantsPan(e) ? "pan" : (grabbed ?? "marquee");
     gesture.current = {
       kind,
       clientX: e.clientX,
@@ -474,6 +554,10 @@ function SeatCanvasInner<T extends CanvasSeat>(
       g.clientY = e.clientY;
     } else if (g.kind === "marquee") {
       updateMarquee({ x1: g.originX, y1: g.originY, x2: p.x, y2: p.y });
+    } else if (g.kind === "element") {
+      onElementDrag?.(dx, dy, "move");
+    } else if (g.kind === "table") {
+      onTableDrag?.(dx, dy, "move");
     } else {
       onSeatDrag?.(dx, dy, "move");
     }
@@ -496,11 +580,14 @@ function SeatCanvasInner<T extends CanvasSeat>(
       } else {
         onBackgroundClick?.({ x: g.originX, y: g.originY }, g.additive);
       }
-    } else if (g.kind === "seat" && p) {
+    } else if (p && (g.kind === "seat" || g.kind === "element" || g.kind === "table")) {
       // A drag that never left the slop is a plain click; committing it would push a no-op onto the
       // undo stack, so pressing Ctrl+Z after clicking around would appear to do nothing.
-      if (g.moved) onSeatDrag?.(p.x - g.originX, p.y - g.originY, "end");
-      else onSeatDrag?.(0, 0, "end");
+      const dx = g.moved ? p.x - g.originX : 0;
+      const dy = g.moved ? p.y - g.originY : 0;
+      if (g.kind === "element") onElementDrag?.(dx, dy, "end");
+      else if (g.kind === "table") onTableDrag?.(dx, dy, "end");
+      else onSeatDrag?.(dx, dy, "end");
     }
   };
 
@@ -583,7 +670,7 @@ function SeatCanvasInner<T extends CanvasSeat>(
             fn();
           }
         }}
-        onPointerDown={(e) => beginGesture(e, false)}
+        onPointerDown={(e) => beginGesture(e, null)}
         onPointerMove={onPointerMove}
         onPointerUp={endGesture}
         onPointerCancel={endGesture}
@@ -632,14 +719,41 @@ function SeatCanvasInner<T extends CanvasSeat>(
           </g>
         ))}
 
-        {/* Tables first: they sit under their seats. Decoration — never interactive (FR-082). */}
+        {/* Tables first: they sit under their seats. Never inventory (FR-082) — a table is grabbable
+            while editing so it can be repositioned, and inert for a buyer. */}
         {tables.map((t, i) => (
           <g
             key={`tbl-${i}`}
             transform={`rotate(${t.rotation} ${t.x} ${t.y})`}
             aria-hidden="true"
-            pointerEvents="none"
+            pointerEvents={editable && onTablePointerDown ? undefined : "none"}
+            style={editable && onTablePointerDown ? { cursor: "move" } : undefined}
+            onPointerDown={
+              editable && onTablePointerDown
+                ? (e) => {
+                    if (wantsPan(e)) return;
+                    e.stopPropagation();
+                    onTablePointerDown(i);
+                    // Begin the gesture on the SVG, same as a seat: the move/up handlers live there.
+                    beginGesture(e, "table");
+                  }
+                : undefined
+            }
           >
+            {selectedTableIndex === i && (
+              // Same dashed ring the selected element gets, so "what will Delete remove" is legible.
+              <rect
+                x={t.x - t.width / 2 - 30}
+                y={t.y - t.height / 2 - 30}
+                width={t.width + 60}
+                height={t.height + 60}
+                rx={14}
+                fill="none"
+                className="stroke-burgundy"
+                strokeWidth={strokeScale * 1.5}
+                strokeDasharray={`${strokeScale * 5} ${strokeScale * 4}`}
+              />
+            )}
             {t.shape === "round" ? (
               <circle
                 cx={t.x}
@@ -672,14 +786,41 @@ function SeatCanvasInner<T extends CanvasSeat>(
           </g>
         ))}
 
-        {/* Non-sellable decoration. Excluded from the seat tab order (FR-040). */}
-        {elements.map((el, i) => (
+        {/* Non-sellable decoration. Excluded from the seat tab order (FR-040), and inert for a
+            buyer — a stage that swallows the tap meant for the front row is a real misclick. */}
+        {elements.map((el, i) => {
+          const grabbable = editable && !!onElementPointerDown;
+          return (
           <g
             key={`el-${i}`}
             transform={`rotate(${el.rotation} ${el.x} ${el.y})`}
             aria-hidden="true"
-            pointerEvents="none"
+            pointerEvents={grabbable ? undefined : "none"}
+            style={grabbable ? { cursor: "grab" } : undefined}
+            onPointerDown={
+              grabbable
+                ? (e) => {
+                    e.stopPropagation();
+                    if (!wantsPan(e)) onElementPointerDown(i, e.shiftKey);
+                    beginGesture(e, "element");
+                  }
+                : undefined
+            }
           >
+            {/* Selection ring, drawn only for the one being edited. */}
+            {selectedElementIndex === i && (
+              <rect
+                x={el.x - el.width / 2 - 20}
+                y={el.y - el.height / 2 - 20}
+                width={el.width + 40}
+                height={el.height + 40}
+                rx={12}
+                fill="none"
+                className="stroke-burgundy"
+                strokeWidth={strokeScale * 1.5}
+                strokeDasharray={`${strokeScale * 5} ${strokeScale * 4}`}
+              />
+            )}
             {SHAPE_KINDS.has(el.kind) && el.points && el.points.length >= 2 && (
               <polyline
                 // A boundary closes back to its first point; a divider stays an open line.
@@ -691,6 +832,35 @@ function SeatCanvasInner<T extends CanvasSeat>(
                 fill="none"
               />
             )}
+            {/* Vertex handles — only for the selected shape, and only when an editor asked for them. */}
+            {onVertexDrag &&
+              selectedElementIndex === i &&
+              SHAPE_KINDS.has(el.kind) &&
+              el.points?.map((p, v) => (
+                <circle
+                  key={v}
+                  cx={p.x}
+                  cy={p.y}
+                  r={Math.max(18, 60 / Math.sqrt(zoom))}
+                  className="cursor-move fill-burgundy stroke-beige-kem"
+                  strokeWidth={strokeScale}
+                  onPointerDown={(e) => {
+                    if (wantsPan(e)) return;
+                    e.stopPropagation();
+                    (e.target as Element).setPointerCapture(e.pointerId);
+                    const move = (ev: PointerEvent) => {
+                      const at = toLayout(ev.clientX, ev.clientY);
+                      if (at) onVertexDrag(i, v, at.x, at.y);
+                    };
+                    const up = () => {
+                      window.removeEventListener("pointermove", move);
+                      window.removeEventListener("pointerup", up);
+                    };
+                    window.addEventListener("pointermove", move);
+                    window.addEventListener("pointerup", up);
+                  }}
+                />
+              ))}
             {el.kind !== "label" && !SHAPE_KINDS.has(el.kind) && (
               <rect
                 x={el.x - el.width / 2}
@@ -707,7 +877,7 @@ function SeatCanvasInner<T extends CanvasSeat>(
               // Text content, never markup — React escapes it (FR-018, SEC-07).
               <text
                 x={el.x}
-                y={el.y}
+                y={el.y - (el.kind === "area" && el.capacity ? Math.max(40, el.height / 10) : 0)}
                 textAnchor="middle"
                 dominantBaseline="central"
                 fontSize={Math.max(60, el.height / 3)}
@@ -716,13 +886,29 @@ function SeatCanvasInner<T extends CanvasSeat>(
                 {el.label}
               </text>
             )}
+            {/* A capacity zone says how many it holds. Without this it draws as an anonymous shape,
+                and a standing floor is indistinguishable from a decorative outline — for the buyer
+                as much as for the organizer, since both sides render through this component. */}
+            {el.kind === "area" && (el.capacity ?? 0) > 0 && (
+              <text
+                x={el.x}
+                y={el.y + (el.label ? Math.max(60, el.height / 6) : 0)}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontSize={Math.max(50, el.height / 5)}
+                className="fill-beige-kem/55 font-mono"
+              >
+                {el.capacity} chỗ
+              </text>
+            )}
           </g>
-        ))}
+          );
+        })}
 
         {underlay}
 
         {/* Seats, in the payload's section → row → number order, which IS the tab order (FR-039a). */}
-        {seats.map((seat) => {
+        {drawnSeats.map((seat) => {
           const label = seatLabel?.(seat) ?? `Ghế ${seat.row}${seat.number}`;
           const selected = selectedIds?.has(seat.id) ?? false;
           // The seat's own footprint: its section's size multiplier scaled off the space's nominal
@@ -746,7 +932,7 @@ function SeatCanvasInner<T extends CanvasSeat>(
                   ? (e) => {
                       e.stopPropagation();
                       if (!wantsPan(e)) onSeatPointerDown?.(seat, e.shiftKey);
-                      beginGesture(e, true);
+                      beginGesture(e, "seat");
                     }
                   : undefined
               }
@@ -782,17 +968,60 @@ function SeatCanvasInner<T extends CanvasSeat>(
               }
             >
               <title>{label}</title>
+              {/* A chair read from above: backrest behind, cushion in front. The whole glyph stays
+                  inside the seat's effective diameter, so what you see is what the overlap rule
+                  measures. A `square` section drops the backrest for a plain block.
+
+                  Drawn HERE rather than in the editor, which is where it used to live: the organizer
+                  arranging a room and the buyer picking a seat now look at the same shape, which is
+                  the entire point of there being one renderer. */}
+              {seat.shape !== "square" && (
+                <rect
+                  x={seat.x - rr * 0.92}
+                  y={seat.y - rr * 0.96}
+                  width={d * 0.92}
+                  height={d * 0.26}
+                  rx={d * 0.1}
+                  strokeWidth={selected ? strokeScale * 1.6 : strokeScale * 0.85}
+                  className={seatClass?.(seat) ?? "fill-transparent stroke-beige-kem/50"}
+                  style={fill || stroke ? { fill, stroke } : undefined}
+                />
+              )}
+              <rect
+                x={seat.x - rr * 0.8}
+                y={seat.y - rr * (seat.shape === "square" ? 0.8 : 0.36)}
+                width={d * 0.8}
+                height={d * (seat.shape === "square" ? 0.8 : 0.58)}
+                rx={seat.shape === "square" ? rr * 0.16 : rr * 0.32}
+                strokeWidth={selected ? strokeScale * 1.8 : strokeScale}
+                className={seatClass?.(seat) ?? "fill-transparent stroke-beige-kem/50"}
+                style={fill || stroke ? { fill, stroke } : undefined}
+              />
+              {/* Invisible hit area — a thin chair is hard to grab, and a buyer on a phone hits the
+                  gap between backrest and cushion constantly without it. */}
               <rect
                 x={seat.x - rr}
                 y={seat.y - rr}
                 width={d}
                 height={d}
-                rx={seat.shape === "square" ? rr * 0.15 : rr}
-                strokeWidth={selected ? strokeScale * 1.8 : strokeScale}
-                className={seatClass?.(seat) ?? "fill-transparent stroke-beige-kem/50"}
-                style={fill || stroke ? { fill, stroke } : undefined}
+                fill="transparent"
               />
-              {showNumbers && (
+              {/* The accessibility mark. Drawn instead of the number, not beside it: at the size a
+                  seat renders, two glyphs in one cushion is illegible. The label still announces it. */}
+              {seat.isAccessible && showNumbers && (
+                <text
+                  x={seat.x}
+                  y={seat.y}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontSize={d * 0.5}
+                  pointerEvents="none"
+                  className="fill-beige-kem/80"
+                >
+                  ♿
+                </text>
+              )}
+              {showNumbers && !seat.isAccessible && (
                 <text
                   x={seat.x}
                   y={seat.y}

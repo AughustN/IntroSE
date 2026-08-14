@@ -4,6 +4,7 @@ import { LAYOUT_MAX_ELEMENTS } from '../../src/config.js';
 import { pool } from '../../src/db/pool.js';
 import { app } from '../helpers/app.js';
 import { bearer, makeApprovedOrganizer, registerUser } from '../helpers/authFixture.js';
+import { bindAndGenerate } from '../helpers/seatmapSeed.js';
 
 // Non-sellable elements (US5: FR-016..FR-019, SC-009) and reuse (US8: FR-036/FR-037, SC-013).
 
@@ -33,6 +34,7 @@ describe('non-sellable elements (US5)', () => {
     await request(app).put(`/api/organizer/layouts/${layout.id}`).set(o.h).send({
       version: current.version,
       sections: current.sections,
+      categories: current.categories,
       seats: current.seats,
       elements: [
         element(),
@@ -46,13 +48,10 @@ describe('non-sellable elements (US5)', () => {
     const ev = (await request(app).post('/api/organizer/events').set(o.h).send({ title: 'S', categoryCode: 'theatre', description: 'd', eventType: 'seated' }).expect(201)).body.id;
     const showtime = (await request(app).post(`/api/organizer/events/${ev}/showtimes`).set(o.h)
       .send({ venueId: venue, startsAt: new Date(Date.now() + 86_400_000).toISOString(), tiers: [{ label: 'VIP', price: 500_000 }] }).expect(201)).body.id;
-    const tierId = (await pool.query(`SELECT id FROM ticket_tiers WHERE showtime_id = $1 LIMIT 1`, [showtime])).rows[0].id;
 
-    const gen = await request(app).post(`/api/organizer/showtimes/${showtime}/seat-map`).set(o.h)
-      .send({ sectionTiers: [{ sectionId: section, ticketTierId: tierId }] }).expect(201);
+    await bindAndGenerate(o.h, { showtime, layoutId: layout.id });
 
     // Five elements on the map, and not one of them became inventory (FR-017).
-    expect(gen.body.seats).toBe(6);
     const bookable = await pool.query(`SELECT count(*)::int AS c FROM showtime_seats WHERE showtime_id = $1`, [showtime]);
     expect(bookable.rows[0].c).toBe(6);
   });
@@ -64,11 +63,33 @@ describe('non-sellable elements (US5)', () => {
 
     const nasty = '<img src=x onerror=alert(1)>';
     const saved = await request(app).put(`/api/organizer/layouts/${layout.id}`).set(o.h)
-      .send({ version: layout.version, sections: [], seats: [], elements: [element({ kind: 'label', label: nasty })] })
+      .send({ version: layout.version, sections: [], categories: [], seats: [], elements: [element({ kind: 'label', label: nasty })] })
       .expect(200);
 
     // Round-trips byte-for-byte: no stripping, no interpreting. Escaping happens at render.
     expect(saved.body.elements[0].label).toBe(nasty);
+  });
+
+  it('a boundary polygon survives a save round-trip through the editor (FR-058)', async () => {
+    const o = await organizer();
+    const venue = await venueOf(o);
+    const layout = (await request(app).post(`/api/organizer/venues/${venue}/layouts`).set(o.h).send({ name: 'L' }).expect(201)).body;
+
+    const points = [{ x: 1000, y: 1000 }, { x: 9000, y: 1000 }, { x: 9000, y: 9000 }, { x: 1000, y: 9000 }];
+    const saved = await request(app).put(`/api/organizer/layouts/${layout.id}`).set(o.h)
+      .send({ version: layout.version, sections: [], categories: [], seats: [], elements: [element({ kind: 'boundary', label: null, points })] })
+      .expect(200);
+    expect(saved.body.elements[0].points).toEqual(points);
+
+    // The round-trip is the whole point: the editor GETs, then PUTs back what it was handed. A read
+    // that dropped the vertices erased the polygon on the very next save.
+    const reread = (await request(app).get(`/api/organizer/layouts/${layout.id}`).set(o.h).expect(200)).body;
+    expect(reread.elements[0].points).toEqual(points);
+
+    const resaved = await request(app).put(`/api/organizer/layouts/${layout.id}`).set(o.h)
+      .send({ version: reread.version, sections: reread.sections, categories: reread.categories, seats: reread.seats, elements: reread.elements })
+      .expect(200);
+    expect(resaved.body.elements[0].points).toEqual(points);
   });
 
   it(`refuses the element past the ceiling of ${LAYOUT_MAX_ELEMENTS} (FR-019)`, async () => {
@@ -78,7 +99,7 @@ describe('non-sellable elements (US5)', () => {
 
     const tooMany = Array.from({ length: LAYOUT_MAX_ELEMENTS + 1 }, () => element());
     await request(app).put(`/api/organizer/layouts/${layout.id}`).set(o.h)
-      .send({ version: layout.version, sections: [], seats: [], elements: tooMany })
+      .send({ version: layout.version, sections: [], categories: [], seats: [], elements: tooMany })
       .expect(409)
       .expect((r) => expect(r.body.error).toBe('element_limit_reached'));
   });
@@ -96,7 +117,7 @@ describe('clone and template (US8)', () => {
 
     const withElements = (await request(app).get(`/api/organizer/layouts/${layout.id}`).set(o.h).expect(200)).body;
     await request(app).put(`/api/organizer/layouts/${layout.id}`).set(o.h)
-      .send({ version: withElements.version, isTemplate: true, sections: withElements.sections, seats: withElements.seats, elements: [element()] })
+      .send({ version: withElements.version, isTemplate: true, sections: withElements.sections, categories: withElements.categories, seats: withElements.seats, elements: [element()] })
       .expect(200);
 
     const clone = (await request(app).post(`/api/organizer/layouts/${layout.id}/clone`).set(o.h)
@@ -111,11 +132,36 @@ describe('clone and template (US8)', () => {
 
     // Editing the clone leaves the source untouched — a copy, never a live link.
     await request(app).put(`/api/organizer/layouts/${clone.id}`).set(o.h)
-      .send({ version: clone.version, sections: clone.sections, seats: [], elements: [] })
+      .send({ version: clone.version, sections: clone.sections, categories: clone.categories, seats: [], elements: [] })
       .expect(200);
 
     const sourceAfter = (await request(app).get(`/api/organizer/layouts/${layout.id}`).set(o.h).expect(200)).body;
     expect(sourceAfter.seats).toHaveLength(4);
+  });
+
+  it('carries its tables, and each cloned seat still points at its own cloned table', async () => {
+    const o = await organizer();
+    const source = await venueOf(o, 'Nguồn');
+    const target = await venueOf(o, 'Đích');
+
+    const layout = (await request(app).post(`/api/organizer/venues/${source}/layouts`).set(o.h).send({ name: 'Tiệc' }).expect(201)).body;
+    const section = (await request(app).post(`/api/organizer/venues/${source}/sections`).set(o.h).send({ name: 'Khu A' }).expect(201)).body.id;
+    const table = (await request(app).post(`/api/organizer/layouts/${layout.id}/tables`).set(o.h)
+      .send({ sectionId: section, name: 'Bàn 1', shape: 'round', x: 5000, y: 5000, width: 600, height: 600, rotation: 0, seatCount: 6 })
+      .expect(201)).body;
+
+    const clone = (await request(app).post(`/api/organizer/layouts/${layout.id}/clone`).set(o.h)
+      .send({ targetVenueId: target, name: 'Bản sao' }).expect(201)).body;
+
+    // A gala layout whose tables were dropped came out as loose seats with nothing to sit at.
+    expect(clone.tables).toHaveLength(1);
+    expect(clone.tables[0].name).toBe('Bàn 1');
+    expect(clone.tables[0].id).not.toBe(table.id);
+    expect(clone.seats).toHaveLength(6);
+
+    // Every seat points at the CLONE's table, never back at the source's.
+    const clonedTableId = clone.tables[0].id;
+    expect(clone.seats.map((s: { tableId: number | null }) => s.tableId)).toEqual(Array(6).fill(clonedTableId));
   });
 
   it("refuses cloning another organizer's layout (FR-037)", async () => {

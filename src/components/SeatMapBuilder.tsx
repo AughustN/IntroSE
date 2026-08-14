@@ -4,9 +4,9 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { ManageShowtime, layoutApi, organizerApi } from "../services/catalogClient";
+import { ManageShowtime, layoutApi, organizerApi, studioApi } from "../services/catalogClient";
 import { Empty, ErrorRetry, Loading } from "./organizer/states";
-import LayoutEditor from "./seatmap/LayoutEditor";
+import ChartEditor from "./seatmap/ChartEditor";
 import ShowtimeMapPanel from "./seatmap/ShowtimeMapPanel";
 
 const input =
@@ -37,7 +37,7 @@ export default function SeatMapBuilder({
   onClose: () => void;
 }) {
   const [rows, setRows] = useState<ManageShowtime[] | null>(null);
-  const [map, setMap] = useState<Record<string, number>>({}); // `${showtimeId}:${sectionId}` → tierId
+  const [map, setMap] = useState<Record<string, number>>({}); // `${showtimeId}:${categoryId}` → tierId
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -83,24 +83,34 @@ export default function SeatMapBuilder({
       setEditing(target.id);
     }, "Đang mở trình thiết kế sơ đồ.");
 
+  /**
+   * Price every class, then bind the chart.
+   *
+   * The mapping is written onto the TIERS rather than passed to the generate call, so it survives:
+   * the next showtime of this chart already knows which class costs what, instead of asking again.
+   */
   const applyToShowtime = (st: ManageShowtime) => {
-    const withSeats = st.sections.filter((s) => s.seatCount > 0);
-    const sectionTiers = withSeats.map((s) => ({
-      sectionId: s.id,
-      ticketTierId: map[`${st.id}:${s.id}`],
-    }));
-    if (sectionTiers.some((m) => !m.ticketTierId)) {
-      setErr("Mỗi khu vực có ghế phải chọn một hạng vé.");
+    if (st.layoutId === null) {
+      setErr("Suất này chưa có sơ đồ để áp dụng.");
+      return;
+    }
+    const withSeats = st.categories.filter((c) => c.seatCount > 0);
+    const chosen = withSeats.map((c) => ({ categoryId: c.id, tierId: map[`${st.id}:${c.id}`] }));
+    if (chosen.some((m) => !m.tierId)) {
+      setErr("Mỗi hạng vé có ghế phải chọn một mức giá.");
       return;
     }
     void run(async () => {
-      await organizerApi.generateSeatMap(st.id, sectionTiers);
+      for (const { categoryId, tierId } of chosen) {
+        await studioApi.updateTier(tierId, { categoryId });
+      }
+      await organizerApi.generateSeatMap(st.id, st.layoutId as number);
     }, "Đã áp dụng sơ đồ — ghế đã sẵn sàng để bán.");
   };
 
   if (editing !== null) {
     return (
-      <LayoutEditor
+      <ChartEditor
         layoutId={editing}
         onClose={() => {
           setEditing(null);
@@ -219,37 +229,47 @@ export default function SeatMapBuilder({
                         tiers={st.tiers}
                         onDone={() => void reload()}
                       />
-                    ) : st.sections.filter((s) => s.seatCount > 0).length === 0 ? (
+                    ) : st.categories.filter((c) => c.seatCount > 0).length === 0 ? (
                       <p className="text-xs text-beige-kem/50">
                         Chưa có ghế để áp dụng — hoàn tất bước 1 trước.
+                      </p>
+                    ) : st.layoutStatus !== "ready" ? (
+                      <p className="text-xs text-beige-kem/50">
+                        Sơ đồ đang là bản nháp. Mở trình thiết kế và bấm “Phát hành” trước khi áp
+                        dụng cho suất diễn.
                       </p>
                     ) : (
                       <div className="space-y-2">
                         <p className="font-mono text-[11px] text-beige-kem/60">
-                          Gán hạng vé cho từng khu, rồi áp dụng:
+                          Đặt giá cho từng hạng vé, rồi áp dụng:
                         </p>
-                        {st.sections
-                          .filter((s) => s.seatCount > 0)
-                          .map((s) => (
-                            <div key={s.id} className="flex items-center gap-3">
-                              <span className="w-40 shrink-0 text-sm">
-                                {s.name}{" "}
+                        {st.categories
+                          .filter((c) => c.seatCount > 0)
+                          .map((c) => (
+                            <div key={c.id} className="flex items-center gap-3">
+                              <span
+                                aria-hidden="true"
+                                className="h-4 w-4 shrink-0 rounded-sm border-2"
+                                style={{ borderColor: c.color, backgroundColor: `${c.color}59` }}
+                              />
+                              <span className="w-36 shrink-0 text-sm">
+                                {c.name}{" "}
                                 <span className="font-mono text-[10px] text-beige-kem/40">
-                                  ({s.seatCount} ghế)
+                                  ({c.seatCount} ghế)
                                 </span>
                               </span>
                               <select
-                                value={map[`${st.id}:${s.id}`] ?? ""}
+                                value={map[`${st.id}:${c.id}`] ?? ""}
                                 onChange={(e) =>
                                   setMap((m) => ({
                                     ...m,
-                                    [`${st.id}:${s.id}`]: Number(e.target.value),
+                                    [`${st.id}:${c.id}`]: Number(e.target.value),
                                   }))
                                 }
                                 className={input}
                               >
                                 <option value="" className="bg-xanh-pho">
-                                  Chọn hạng vé
+                                  Chọn mức giá
                                 </option>
                                 {st.tiers
                                   .filter((t) => !t.archived)

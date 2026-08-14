@@ -12,6 +12,7 @@
     "db:migrate": "tsx --tsconfig tsconfig.server.json server/src/db/migrate.ts",
     "seed": "tsx --tsconfig tsconfig.server.json server/src/db/seed-dev.ts",
     "test": "vitest run",
+    "test:web": "vitest run --config vitest.web.config.ts",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.server.json --noEmit",
     "lint": "eslint . && prettier --check .",

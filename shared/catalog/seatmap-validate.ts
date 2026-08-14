@@ -7,18 +7,31 @@
 /** The coordinate space and seat size these checks assume. Mirrors server config (FR-008). */
 export const LAYOUT_SPACE = 10_000;
 export const SEAT_DIAMETER = 100;
+/**
+ * Seats per layout (FR-007). Mirrors server config the same way the two constants above do — the
+ * SERVER is authoritative and refuses a save past it with `409 seat_limit_reached`; this copy exists
+ * so the editor can stop a single drag from building a draft that could never be saved.
+ */
+export const LAYOUT_MAX_SEATS = 2_000;
 
 export type ValidationCode =
   | 'overlapping_seats'
   | 'duplicate_label'
   | 'seat_without_section'
-  | 'section_without_tier'
   | 'zero_capacity'
   // Added by the hall-scheme amendment (FR-072..FR-075). Reported in the SAME single pass — there is
   // one validate/publish gate, not two.
   | 'seats_outside_boundary'
   | 'icon_without_position'
-  | 'section_without_color';
+  // Categories. `category_without_tier` replaces the old `section_without_tier`: the thing an event
+  // prices is now the class, not the place. `section_without_color` is gone — colour moved to the
+  // category, where the column is NOT NULL, so there is nothing left to check at publish time.
+  | 'seat_without_category'
+  | 'category_without_tier'
+  // Capacity zones (0027). A zone is an `area` that carries a capacity AND a price class, and is sold
+  // by count against that class's tier rather than as seat rows.
+  | 'zone_without_category'
+  | 'category_mixed_inventory';
 
 export interface ValidationIssue {
   code: ValidationCode;
@@ -27,11 +40,13 @@ export interface ValidationIssue {
   /** For `overlapping_seats` this is the PAIR (FR-031). */
   seatIds?: number[];
   sectionIds?: number[];
+  categoryIds?: number[];
 }
 
 export interface ValidatableSeat {
   id: number;
   sectionId: number | null;
+  categoryId?: number | null;
   rowLabel: string;
   seatNumber: number;
   x: number;
@@ -41,10 +56,15 @@ export interface ValidatableSeat {
 export interface ValidatableSection {
   id: number;
   name: string;
-  /** Editor-only colour. Required to PUBLISH, not to store, so drafts stay permissive (FR-066). */
+  /** Editor-only colour, and no longer a publish requirement — see `ValidatableCategory`. */
   color?: string | null;
   /** Scales the nominal diameter; 1.0 = today's rendering (FR-065). */
   seatSizeMultiplier?: number;
+}
+
+export interface ValidatableCategory {
+  id: number;
+  name: string;
 }
 
 /** A shape or icon, for the two geometry checks the amendment adds. */
@@ -53,6 +73,9 @@ export interface ValidatableElement {
   x?: number | null;
   y?: number | null;
   points?: { x: number; y: number }[] | null;
+  /** `area` only — see `LayoutElement`. A capacity with a category is a zone sold by count. */
+  capacity?: number | null;
+  categoryId?: number | null;
 }
 
 export const SEAT_SIZE_MIN = 0.5;
@@ -83,9 +106,10 @@ export function pointInPolygon(pt: { x: number; y: number }, poly: { x: number; 
 export interface ValidatableLayout {
   seats: ValidatableSeat[];
   sections: ValidatableSection[];
-  /** Section ids that have a ticket tier for the showtime being bound. Omit when validating a layout
+  categories?: ValidatableCategory[];
+  /** Category ids that have a ticket tier for the showtime being bound. Omit when validating a layout
    *  on its own — a layout alone has no tiers, so the check only runs at bind time (FR-030, T050). */
-  sectionsWithTier?: number[];
+  categoriesWithTier?: number[];
   /** Shapes and facility icons, for the two geometry checks the amendment adds (FR-073, FR-074). */
   elements?: ValidatableElement[];
 }
@@ -147,15 +171,21 @@ function findOverlaps(seats: ValidatableSeat[], sizeOf: (s: ValidatableSeat) => 
 /** Every problem present, in one pass, each naming the seats or sections at fault (FR-030, FR-031). */
 export function validateLayout(layout: ValidatableLayout): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  const { seats, sections, sectionsWithTier, elements } = layout;
+  const { seats, sections, categories, categoriesWithTier, elements } = layout;
 
   // A seat's drawn size comes from its section's multiplier (FR-065).
   const multiplierOf = new Map(sections.map((sec) => [sec.id, sec.seatSizeMultiplier]));
   const sizeOf = (s: ValidatableSeat) =>
     effectiveDiameter(s.sectionId === null ? 1 : multiplierOf.get(s.sectionId));
 
-  if (seats.length === 0) {
-    issues.push({ code: 'zero_capacity', message: 'Sơ đồ chưa có ghế nào, không thể phát hành.' });
+  // A zone holds people without holding seats, so "empty" now means neither. Counting only seats
+  // would make a standing-only venue permanently unpublishable.
+  const zones = (elements ?? []).filter((el) => el.kind === 'area' && (el.capacity ?? 0) > 0);
+  if (seats.length === 0 && zones.length === 0) {
+    issues.push({
+      code: 'zero_capacity',
+      message: 'Sơ đồ chưa có ghế hay khu sức chứa nào, không thể phát hành.',
+    });
   }
 
   for (const [a, b] of findOverlaps(seats, sizeOf)) {
@@ -190,31 +220,63 @@ export function validateLayout(layout: ValidatableLayout): ValidationIssue[] {
     });
   }
 
+  // A seat with no class cannot be priced, so it cannot be sold. Same shape of rule as the missing
+  // section above, and permissive in the same way: a draft may hold unclassified seats while drawing.
+  const uncategorised = seats.filter((s) => s.categoryId === null || s.categoryId === undefined).map((s) => s.id);
+  if (uncategorised.length > 0) {
+    issues.push({
+      code: 'seat_without_category',
+      message: 'Có ghế chưa thuộc hạng vé nào.',
+      seatIds: uncategorised,
+    });
+  }
+
+  // A zone with a capacity but no price class cannot be priced, so it cannot be sold — and unlike a
+  // sectionless seat it would not even show up as inventory. Caught here rather than at bind time
+  // because it is a property of the chart alone.
+  const namelessZones = zones.filter((z) => z.categoryId === null || z.categoryId === undefined);
+  if (namelessZones.length > 0) {
+    issues.push({
+      code: 'zone_without_category',
+      message: `${namelessZones.length} khu sức chứa chưa có hạng giá — chọn hạng giá hoặc xoá khu.`,
+    });
+  }
+
+  // A price class is sold EITHER as seats or as capacity, never both: generation would have to make
+  // the class's tier both seat-gated (quantity NULL) and count-gated at once, and whichever won, the
+  // other half of the class would silently stop being sellable.
+  const seatCategories = new Set(
+    seats.map((s) => s.categoryId).filter((id): id is number => id !== null && id !== undefined),
+  );
+  const zoneCategories = new Set(
+    zones.map((z) => z.categoryId).filter((id): id is number => id !== null && id !== undefined),
+  );
+  const mixed = [...zoneCategories].filter((id) => seatCategories.has(id));
+  if (mixed.length > 0) {
+    const names = (categories ?? []).filter((c) => mixed.includes(c.id)).map((c) => c.name);
+    issues.push({
+      code: 'category_mixed_inventory',
+      message: `Hạng vé "${names.join('", "')}" vừa có ghế vừa có khu sức chứa — tách thành hai hạng riêng.`,
+      categoryIds: mixed,
+    });
+  }
+
   // Only checkable at bind time: a layout on its own has no tiers (T050).
-  if (sectionsWithTier) {
-    const tiered = new Set(sectionsWithTier);
-    const occupied = new Set(seats.map((s) => s.sectionId).filter((id): id is number => id !== null));
-    const untiered = sections.filter((s) => occupied.has(s.id) && !tiered.has(s.id)).map((s) => s.id);
+  if (categoriesWithTier) {
+    const tiered = new Set(categoriesWithTier);
+    // A zone's class needs a price just as much as a seat's does.
+    const occupied = new Set([...seatCategories, ...zoneCategories]);
+    const untiered = (categories ?? []).filter((c) => occupied.has(c.id) && !tiered.has(c.id));
     if (untiered.length > 0) {
       issues.push({
-        code: 'section_without_tier',
-        message: 'Mỗi khu vực có ghế phải được gán một hạng vé.',
-        sectionIds: untiered,
+        code: 'category_without_tier',
+        message: `Hạng vé "${untiered.map((c) => c.name).join('", "')}" chưa có giá cho suất diễn này.`,
+        categoryIds: untiered.map((c) => c.id),
       });
     }
   }
 
-  // ---- hall-scheme amendment: three more checks, same single pass (FR-072..FR-075) ----
-
-  for (const sec of sections) {
-    if (sec.color === null || sec.color === undefined || sec.color === '') {
-      issues.push({
-        code: 'section_without_color',
-        message: `Khu "${sec.name}" chưa chọn màu.`,
-        sectionIds: [sec.id],
-      });
-    }
-  }
+  // ---- hall-scheme amendment: two more checks, same single pass (FR-073, FR-074) ----
 
   for (const el of elements ?? []) {
     const isShape = el.kind === 'boundary' || el.kind === 'divider';

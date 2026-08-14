@@ -3,8 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { LayoutElement, LayoutSeat } from "@/shared/catalog/seatmap";
-import { clampCoord, normaliseRotation } from "@/shared/catalog/seatmap-validate";
+import type {
+  LayoutCategory,
+  LayoutElement,
+  LayoutSeat,
+  LayoutSection,
+  SeatType,
+} from "@/shared/catalog/seatmap";
+import {
+  LAYOUT_MAX_SEATS,
+  clampCoord,
+  normaliseRotation,
+} from "@/shared/catalog/seatmap-validate";
 
 /**
  * The canvas operations (FR-009). Pure functions over a seat list so each one is a single undoable
@@ -16,8 +26,69 @@ import { clampCoord, normaliseRotation } from "@/shared/catalog/seatmap-validate
 
 export const GRID = 50;
 
-export const snap = (v: number, enabled: boolean): number =>
-  enabled ? Math.round(v / GRID) * GRID : Math.round(v);
+/** Default centre-to-centre spacing when a tool lays seats out: 1.5 nominal diameters, the gap a
+ *  real theatre row uses and comfortably clear of the overlap threshold (one diameter). */
+export const SEAT_PITCH = 150;
+
+// ---- Client-side identity ---------------------------------------------------------------------
+
+/**
+ * Ids for things the editor has drawn but the database has never seen.
+ *
+ * Negative on purpose. Selection, undo and the section a seat points at all need a stable handle the
+ * moment a seat appears, long before a save exists to hand out a real one; and negative can never
+ * collide with a BIGSERIAL, so `id > 0` is a total test for "already persisted" on both sides of the
+ * wire (see `resolveSection` in layouts.repo.ts).
+ */
+let tempCounter = 0;
+export const mintId = (): number => {
+  tempCounter -= 1;
+  return tempCounter;
+};
+
+/**
+ * Ids for a preview that is about to be thrown away.
+ *
+ * A drawing tool re-runs its maker on every pointer move to show what it would create; minting real
+ * placeholders for those would be a side effect during render, and the seats never reach the draft
+ * anyway. Distinct ids still matter — `arcSeats` keys its result by id, so a preview arc built from
+ * a single shared id would collapse every seat onto one point.
+ */
+export const previewIds = (): (() => number) => {
+  let n = 0;
+  return () => {
+    n += 1;
+    return n;
+  };
+};
+
+// ---- Labels -----------------------------------------------------------------------------------
+
+/** A → B → … → Z → AA, the way rows are lettered on a real seating chart. */
+export function rowLabelAt(index: number): string {
+  let n = index;
+  let out = "";
+  do {
+    out = String.fromCharCode(65 + (n % 26)) + out;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return out;
+}
+
+/** The first row letter not already used in this section, so a second row tool run continues the
+ *  alphabet instead of colliding with the first (which validation would flag as a duplicate). */
+export function nextRowLabel(seats: LayoutSeat[], sectionId: number | null): string {
+  const used = new Set(
+    seats.filter((s) => s.sectionId === sectionId).map((s) => s.rowLabel.toUpperCase()),
+  );
+  for (let i = 0; i < 1000; i += 1) {
+    const label = rowLabelAt(i);
+    if (!used.has(label)) return label;
+  }
+  return "A";
+}
+
+export const snap = (v: number, enabled: boolean): number => (enabled ? Math.round(v / GRID) * GRID : Math.round(v));
 
 const isSelected = (s: LayoutSeat, ids: Set<number>) => s.id !== undefined && ids.has(s.id);
 
@@ -165,9 +236,370 @@ export function deleteSeats(seats: LayoutSeat[], ids: Set<number>): LayoutSeat[]
   return seats.filter((s) => !isSelected(s, ids));
 }
 
-/** Seats whose centre falls inside a marquee rectangle. */
-export function seatsInRect(
+// ---- Creation tools (FR-010) ------------------------------------------------------------------
+//
+// Every one of these takes the rectangle or line the organizer just dragged and returns seats. The
+// count comes from the SIZE of the gesture rather than from a number typed into a form: drag a
+// longer row, get more seats. That is the whole reason the old Section/Row/Count form could not be
+// the primary way to build a map — it made you guess the number, then fix the geometry afterwards.
+
+export interface SeatFactory {
+  sectionId: number | null;
+  /** The price class new seats land in — the active category, alongside the active section. */
+  categoryId: number | null;
+  seatType: SeatType;
+  /** Centre-to-centre spacing. */
+  pitch: number;
+  /** Where numbering starts within each row. */
+  startNumber: number;
+  /** First row letter; later rows continue the alphabet. */
+  rowLabel: string;
+  /**
+   * Most seats this ONE gesture may create. Defaults to the whole layout ceiling.
+   *
+   * The per-row and per-column caps below bound each axis but never their product, so dragging the
+   * grid tool across the canvas produced 8,464 seats — four times the ceiling. The server then refused
+   * the save with `409 seat_limit_reached` and the entire gesture was lost, after the editor had
+   * already rendered and validated all of them. Clipping at draw time fails the right way instead.
+   */
+  budget?: number;
+}
+
+/** How many seats fit along a span at this pitch — at least one, so a tiny drag still makes a seat. */
+const fit = (span: number, pitch: number, cap: number): number =>
+  Math.max(1, Math.min(cap, Math.round(Math.abs(span) / pitch) + 1));
+
+/** Caps on ONE gesture. Exported so a test can pin them, and because the editor reports them. */
+export /** What one gesture is allowed to create: whatever the caller budgeted, bounded by the ceiling. */
+const budgetOf = (f: SeatFactory): number =>
+  Math.max(0, Math.min(f.budget ?? LAYOUT_MAX_SEATS, LAYOUT_MAX_SEATS));
+
+export const MAX_PER_ROW = 200;
+export const MAX_ROWS = 100;
+
+/** A straight run of seats between two points. */
+export function makeRow(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  f: SeatFactory,
+  grid: boolean,
+  nextId: () => number = mintId,
+): LayoutSeat[] {
+  const length = Math.hypot(to.x - from.x, to.y - from.y);
+  const count = Math.min(fit(length, f.pitch, MAX_PER_ROW), budgetOf(f));
+  const rotation = normaliseRotation((Math.atan2(to.y - from.y, to.x - from.x) * 180) / Math.PI);
+  return Array.from({ length: count }, (_, i) => {
+    const t = count === 1 ? 0 : i / (count - 1);
+    return {
+      id: nextId(),
+      sectionId: f.sectionId,
+      categoryId: f.categoryId,
+      rowLabel: f.rowLabel,
+      seatNumber: f.startNumber + i,
+      seatType: f.seatType,
+      x: clampCoord(snap(from.x + (to.x - from.x) * t, grid)),
+      y: clampCoord(snap(from.y + (to.y - from.y) * t, grid)),
+      // A row dragged at an angle should have its seats facing along it, not stubbornly upright.
+      rotation: Math.abs(rotation) < 1 || Math.abs(rotation - 180) < 1 ? 0 : rotation,
+    };
+  });
+}
+
+/** A rectangular block: rows down, seats across, lettered and numbered as it goes. */
+export function makeGrid(
+  rect: Rect,
+  f: SeatFactory,
+  grid: boolean,
+  nextId: () => number = mintId,
+): LayoutSeat[] {
+  const x0 = Math.min(rect.x1, rect.x2);
+  const y0 = Math.min(rect.y1, rect.y2);
+  const cols = fit(rect.x2 - rect.x1, f.pitch, MAX_PER_ROW);
+  const rows = fit(rect.y2 - rect.y1, f.pitch, MAX_ROWS);
+  const budget = budgetOf(f);
+  const firstRow = labelIndex(f.rowLabel);
+  const out: LayoutSeat[] = [];
+  for (let r = 0; r < rows && out.length < budget; r += 1) {
+    for (let c = 0; c < cols && out.length < budget; c += 1) {
+      out.push({
+        id: nextId(),
+        sectionId: f.sectionId,
+        categoryId: f.categoryId,
+        rowLabel: rowLabelAt(firstRow + r),
+        seatNumber: f.startNumber + c,
+        seatType: f.seatType,
+        x: clampCoord(snap(x0 + c * f.pitch, grid)),
+        y: clampCoord(snap(y0 + r * f.pitch, grid)),
+        rotation: 0,
+      });
+    }
+  }
+  return out;
+}
+
+/** A curved row — the same gesture as `makeRow`, bowed by `bow` layout units at its middle. */
+export function makeArc(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  bow: number,
+  f: SeatFactory,
+  grid: boolean,
+  nextId: () => number = mintId,
+): LayoutSeat[] {
+  // Built as a straight row, then bent by the same code the Curve button uses, so a drawn arc and a
+  // curved-afterwards row land in exactly the same place.
+  const straight = makeRow(from, to, f, grid, nextId);
+  const ids = new Set(straight.map((s) => s.id as number));
+  return arcSeats(straight, ids, bow);
+}
+
+/** Inverse of `rowLabelAt`; unparseable labels start the alphabet over rather than throwing. */
+function labelIndex(label: string): number {
+  const upper = label.toUpperCase();
+  if (!/^[A-Z]+$/.test(upper)) return 0;
+  let n = 0;
+  for (const ch of upper) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n - 1;
+}
+
+// ---- Selection-wide edits ---------------------------------------------------------------------
+
+/** Move a selection into a section (or out of every section, with `null`). */
+export function assignSection(
   seats: LayoutSeat[],
+  ids: Set<number>,
+  sectionId: number | null,
+): LayoutSeat[] {
+  return seats.map((s) => (isSelected(s, ids) ? { ...s, sectionId } : s));
+}
+
+export function setSeatType(seats: LayoutSeat[], ids: Set<number>, seatType: SeatType): LayoutSeat[] {
+  return seats.map((s) => (isSelected(s, ids) ? { ...s, seatType } : s));
+}
+
+/**
+ * Re-letter and renumber a selection as one row, in the order it reads on the map.
+ *
+ * Left to right, then top to bottom — the order a person numbers seats by hand, and the order that
+ * makes the result predictable after a marquee that caught two half-rows.
+ */
+export function renumberSeats(
+  seats: LayoutSeat[],
+  ids: Set<number>,
+  opts: { rowLabel?: string; startNumber: number; reverse?: boolean },
+): LayoutSeat[] {
+  const sel = seats.filter((s) => isSelected(s, ids)).sort((a, b) => a.y - b.y || a.x - b.x);
+  if (opts.reverse) sel.reverse();
+  const next = new Map<number, { rowLabel?: string; seatNumber: number }>();
+  sel.forEach((s, i) =>
+    next.set(s.id as number, { rowLabel: opts.rowLabel, seatNumber: opts.startNumber + i }),
+  );
+  return seats.map((s) => {
+    const n = s.id === undefined ? undefined : next.get(s.id);
+    if (!n) return s;
+    return { ...s, seatNumber: n.seatNumber, rowLabel: n.rowLabel ?? s.rowLabel };
+  });
+}
+
+/** Mirror a selection across its own vertical centre line — the fast way to build the other half of
+ *  a symmetrical house without drawing it twice. Labels are untouched; renumber after if you want. */
+export function mirrorSeats(seats: LayoutSeat[], ids: Set<number>): LayoutSeat[] {
+  const sel = seats.filter((s) => isSelected(s, ids));
+  if (sel.length < 2) return seats;
+  const xs = sel.map((s) => s.x);
+  const axis = (Math.min(...xs) + Math.max(...xs)) / 2;
+  return seats.map((s) =>
+    isSelected(s, ids)
+      ? { ...s, x: clampCoord(2 * axis - s.x), rotation: normaliseRotation(-s.rotation) }
+      : s,
+  );
+}
+
+/** Duplicate a selection, offset so the copy is visible and immediately draggable. */
+/**
+ * Fresh row letters for a copy — one per distinct source row, per section.
+ *
+ * Without this, duplicating or pasting kept the originals' `rowLabel` AND `seatNumber`, so the copy
+ * collided with its own source on (section, row, number). That is `duplicate_label` in the shared
+ * validator, which BLOCKS publishing — meaning every Ctrl+D left the layout unpublishable until the
+ * organizer noticed and renumbered by hand. `makeRow` already avoids this via `nextRowLabel`; copies
+ * simply never did.
+ *
+ * One new letter per source row rather than one for the whole selection, so duplicating a block keeps
+ * its shape instead of collapsing every row into one.
+ */
+function freshRowLabels(
+  existing: LayoutSeat[],
+  selection: readonly { sectionId: number | null; rowLabel: string }[],
+): Map<string, string> {
+  const key = (sectionId: number | null, rowLabel: string) =>
+    `${sectionId ?? "none"}|${rowLabel.toUpperCase()}`;
+  const used = new Set(existing.map((s) => key(s.sectionId, s.rowLabel)));
+  const out = new Map<string, string>();
+
+  for (const s of selection) {
+    const from = key(s.sectionId, s.rowLabel);
+    if (out.has(from)) continue;
+    for (let i = 0; i < 1000; i += 1) {
+      const label = rowLabelAt(i);
+      const candidate = key(s.sectionId, label);
+      if (!used.has(candidate)) {
+        used.add(candidate);
+        out.set(from, label);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+export function duplicateSeats(
+  seats: LayoutSeat[],
+  ids: Set<number>,
+  dx: number,
+  dy: number,
+): { seats: LayoutSeat[]; newIds: Set<number> } {
+  const newIds = new Set<number>();
+  const selection = seats.filter((s) => isSelected(s, ids));
+  const relabel = freshRowLabels(seats, selection);
+  const copies = selection.map((s) => {
+    const id = mintId();
+    newIds.add(id);
+    return {
+      ...s,
+      id,
+      rowLabel: relabel.get(`${s.sectionId ?? "none"}|${s.rowLabel.toUpperCase()}`) ?? s.rowLabel,
+      x: clampCoord(s.x + dx),
+      y: clampCoord(s.y + dy),
+    };
+  });
+  return { seats: [...seats, ...copies], newIds };
+}
+
+/**
+ * Copy / cut / paste.
+ *
+ * The clipboard holds seats stripped of identity — no `id`, so a paste always mints fresh
+ * placeholders and can never collide with the seats it was copied from, and positions are stored
+ * RELATIVE to the selection's top-left corner so a paste lands where it is asked to rather than where
+ * the original happened to be. That also makes the payload safe to keep across layouts.
+ */
+export interface SeatClipboard {
+  /** Seats with `x`/`y` relative to the copied selection's top-left corner. */
+  seats: Omit<LayoutSeat, "id">[];
+}
+
+export function copySeats(seats: LayoutSeat[], ids: Set<number>): SeatClipboard | null {
+  const sel = seats.filter((s) => isSelected(s, ids));
+  if (sel.length === 0) return null;
+  const originX = Math.min(...sel.map((s) => s.x));
+  const originY = Math.min(...sel.map((s) => s.y));
+  return {
+    seats: sel.map(({ id: _id, ...rest }) => ({ ...rest, x: rest.x - originX, y: rest.y - originY })),
+  };
+}
+
+/** Paste at (x, y), which becomes the pasted block's top-left corner. Returns the new ids so the
+ *  caller can select what it just created — pasting and then not knowing what you pasted is useless. */
+export function pasteSeats(
+  seats: LayoutSeat[],
+  clipboard: SeatClipboard,
+  x: number,
+  y: number,
+): { seats: LayoutSeat[]; newIds: Set<number> } {
+  const newIds = new Set<number>();
+  // Against the CURRENT map, not the one the copy was taken from — so pasting the same clipboard
+  // twice lands on two different rows instead of colliding with the first paste.
+  const relabel = freshRowLabels(seats, clipboard.seats);
+  const copies = clipboard.seats.map((s) => {
+    const id = mintId();
+    newIds.add(id);
+    return {
+      ...s,
+      id,
+      rowLabel: relabel.get(`${s.sectionId ?? "none"}|${s.rowLabel.toUpperCase()}`) ?? s.rowLabel,
+      x: clampCoord(s.x + x),
+      y: clampCoord(s.y + y),
+    };
+  });
+  return { seats: [...seats, ...copies], newIds };
+}
+
+// ---- Sections, categories and elements ---------------------------------------------------------
+
+export function addSection(name: string): LayoutSection {
+  return { id: mintId(), name, description: null };
+}
+
+/** Palette for a new category. Same five colours the server defaults sections to, so a chart drawn
+ *  entirely in the editor and one backfilled from sections look like the same product. */
+export const CATEGORY_COLORS = ["#4C9A6B", "#3E7CB1", "#C9762F", "#9B4D8E", "#B3453C"] as const;
+
+export function addCategory(name: string, existing: number): LayoutCategory {
+  return { id: mintId(), name, color: CATEGORY_COLORS[existing % CATEGORY_COLORS.length] };
+}
+
+/** Flag or unflag a selection as wheelchair-accessible (§9). */
+export function setAccessible(
+  seats: LayoutSeat[],
+  ids: Set<number>,
+  isAccessible: boolean,
+): LayoutSeat[] {
+  return seats.map((s) => (isSelected(s, ids) ? { ...s, isAccessible } : s));
+}
+
+export function assignCategory(
+  seats: LayoutSeat[],
+  ids: Set<number>,
+  categoryId: number | null,
+): LayoutSeat[] {
+  return seats.map((s) => (isSelected(s, ids) ? { ...s, categoryId } : s));
+}
+
+/** Drop a category and leave its seats unclassified, for the same reason `removeSection` orphans
+ *  rather than deletes: an unclassified seat is a visible, fixable validation issue; a deleted block
+ *  of work is not recoverable once saved. */
+export function removeCategory(
+  categories: LayoutCategory[],
+  seats: LayoutSeat[],
+  categoryId: number,
+): { categories: LayoutCategory[]; seats: LayoutSeat[] } {
+  return {
+    categories: categories.filter((c) => c.id !== categoryId),
+    seats: seats.map((s) => (s.categoryId === categoryId ? { ...s, categoryId: null } : s)),
+  };
+}
+
+/** Drop a section and orphan its seats rather than deleting them — losing a block's worth of work to
+ *  a mis-click is not recoverable once saved, whereas a sectionless seat is a visible, fixable
+ *  validation issue (FR-030). */
+export function removeSection(
+  sections: LayoutSection[],
+  seats: LayoutSeat[],
+  sectionId: number,
+): { sections: LayoutSection[]; seats: LayoutSeat[] } {
+  return {
+    sections: sections.filter((s) => s.id !== sectionId),
+    seats: seats.map((s) => (s.sectionId === sectionId ? { ...s, sectionId: null } : s)),
+  };
+}
+
+
+export interface Rect {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+/**
+ * Seats whose centre falls inside a marquee rectangle.
+ *
+ * Typed on the least a seat has to have, so the same marquee works over a layout being drafted and
+ * over a showtime's live inventory — two different seat shapes, one selection rule.
+ */
+export function seatsInRect(
+  seats: { id?: number; x: number; y: number }[],
   rect: { x1: number; y1: number; x2: number; y2: number },
 ): number[] {
   const minX = Math.min(rect.x1, rect.x2);

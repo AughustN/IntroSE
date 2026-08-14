@@ -205,6 +205,15 @@ export const SEAT_DIAMETER = ms("SEAT_DIAMETER", 100);
 /** Ceilings — chosen to keep the editor and the buyer map inside PLAT-01 and PERF-02 (FR-007, FR-019). */
 export const LAYOUT_MAX_SEATS = ms("LAYOUT_MAX_SEATS", 2_000);
 export const LAYOUT_MAX_ELEMENTS = ms("LAYOUT_MAX_ELEMENTS", 200);
+/**
+ * How many people one capacity zone may hold.
+ *
+ * Deliberately far above `LAYOUT_MAX_SEATS`, and not related to it. The seat ceiling exists because
+ * every seat is a row, a bookable unit and an SVG node; a zone is one row and one polygon whatever
+ * its capacity, so capping it at the seat limit would defeat the reason zones exist — a stadium floor
+ * holding 20,000 is the case they were added for.
+ */
+export const ZONE_MAX_CAPACITY = ms("ZONE_MAX_CAPACITY", 100_000);
 export const VENUE_MAX_LAYOUTS = ms("VENUE_MAX_LAYOUTS", 20);
 /** Floor-plan upload bounds. Dimensions are checked before re-encoding, so a decompression bomb is
  *  refused rather than allocated (FR-023). */

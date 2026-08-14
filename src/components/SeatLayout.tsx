@@ -135,9 +135,7 @@ export default function SeatLayout({
   // Seats arrive already ordered section → row → number, which is both the draw order and the tab
   // order (feature 005, FR-039a). The old row-grouping is gone: geometry decides placement now.
 
-  const toggleSeatSelection = (seat: SeatMapSeat) => {
-    const mine = heldByMe.has(seat.id);
-    if (!mine && seat.status !== "available") return; // taken by someone else, or sold/blocked
+  const pick = (seat: SeatMapSeat) =>
     onToggleSeat({
       id: `${seat.row}${seat.number}`,
       row: seat.row,
@@ -147,6 +145,31 @@ export default function SeatLayout({
       isBooked: false,
       showtimeSeatId: seat.id,
     });
+
+  /**
+   * Picking a seat — or, at a table sold whole, picking the whole table.
+   *
+   * `whole_table` is expressed HERE, as a selection rule, rather than as a different kind of
+   * inventory: the hold that follows still takes N ordinary seat rows, so feature 003's concurrency
+   * guarantees are untouched. A table is only offered if every seat at it is free, because a table
+   * "sold as a whole" that arrives with two seats missing is not the thing that was advertised.
+   */
+  const toggleSeatSelection = (seat: SeatMapSeat) => {
+    const mine = heldByMe.has(seat.id);
+    if (!mine && seat.status !== "available") return; // taken by someone else, or sold/blocked
+
+    if (seat.tableBookingMode === "whole_table" && seat.tableId != null) {
+      const table = seats.filter((s) => s.tableId === seat.tableId);
+      const free = table.every((s) => s.status === "available" || heldByMe.has(s.id));
+      if (!free) return;
+      // Whichever way this click resolves, the whole table follows it.
+      const wantSelected = !mine;
+      for (const s of table) {
+        if (heldByMe.has(s.id) !== wantSelected) pick(s);
+      }
+      return;
+    }
+    pick(seat);
   };
 
   const selectedSeatsList = heldSeats;
@@ -165,7 +188,14 @@ export default function SeatLayout({
    *  without seeing the map (FR-039a). */
   const statusTitle = (seat: SeatMapSeat): string => {
     const price = formatVnd(seat.price);
-    const where = `${seat.section ? `${seat.section}, ` : ""}hàng ${seat.row}, ghế ${seat.number}`;
+    // The two facts a screen-reader user cannot get from the picture: that this seat is accessible,
+    // and that choosing it takes the whole table with it.
+    const notes = [
+      seat.isAccessible ? "ghế cho người dùng xe lăn" : null,
+      seat.tableBookingMode === "whole_table" ? "bán trọn bàn" : null,
+    ].filter(Boolean);
+    const suffix = notes.length > 0 ? `, ${notes.join(", ")}` : "";
+    const where = `${seat.section ? `${seat.section}, ` : ""}hàng ${seat.row}, ghế ${seat.number}${suffix}`;
     if (heldByMe.has(seat.id)) return `${where} — bạn đang giữ (${price})`;
     const label: Record<SeatStatus, string> = {
       available: "còn trống",

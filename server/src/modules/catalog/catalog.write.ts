@@ -2,6 +2,9 @@ import type { Db } from "../../db/pool.js";
 import { pool, withTransaction } from "../../db/pool.js";
 import { generateUniqueSlug } from "./slug.js";
 import { queueEventNotification } from "../notifications/notifications.service.js";
+import { refreshSnapshot } from "../seatmap/apply.js";
+import { defaultCategoryId } from "../seatmap/layouts.repo.js";
+import { err } from "../../http.js";
 
 /** The caller's approved organizer row id, or null (events bind to this — D-E). */
 export async function getApprovedOrganizerId(
@@ -170,7 +173,13 @@ export async function addShowtimeWithTiers(
   input: {
     venueId: number;
     startsAt: string;
-    tiers: { label: string; price: number; totalQuantity?: number | null }[];
+    tiers: {
+      label: string;
+      price: number;
+      totalQuantity?: number | null;
+      /** Seated only: the chart class this tier prices, the durable half of the category↔price join. */
+      categoryId?: number | null;
+    }[];
   },
 ): Promise<number> {
   return withTransaction(async (client) => {
@@ -192,8 +201,9 @@ export async function addShowtimeWithTiers(
     ).rows[0].id;
     for (const t of input.tiers) {
       await client.query(
-        `INSERT INTO ticket_tiers (showtime_id, label, price_amount, total_quantity) VALUES ($1, $2, $3, $4)`,
-        [st, t.label, t.price, seated ? null : (t.totalQuantity ?? 100)],
+        `INSERT INTO ticket_tiers (showtime_id, label, price_amount, total_quantity, category_id)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [st, t.label, t.price, seated ? null : (t.totalQuantity ?? 100), t.categoryId ?? null],
       );
     }
     return st;
@@ -247,10 +257,10 @@ export async function addSeats(
   const y = Math.min(10000, (prior[0].max_y ?? 1050) + 150);
   const startX = Math.max(0, Math.round(5000 - ((count - 1) * 150) / 2));
   await db.query(
-    `INSERT INTO seats (layout_id, section_id, row_label, seat_number, pos_x, pos_y)
-     SELECT $1, $2, $3, gs, LEAST(10000, $4::int + (gs - 1) * 150), $5 FROM generate_series(1, $6) AS gs
+    `INSERT INTO seats (layout_id, section_id, category_id, row_label, seat_number, pos_x, pos_y)
+     SELECT $1, $2, $7, $3, gs, LEAST(10000, $4::int + (gs - 1) * 150), $5 FROM generate_series(1, $6) AS gs
      ON CONFLICT (section_id, row_label, seat_number) DO NOTHING`,
-    [layoutId, sectionId, rowLabel, startX, y, count],
+    [layoutId, sectionId, rowLabel, startX, y, count, await defaultCategoryId(layoutId, db)],
   );
   return count;
 }
@@ -328,6 +338,9 @@ export async function eventShowtimesManage(eventId: number, db: Db = pool) {
     bookableSeats: number;
     tiers?: unknown;
     sections?: unknown;
+    layoutId?: number | null;
+    layoutStatus?: string | null;
+    categories?: unknown;
   }[];
   for (const st of showtimes) {
     // Deliberately the OPPOSITE of the buyer reads: archived tiers stay visible here, flagged, with
@@ -336,7 +349,7 @@ export async function eventShowtimesManage(eventId: number, db: Db = pool) {
     st.tiers = (
       await db.query(
         `SELECT id, label, price_amount::int AS price, total_quantity AS capacity,
-                sold_quantity AS sold, reserved_quantity AS held,
+                sold_quantity AS sold, reserved_quantity AS held, category_id AS "categoryId",
                 (archived_at IS NOT NULL) AS archived
            FROM ticket_tiers WHERE showtime_id = $1
           ORDER BY archived_at NULLS FIRST, price_amount`,
@@ -344,26 +357,39 @@ export async function eventShowtimesManage(eventId: number, db: Db = pool) {
       )
     ).rows;
     st.sections = await listSections(st.venueId, db);
+
+    // The chart this showtime would bind to, and its price classes. An already-generated showtime
+    // keeps the layout it was generated from; one that has not generated yet defaults to the venue's.
+    const { rows: chart } = await db.query<{ id: number; status: string }>(
+      `SELECT l.id, l.status FROM venue_layouts l
+        WHERE l.id = COALESCE((SELECT layout_id FROM showtimes WHERE id = $1),
+                              (SELECT id FROM venue_layouts WHERE venue_id = $2 ORDER BY created_at LIMIT 1))`,
+      [st.id, st.venueId],
+    );
+    st.layoutId = chart[0]?.id ?? null;
+    st.layoutStatus = chart[0]?.status ?? null;
+    st.categories = chart[0]
+      ? (
+          await db.query(
+            `SELECT c.id, c.name, c.color,
+                    (SELECT count(*)::int FROM seats s WHERE s.category_id = c.id) AS "seatCount"
+               FROM layout_categories c WHERE c.layout_id = $1 ORDER BY c.name`,
+            [chart[0].id],
+          )
+        ).rows
+      : [];
   }
   return showtimes;
 }
 
-export async function sectionsWithSeats(venueId: number, db: Db = pool): Promise<number[]> {
-  const { rows } = await db.query<{ section_id: number }>(
-    `SELECT DISTINCT s.section_id FROM seats s
-       JOIN venue_layouts l ON l.id = s.layout_id
-      WHERE l.venue_id = $1 AND s.section_id IS NOT NULL`,
-    [venueId],
-  );
-  return rows.map((r) => r.section_id);
-}
-
-export async function tiersOfShowtime(showtimeId: number, db: Db = pool): Promise<number[]> {
-  const { rows } = await db.query<{ id: number }>(
-    `SELECT id FROM ticket_tiers WHERE showtime_id = $1`,
+/** Categories this showtime has put a price on — the event half of the category↔price join. */
+export async function pricedCategories(showtimeId: number, db: Db = pool): Promise<number[]> {
+  const { rows } = await db.query<{ category_id: number }>(
+    `SELECT DISTINCT category_id FROM ticket_tiers
+      WHERE showtime_id = $1 AND archived_at IS NULL AND category_id IS NOT NULL`,
     [showtimeId],
   );
-  return rows.map((r) => r.id);
+  return rows.map((r) => r.category_id);
 }
 
 export async function showtimeHasSeatMap(showtimeId: number, db: Db = pool): Promise<boolean> {
@@ -374,61 +400,122 @@ export async function showtimeHasSeatMap(showtimeId: number, db: Db = pool): Pro
 }
 
 /**
- * Generate the seated seat map: one showtime_seat per physical seat, tier assigned per section (R-7).
+ * Generate the seated seat map: one showtime_seat per physical seat, priced by its CATEGORY (R-7).
  *
- * Feature 005: this SNAPSHOTS the layout onto the showtime (FR-005). Each seat's geometry is copied
- * onto its `showtime_seats` row, and the layout's decoration and background are frozen into
- * `showtimes.layout_snapshot`. From here the showtime owns its map — a later layout edit reaches it
- * only through an explicit, previewed re-apply.
+ * The category→tier mapping is no longer an argument. It lives on `ticket_tiers.category_id`, so it
+ * is a durable property of the showtime rather than something re-typed at every generation and then
+ * discarded — which is what lets one chart back many showtimes at many prices (FR-005).
+ *
+ * Feature 005: this SNAPSHOTS the layout onto the showtime. Each seat's geometry AND its identity —
+ * row, number, section, category — is copied onto its `showtime_seats` row, and the layout's
+ * decoration and background are frozen into `showtimes.layout_snapshot`. From here the showtime owns
+ * its map; a later layout edit reaches it only through an explicit, previewed re-apply.
  */
-export async function generateSeatMap(
-  showtimeId: number,
-  sectionTiers: { sectionId: number; ticketTierId: number }[],
-): Promise<number> {
+export async function generateSeatMap(showtimeId: number, layoutId: number): Promise<number> {
   return withTransaction(async (client) => {
+    const { rows: tiers } = await client.query<{ id: number; category_id: number }>(
+      `SELECT id, category_id FROM ticket_tiers
+        WHERE showtime_id = $1 AND archived_at IS NULL AND category_id IS NOT NULL`,
+      [showtimeId],
+    );
+
     let total = 0;
-    let layoutId: number | null = null;
-    for (const { sectionId, ticketTierId } of sectionTiers) {
+    for (const tier of tiers) {
       const res = await client.query(
         `INSERT INTO showtime_seats (showtime_id, seat_id, ticket_tier_id, status,
-                                     pos_x, pos_y, rotation, row_label, seat_number, section_name)
+                                     pos_x, pos_y, rotation, row_label, seat_number, section_name,
+                                     category_name, is_accessible, table_id, table_booking_mode)
          SELECT $1, s.id, $2, 'available', s.pos_x, s.pos_y, s.rotation, s.row_label, s.seat_number,
-                (SELECT sec.name FROM sections sec WHERE sec.id = s.section_id)
-           FROM seats s WHERE s.section_id = $3`,
-        [showtimeId, ticketTierId, sectionId],
+                (SELECT sec.name FROM sections sec WHERE sec.id = s.section_id),
+                (SELECT c.name FROM layout_categories c WHERE c.id = s.category_id),
+                s.is_accessible, s.table_id,
+                (SELECT t.booking_mode FROM layout_tables t WHERE t.id = s.table_id)
+           FROM seats s WHERE s.layout_id = $3 AND s.category_id = $4`,
+        [showtimeId, tier.id, layoutId, tier.category_id],
       );
       total += res.rowCount ?? 0;
-      if (layoutId === null) {
-        const { rows } = await client.query<{ layout_id: number }>(
-          `SELECT layout_id FROM sections WHERE id = $1`,
-          [sectionId],
-        );
-        layoutId = rows[0]?.layout_id ?? null;
-      }
     }
 
-    if (layoutId !== null) {
-      await client.query(
-        `UPDATE showtimes st
-            SET layout_id = $2,
-                layout_snapshot = jsonb_build_object(
-                  'elements', COALESCE((
-                    SELECT jsonb_agg(jsonb_build_object(
-                      'kind', e.kind, 'x', e.pos_x, 'y', e.pos_y,
-                      'width', e.width, 'height', e.height, 'rotation', e.rotation, 'label', e.label))
-                      FROM layout_elements e WHERE e.layout_id = l.id), '[]'::jsonb),
-                  'planUrl', l.background_url,
-                  'planScale', round(l.background_scale * 1000),
-                  'planOffsetX', l.background_offset_x,
-                  'planOffsetY', l.background_offset_y,
-                  'planOpacity', round(l.background_opacity * 100),
-                  'planVisibleToBuyers', l.background_public
-                )
-           FROM venue_layouts l
-          WHERE st.id = $1 AND l.id = $2`,
-        [showtimeId, layoutId],
+    /*
+     * Capacity zones (0027): a zone sells by COUNT, so its capacity becomes its tier's quantity
+     * instead of becoming seat rows.
+     *
+     * Written per class by summing every zone that names it, because one price class may be drawn as
+     * several zones (two standing wings at the same price). The guard is the one that matters: a
+     * regeneration must never set a quantity below what is already sold or held, or the CHECK on
+     * `ticket_tiers` would reject it — and if it did not, the showtime would have oversold.
+     * `GREATEST` is deliberately NOT used to paper over that; the refusal is explicit and names the
+     * class, because silently keeping the old capacity would leave the organizer believing an edit
+     * took effect.
+     */
+    const { rows: zones } = await client.query<{ category_id: number; capacity: string; name: string }>(
+      `SELECT e.category_id, sum(e.capacity)::bigint AS capacity, c.name
+         FROM layout_elements e
+         JOIN layout_categories c ON c.id = e.category_id
+        WHERE e.layout_id = $1 AND e.kind = 'area' AND e.capacity IS NOT NULL
+        GROUP BY e.category_id, c.name`,
+      [layoutId],
+    );
+
+    for (const zone of zones) {
+      const tier = tiers.find((t) => t.category_id === zone.category_id);
+      // Unreachable in practice: `categoriesWithInventory` makes the gate refuse an unpriced zone
+      // class before we get here. Kept as defence in depth rather than an assertion, because the
+      // alternative to skipping is throwing on a path that has already taken money elsewhere.
+      if (!tier) continue;
+      const capacity = Number(zone.capacity);
+      const { rows: committed } = await client.query<{ taken: string }>(
+        `SELECT (sold_quantity + reserved_quantity)::bigint AS taken
+           FROM ticket_tiers WHERE id = $1 FOR UPDATE`,
+        [tier.id],
       );
+      const taken = Number(committed[0]?.taken ?? 0);
+      if (capacity < taken) {
+        throw err.conflict(
+          'zone_capacity_below_sold',
+          `Khu "${zone.name}" chỉ còn ${capacity} chỗ nhưng đã bán hoặc giữ ${taken}.`,
+        );
+      }
+      await client.query(`UPDATE ticket_tiers SET total_quantity = $2 WHERE id = $1`, [tier.id, capacity]);
+      total += capacity;
     }
+
+    // One snapshot writer, not two. This used to inline its own `jsonb_build_object` that omitted
+    // `points`, `tables` and `sectionStyles`, so a freshly generated map rendered without its
+    // polygons, tables and per-section styling until someone happened to run a re-apply.
+    await refreshSnapshot(showtimeId, layoutId, client);
     return total;
   });
+}
+
+/**
+ * Category ids of a layout that hold INVENTORY — each must be priced before generation.
+ *
+ * Both kinds of inventory, and that second half was missing. A capacity zone (0027) carries its class on
+ * `layout_elements.category_id` and produces no `seats` rows at all, so a class living only on a zone was
+ * invisible to this query: it passed the unpriced-class gate, and the generator then found no tier for it
+ * and skipped it. The showtime came back 201 with the standing floor silently absent — on exactly the
+ * arena-with-a-floor shape zones were added for.
+ */
+export async function categoriesWithInventory(layoutId: number, db: Db = pool): Promise<number[]> {
+  const { rows } = await db.query<{ category_id: number }>(
+    `SELECT DISTINCT category_id FROM seats WHERE layout_id = $1 AND category_id IS NOT NULL
+     UNION
+     SELECT DISTINCT category_id FROM layout_elements
+       WHERE layout_id = $1 AND kind = 'area' AND capacity IS NOT NULL AND category_id IS NOT NULL`,
+    [layoutId],
+  );
+  return rows.map((r) => r.category_id);
+}
+
+/** The layout's venue and publish status, for the two checks generation makes before binding. */
+export async function layoutBinding(
+  layoutId: number,
+  db: Db = pool,
+): Promise<{ venueId: number; status: string } | null> {
+  const { rows } = await db.query<{ venue_id: number; status: string }>(
+    `SELECT venue_id, status FROM venue_layouts WHERE id = $1`,
+    [layoutId],
+  );
+  return rows[0] ? { venueId: rows[0].venue_id, status: rows[0].status } : null;
 }

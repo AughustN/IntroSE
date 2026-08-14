@@ -8,6 +8,7 @@ import {
   TABLE_MIN_SEATS,
 } from "../../config.js";
 import { pool, withTransaction } from "../../db/pool.js";
+import { defaultCategoryId, forgetDocument } from "./layouts.repo.js";
 import { err, HttpError } from "../../http.js";
 
 /**
@@ -25,6 +26,10 @@ import { err, HttpError } from "../../http.js";
 
 export interface TableInput {
   sectionId: number | null;
+  /** Imparted to this table's seats, like its section. Defaults to the layout's first category. */
+  categoryId?: number | null;
+  /** `whole_table` groups the table's seats into one pick on the buyer's map (§3). */
+  bookingMode?: "per_seat" | "whole_table";
   name: string;
   shape: "round" | "rect";
   x: number;
@@ -225,12 +230,17 @@ async function writeSeats(
   t: TableInput,
 ): Promise<void> {
   await client.query(`DELETE FROM seats WHERE table_id = $1`, [tableId]);
+  // A table imparts its category to its seats, exactly as it imparts its section (FR-049).
+  const categoryId = t.categoryId ?? (await defaultCategoryId(layoutId, client));
+  // Any table mutation rewrites seats outside the document, so the document no longer describes the
+  // layout. The next read adopts a fresh one from the rows.
+  await forgetDocument(layoutId, client);
   const spots = distributeSeats(t);
   for (const [i, spot] of spots.entries()) {
     await client.query(
-      `INSERT INTO seats (layout_id, section_id, table_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation)
-       VALUES ($1, $2, $3, $4, $5, 'single', $6, $7, $8)`,
-      [layoutId, t.sectionId, tableId, t.name, i + 1, spot.x, spot.y, spot.rotation],
+      `INSERT INTO seats (layout_id, section_id, category_id, table_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation)
+       VALUES ($1, $2, $9, $3, $4, $5, 'single', $6, $7, $8)`,
+      [layoutId, t.sectionId, tableId, t.name, i + 1, spot.x, spot.y, spot.rotation, categoryId],
     );
   }
 }
@@ -253,8 +263,9 @@ export async function createTable(layoutId: number, input: TableInput): Promise<
     await assertSeatBudget(client, layoutId, input.seatCount);
 
     const { rows } = await client.query<{ id: number }>(
-      `INSERT INTO layout_tables (layout_id, section_id, name, shape, pos_x, pos_y, width, height, rotation, seat_count, side_counts)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+      `INSERT INTO layout_tables (layout_id, section_id, category_id, name, shape, pos_x, pos_y, width, height,
+                                  rotation, seat_count, side_counts, booking_mode)
+       VALUES ($1, $2, $12, $3, $4, $5, $6, $7, $8, $9, $10, $11, $13) RETURNING id`,
       [
         layoutId,
         input.sectionId,
@@ -267,6 +278,8 @@ export async function createTable(layoutId: number, input: TableInput): Promise<
         normaliseRotation(input.rotation),
         input.seatCount,
         input.sideCounts ? JSON.stringify(input.sideCounts) : null,
+        input.categoryId ?? null,
+        input.bookingMode ?? "per_seat",
       ],
     );
     const tableId = rows[0].id;
@@ -292,6 +305,8 @@ export async function updateTable(
       rotation: number;
       seat_count: number;
       side_counts: number[] | null;
+      category_id: number | null;
+      booking_mode: "per_seat" | "whole_table";
     }>(`SELECT * FROM layout_tables WHERE id = $1 FOR UPDATE`, [tableId]);
     const cur = rows[0];
     if (!cur) throw err.notFound("not_found", "Không tìm thấy bàn.");
@@ -307,6 +322,10 @@ export async function updateTable(
       rotation: patch.rotation ?? cur.rotation,
       seatCount: patch.seatCount ?? cur.seat_count,
       sideCounts: patch.sideCounts !== undefined ? patch.sideCounts : cur.side_counts,
+      // A PATCH that does not mention these keeps what is stored, rather than silently resetting a
+      // table to per-seat or unclassifying its seats.
+      categoryId: patch.categoryId !== undefined ? patch.categoryId : cur.category_id,
+      bookingMode: patch.bookingMode ?? cur.booking_mode,
     };
     assertSeatCount(next.seatCount);
 
@@ -320,7 +339,8 @@ export async function updateTable(
 
     await client.query(
       `UPDATE layout_tables SET section_id = $2, name = $3, shape = $4, pos_x = $5, pos_y = $6,
-                                width = $7, height = $8, rotation = $9, seat_count = $10, side_counts = $11
+                                width = $7, height = $8, rotation = $9, seat_count = $10, side_counts = $11,
+                                category_id = $12, booking_mode = $13
         WHERE id = $1`,
       [
         tableId,
@@ -334,6 +354,8 @@ export async function updateTable(
         normaliseRotation(next.rotation),
         next.seatCount,
         next.sideCounts ? JSON.stringify(next.sideCounts) : null,
+        next.categoryId ?? null,
+        next.bookingMode ?? "per_seat",
       ],
     );
     await writeSeats(client, cur.layout_id, tableId, next);
@@ -349,8 +371,14 @@ export async function deleteTable(tableId: number): Promise<void> {
     if (rows.length === 0) throw err.notFound("not_found", "Không tìm thấy bàn.");
 
     await assertNoCommittedSeats(client, tableId);
+    const { rows: owner } = await client.query<{ layout_id: number }>(
+      `SELECT layout_id FROM layout_tables WHERE id = $1`,
+      [tableId],
+    );
     await client.query(`DELETE FROM seats WHERE table_id = $1`, [tableId]);
     await client.query(`DELETE FROM layout_tables WHERE id = $1`, [tableId]);
+    // Seats went away outside the document, so it no longer describes the layout.
+    if (owner[0]) await forgetDocument(owner[0].layout_id, client);
   });
 }
 

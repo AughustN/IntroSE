@@ -20,6 +20,7 @@ export interface TierRow {
   total_quantity: number | null;
   sold_quantity: number;
   reserved_quantity: number;
+  category_id: number | null;
   archived_at: Date | null;
 }
 
@@ -31,7 +32,7 @@ export interface TierContext extends TierRow {
 }
 
 const TIER_COLUMNS = `tt.id, tt.showtime_id, tt.label, tt.price_amount, tt.total_quantity,
-                      tt.sold_quantity, tt.reserved_quantity, tt.archived_at`;
+                      tt.sold_quantity, tt.reserved_quantity, tt.category_id, tt.archived_at`;
 
 /** The tier plus everything the guards need: which event owns it, its type, and whose it is. */
 export async function tierContext(tierId: number, db: Db = pool): Promise<TierContext | null> {

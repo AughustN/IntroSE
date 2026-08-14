@@ -11,8 +11,12 @@ import type {
   Layout,
   LayoutTable,
   LayoutFloorPlan,
+  LayoutReferenceChart,
+  LayoutLibraryEntry,
+  LayoutRevision,
   LayoutSummary,
   SaveLayoutRequest,
+  ShowtimeMap,
   ValidateResponse,
 } from "@/shared/catalog/seatmap";
 import type {
@@ -103,9 +107,16 @@ export interface ManageShowtime {
     capacity: number | null;
     sold: number;
     held: number;
+    /** Which chart class this tier prices. Null until the organizer binds it. */
+    categoryId: number | null;
     archived: boolean;
   }[];
   sections: Section[];
+  /** The chart this showtime binds to: the one it generated from, else the venue's default. */
+  layoutId: number | null;
+  layoutStatus: "draft" | "ready" | "archived" | null;
+  /** That chart's price classes — what a tier is bound TO. */
+  categories: { id: number; name: string; color: string; seatCount: number }[];
 }
 
 export const organizerApi = {
@@ -120,13 +131,12 @@ export const organizerApi = {
     }),
   addSeats: (venueId: number, b: { sectionId: number; rowLabel: string; count: number }) =>
     authed<{ count: number }>(`/organizer/venues/${venueId}/seats`, { method: "POST", body: b }),
-  generateSeatMap: (
-    showtimeId: number,
-    sectionTiers: { sectionId: number; ticketTierId: number }[],
-  ) =>
+  /** Bind a published chart to a showtime. Which class costs what is already recorded on the tiers,
+   *  so all this call names is the chart. */
+  generateSeatMap: (showtimeId: number, layoutId: number) =>
     authed<{ seats: number }>(`/organizer/showtimes/${showtimeId}/seat-map`, {
       method: "POST",
-      body: { sectionTiers },
+      body: { layoutId },
     }),
   createEvent: (b: {
     title: string;
@@ -175,6 +185,23 @@ export const layoutApi = {
   clone: (id: number, b: { targetVenueId: number; name: string }) =>
     authed<Layout>(`/organizer/layouts/${id}/clone`, { method: "POST", body: b }),
 
+  // The library: every chart across every venue, with the usage count that decides whether archiving
+  // and deleting are offered at all.
+  library: () => authed<{ layouts: LayoutLibraryEntry[] }>(`/organizer/layouts`),
+  archive: (id: number) => authed<Layout>(`/organizer/layouts/${id}/archive`, { method: "POST" }),
+
+  // History. A revision is taken at publish, and restoring one goes back through the ordinary save
+  // path on the server — so it inherits the refusal to delete a seat somebody has bought.
+  revisions: (id: number) =>
+    authed<{ revisions: LayoutRevision[] }>(`/organizer/layouts/${id}/revisions`),
+  restoreRevision: (id: number, revisionId: number) =>
+    authed<Layout>(`/organizer/layouts/${id}/revisions/${revisionId}/restore`, { method: "POST" }),
+  saveAsTemplate: (id: number, name: string) =>
+    authed<Layout>(`/organizer/layouts/${id}/save-as-template`, { method: "POST", body: { name } }),
+  restore: (id: number) => authed<Layout>(`/organizer/layouts/${id}/restore`, { method: "POST" }),
+  rename: (id: number, name: string) =>
+    authed<Layout>(`/organizer/layouts/${id}`, { method: "PATCH", body: { name } }),
+
   // Tables (feature 005 amendment). Placing one generates its seats server-side, where the sold/held
   // guards can see them; moving, re-counting or deleting is refused whole if any seat is committed.
   addTable: (layoutId: number, body: Record<string, unknown>) =>
@@ -214,10 +241,44 @@ export const layoutApi = {
   },
   alignPlan: (id: number, b: Omit<LayoutFloorPlan, "url">) =>
     authed<LayoutFloorPlan>(`/organizer/layouts/${id}/floorplan`, { method: "PATCH", body: b }),
+  /** The tracing layer. Same upload pipeline as the plan; the server never lets it reach a buyer. */
+  uploadReference: async (id: number, file: File): Promise<LayoutReferenceChart> => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await withAuthRetry((token) =>
+      fetch(`/api/organizer/layouts/${id}/reference`, {
+        method: "POST",
+        headers: token
+          ? { Authorization: `Bearer ${token}`, Accept: "application/json" }
+          : { Accept: "application/json" },
+        credentials: "include",
+        body: form,
+      }),
+    );
+    if (!res.ok) {
+      const e = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+      throw new Error(e.message ?? e.error ?? `error ${res.status}`);
+    }
+    return (await res.json()) as LayoutReferenceChart;
+  },
+  alignReference: (id: number, b: Omit<LayoutReferenceChart, "url">) =>
+    authed<LayoutReferenceChart>(`/organizer/layouts/${id}/reference`, { method: "PATCH", body: b }),
+  removeReference: (id: number) =>
+    authed<void>(`/organizer/layouts/${id}/reference`, { method: "DELETE" }),
+  /** Re-shape a standing area and regenerate its positions. Refused whole if any is sold or held. */
+  reshapeArea: (id: number, elementId: number, b: { points: { x: number; y: number }[]; capacity: number }) =>
+    authed<{ created: number; layout: Layout }>(`/organizer/layouts/${id}/areas/${elementId}`, {
+      method: "PATCH",
+      body: b,
+    }),
   removePlan: (id: number) =>
     authed<void>(`/organizer/layouts/${id}/floorplan`, { method: "DELETE" }),
 
   // Showtime map — the only inventory-aware calls (FR-027..FR-029, FR-033..FR-035).
+  /** The owner's read. Not `catalogClient.getSeatMap`, which is gated on public visibility and so
+   *  returns nothing for the draft events an organizer is most often arranging. */
+  showtimeMap: (showtimeId: number) =>
+    authed<ShowtimeMap>(`/organizer/showtimes/${showtimeId}/seat-map`),
   reapplyPreview: (showtimeId: number) =>
     authed<ApplyPreview>(`/organizer/showtimes/${showtimeId}/seat-map/reapply`, {
       method: "POST",
@@ -335,7 +396,10 @@ export const studioApi = {
       method: "POST",
       body: b,
     }),
-  updateTier: (tierId: number, b: { label?: string; price?: number; capacity?: number }) =>
+  updateTier: (
+    tierId: number,
+    b: { label?: string; price?: number; capacity?: number; categoryId?: number | null },
+  ) =>
     authed<TierMutationResult>(`/organizer/tiers/${tierId}`, { method: "PATCH", body: b }),
   removeTier: (tierId: number) =>
     authed<TierRemovalResult>(`/organizer/tiers/${tierId}`, { method: "DELETE" }),

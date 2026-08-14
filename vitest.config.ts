@@ -6,7 +6,12 @@ export default defineConfig({
   // The holds contract also exports runtime values (event names, room key), so the alias has to
   // exist for the bundler too. `.js` specifiers map back to the TS source.
   resolve: {
-    alias: [{ find: /^@shared\/(.*)\.js$/, replacement: path.resolve(__dirname, "shared/$1.ts") }],
+    alias: [
+      { find: /^@shared\/(.*)\.js$/, replacement: path.resolve(__dirname, "shared/$1.ts") },
+      // Mirrors tsconfig.web.json, so an integration test can drive the EDITOR's own pure operations
+      // against the real API rather than hand-rolling a payload that only resembles what it sends.
+      { find: /^@\//, replacement: `${path.resolve(__dirname)}/` },
+    ],
   },
   test: {
     include: ["server/tests/**/*.test.ts"],

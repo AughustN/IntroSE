@@ -1,0 +1,6 @@
+{
+  "name": "Concert Venue Seat Map Editor",
+  "description": "Interactive visual venue seat map editor and builder for concert booking platforms with sections, rows, VIP zones, pricing tiers, blueprint background, and buyer seat selection preview.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

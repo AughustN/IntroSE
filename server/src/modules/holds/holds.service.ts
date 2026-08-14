@@ -78,9 +78,10 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
   if (selection.kind === "seated" && showtime.eventType !== "seated") {
     throw err.unprocessable("invalid_selection", "Suất diễn này không có sơ đồ ghế.");
   }
-  if (selection.kind === "ga" && showtime.eventType !== "general_admission") {
-    throw err.unprocessable("invalid_selection", "Suất diễn này phải chọn ghế cụ thể.");
-  }
+  // A quantity selection used to be refused on any seated showtime. That was the event's type
+  // standing in for the real question, and it made a capacity zone on a seated chart unsellable —
+  // an arena with a standing floor could not be sold at all. The real question is asked below,
+  // against the tier, once it is locked: does anything seat-shaped back it?
 
   const outcome = await withTransaction(async (client) => {
     const now = new Date();
@@ -159,6 +160,23 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
     // BEFORE the archive are untouched and still convert: this guards new holds only.
     if (tier.archived_at !== null) {
       throw err.unprocessable("tier_archived", "Hạng vé này đã ngừng bán.");
+    }
+    /*
+     * On a seated showtime a quantity is only valid against a CAPACITY ZONE's tier, and that takes
+     * BOTH halves of the test:
+     *
+     *  - it must be sold by count (`total_quantity` set), because a seated tier's quantity is NULL,
+     *    and NULL means unlimited — selling that by the ticket would be unbounded and back nothing;
+     *  - it must have no seat rows, because a ticket sold by count reserves no particular seat, so
+     *    the seat would stay available to the next buyer.
+     *
+     * Either half alone lets something through: a seated tier whose map has not been generated yet
+     * has no seat rows either.
+     */
+    if (showtime.eventType !== "general_admission") {
+      if (tier.total_quantity === null || (await repo.tierHasSeats(client, tier.id))) {
+        throw err.unprocessable("invalid_selection", "Hạng vé này phải chọn ghế cụ thể.");
+      }
     }
 
     const remaining = repo.tierRemaining(tier);

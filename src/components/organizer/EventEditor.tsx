@@ -5,7 +5,7 @@
 
 import { useState } from "react";
 import { isMaterialEdit } from "@/shared/catalog/material-edit";
-import { MyEvent, MyVenue, studioApi } from "../../services/catalogClient";
+import { MyEvent, MyVenue, organizerApi, studioApi } from "../../services/catalogClient";
 import { useEventCategories } from "../../hooks/useEventCategories";
 import AiListingPanel from "./AiListingPanel";
 import ShowtimeList from "./ShowtimeList";
@@ -51,6 +51,52 @@ export default function EventEditor({
 
   /** An approved, on-sale event is the only one a save can pull out of the public catalog. */
   const isLive = event.moderation === "approved" && event.status === "on_sale";
+
+  /**
+   * Submitting for review, and withdrawing.
+   *
+   * The console shipped without either: the server route, the API client method and even the hint
+   * "Thêm suất chiếu để có thể gửi duyệt" all existed, but nothing called them — so an organizer
+   * could build a whole event and had no way to put it in front of an admin, which left every event
+   * stranded in draft forever.
+   *
+   * Publishing is a REQUEST, not a state change the organizer controls: it moves the event to
+   * pending review, and an admin decides. The button says so, because "Phát hành" would promise
+   * something this action cannot deliver.
+   */
+  const onSale = event.status === "on_sale";
+
+  const submitForReview = async () => {
+    setBusy(true);
+    setRefusal(null);
+    setNotice(null);
+    try {
+      await organizerApi.publish(event.id);
+      setNotice("Đã gửi duyệt. Sự kiện sẽ hiển thị sau khi admin duyệt.");
+      onRefresh();
+    } catch (e) {
+      // The server refuses with `needs_showtime_and_tier` when there is nothing sellable yet; its
+      // message already names the missing piece, so it is shown rather than replaced.
+      setRefusal((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const withdraw = async () => {
+    setBusy(true);
+    setRefusal(null);
+    setNotice(null);
+    try {
+      await organizerApi.unpublish(event.id);
+      setNotice("Đã ngừng bán. Sự kiện không còn hiển thị công khai.");
+      onRefresh();
+    } catch (e) {
+      setRefusal((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const changedFields = () => {
     const fields: string[] = [];
@@ -103,14 +149,27 @@ export default function EventEditor({
         <button onClick={onBack} className={ghost}>
           ← Danh sách sự kiện
         </button>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {event.eventType === "seated" && (
             <button onClick={() => onOpenSeatMap(event.id)} className={ghost}>
               Sơ đồ ghế
             </button>
           )}
-          {isLive && (
+          {onSale ? (
+            <button onClick={withdraw} disabled={busy} className={ghost}>
+              Ngừng bán
+            </button>
+          ) : (
+            <button onClick={submitForReview} disabled={busy} className={btn}>
+              Gửi duyệt
+            </button>
+          )}
+          {isLive ? (
             <span className="font-mono text-[10px] text-la-co">Đang hiển thị công khai</span>
+          ) : (
+            onSale && (
+              <span className="font-mono text-[10px] text-cam-dat">Đang chờ admin duyệt</span>
+            )
           )}
         </div>
       </div>

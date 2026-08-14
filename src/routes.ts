@@ -24,6 +24,8 @@ export type Screen =
   | "wallet"
   | "admin"
   | "organizer"
+  /** The seat map library, and the editor beneath it at `/organizer/seatmaps/:id`. */
+  | "seatmaps"
   | "moderation"
   | "about-us"
   | "terms-of-service"
@@ -38,6 +40,14 @@ export interface Route {
   bookingId?: string;
   /** From `/organizer/events/:id` — which event the organizer console has open (feature 006). */
   organizerEventId?: number;
+  /**
+   * From `/organizer/seatmaps/:id` — which chart the editor has open.
+   *
+   * A chart is addressable in its own right because it belongs to a VENUE, not to an event: the same
+   * chart backs many showtimes across many events, so reaching it only by drilling through one of
+   * them misrepresents what it is (and made it impossible to link to).
+   */
+  organizerLayoutId?: number;
 }
 
 /** Screens whose URL carries no parameter. Order is irrelevant; lookup goes both ways. */
@@ -53,6 +63,7 @@ const STATIC_PATHS: ReadonlyArray<readonly [Screen, string]> = [
   ["wallet", "/wallet"],
   ["admin", "/admin"],
   ["organizer", "/organizer"],
+  ["seatmaps", "/organizer/seatmaps"],
   ["moderation", "/moderation"],
   ["about-us", "/about-us"],
   ["terms-of-service", "/terms-of-service"],
@@ -91,9 +102,14 @@ export function screenToPath(
     eventSlug?: string | null;
     bookingId?: string | null;
     organizerEventId?: number | null;
+    organizerLayoutId?: number | null;
   } = {},
 ): string {
   switch (screen) {
+    case "seatmaps":
+      return params.organizerLayoutId
+        ? `/organizer/seatmaps/${params.organizerLayoutId}`
+        : "/organizer/seatmaps";
     case "organizer":
       // The console's second level is linkable; the list is the bare path (feature 006, FR-039).
       return params.organizerEventId
@@ -136,6 +152,13 @@ export function pathToRoute(pathname: string): Route | null {
 
   if (segments[0] === "tickets" && segments[1] && segments.length === 2) {
     return { screen: "ticket", bookingId: segments[1] };
+  }
+
+  // `/organizer/seatmaps/:id` — one chart open in the editor. Checked before the events branch
+  // because both live under `/organizer`, and a non-numeric id is not a route.
+  if (segments[0] === "organizer" && segments[1] === "seatmaps" && segments.length === 3) {
+    const id = Number(segments[2]);
+    if (Number.isInteger(id) && id > 0) return { screen: "seatmaps", organizerLayoutId: id };
   }
 
   // `/organizer/events/:id` — one event open in the console. A non-numeric id is not a route, so it

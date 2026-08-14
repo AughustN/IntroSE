@@ -162,7 +162,7 @@ describe('upload abuse bound (FR-023a, SC-005b)', () => {
     let version = layout.version;
     for (let i = 0; i < 25; i += 1) {
       const res = await request(app).put(`/api/organizer/layouts/${layout.id}`).set(o.h)
-        .send({ version, sections: [], seats: [], elements: [] })
+        .send({ version, sections: [], categories: [], seats: [], elements: [] })
         .expect(200);
       version = res.body.version;
     }

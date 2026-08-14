@@ -82,6 +82,12 @@ export interface SeatMapSeat {
   /** Section name — drives the accessible label and the tab order (FR-039a). */
   section: string | null;
   /**
+   * The seat's price class, frozen at generation. Names what the colour MEANS: the legend labels each
+   * class, so colour is never the only carrier of price (FR-071). Null on maps generated before
+   * categories existed, where the legend falls back to naming the tier.
+   */
+  category?: string | null;
+  /**
    * The seat's drawn form, from its section's style (FR-064). Shape and size reach the buyer —
    * section COLOUR does not, because on the buyer's map colour means price and nothing else.
    * Absent on pre-amendment snapshots, where the renderers fall back to 005's circle at 1×.
@@ -89,9 +95,23 @@ export interface SeatMapSeat {
   shape?: 'circle' | 'square';
   /** Multiplier on the space's nominal seat diameter. 1 = 005's baseline. */
   sizeMultiplier?: number;
+  /** Usable by a wheelchair user — drawn with its own glyph and announced to assistive tech. */
+  isAccessible?: boolean;
+  /** The table this seat sits at, when it sits at one. Frozen at generation. */
+  tableId?: number | null;
+  /** When `whole_table`, selecting this seat selects every seat of `tableId`. */
+  tableBookingMode?: 'per_seat' | 'whole_table' | null;
 }
 
-/** Non-sellable decoration (feature 005). Never inventory: it cannot be held, sold, or priced (FR-017). */
+/**
+ * The drawn layer of a map (feature 005).
+ *
+ * Decoration by default and by rule: a stage, an aisle or a facility icon can never be held, sold or
+ * priced (FR-017). Capacity zones (0027) are the single exception — an `area` that carries a capacity
+ * and a price class is sellable, by count rather than by seat. The exception is enforced in the
+ * database rather than trusted to callers: `layout_elements_capacity_area_only` refuses a capacity or
+ * a category on any other kind, so the rule that a stage cannot become a ticket still holds.
+ */
 export interface SeatMapElement {
   kind:
     | 'stage'
@@ -120,6 +140,14 @@ export interface SeatMapElement {
   label: string | null;
   /** Ordered vertices for `boundary` / `divider`; the rectangle fields stay as the bounding box. */
   points?: { x: number; y: number }[] | null;
+  /**
+   * `area` only: a capacity zone (0027) — how many people it holds, and the price class it sells
+   * under. The one exception to the "never inventory" rule above, and a deliberate one: a zone IS
+   * sellable, just not seat by seat, so the buyer's map has to be able to tell it apart from a
+   * decorative shape. Its stock lives on the tier, never here.
+   */
+  capacity?: number | null;
+  categoryId?: number | null;
 }
 
 /** Background layer only. Holds no seat and no status (FR-020). */
@@ -175,6 +203,9 @@ export interface SeatMapTable {
   rotation: number;
 }
 
+/** How a table sells. `whole_table` groups its seats into one pick on the buyer's map. */
+export type TableBookingMode = 'per_seat' | 'whole_table';
+
 export interface EventListResponse {
   events: EventCard[];
   total: number;
@@ -197,6 +228,8 @@ export interface ManagedTier {
   held: number;
   /** null when capacity is unbounded. Seated counts available showtime_seats. */
   remaining: number | null;
+  /** The chart category this tier prices — the durable half of the category↔price join (feature 005). */
+  categoryId: number | null;
   archived: boolean;
   archivedAt: string | null;
 }

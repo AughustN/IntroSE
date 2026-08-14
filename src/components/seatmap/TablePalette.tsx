@@ -32,6 +32,33 @@ export interface TableDraft {
   rotation: number;
   seatCount: number;
   sideCounts?: number[] | null;
+  bookingMode?: "per_seat" | "whole_table";
+}
+
+/** Grid spacing for newly placed tables — wider than the biggest table so slots never touch. */
+const SLOT = 1600;
+
+/**
+ * The first grid slot no existing table overlaps.
+ *
+ * Deliberately dumb: walk the grid in reading order and take the first free cell. An organizer who
+ * wants a specific arrangement drags the table there; all this has to guarantee is that a new table
+ * is visible and separate, so it can be grabbed at all.
+ */
+function freeSlot(tables: LayoutTable[], w: number, h: number): { x: number; y: number } {
+  const cols = 6;
+  for (let i = 0; i < cols * cols; i += 1) {
+    const x = 1200 + (i % cols) * SLOT;
+    const y = 1200 + Math.floor(i / cols) * SLOT;
+    const clash = tables.some(
+      (t) =>
+        Math.abs(t.x - x) < (t.width + w) / 2 + 200 && Math.abs(t.y - y) < (t.height + h) / 2 + 200,
+    );
+    if (!clash) return { x, y };
+  }
+  // A layout with 36 tables in the grid is past the point where auto-placement helps; drop it at the
+  // centre and let the organizer sort it out by dragging.
+  return { x: 5000, y: 5000 };
 }
 
 export default function TablePalette({
@@ -52,6 +79,7 @@ export default function TablePalette({
   const [sectionId, setSectionId] = useState<number | "">("");
   const [shape, setShape] = useState<"round" | "rect">("round");
   const [seatCount, setSeatCount] = useState("10");
+  const [wholeTable, setWholeTable] = useState(false);
   const [name, setName] = useState("");
   const [standing, setStanding] = useState("200");
 
@@ -64,14 +92,18 @@ export default function TablePalette({
       sectionId: sectionId === "" ? null : Number(sectionId),
       name: name.trim() || suggested,
       shape,
-      // Dropped at the centre; the organizer drags it into place, which carries its seats (FR-050).
-      x: 5000,
-      y: 5000,
+      // The first free slot on a coarse grid, NOT the centre of the map.
+      //
+      // Every table used to be dropped at (5000, 5000) on the assumption the organizer would
+      // immediately drag it into place. Two tables therefore landed exactly on top of each other —
+      // and their seats with them, which the overlap check then reported as an unpublishable map.
+      ...freeSlot(tables, shape === "round" ? 700 : 1400, 700),
       width: shape === "round" ? 700 : 1400,
       height: shape === "round" ? 700 : 700,
       rotation: 0,
       seatCount: Number.isFinite(count) ? count : 10,
       sideCounts: null,
+      bookingMode: wholeTable ? "whole_table" : "per_seat",
     });
     setName("");
   };
@@ -145,6 +177,16 @@ export default function TablePalette({
             className={input}
           />
         </div>
+
+        <label className="flex items-center gap-2 font-mono text-[11px] text-beige-kem/60">
+          <input
+            type="checkbox"
+            checked={wholeTable}
+            onChange={(e) => setWholeTable(e.target.checked)}
+            className="accent-burgundy"
+          />
+          Bán trọn bàn — khách chọn một ghế là lấy cả bàn
+        </label>
 
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder={suggested} maxLength={40} className={input} />
 

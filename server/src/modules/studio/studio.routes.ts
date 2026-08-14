@@ -91,6 +91,7 @@ const addTierSchema = z.object({
   label: z.string().trim().min(1).max(80),
   price: dong,
   capacity: z.number().int().nonnegative().nullable().optional(),
+  categoryId: z.number().int().nullable().optional(),
 });
 
 const updateTierSchema = z
@@ -98,6 +99,7 @@ const updateTierSchema = z
     label: z.string().trim().min(1).max(80).optional(),
     price: dong.optional(),
     capacity: z.number().int().nonnegative().optional(),
+    categoryId: z.number().int().nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "empty" });
 

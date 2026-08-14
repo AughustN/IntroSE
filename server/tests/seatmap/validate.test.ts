@@ -6,9 +6,16 @@ import { SEAT_DIAMETER, validateLayout } from '@shared/catalog/seatmap-validate.
 // Unit tests against the SHARED validator — the same function the server runs at publish and the
 // editor runs for live highlighting, so these pin what both sides mean by "overlapping".
 
-const seat = (id: number, x: number, y: number, extra: Partial<{ sectionId: number | null; rowLabel: string; seatNumber: number }> = {}) => ({
+const seat = (
+  id: number,
+  x: number,
+  y: number,
+  extra: Partial<{ sectionId: number | null; categoryId: number | null; rowLabel: string; seatNumber: number }> = {},
+) => ({
   id,
   sectionId: extra.sectionId === undefined ? 1 : extra.sectionId,
+  // Classified by default, so a case about overlap or labels is not also a case about categories.
+  categoryId: extra.categoryId === undefined ? 1 : extra.categoryId,
   rowLabel: extra.rowLabel ?? 'A',
   seatNumber: extra.seatNumber ?? id,
   x,
@@ -16,6 +23,7 @@ const seat = (id: number, x: number, y: number, extra: Partial<{ sectionId: numb
 });
 
 const sections = [{ id: 1, name: 'Khu A' }];
+const categories = [{ id: 1, name: 'VIP' }];
 
 describe('overlap (FR-030a)', () => {
   it('flags a pair whose centres are closer than one seat diameter, naming BOTH seats', () => {
@@ -78,13 +86,22 @@ describe('the other four checks (FR-030)', () => {
     expect(issue?.seatIds).toEqual([1]);
   });
 
-  it('flags a section with seats but no ticket tier — only at bind time, when tiers are known', () => {
-    const layout = { seats: [seat(1, 1000, 1000)], sections };
+  it('flags a seat belonging to no category — it could never be priced, so never sold', () => {
+    const issues = validateLayout({
+      seats: [seat(1, 1000, 1000, { categoryId: null })],
+      sections,
+      categories,
+    });
+    expect(issues.find((i) => i.code === 'seat_without_category')?.seatIds).toEqual([1]);
+  });
+
+  it('flags a category with seats but no price — only at bind time, when tiers are known', () => {
+    const layout = { seats: [seat(1, 1000, 1000)], sections, categories };
     // Without tier information the check cannot run: a layout alone has no tiers.
-    expect(validateLayout(layout).filter((i) => i.code === 'section_without_tier')).toHaveLength(0);
-    // With it, the untiered section is named.
-    const issues = validateLayout({ ...layout, sectionsWithTier: [] });
-    expect(issues.find((i) => i.code === 'section_without_tier')?.sectionIds).toEqual([1]);
+    expect(validateLayout(layout).filter((i) => i.code === 'category_without_tier')).toHaveLength(0);
+    // With it, the unpriced category is named.
+    const issues = validateLayout({ ...layout, categoriesWithTier: [] });
+    expect(issues.find((i) => i.code === 'category_without_tier')?.categoryIds).toEqual([1]);
   });
 
   it('flags zero capacity', () => {
@@ -99,22 +116,25 @@ describe('the other four checks (FR-030)', () => {
         seat(3, 5000, 5000, { sectionId: null }), // sectionless
       ],
       sections,
-      sectionsWithTier: [],
+      categories,
+      categoriesWithTier: [],
     });
     const codes = new Set(issues.map((i) => i.code));
     expect(codes).toContain('overlapping_seats');
     expect(codes).toContain('duplicate_label');
     expect(codes).toContain('seat_without_section');
-    expect(codes).toContain('section_without_tier');
+    expect(codes).toContain('category_without_tier');
   });
 
   it('reports clean for a valid layout', () => {
     const issues = validateLayout({
       seats: [seat(1, 1000, 1000, { seatNumber: 1 }), seat(2, 1200, 1000, { seatNumber: 2 })],
-      // A section must now carry a colour to publish (FR-066, hall-scheme amendment). The definition
-      // of "valid" genuinely changed, so the fixture does too.
-      sections: sections.map((s) => ({ ...s, color: '#4C9A6B' })),
-      sectionsWithTier: [1],
+      // Colour is no longer a publish requirement on the SECTION — it moved to the category, where the
+      // column is NOT NULL. What "valid" now also requires is that every seat has a class and every
+      // class with seats has a price.
+      sections,
+      categories,
+      categoriesWithTier: [1],
     });
     expect(issues).toEqual([]);
   });

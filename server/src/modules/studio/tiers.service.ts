@@ -52,6 +52,7 @@ function toManagedTier(
     sold: inv.sold,
     held: inv.held,
     remaining: inv.remaining,
+    categoryId: row.category_id,
     archived: row.archived_at !== null,
     archivedAt: row.archived_at ? row.archived_at.toISOString() : null,
   };
@@ -93,6 +94,8 @@ export interface AddTierInput {
   label: string;
   price: number;
   capacity?: number | null;
+  /** The chart category this price applies to. Seated showtimes only — GA has no chart. */
+  categoryId?: number | null;
 }
 
 export async function addTier(
@@ -121,13 +124,17 @@ export async function addTier(
     }
 
     const { rows } = await client.query<{ id: number }>(
-      `INSERT INTO ticket_tiers (showtime_id, label, price_amount, total_quantity)
-       VALUES ($1, $2, $3, $4) RETURNING id`,
+      // `category_id` is the seated half of the contract: it names the CHART class this price applies
+      // to, so generation can bind seats to tiers without the organizer re-picking sections every
+      // time (feature 005 categories). Null on general admission, which has no chart.
+      `INSERT INTO ticket_tiers (showtime_id, label, price_amount, total_quantity, category_id)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
       [
         showtimeId,
         input.label,
         input.price,
         ctx.eventType === "seated" ? null : (input.capacity ?? 100),
+        input.categoryId ?? null,
       ],
     );
     const tierId = rows[0].id;
@@ -146,6 +153,8 @@ export interface UpdateTierInput {
   label?: string;
   price?: number;
   capacity?: number;
+  /** Omitted leaves the binding alone; an explicit null clears it. */
+  categoryId?: number | null;
 }
 
 export async function updateTier(
@@ -170,6 +179,7 @@ export async function updateTier(
     const changed: string[] = [];
     if (input.label !== undefined) changed.push("tier.label");
     if (input.price !== undefined) changed.push("tier.price");
+    if (input.categoryId !== undefined) changed.push("tier.category");
 
     if (wantsCapacity) {
       const { sold, held } = await tierCommitted(locked, ctx.event_type, client);
@@ -191,9 +201,18 @@ export async function updateTier(
         `UPDATE ticket_tiers
             SET label = COALESCE($2, label),
                 price_amount = COALESCE($3, price_amount),
-                total_quantity = CASE WHEN $4::int IS NULL THEN total_quantity ELSE $4::int END
+                total_quantity = CASE WHEN $4::int IS NULL THEN total_quantity ELSE $4::int END,
+                -- Distinguishes "not mentioned" from "cleared": only an explicit null unbinds.
+                category_id = CASE WHEN $6::boolean THEN $5::bigint ELSE category_id END
           WHERE id = $1`,
-        [ctx.id, input.label ?? null, input.price ?? null, wantsCapacity ? input.capacity : null],
+        [
+          ctx.id,
+          input.label ?? null,
+          input.price ?? null,
+          wantsCapacity ? input.capacity : null,
+          input.categoryId ?? null,
+          input.categoryId !== undefined,
+        ],
       );
     } catch (e) {
       // The table CHECK is the last line of defence behind the explicit refusal above. If a hold

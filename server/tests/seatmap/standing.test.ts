@@ -173,7 +173,11 @@ describe("no showtime is both seated and general admission (SC-026)", () => {
          FROM showtimes st
         WHERE EXISTS (SELECT 1 FROM showtime_seats ss WHERE ss.showtime_id = st.id)
           AND EXISTS (SELECT 1 FROM ticket_tiers tt
-                       WHERE tt.showtime_id = st.id AND tt.total_quantity IS NOT NULL)`,
+                       WHERE tt.showtime_id = st.id AND tt.total_quantity IS NOT NULL
+                     -- In step with isMixedShowtime: a capacity zone's tier (0027) carries a class and
+                     -- is legitimately quantity-backed on a seated showtime, so only a classless one is
+                     -- the GA leftover SC-026 forbids.
+                     AND tt.category_id IS NULL)`,
     );
     expect(rows).toEqual([]);
   });

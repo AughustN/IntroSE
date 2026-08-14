@@ -268,10 +268,16 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
       pos_y: number | null;
       rotation: number;
       section: string | null;
+      category: string | null;
       tier_id: number;
+      is_accessible: boolean;
+      table_id: number | null;
+      table_booking_mode: 'per_seat' | 'whole_table' | null;
     }>(
       `SELECT ss.id, ss.row_label, ss.seat_number, tt.label, tt.price_amount::text AS price, ss.status,
-              ss.pos_x, ss.pos_y, ss.rotation, ss.section_name AS section, tt.id AS tier_id
+              ss.pos_x, ss.pos_y, ss.rotation, ss.section_name AS section,
+              ss.category_name AS category, tt.id AS tier_id,
+              ss.is_accessible, ss.table_id, ss.table_booking_mode
          FROM showtime_seats ss
          JOIN ticket_tiers tt ON tt.id = ss.ticket_tier_id
         WHERE ss.showtime_id = $1
@@ -289,9 +295,11 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
     // no ticket-tier column exists for it — feature 006 owns that table — so the map re-colours itself
     // whenever a price changes, and the two buyer renderers cannot disagree about a value that is not
     // persisted anywhere.
-    const tiers = await db.query<{ id: number; label: string; price: string }>(
-      `SELECT id, label, price_amount::text AS price FROM ticket_tiers
-        WHERE showtime_id = $1 AND archived_at IS NULL`,
+    const tiers = await db.query<{ id: number; label: string; price: string; color: string | null }>(
+      `SELECT tt.id, tt.label, tt.price_amount::text AS price, c.color
+         FROM ticket_tiers tt
+         LEFT JOIN layout_categories c ON c.id = tt.category_id
+        WHERE tt.showtime_id = $1 AND tt.archived_at IS NULL`,
       [showtimeId],
     );
     // Style is looked up by section NAME: that is the only section identity a seat row carries, and
@@ -299,7 +307,7 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
     const styleOf = new Map((s?.sectionStyles ?? []).map((st) => [st.name, st]));
 
     const tierLegend = buildTierLegend(
-      tiers.rows.map((t) => ({ id: t.id, label: t.label, price: Number(t.price) })),
+      tiers.rows.map((t) => ({ id: t.id, label: t.label, price: Number(t.price), color: t.color })),
     );
 
     return {
@@ -319,7 +327,11 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
         y: r.pos_y ?? 0,
         rotation: r.rotation,
         section: r.section,
+        category: r.category,
         tierId: r.tier_id,
+        isAccessible: r.is_accessible,
+        tableId: r.table_id,
+        tableBookingMode: r.table_booking_mode,
         shape: r.section ? styleOf.get(r.section)?.seatShape : undefined,
         sizeMultiplier: r.section ? styleOf.get(r.section)?.seatSizeMultiplier : undefined,
       })),

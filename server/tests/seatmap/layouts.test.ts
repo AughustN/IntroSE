@@ -4,6 +4,7 @@ import { LAYOUT_MAX_SEATS, VENUE_MAX_LAYOUTS } from '../../src/config.js';
 import { pool } from '../../src/db/pool.js';
 import { app } from '../helpers/app.js';
 import { bearer, makeApprovedOrganizer, registerUser } from '../helpers/authFixture.js';
+import { bindAndGenerate, defaultLayoutOf } from '../helpers/seatmapSeed.js';
 
 // Layout CRUD, ceilings, optimistic concurrency, and ownership (US1: FR-001..FR-007, FR-014/015).
 // Every refusal here asserts the DENIAL, not just the happy path (constitution Principle IV).
@@ -19,7 +20,7 @@ async function venueOf(o: { h: Record<string, string> }, name = 'V'): Promise<nu
   return res.body.id;
 }
 
-const emptySave = (version: number) => ({ version, sections: [], seats: [], elements: [] });
+const emptySave = (version: number) => ({ version, sections: [], categories: [], seats: [], elements: [] });
 
 describe('layouts (US1)', () => {
   it('creates, lists, renames and deletes a layout of my own venue (FR-001)', async () => {
@@ -68,7 +69,7 @@ describe('layouts (US1)', () => {
       sectionId: null, rowLabel: 'A', seatNumber: i + 1, seatType: 'single' as const, x: 100, y: 100, rotation: 0,
     }));
     await request(app).put(`/api/organizer/layouts/${layout.id}`).set(o.h)
-      .send({ version: 1, sections: [], seats: tooMany, elements: [] })
+      .send({ version: 1, sections: [], categories: [], seats: tooMany, elements: [] })
       .expect(409)
       .expect((r) => expect(r.body.error).toBe('seat_limit_reached'));
 
@@ -100,6 +101,7 @@ describe('layouts (US1)', () => {
     const saved = await request(app).put(`/api/organizer/layouts/${layout.id}`).set(o.h).send({
       version: 1,
       sections: [{ id: section, name: 'Khu A' }],
+      categories: [],
       seats: [{ sectionId: section, rowLabel: 'A', seatNumber: 1, seatType: 'single', x: 500, y: 500, rotation: 725 }],
       elements: [],
     }).expect(200);
@@ -116,8 +118,7 @@ describe('layouts (US1)', () => {
     const ev = (await request(app).post('/api/organizer/events').set(o.h).send({ title: 'S', categoryCode: 'theatre', description: 'd', eventType: 'seated' }).expect(201)).body.id;
     const showtime = (await request(app).post(`/api/organizer/events/${ev}/showtimes`).set(o.h)
       .send({ venueId: venue, startsAt: new Date(Date.now() + 86_400_000).toISOString(), tiers: [{ label: 'VIP', price: 500_000 }] }).expect(201)).body.id;
-    const tierId = (await pool.query(`SELECT id FROM ticket_tiers WHERE showtime_id = $1 LIMIT 1`, [showtime])).rows[0].id;
-    await request(app).post(`/api/organizer/showtimes/${showtime}/seat-map`).set(o.h).send({ sectionTiers: [{ sectionId: section, ticketTierId: tierId }] }).expect(201);
+    await bindAndGenerate(o.h, { showtime, layoutId: await defaultLayoutOf(venue) });
 
     const layoutId = (await pool.query(`SELECT layout_id FROM sections WHERE id = $1`, [section])).rows[0].layout_id;
     await request(app).delete(`/api/organizer/layouts/${layoutId}`).set(o.h)

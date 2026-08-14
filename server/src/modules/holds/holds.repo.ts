@@ -169,6 +169,25 @@ export function tierRemaining(tier: TierRow): number | null {
   return tier.total_quantity === null ? null : tier.total_quantity - tier.sold_quantity - tier.reserved_quantity;
 }
 
+/**
+ * Does this tier have seat rows behind it?
+ *
+ * The question a quantity selection has to answer before it is allowed. A tier is sold EITHER as
+ * individual seats or by count, and the honest test is not the event's type but the inventory itself:
+ * if `showtime_seats` rows exist for the tier, every ticket is a specific seat and a bare quantity
+ * would sell one that nothing reserves — the double-sell this whole module exists to prevent.
+ *
+ * A capacity zone's tier (0027) has no seat rows, which is exactly why it can be sold by count, and
+ * why a seated showtime with a standing floor works without a second inventory mechanism.
+ */
+export async function tierHasSeats(client: pg.PoolClient, tierId: number): Promise<boolean> {
+  const { rows } = await client.query(
+    `SELECT 1 FROM showtime_seats WHERE ticket_tier_id = $1 LIMIT 1`,
+    [tierId],
+  );
+  return rows.length > 0;
+}
+
 export async function bumpReserved(client: pg.PoolClient, tierId: number, delta: number): Promise<void> {
   await client.query(
     `UPDATE ticket_tiers SET reserved_quantity = GREATEST(reserved_quantity + $2, 0) WHERE id = $1`,

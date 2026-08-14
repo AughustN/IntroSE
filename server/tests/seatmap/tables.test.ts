@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { pool } from "../../src/db/pool.js";
 import { app } from "../helpers/app.js";
 import { bearer, makeApprovedOrganizer, registerUser } from "../helpers/authFixture.js";
+import { bindAndGenerate } from "../helpers/seatmapSeed.js";
 
 /**
  * Tables (US9, FR-047..FR-056) — the gala-dinner layout.
@@ -242,16 +243,7 @@ describe("tables — refusals when inventory is at stake (FR-051, FR-052, SC-017
         })
         .expect(201)
     ).body.id;
-    const tier = (
-      await pool.query<{ id: number }>(`SELECT id FROM ticket_tiers WHERE showtime_id = $1`, [
-        showtime,
-      ])
-    ).rows[0].id;
-    await request(app)
-      .post(`/api/organizer/showtimes/${showtime}/seat-map`)
-      .set(o.h)
-      .send({ sectionTiers: [{ sectionId: section, ticketTierId: tier }] })
-      .expect(201);
+    await bindAndGenerate(o.h, { showtime, layoutId });
 
     await pool.query(
       `UPDATE showtime_seats SET status = $2, hold_expires_at = CASE WHEN $2 = 'held' THEN now() + interval '5 minutes' END

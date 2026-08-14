@@ -11,6 +11,8 @@ import AdminPanel from "./components/AdminPanel";
 import AuthModal from "./components/AuthModal";
 import AccountPage from "./components/account/AccountPage";
 import OrganizerPanel from "./components/OrganizerPanel";
+import SeatMapLibrary from "./components/seatmap/SeatMapLibrary";
+import ChartEditor from "./components/seatmap/ChartEditor";
 import AdminModeration from "./components/AdminModeration";
 import ResetPassword from "./components/ResetPassword";
 import type { Me } from "@/shared/auth/types";
@@ -333,6 +335,17 @@ export default function App() {
       navigate(screenToPath(screen, params));
     },
     [navigate],
+  );
+
+  /**
+   * Which chart the address bar has open, if any.
+   *
+   * Read from the URL rather than kept in state: a deep link, a Back and a click then all arrive by
+   * the same path, and there is no second copy of "which chart" to fall out of step with the bar.
+   */
+  const seatmapLayoutId = useMemo(
+    () => pathToRoute(location.pathname)?.organizerLayoutId ?? null,
+    [location.pathname],
   );
 
   const activeScreenRef = useLatest(activeScreen);
@@ -1727,6 +1740,19 @@ export default function App() {
             </div>
           ))}
         {activeScreen === "organizer" && <OrganizerPanel onBack={goHome} />}
+        {activeScreen === "seatmaps" &&
+          (seatmapLayoutId !== null ? (
+            <ChartEditor
+              layoutId={seatmapLayoutId}
+              // Back to the library, not out of the section — the editor is a level, not a modal.
+              onClose={() => navigate(screenToPath("seatmaps"))}
+            />
+          ) : (
+            <SeatMapLibrary
+              onOpen={(id) => navigate(screenToPath("seatmaps", { organizerLayoutId: id }))}
+              onClose={() => goTo("organizer")}
+            />
+          ))}
         {activeScreen === "moderation" && <AdminModeration onBack={goHome} />}
 
         {activeScreen === "about-us" && (

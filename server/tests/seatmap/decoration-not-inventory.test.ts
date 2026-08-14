@@ -4,6 +4,7 @@ import { pool } from "../../src/db/pool.js";
 import { app } from "../helpers/app.js";
 import { bearer, makeApprovedOrganizer, registerUser } from "../helpers/authFixture.js";
 import { createTable } from "../../src/modules/seatmap/tables.js";
+import { bindAndGenerate } from "../helpers/seatmapSeed.js";
 
 /**
  * Decoration never becomes inventory (SC-018).
@@ -125,15 +126,7 @@ describe("decoration never becomes inventory (SC-018)", () => {
         })
         .expect(201)
     ).body.id;
-    const tierId = (
-      await pool.query<{ id: number }>(`SELECT id FROM ticket_tiers WHERE showtime_id = $1`, [showtime])
-    ).rows[0].id;
-
-    await request(app)
-      .post(`/api/organizer/showtimes/${showtime}/seat-map`)
-      .set(o.h)
-      .send({ sectionTiers: [{ sectionId: section, ticketTierId: tierId }] })
-      .expect(201);
+    await bindAndGenerate(o.h, { showtime, layoutId, publish: false });
 
     // The count that matters: bookable units === seats. Not seats + tables, not seats + icons.
     const { rows: bookable } = await pool.query<{ n: string }>(

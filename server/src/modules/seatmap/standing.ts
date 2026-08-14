@@ -14,6 +14,7 @@
  */
 
 import { pointInPolygon } from '@shared/catalog/seatmap-validate.js';
+import { defaultCategoryId, forgetDocument } from './layouts.repo.js';
 import type { ShapePoint } from '@shared/catalog/seatmap.js';
 import {
   LAYOUT_MAX_SEATS,
@@ -102,8 +103,8 @@ export async function createStandingArea(layoutId: number, input: StandingAreaIn
     const from = (last[0].max_n ?? 0) + 1;
 
     const res = await client.query(
-      `INSERT INTO seats (layout_id, section_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation)
-       SELECT $1, $2, $3, $4::int + i, 'standing', p.x, p.y, 0
+      `INSERT INTO seats (layout_id, section_id, category_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation)
+       SELECT $1, $2, $7, $3, $4::int + i, 'standing', p.x, p.y, 0
          FROM unnest($5::int[], $6::int[]) WITH ORDINALITY AS p(x, y, i)
        ON CONFLICT (section_id, row_label, seat_number) DO NOTHING`,
       [
@@ -113,12 +114,13 @@ export async function createStandingArea(layoutId: number, input: StandingAreaIn
         from - 1,
         positions.map((p) => p.x),
         positions.map((p) => p.y),
+        await defaultCategoryId(layoutId, client),
       ],
     );
 
     await client.query(
-      `INSERT INTO layout_elements (layout_id, kind, pos_x, pos_y, width, height, rotation, label, points)
-       VALUES ($1, 'area', $2, $3, $4, $5, 0, $6, $7::jsonb)`,
+      `INSERT INTO layout_elements (layout_id, kind, pos_x, pos_y, width, height, rotation, label, points, capacity)
+       VALUES ($1, 'area', $2, $3, $4, $5, 0, $6, $7::jsonb, $8)`,
       [
         layoutId,
         Math.round((Math.min(...input.points.map((p) => p.x)) + Math.max(...input.points.map((p) => p.x))) / 2),
@@ -127,9 +129,127 @@ export async function createStandingArea(layoutId: number, input: StandingAreaIn
         Math.max(...input.points.map((p) => p.y)) - Math.min(...input.points.map((p) => p.y)),
         input.rowLabel,
         JSON.stringify(input.points),
+        input.count,
       ],
     );
 
+    // Standing positions are generated here, not from the document, so the document no longer
+    // describes this layout. The next read adopts a fresh one from the rows.
+    await forgetDocument(layoutId, client);
+    return res.rowCount ?? 0;
+  });
+}
+
+/**
+ * Re-shape an area, or change how many people it holds.
+ *
+ * The polygon and the positions inside it are regenerated together in one transaction, for the same
+ * reason they are created together: a drawn area whose shape and headcount disagree is a lie the
+ * buyer discovers at the door.
+ *
+ * Refused WHOLE if any position is already sold or held, using exactly the discipline tables.ts
+ * applies (FR-051, FR-052) — an area is a group of seats, and dragging its corner is no more allowed
+ * to disturb a paid seat than dragging a table is.
+ */
+export async function reshapeStandingArea(
+  layoutId: number,
+  elementId: number,
+  input: { points: ShapePoint[]; capacity: number },
+): Promise<number> {
+  if (input.points.length < POLYGON_MIN_POINTS || input.points.length > POLYGON_MAX_POINTS) {
+    throw err.badRequest(
+      'invalid_polygon',
+      `Vùng đứng cần từ ${POLYGON_MIN_POINTS} đến ${POLYGON_MAX_POINTS} điểm.`,
+    );
+  }
+
+  return withTransaction(async (client) => {
+    const { rows: el } = await client.query<{ label: string | null }>(
+      `SELECT label FROM layout_elements WHERE id = $1 AND layout_id = $2 AND kind = 'area' FOR UPDATE`,
+      [elementId, layoutId],
+    );
+    if (!el[0]) throw err.notFound('not_found', 'Không tìm thấy vùng đứng.');
+    const rowLabel = el[0].label ?? 'ĐỨNG';
+
+    // Nothing here may disturb a seat someone has bought or is holding.
+    const { rows: committed } = await client.query<{ status: 'sold' | 'held'; n: number }>(
+      `SELECT ss.status, count(*)::int AS n
+         FROM showtime_seats ss
+         JOIN seats s ON s.id = ss.seat_id
+        WHERE s.layout_id = $1 AND s.row_label = $2 AND s.seat_type = 'standing'
+          AND (ss.status = 'sold' OR (ss.status = 'held' AND ss.hold_expires_at > now()))
+        GROUP BY ss.status`,
+      [layoutId, rowLabel],
+    );
+    if (committed.length > 0) {
+      const sold = committed.find((r) => r.status === 'sold');
+      const row = sold ?? committed[0];
+      throw err.conflict(
+        row.status === 'sold' ? 'seat_sold' : 'seat_held',
+        `Không thể sửa vùng này: ${row.n} chỗ ${row.status === 'sold' ? 'đã bán' : 'đang được giữ'}.`,
+      );
+    }
+
+    const positions = standingPositions(input.points, input.capacity);
+    if (positions.length < input.capacity) {
+      throw err.conflict(
+        'area_too_small',
+        `Vùng đã vẽ chỉ chứa được ${positions.length} chỗ đứng, cần ${input.capacity}. Hãy vẽ vùng rộng hơn.`,
+      );
+    }
+
+    const { rows: cur } = await client.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM seats WHERE layout_id = $1 AND NOT (row_label = $2 AND seat_type = 'standing')`,
+      [layoutId, rowLabel],
+    );
+    if (Number(cur[0].n) + input.capacity > LAYOUT_MAX_SEATS) {
+      throw err.conflict('seat_limit_reached', `Một sơ đồ chỉ chứa tối đa ${LAYOUT_MAX_SEATS} ghế.`);
+    }
+
+    const { rows: keep } = await client.query<{ section_id: number | null; category_id: number | null }>(
+      `SELECT section_id, category_id FROM seats
+        WHERE layout_id = $1 AND row_label = $2 AND seat_type = 'standing' LIMIT 1`,
+      [layoutId, rowLabel],
+    );
+    const sectionId = keep[0]?.section_id ?? null;
+    const categoryId = keep[0]?.category_id ?? (await defaultCategoryId(layoutId, client));
+
+    await client.query(
+      `DELETE FROM seats WHERE layout_id = $1 AND row_label = $2 AND seat_type = 'standing'`,
+      [layoutId, rowLabel],
+    );
+    const res = await client.query(
+      `INSERT INTO seats (layout_id, section_id, category_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation)
+       SELECT $1, $2, $3, $4, i, 'standing', p.x, p.y, 0
+         FROM unnest($5::int[], $6::int[]) WITH ORDINALITY AS p(x, y, i)`,
+      [
+        layoutId,
+        sectionId,
+        categoryId,
+        rowLabel,
+        positions.map((p) => p.x),
+        positions.map((p) => p.y),
+      ],
+    );
+
+    const xs = input.points.map((p) => p.x);
+    const ys = input.points.map((p) => p.y);
+    await client.query(
+      `UPDATE layout_elements
+          SET pos_x = $2, pos_y = $3, width = $4, height = $5, points = $6::jsonb, capacity = $7
+        WHERE id = $1`,
+      [
+        elementId,
+        Math.round((Math.min(...xs) + Math.max(...xs)) / 2),
+        Math.round((Math.min(...ys) + Math.max(...ys)) / 2),
+        Math.max(1, Math.max(...xs) - Math.min(...xs)),
+        Math.max(1, Math.max(...ys) - Math.min(...ys)),
+        JSON.stringify(input.points),
+        input.capacity,
+      ],
+    );
+
+    await forgetDocument(layoutId, client);
     return res.rowCount ?? 0;
   });
 }
@@ -143,7 +263,11 @@ export async function isMixedShowtime(showtimeId: number, db: Db): Promise<boole
   const { rows } = await db.query<{ seated: string; ga: string }>(
     `SELECT (SELECT count(*) FROM showtime_seats WHERE showtime_id = $1)::text AS seated,
             (SELECT count(*) FROM ticket_tiers
-              WHERE showtime_id = $1 AND total_quantity IS NOT NULL)::text AS ga`,
+              -- category_id IS NULL separates a genuine GA leftover from a capacity zone's tier
+              -- (0027): a zone tier always names its class, and its quantity is legitimate on a seated
+              -- showtime. Without this clause a lawful seated-plus-standing chart reports SC-026 broken
+              -- the moment one exists.
+              WHERE showtime_id = $1 AND total_quantity IS NOT NULL AND category_id IS NULL)::text AS ga`,
     [showtimeId],
   );
   return Number(rows[0].seated) > 0 && Number(rows[0].ga) > 0;
