@@ -261,11 +261,6 @@ export default function SeatLayout({
             colours mean.
           */}
           <div className="border border-beige-kem/30 p-5 sm:p-8">
-            <div className="mx-auto mb-10 w-full max-w-lg text-center">
-              <p className="label-eyebrow mb-2 text-ink-soft">Sân khấu</p>
-              <div className="h-1 rounded-[100%] bg-gradient-to-t from-beige-kem/45 to-beige-kem/10" />
-            </div>
-
             {loading ? (
               <p className="py-12 text-center font-meta text-meta text-ink-soft">
                 Đang tải sơ đồ ghế…

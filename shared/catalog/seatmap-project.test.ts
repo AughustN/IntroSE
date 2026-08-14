@@ -11,7 +11,9 @@ import {
 } from './seatmap-document.js';
 import type { Layout } from './seatmap.js';
 import {
+  inferStartLabels,
   letterAt,
+  letterIndex,
   projectDocument,
   regenerateBlock,
   rowLabelFor,
@@ -408,5 +410,88 @@ describe('capacity zones, at the publish gate', () => {
     // No capacity means it is not inventory, so the chart is empty — and it is not asked for a class.
     expect(issues.find((i) => i.code === 'zero_capacity')).toBeDefined();
     expect(issues.find((i) => i.code === 'zone_without_category')).toBeUndefined();
+  });
+});
+
+describe('continuing an adopted block\u2019s numbering', () => {
+  /*
+   * A chart adopted from pre-document rows has no parameters and whatever numbering the venue used.
+   * Regenerating it from the defaults restarted at A1, which renumbered the row AND slid every
+   * surviving id along it — the seat a ticket was sold for was no longer where the buyer chose it.
+   */
+  const adopted = (from: number, count = 90): DocumentBlock => ({
+    key: 'b-1',
+    kind: 'seating-block',
+    title: 'Khu A',
+    x: 1500,
+    y: 5740,
+    rotation: 0,
+    width: 8500,
+    height: 1,
+    sectionId: 1,
+    categoryId: 1,
+    seats: Array.from({ length: count }, (_, i) => ({
+      seatId: 1000 + i,
+      rowLabel: 'A',
+      seatNumber: from + i,
+      dx: i * 95,
+      dy: 0,
+      rotation: 0,
+    })),
+  });
+
+  it('reads the start back off the existing labels', () => {
+    expect(inferStartLabels(adopted(11))).toEqual({ startSeatNumber: 11, startRowIndex: 0 });
+  });
+
+  it('keeps every seat when the block is first made parametric', () => {
+    const block = adopted(11);
+    let minted = 0;
+    const out = regenerateBlock(
+      { ...block, params: { ...inferStartLabels(block), rowsCount: 1, seatsPerRow: 90, seatSpacing: 95 } },
+      () => --minted,
+    );
+    // Same labels, same rows, nothing re-minted — and the ids stay on the seats they belonged to.
+    expect(out.seats!.map((s) => s.seatNumber)).toEqual(block.seats!.map((s) => s.seatNumber));
+    expect(out.seats!.map((s) => s.seatId)).toEqual(block.seats!.map((s) => s.seatId));
+    expect(minted).toBe(0);
+  });
+
+  it('appends GROWN seats after the existing ones, in order', () => {
+    const block = adopted(11);
+    let minted = 0;
+    const out = regenerateBlock(
+      { ...block, params: { ...inferStartLabels(block), rowsCount: 1, seatsPerRow: 95, seatSpacing: 95 } },
+      () => --minted,
+    );
+    const numbers = out.seats!.map((s) => s.seatNumber);
+    expect(numbers[0]).toBe(11);
+    expect(numbers.at(-1)).toBe(105);
+    // The 90 that existed keep their rows; only the five new ones are minted, and they are the last five.
+    expect(minted).toBe(-5);
+    expect(out.seats!.slice(0, 90).every((s) => s.seatId > 0)).toBe(true);
+    expect(out.seats!.slice(90).every((s) => s.seatId < 0)).toBe(true);
+  });
+
+  it('starts a lettered row where the block already starts', () => {
+    const block = adopted(1);
+    const fromF = { ...block, seats: block.seats!.map((s) => ({ ...s, rowLabel: 'F' })) };
+    expect(inferStartLabels(fromF).startRowIndex).toBe(5);
+  });
+
+  it('reads numeric row labels too, and declines anything it cannot reproduce', () => {
+    const block = adopted(1);
+    const numeric = { ...block, seats: block.seats!.map((s) => ({ ...s, rowLabel: '3' })) };
+    expect(inferStartLabels(numeric)).toMatchObject({ rowLabelScheme: 'num-asc', startRowIndex: 2 });
+
+    // A hand-edited label is not something this can regenerate, so it says nothing about rows rather
+    // than guessing and relabelling the chart.
+    const odd = { ...block, seats: block.seats!.map((s) => ({ ...s, rowLabel: 'Khu-A' })) };
+    expect(inferStartLabels(odd).startRowIndex).toBeUndefined();
+  });
+
+  it('letterIndex inverts letterAt', () => {
+    for (const i of [0, 1, 25, 26, 27, 51, 52]) expect(letterIndex(letterAt(i))).toBe(i);
+    expect(letterIndex('A1')).toBeNull();
   });
 });

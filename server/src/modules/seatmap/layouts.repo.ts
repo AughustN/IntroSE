@@ -190,8 +190,11 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
       points: { x: number; y: number }[] | null;
       capacity: number | null;
       category_id: number | null;
+      color: string | null;
+      geometry: string | null;
+      section_id: number | null;
     }>(
-      `SELECT id, kind, pos_x, pos_y, width, height, rotation, label, points, capacity, category_id
+      `SELECT id, kind, pos_x, pos_y, width, height, rotation, label, points, capacity, category_id, color, geometry, section_id
          FROM layout_elements WHERE layout_id = $1 ORDER BY id`,
       [layoutId],
     ),
@@ -275,6 +278,9 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
       points: e.points,
       capacity: e.capacity,
       categoryId: e.category_id,
+      color: e.color,
+      geometry: e.geometry,
+      sectionId: e.section_id,
     })),
     floorPlan: {
       url: l.background_url,
@@ -526,8 +532,45 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
       keptCategories,
     ]);
 
-    // --- seats
-    const keptSeats: number[] = [];
+    /*
+     * --- seats
+     *
+     * The DROP comes first, and the order is load-bearing.
+     *
+     * A save that deletes the block holding rows A–E and pulls the survivors back from F–J onto A–E
+     * asks for two things in one statement sequence. With the survivors renamed first, the old A1 is
+     * still sitting on the label the new A1 wants and `uq_seat_label` rejects the save — 409
+     * `duplicate_seat_label` for a result that is perfectly valid once both halves have run.
+     *
+     * Deferring the constraint to COMMIT would be the tidier fix and is not available: Postgres will
+     * not use a DEFERRABLE unique constraint as an `ON CONFLICT` arbiter, and three insert paths
+     * (`generate-seats`, standing areas, the catalog writer) depend on exactly that inference.
+     *
+     * What makes deleting first safe is that the keep-list does not depend on the loop: a seat is kept
+     * iff the incoming payload names its id. Every seat NOT named is going in either order; doing it
+     * up front only means the labels it held are free when the survivors are rewritten.
+     *
+     * The remaining ordering rule is inside the loop: `inSeats` arrives in row-major ascending order,
+     * so a block shifted DOWN vacates each label before the row that wants it is written. Row-letter
+     * repacking only ever shifts downward, which is why it composes with this.
+     */
+    const keptSeats: number[] = inSeats.filter((s) => s.id).map((s) => s.id as number);
+
+    // A seat a showtime has generated from CANNOT be deleted here. `showtime_seats.seat_id` is a
+    // plain `REFERENCES seats(id)` with no ON DELETE clause (0002_catalog.sql:129), so this statement
+    // raises 23503 for such a seat.
+    //
+    // The service refuses that save up front with `seat_in_use` so the organizer is told which seats
+    // are sold rather than shown a 500. This catch is the belt-and-braces behind it, because the
+    // pre-check and this DELETE are two statements and only the transaction makes them one.
+    //
+    // The 23503 is mapped to that refusal by the SERVICE, which is where PG codes are already turned
+    // into refusals (it does the same for 23505) — this layer stays free of HTTP.
+    //
+    // NOTE for future readers: `ON DELETE CASCADE` here would "fix" the error by deleting paid
+    // inventory. It is never the right answer.
+    await client.query(`DELETE FROM seats WHERE layout_id = $1 AND NOT (id = ANY($2::bigint[]))`, [layoutId, keptSeats]);
+
     for (const seat of inSeats) {
       const x = clampCoord(seat.x);
       const y = clampCoord(seat.y);
@@ -543,7 +586,6 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
           [seat.id, sectionId, seat.rowLabel, seat.seatNumber, seat.seatType, x, y, rot, layoutId, categoryId,
            seat.isAccessible ?? false],
         );
-        keptSeats.push(seat.id);
       } else {
         const { rows } = await client.query<{ id: number }>(
           `INSERT INTO seats (layout_id, section_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation,
@@ -555,28 +597,13 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
         keptSeats.push(rows[0].id);
       }
     }
-    // A seat a showtime has generated from CANNOT be deleted here. `showtime_seats.seat_id` is a
-    // plain `REFERENCES seats(id)` with no ON DELETE clause (0002_catalog.sql:129), so this statement
-    // raises 23503 for such a seat. The comment that used to sit here claimed the opposite; it was
-    // wrong, and only survived because no caller had yet saved a layout omitting a bound seat.
-    //
-    // The service refuses that save up front with `seat_in_use` so the organizer is told which seats
-    // are sold rather than shown a 500. This catch is the belt-and-braces behind it, because the
-    // pre-check and this DELETE are two statements and only the transaction makes them one.
-    //
-    // The 23503 is mapped to that refusal by the SERVICE, which is where PG codes are already turned
-    // into refusals (it does the same for 23505) — this layer stays free of HTTP.
-    //
-    // NOTE for future readers: `ON DELETE CASCADE` here would "fix" the error by deleting paid
-    // inventory. It is never the right answer.
-    await client.query(`DELETE FROM seats WHERE layout_id = $1 AND NOT (id = ANY($2::bigint[]))`, [layoutId, keptSeats]);
 
     // --- elements: replaced wholesale, they carry no identity anything else points at.
     await client.query(`DELETE FROM layout_elements WHERE layout_id = $1`, [layoutId]);
     for (const e of inElements) {
       await client.query(
-        `INSERT INTO layout_elements (layout_id, kind, pos_x, pos_y, width, height, rotation, label, points, capacity, category_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        `INSERT INTO layout_elements (layout_id, kind, pos_x, pos_y, width, height, rotation, label, points, capacity, category_id, color, geometry, section_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
         [
           layoutId,
           e.kind,
@@ -592,6 +619,12 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
           // A zone's price class survives the save; anything that is not an area carries neither,
           // which the 0027 CHECK enforces independently of this writer.
           e.kind === 'area' ? (categoryIdMap.get(e.categoryId ?? 0) ?? e.categoryId ?? null) : null,
+          e.color ?? null,
+          e.geometry ?? null,
+          // Through the same remap as a seat's: the client may name a section it has just created,
+          // which exists only as a negative placeholder until `sectionIdMap` gives it a real id. Not
+          // gated on kind — any element may belong to a section (0031).
+          resolveRef(e.sectionId ?? null, sectionIdMap, keptSections),
         ],
       );
     }
@@ -906,11 +939,17 @@ export async function cloneLayout(sourceId: number, targetVenueId: number, name:
     await client.query(
       // `capacity` used to be dropped here, so cloning a chart silently emptied every zone; and the
       // category has to be REMAPPED, or the copy would price its zones off the source's classes.
-      `INSERT INTO layout_elements (layout_id, kind, pos_x, pos_y, width, height, rotation, label, points, capacity, category_id)
+      `INSERT INTO layout_elements (layout_id, kind, pos_x, pos_y, width, height, rotation, label, points, capacity, category_id, color, geometry, section_id)
        SELECT $2, kind, pos_x, pos_y, width, height, rotation, label, points, capacity,
               (SELECT c2.id FROM layout_categories c1
                  JOIN layout_categories c2 ON c2.layout_id = $2 AND c2.name = c1.name
-                WHERE c1.id = layout_elements.category_id)
+                WHERE c1.id = layout_elements.category_id),
+              color, geometry,
+              -- Remapped by NAME like the category beside it: pointing a clone's shapes at the
+              -- SOURCE's sections would make deleting the original silently unassign the copy's.
+              (SELECT s2.id FROM sections s1
+                 JOIN sections s2 ON s2.layout_id = $2 AND s2.name = s1.name
+                WHERE s1.id = layout_elements.section_id)
          FROM layout_elements WHERE layout_id = $1`,
       [sourceId, newId],
     );

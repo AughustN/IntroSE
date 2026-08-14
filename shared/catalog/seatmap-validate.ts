@@ -205,10 +205,29 @@ export function validateLayout(layout: ValidatableLayout): ValidationIssue[] {
     if (ids) ids.push(seat.id);
     else byLabel.set(k, [seat.id]);
   }
-  for (const ids of byLabel.values()) {
-    if (ids.length > 1) {
-      issues.push({ code: 'duplicate_label', message: 'Hai ghế trùng nhãn trong cùng một khu vực.', seatIds: ids });
-    }
+  // Reported ONCE per section rather than once per colliding pair, and naming the labels. Two blocks
+  // overlapping by five rows of ten produced fifty identical messages saying only "two seats share a
+  // label", which told the organizer neither which seats nor what to change.
+  const collisionsBySection = new Map<string, { labels: string[]; ids: number[] }>();
+  for (const [k, ids] of byLabel) {
+    if (ids.length < 2) continue;
+    const [section, row, number] = k.split('|');
+    const entry = collisionsBySection.get(section) ?? { labels: [], ids: [] };
+    entry.labels.push(`${row}${number}`);
+    entry.ids.push(...ids);
+    collisionsBySection.set(section, entry);
+  }
+  for (const [section, { labels, ids }] of collisionsBySection) {
+    const name = section === 'none' ? null : sections.find((sec) => String(sec.id) === section)?.name;
+    const shown = labels.slice(0, 5).join(', ');
+    const more = labels.length > 5 ? ` và ${labels.length - 5} nhãn nữa` : '';
+    issues.push({
+      code: 'duplicate_label',
+      message:
+        `${name ? `Khu "${name}"` : 'Ghế chưa thuộc khu nào'} có ${labels.length} nhãn bị trùng ` +
+        `(${shown}${more}). Hai khối đang dùng chung nhãn hàng — đổi nhãn hàng hoặc số ghế bắt đầu của một khối.`,
+      seatIds: ids,
+    });
   }
 
   const sectionless = seats.filter((s) => s.sectionId === null).map((s) => s.id);
@@ -226,7 +245,7 @@ export function validateLayout(layout: ValidatableLayout): ValidationIssue[] {
   if (uncategorised.length > 0) {
     issues.push({
       code: 'seat_without_category',
-      message: 'Có ghế chưa thuộc hạng vé nào.',
+      message: 'Có ghế chưa thuộc hạng ghế nào.',
       seatIds: uncategorised,
     });
   }
@@ -238,7 +257,7 @@ export function validateLayout(layout: ValidatableLayout): ValidationIssue[] {
   if (namelessZones.length > 0) {
     issues.push({
       code: 'zone_without_category',
-      message: `${namelessZones.length} khu sức chứa chưa có hạng giá — chọn hạng giá hoặc xoá khu.`,
+      message: `${namelessZones.length} khu sức chứa chưa có hạng ghế — chọn hạng ghế hoặc xoá khu.`,
     });
   }
 
@@ -256,7 +275,7 @@ export function validateLayout(layout: ValidatableLayout): ValidationIssue[] {
     const names = (categories ?? []).filter((c) => mixed.includes(c.id)).map((c) => c.name);
     issues.push({
       code: 'category_mixed_inventory',
-      message: `Hạng vé "${names.join('", "')}" vừa có ghế vừa có khu sức chứa — tách thành hai hạng riêng.`,
+      message: `Hạng ghế "${names.join('", "')}" vừa có ghế vừa có khu sức chứa — tách thành hai hạng riêng.`,
       categoryIds: mixed,
     });
   }
@@ -270,7 +289,7 @@ export function validateLayout(layout: ValidatableLayout): ValidationIssue[] {
     if (untiered.length > 0) {
       issues.push({
         code: 'category_without_tier',
-        message: `Hạng vé "${untiered.map((c) => c.name).join('", "')}" chưa có giá cho suất diễn này.`,
+        message: `Hạng ghế "${untiered.map((c) => c.name).join('", "')}" chưa có giá vé cho suất diễn này.`,
         categoryIds: untiered.map((c) => c.id),
       });
     }

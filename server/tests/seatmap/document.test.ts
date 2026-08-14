@@ -6,7 +6,8 @@ import { LAYOUT_MAX_SEATS } from '../../src/config.js';
 import { pool } from '../../src/db/pool.js';
 import { app } from '../helpers/app.js';
 import { bearer, makeApprovedOrganizer, registerUser } from '../helpers/authFixture.js';
-import { addBlock, addCategory, addSection } from '@/src/components/seatmap/documentOps.js';
+import { seedEvent, seedShowtime, seedTier } from '../helpers/catalogSeed.js';
+import { addBlock, addCategory, addSection, removeBlocks, repackRowLabels, setSeatType } from '@/src/components/seatmap/documentOps.js';
 
 // Saving a chart as an authoring DOCUMENT (`venue_layouts.document`), projected one way into the
 // normalized rows.
@@ -305,5 +306,261 @@ describe('a chart the editor actually produced', () => {
     expect(saved.seats).toHaveLength(8);
     expect(saved.tables).toHaveLength(1);
     expect(saved.seats.every((s: { tableId: number | null }) => s.tableId !== null)).toBe(true);
+  });
+});
+
+describe('a block that carries a colour and a shape', () => {
+  it('keeps both through the save, for every kind that draws an element', async () => {
+    const o = await organizer();
+    const { layout } = await freshLayout(o);
+
+    // Colour used to be a shape-only control. It is a property of the BLOCK, and `layout_elements`
+    // has carried the column for every kind since 0030 — so a painted stage has to come back painted,
+    // not be quietly dropped on the way through the projection.
+    let d = emptyDocument();
+    d = addBlock(d, 'shape', { x: 2000, y: 2000 }, { geometry: 'circle', color: '#4C9A6B' }).doc;
+    d = addBlock(d, 'stage', { x: 5000, y: 500 }, { color: '#D93025' }).doc;
+    d = addBlock(d, 'bar', { x: 7000, y: 3000 }).doc;
+
+    const saved = (await save(o, layout.id, { version: layout.version, document: d }).expect(200)).body;
+    const by = (kind: string) =>
+      saved.elements.find((e: { kind: string }) => e.kind === kind) as {
+        color: string | null;
+        geometry: string | null;
+        points: { x: number }[] | null;
+      };
+
+    expect(by('boundary').color).toBe('#4C9A6B');
+    expect(by('boundary').geometry).toBe('circle');
+    // Created from the palette, not drawn by hand — it still arrives with an outline to draw.
+    expect(by('boundary').points).toHaveLength(32);
+    expect(by('stage').color).toBe('#D93025');
+    // Unpainted stays unpainted rather than picking up a default on the way through.
+    expect(by('bar').color).toBeNull();
+  });
+
+  it('reads back the same colours when the chart is re-opened', async () => {
+    const o = await organizer();
+    const { layout } = await freshLayout(o);
+    let d = emptyDocument();
+    d = addBlock(d, 'stage', { x: 5000, y: 500 }, { color: '#8A0C24' }).doc;
+    await save(o, layout.id, { version: layout.version, document: d }).expect(200);
+
+    const opened = (await request(app).get(`/api/organizer/layouts/${layout.id}`).set(o.h).expect(200)).body;
+    expect(opened.elements[0].color).toBe('#8A0C24');
+    expect(opened.document.blocks[0].color).toBe('#8A0C24');
+  });
+});
+
+describe('a block that belongs to no section', () => {
+  it('saves its seats with a null section instead of being refused', async () => {
+    const o = await organizer();
+    const { layout } = await freshLayout(o);
+
+    // `seats.section_id` is nullable by design (0007, restated by 0024): a section-less seat is
+    // representable in a DRAFT and caught by validation at publish, not by the constraint. The editor
+    // could not express it — every new block was resolved into `sections[0]` — so this path had never
+    // actually been driven end to end.
+    let d = emptyDocument();
+    d = addBlock(d, 'single-row', { x: 3000, y: 3000 }, { sectionId: null, categoryId: null }).doc;
+
+    const saved = (await save(o, layout.id, { version: layout.version, document: d }).expect(200)).body;
+    expect(saved.seats.length).toBeGreaterThan(0);
+    expect(saved.seats.every((s: { sectionId: number | null }) => s.sectionId === null)).toBe(true);
+    expect(saved.sections).toHaveLength(0);
+  });
+
+  it('keeps those seats — and their ids — across a second save', async () => {
+    const o = await organizer();
+    const { layout } = await freshLayout(o);
+    let d = emptyDocument();
+    d = addBlock(d, 'single-row', { x: 3000, y: 3000 }, { sectionId: null, categoryId: null }).doc;
+    const first = (await save(o, layout.id, { version: layout.version, document: d }).expect(200)).body;
+
+    // Identity is carried by the seat id in the document, not by (section, row, number) — so a null
+    // section must not turn every save into a delete-and-recreate, which would break a sold ticket.
+    const again = (await save(o, layout.id, { version: first.version, document: first.document }).expect(200)).body;
+    expect(again.seats.map((s: { id: number }) => s.id).sort()).toEqual(
+      first.seats.map((s: { id: number }) => s.id).sort(),
+    );
+  });
+
+  it('refuses to PUBLISH until they are given one', async () => {
+    const o = await organizer();
+    const { layout } = await freshLayout(o);
+    let d = emptyDocument();
+    d = addBlock(d, 'single-row', { x: 3000, y: 3000 }, { sectionId: null, categoryId: null }).doc;
+    const saved = (await save(o, layout.id, { version: layout.version, document: d }).expect(200)).body;
+
+    // The whole point of allowing the draft: it is a draft. Publish is where it has to be resolved.
+    const res = await request(app)
+      .post(`/api/organizer/layouts/${layout.id}/publish`)
+      .set(o.h)
+      .send({ version: saved.version });
+    expect(res.status).toBe(422);
+    expect(JSON.stringify(res.body)).toContain('seat_without_section');
+  });
+});
+
+describe('a shape assigned to a section', () => {
+  it('still belongs to it after the document is dropped and re-adopted', async () => {
+    const o = await organizer();
+    const { layout } = await freshLayout(o);
+
+    // Drawing the outline of a stand and saying which stand it is, then putting seats inside it, is the
+    // ordinary way a venue gets drawn. The assignment lived only in `venue_layouts.document` — so the
+    // first table or standing area placed anywhere in the chart, which nulls that column by design,
+    // silently detached every shape from its section.
+    let d = emptyDocument();
+    const sec = addSection(d, 'Khu A');
+    d = sec.doc;
+    d = addBlock(d, 'shape', { x: 3000, y: 3000 }, { sectionId: sec.id, geometry: 'rect' }).doc;
+
+    const saved = (await save(o, layout.id, { version: layout.version, document: d }).expect(200)).body;
+    const sectionId = saved.sections[0].id as number;
+    expect(saved.elements[0].sectionId).toBe(sectionId);
+
+    await request(app).post(`/api/organizer/layouts/${layout.id}/tables`).set(o.h)
+      .send({ sectionId, name: 'Bàn 1', shape: 'round', x: 5000, y: 5000, width: 600, height: 600, rotation: 0, seatCount: 6 })
+      .expect(201);
+
+    const reopened = (await request(app).get(`/api/organizer/layouts/${layout.id}`).set(o.h).expect(200)).body;
+    const shape = reopened.elements.find((e: { kind: string }) => e.kind === 'boundary');
+    expect(shape.sectionId).toBe(sectionId);
+    // And it comes back on the BLOCK, so the inspector shows it rather than reading "chưa thuộc khu".
+    const block = reopened.document.blocks.find((b: { kind: string }) => b.kind === 'shape');
+    expect(block.sectionId).toBe(sectionId);
+  });
+
+  it('keeps a capacity zone pointed at its price class through the same re-adoption', async () => {
+    const o = await organizer();
+    const { layout } = await freshLayout(o);
+
+    // The same line lost this, and it costs more: a zone's capacity is SOLD against its class's tier,
+    // so an unassigned zone is `zone_without_category` and the chart stops being publishable — after a
+    // table was placed somewhere else entirely.
+    let d = emptyDocument();
+    const cat = addCategory(d, 'Sàn');
+    d = cat.doc;
+    const sec = addSection(d, 'Khu A');
+    d = sec.doc;
+    d = addBlock(d, 'ga-zone', { x: 4000, y: 4000 }, { categoryId: cat.id }).doc;
+    const saved = (await save(o, layout.id, { version: layout.version, document: d }).expect(200)).body;
+    const categoryId = saved.categories[0].id as number;
+    expect(saved.elements[0].categoryId).toBe(categoryId);
+
+    await request(app).post(`/api/organizer/layouts/${layout.id}/tables`).set(o.h)
+      .send({ sectionId: saved.sections[0].id, name: 'Bàn 1', shape: 'round', x: 8000, y: 8000, width: 600, height: 600, rotation: 0, seatCount: 6 })
+      .expect(201);
+
+    const reopened = (await request(app).get(`/api/organizer/layouts/${layout.id}`).set(o.h).expect(200)).body;
+    const zone = reopened.elements.find((e: { kind: string }) => e.kind === 'area');
+    expect(zone.categoryId).toBe(categoryId);
+    expect(zone.capacity).toBeGreaterThan(0);
+  });
+});
+
+describe('re-lettering rows after a delete', () => {
+  /** Two 5×10 blocks in one section: A–E, then F–J. */
+  const twoBlocks = () => {
+    let d = emptyDocument();
+    const sec = addSection(d, 'Khu A');
+    d = sec.doc;
+    const first = addBlock(d, 'seating-block', { x: 1000, y: 1000 }, { sectionId: sec.id });
+    d = first.doc;
+    const second = addBlock(d, 'seating-block', { x: 5000, y: 1000 }, { sectionId: sec.id });
+    return { doc: second.doc, first: first.key, second: second.key };
+  };
+
+  it('renames the survivors WITHOUT replacing them — same seat ids, new labels', async () => {
+    const o = await organizer();
+    const { layout } = await freshLayout(o);
+    const c = twoBlocks();
+
+    const saved = (await save(o, layout.id, { version: layout.version, document: c.doc }).expect(200)).body;
+    expect(saved.seats).toHaveLength(100);
+    const survivors = saved.seats
+      .filter((s: { rowLabel: string }) => s.rowLabel >= 'F')
+      .map((s: { id: number }) => s.id);
+    expect(survivors).toHaveLength(50);
+
+    // Delete A–E and close the gap, exactly as the editor does it.
+    const packed = repackRowLabels(removeBlocks(saved.document, new Set([c.first])));
+    const after = (await save(o, layout.id, { version: saved.version, document: packed }).expect(200)).body;
+
+    // The safety property: F1 became A1, and it is the SAME ROW — renamed, not replaced. Through
+    // `regenerateBlock` every id here would be fresh and the originals would have been deleted.
+    expect(after.seats).toHaveLength(50);
+    const ids = new Set(after.seats.map((s: { id: number }) => s.id));
+    expect(survivors.filter((id: number) => !ids.has(id))).toEqual([]);
+    expect([...new Set(after.seats.map((s: { rowLabel: string }) => s.rowLabel))].sort()).toEqual([
+      'A', 'B', 'C', 'D', 'E',
+    ]);
+  });
+
+  it('re-letters a chart a showtime is already selling, without disturbing the tickets', async () => {
+    const o = await organizer();
+    const { venue, layout } = await freshLayout(o);
+    const c = twoBlocks();
+    const saved = (await save(o, layout.id, { version: layout.version, document: c.doc }).expect(200)).body;
+
+    // Bind the F–J seats to a showtime, as `generateSeatMap` would. Only those: a seat a showtime has
+    // generated from cannot be DELETED, which is a different rule and already has its own test — what
+    // is under test here is whether such a seat can be RENAMED.
+    const { rows: org } = await pool.query<{ id: number }>(`SELECT id FROM organizers WHERE user_id = $1`, [o.userId]);
+    const ev = await seedEvent({ organizerId: org[0].id, eventType: 'seated', category: 'theatre' });
+    const showtime = await seedShowtime(ev.id, venue);
+    const tier = await seedTier(showtime, { label: 'VIP', price: 500_000, total: null });
+    await pool.query(
+      `INSERT INTO showtime_seats (showtime_id, seat_id, ticket_tier_id, status, pos_x, pos_y, rotation,
+                                   row_label, seat_number, section_name)
+       SELECT $1, s.id, $2, 'available', s.pos_x, s.pos_y, s.rotation, s.row_label, s.seat_number, 'Khu A'
+         FROM seats s WHERE s.layout_id = $3 AND s.row_label >= 'F'`,
+      [showtime, tier, layout.id],
+    );
+
+    const packed = repackRowLabels(removeBlocks(saved.document, new Set([c.first])));
+    // Not 409. A re-letter that went through `regenerateBlock` would have asked the server to DELETE
+    // 50 seats a showtime had generated from, and `seat_in_use` would have refused the whole save.
+    const after = (await save(o, layout.id, { version: saved.version, document: packed }).expect(200)).body;
+    expect(after.seats).toHaveLength(50);
+
+    // And the showtime is untouched: `showtime_seats` carries its OWN row_label, snapshotted when it
+    // bound these seats, so a ticket issued for F1 still says F1 while the chart now calls it A1.
+    const { rows } = await pool.query<{ row_label: string; n: string }>(
+      `SELECT row_label, COUNT(*)::text AS n FROM showtime_seats WHERE showtime_id = $1
+        GROUP BY row_label ORDER BY row_label`,
+      [showtime],
+    );
+    expect(rows.map((r) => r.row_label)).toEqual(['F', 'G', 'H', 'I', 'J']);
+  });
+});
+
+describe('seat types', () => {
+  it('stores a love seat as a love seat, and everything else as single', async () => {
+    const o = await organizer();
+    const { layout } = await freshLayout(o);
+
+    // `seats.seat_type` has allowed 'double' since 0002 and nothing in the product could ever write
+    // one: the editor had no control, and the projection defaulted every seat to 'single'. So this
+    // column had three legal values and two reachable ones.
+    const made = addBlock(emptyDocument(), 'single-row', { x: 2000, y: 2000 });
+    const key = made.key;
+    const refs = made.doc.blocks
+      .find((b) => b.key === key)!
+      .seats!.slice(0, 2)
+      .map((_, index) => ({ blockKey: key, index }));
+    const d = setSeatType(made.doc, refs, 'double');
+
+    const saved = (await save(o, layout.id, { version: layout.version, document: d }).expect(200)).body;
+    const types = saved.seats.map((s: { seatType: string }) => s.seatType);
+    expect(types.filter((t: string) => t === 'double')).toHaveLength(2);
+    expect(types.filter((t: string) => t === 'single')).toHaveLength(saved.seats.length - 2);
+
+    // And it comes back on the DOCUMENT too, so re-opening the chart shows the control set correctly
+    // rather than reporting every seat as ordinary.
+    const reopened = (await request(app).get(`/api/organizer/layouts/${layout.id}`).set(o.h).expect(200)).body;
+    const docSeats = reopened.document.blocks.flatMap((b: { seats?: { seatType?: string }[] }) => b.seats ?? []);
+    expect(docSeats.filter((s: { seatType?: string }) => s.seatType === 'double')).toHaveLength(2);
   });
 });

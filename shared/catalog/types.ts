@@ -148,6 +148,9 @@ export interface SeatMapElement {
    */
   capacity?: number | null;
   categoryId?: number | null;
+  /** A drawn outline's fill colour, six hex digits; absent means the theme's ink. */
+  color?: string | null;
+  geometry?: string | null;
 }
 
 /** Background layer only. Holds no seat and no status (FR-020). */

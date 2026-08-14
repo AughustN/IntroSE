@@ -88,6 +88,10 @@ const documentBlock = z.object({
   seats: z.array(documentSeat).optional(),
   // Authoring-only: the projection never reads it, so a locked block sells like any other.
   locked: z.boolean().optional(),
+  // A drawn outline's fill. Same strict hex as a category: the value ends up in an SVG `fill`, so
+  // anything looser would let `url(...)` name a paint server of the caller's choosing.
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
+  geometry: z.enum(['rect', 'square', 'circle', 'oval', 'triangle', 'hexagon']).nullable().optional(),
 });
 
 export const documentSchema = z.object({

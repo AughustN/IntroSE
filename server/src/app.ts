@@ -24,7 +24,13 @@ export function createApp(): Express {
     if (origin && config.corsOrigins.includes(origin)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Access-Control-Allow-Credentials", "true");
-      res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,PATCH,DELETE,OPTIONS");
+      // PUT belongs here: five routes use it — the seat-map save
+      // (`PUT /organizer/layouts/:id`) plus the admin category rename, featured events and settings.
+      // Omitting it made the browser's preflight succeed and then refuse to send the request, which
+      // surfaces as a bare network failure ("Load failed" / "Failed to fetch") with no server log and
+      // no status code — indistinguishable from the API being down. GET needs no preflight, so reads
+      // worked and only writes broke, which is what made it look like a save bug.
+      res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS");
       res.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type,X-Idempotency-Key");
       res.vary("Origin");
       if (req.method === "OPTIONS") return res.sendStatus(204);

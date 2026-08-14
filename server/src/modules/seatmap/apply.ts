@@ -300,7 +300,9 @@ export async function refreshSnapshot(showtimeId: number, layoutId: number, db: 
                   -- A capacity zone is INVENTORY the buyer can buy (0027), so the buyer's copy of the
                   -- map has to carry what makes it one. Without these it drew as an anonymous shape and
                   -- a standing floor looked like decoration.
-                  'capacity', e.capacity, 'categoryId', e.category_id))
+                  'capacity', e.capacity, 'categoryId', e.category_id,
+                  -- A drawn outline's colour reaches the buyer through here or not at all.
+                  'color', e.color, 'geometry', e.geometry))
                   FROM layout_elements e WHERE e.layout_id = l.id), '[]'::jsonb),
               -- Tables ride in the SAME snapshot as the elements (FR-081). The snapshot is what stops
               -- a later layout edit reshaping a show that is already selling, and a table sits in the

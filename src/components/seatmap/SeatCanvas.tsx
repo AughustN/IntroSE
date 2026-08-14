@@ -19,6 +19,7 @@ import type {
   SeatMapSpace,
   SeatMapTable,
 } from "@/shared/catalog/types";
+import { readableInk, rowMarkers } from "./layoutOps";
 
 /**
  * The one surface that turns layout coordinates into pixels (research R-4).
@@ -64,6 +65,11 @@ export interface CanvasSeat {
   section: string | null;
   shape?: "circle" | "square";
   sizeMultiplier?: number;
+  /**
+   * `single` or `double` — a love seat, one unit seating two. Absent means `single`, which is what
+   * the column defaults to, so a snapshot taken before this existed still renders.
+   */
+  seatType?: "single" | "double" | "standing";
   /** Drawn with a wheelchair mark, on every screen — a buyer needs this more than an organizer. */
   isAccessible?: boolean;
 }
@@ -127,12 +133,36 @@ export interface SeatCanvasProps<T extends CanvasSeat> {
   onSeatActivate?: (seat: T) => void;
   /** False for the read-only preview: seats are drawn but not focusable or clickable. */
   interactive?: boolean;
+  /**
+   * Whether the viewBox tracks the content, or stays the whole coordinate space.
+   *
+   * `true` (the default, and what a viewer wants) frames the seats that exist, so a small venue is not
+   * lost in a 10,000-unit space.
+   *
+   * `false` is for AUTHORING. With content-fitting on, the viewBox is recomputed from the seats and
+   * elements present, so every add, delete or outward drag rescales the whole map — place a stage near
+   * an edge and the chart you were working on visibly shrinks. One unit is then worth a different number
+   * of pixels from one edit to the next, which makes judging a size or a gap impossible. Pinning the box
+   * to the space keeps the ratio constant no matter what is added; "fit to frame" is still there for
+   * when the organizer actually wants to re-frame.
+   */
+  fitContent?: boolean;
+  /**
+   * Draw each row's letter at the end of the row. On by default, on every screen.
+   *
+   * A buyer needs it at least as much as an organizer: a ticket says "K12", and until now the chart
+   * that ticket refers to showed the 12 and never the K. Off is for a map with no meaningful rows —
+   * a standing-only floor, or a thumbnail too small to read them.
+   */
+  showRowLabels?: boolean;
 
   // ---- Authoring (FR-009..FR-014). All inert unless `editable`. ----
   editable?: boolean;
   selectedIds?: ReadonlySet<number>;
   /** Fired before a drag begins, so the editor can adjust the selection first. */
-  onSeatPointerDown?: (seat: T, additive: boolean) => void;
+  /** `alt` asks for SEAT-level intent rather than block-level — see `ChartEditor`. Optional so the
+   *  showtime map, which only ever selects seats, need not care. */
+  onSeatPointerDown?: (seat: T, additive: boolean, alt?: boolean) => void;
   /** Cumulative drag offset in LAYOUT units. `end` is the one the editor commits to history. */
   onSeatDrag?: (dx: number, dy: number, phase: "move" | "end") => void;
   /**
@@ -169,7 +199,7 @@ export interface SeatCanvasProps<T extends CanvasSeat> {
    * A completed drag across empty space. `x1,y1` is where it started and `x2,y2` where it ended —
    * un-normalised on purpose, because a drawing tool cares which end is which and a marquee does not.
    */
-  onMarquee?: (rect: Rect, additive: boolean) => void;
+  onMarquee?: (rect: Rect, additive: boolean, alt?: boolean) => void;
   /** The same rectangle, live, for tools that preview what they are about to create. */
   onMarqueeChange?: (rect: Rect | null) => void;
   /** `none` hands the drawing of the drag entirely to `underlay`, for tools that are not selecting. */
@@ -227,6 +257,8 @@ interface Gesture {
   originY: number;
   moved: boolean;
   additive: boolean;
+  /** Held at press time: the editor reads it as "act on seats, not blocks". */
+  alt: boolean;
 }
 
 function SeatCanvasInner<T extends CanvasSeat>(
@@ -245,6 +277,8 @@ function SeatCanvasInner<T extends CanvasSeat>(
     seatTooltip,
     onSeatActivate,
     interactive = false,
+    fitContent = true,
+    showRowLabels = true,
     editable = false,
     selectedIds,
     onSeatPointerDown,
@@ -278,9 +312,9 @@ function SeatCanvasInner<T extends CanvasSeat>(
   const svgRef = useRef<SVGSVGElement>(null);
   const gesture = useRef<Gesture | null>(null);
 
-  // Fit the viewBox to the seats actually present, so a small layout is not lost in a 10000-unit
-  // space. Padded by two seat diameters so edge seats are never clipped.
-  const bounds = useMemo(() => {
+  // What the drawn content occupies, padded by two seat diameters so edge seats are never clipped.
+  // Whether the viewBox follows this is `fitContent`'s decision, not this value's.
+  const contentBounds = useMemo(() => {
     const pts = [
       ...seats.map((s) => ({ x: s.x, y: s.y })),
       ...elements.flatMap((e) => [
@@ -296,6 +330,12 @@ function SeatCanvasInner<T extends CanvasSeat>(
     const maxY = Math.max(...pts.map((p) => p.y)) + pad;
     return { x: minX, y: minY, w: Math.max(maxX - minX, 1), h: Math.max(maxY - minY, 1) };
   }, [seats, elements, space]);
+
+  const bounds = useMemo(
+    () =>
+      fitContent ? contentBounds : { x: 0, y: 0, w: space.width, h: space.height },
+    [fitContent, contentBounds, space.width, space.height],
+  );
 
   const view = useMemo(() => viewOf(bounds, zoom, pan), [bounds, zoom, pan]);
 
@@ -324,6 +364,27 @@ function SeatCanvasInner<T extends CanvasSeat>(
         s.y <= view.y + view.h + pad,
     );
   }, [seats, view, space.seatDiameter]);
+
+  /**
+   * The row letters, and where they go.
+   *
+   * Off the FULL seat list rather than `drawnSeats`: a row that runs off the edge of the viewport
+   * still ends where it ends, and computing from the culled list would put its letter beside whichever
+   * seat happened to be the last one on screen. The markers are culled separately, below.
+   */
+  const markers = useMemo(
+    () => (showRowLabels ? rowMarkers(seats, space.seatDiameter * 1.4) : []),
+    [showRowLabels, seats, space.seatDiameter],
+  );
+
+  const drawnMarkers = useMemo(() => {
+    if (markers.length < CULL_ABOVE) return markers;
+    const pad = space.seatDiameter * 4;
+    return markers.filter(
+      (m) =>
+        m.x >= view.x - pad && m.x <= view.x + view.w + pad && m.y >= view.y - pad && m.y <= view.y + view.h + pad,
+    );
+  }, [markers, view, space.seatDiameter]);
 
   /**
    * Zoom and pan are ALSO held in refs, and the refs are the ones a gesture reads.
@@ -479,7 +540,10 @@ function SeatCanvasInner<T extends CanvasSeat>(
   useImperativeHandle(
     ref,
     (): SeatCanvasHandle => ({
-      zoomToVenue: resetView,
+      // With a pinned viewBox, resetting to zoom 1 would show the whole 10,000-unit space rather than
+      // the chart, so "fit to frame" frames the CONTENT instead — which is what the organizer means by
+      // it, and the one moment they are asking to be re-scaled.
+      zoomToVenue: () => (fitContent ? resetView() : frame(contentBounds)),
       zoomToBlock: (blockId) => {
         const hull = hulls.find((h) => h.block.id === blockId);
         if (hull) frame(hull);
@@ -492,7 +556,7 @@ function SeatCanvasInner<T extends CanvasSeat>(
       },
       toLayout,
     }),
-    [resetView, hulls, frame, seats, space.seatDiameter, toLayout],
+    [resetView, hulls, frame, seats, space.seatDiameter, toLayout, fitContent, contentBounds],
   );
 
   // ---- Pointer gestures ---------------------------------------------------------------------
@@ -514,6 +578,16 @@ function SeatCanvasInner<T extends CanvasSeat>(
    * for a pointer it was never given — which strands the gesture and leaves the map dragging after
    * the button is up.
    */
+  /**
+   * The seat a non-editing viewer pressed, if any.
+   *
+   * Needed because pointer capture goes on the <svg> (see above), which retargets the pointerup — and
+   * with it the `click` the browser would otherwise dispatch to the seat. A buyer's tap therefore never
+   * reached the seat's own handler and selecting a seat by pointer did nothing at all; only the keyboard
+   * path worked. The press is remembered here and completed in `endGesture`.
+   */
+  const tapped = useRef<T | null>(null);
+
   const beginGesture = (e: React.PointerEvent, grabbed: "seat" | "element" | "table" | null) => {
     const p = toLayout(e.clientX, e.clientY);
     if (!p) return;
@@ -526,6 +600,7 @@ function SeatCanvasInner<T extends CanvasSeat>(
       originY: p.y,
       moved: false,
       additive: e.shiftKey,
+      alt: e.altKey,
     };
     if (kind === "marquee") updateMarquee({ x1: p.x, y1: p.y, x2: p.x, y2: p.y });
     if (kind !== "marquee") setHover(null); // a tooltip has no business following a drag
@@ -566,6 +641,8 @@ function SeatCanvasInner<T extends CanvasSeat>(
   const endGesture = (e: React.PointerEvent<SVGSVGElement>) => {
     const g = gesture.current;
     gesture.current = null;
+    const tap = tapped.current;
+    tapped.current = null;
     setPanning(false);
     if (svgRef.current?.hasPointerCapture(e.pointerId)) {
       svgRef.current.releasePointerCapture(e.pointerId);
@@ -576,10 +653,14 @@ function SeatCanvasInner<T extends CanvasSeat>(
     if (g.kind === "marquee") {
       updateMarquee(null);
       if (g.moved && p) {
-        onMarquee?.({ x1: g.originX, y1: g.originY, x2: p.x, y2: p.y }, g.additive);
+        onMarquee?.({ x1: g.originX, y1: g.originY, x2: p.x, y2: p.y }, g.additive, g.alt);
       } else {
         onBackgroundClick?.({ x: g.originX, y: g.originY }, g.additive);
       }
+    } else if (g.kind === "pan") {
+      // A pan that never left the slop is a tap. For a viewer every press is a pan (there is nothing to
+      // drag), so this is where a buyer's seat selection is actually completed.
+      if (!g.moved && tap) onSeatActivate?.(tap);
     } else if (p && (g.kind === "seat" || g.kind === "element" || g.kind === "table")) {
       // A drag that never left the slop is a plain click; committing it would push a no-op onto the
       // undo stack, so pressing Ctrl+Z after clicking around would appear to do nothing.
@@ -827,8 +908,19 @@ function SeatCanvasInner<T extends CanvasSeat>(
                 points={(el.kind === "boundary" ? [...el.points, el.points[0]] : el.points)
                   .map((p) => `${p.x},${p.y}`)
                   .join(" ")}
-                className={ELEMENT_FILL[el.kind]}
+                className={el.color ? "" : ELEMENT_FILL[el.kind]}
                 strokeWidth={10}
+                // A closed outline takes its colour as a translucent wash with a solid edge, so shapes
+                // stay tellable apart without hiding the seats drawn over them. A divider is an open
+                // line and only ever takes a stroke.
+                style={
+                  el.color
+                    ? {
+                        stroke: el.color,
+                        fill: el.kind === "boundary" ? `${el.color}33` : "none",
+                      }
+                    : undefined
+                }
                 fill="none"
               />
             )}
@@ -870,7 +962,11 @@ function SeatCanvasInner<T extends CanvasSeat>(
                 rx={el.kind === "stage" ? 40 : 8}
                 strokeWidth={6}
                 strokeDasharray={el.kind === "aisle" ? "40 30" : undefined}
-                className={ELEMENT_FILL[el.kind]}
+                // A chosen colour replaces the theme's own ink for this element, the same way it does
+                // for a drawn outline above: solid edge, translucent wash, so a stage or a standing
+                // zone can be told apart from the one beside it at a glance.
+                className={el.color ? "" : ELEMENT_FILL[el.kind]}
+                style={el.color ? { stroke: el.color, fill: `${el.color}33` } : undefined}
               />
             )}
             {el.label && (
@@ -880,7 +976,14 @@ function SeatCanvasInner<T extends CanvasSeat>(
                 y={el.y - (el.kind === "area" && el.capacity ? Math.max(40, el.height / 10) : 0)}
                 textAnchor="middle"
                 dominantBaseline="central"
-                fontSize={Math.max(60, el.height / 3)}
+                // Has to fit the element BOTH ways. Height alone was enough while every labelled
+                // element was a fixed-size stage; a named shape can be any proportion, and a long name
+                // in a tall narrow one ran clean off both sides of it.
+                fontSize={Math.min(
+                  Math.max(60, el.height / 3),
+                  // 0.62em is about the width of a monospace glyph; the 0.9 keeps it off the edges.
+                  Math.max(40, (el.width * 0.9) / Math.max(1, el.label.length * 0.62)),
+                )}
                 className="fill-beige-kem/70 font-mono"
               >
                 {el.label}
@@ -907,6 +1010,24 @@ function SeatCanvasInner<T extends CanvasSeat>(
 
         {underlay}
 
+        {/* The row's letter, past the end of the row. Drawn BEFORE the seats so that a letter which
+            lands near a seat on a tight layout sits under it rather than over its number, and marked
+            aria-hidden because every seat already announces its own row in its label. */}
+        {drawnMarkers.map((m) => (
+          <text
+            key={m.key}
+            x={m.x}
+            y={m.y}
+            textAnchor="middle"
+            dominantBaseline="central"
+            fontSize={space.seatDiameter * 0.95}
+            aria-hidden="true"
+            className="pointer-events-none fill-beige-kem/55 font-mono font-bold"
+          >
+            {m.label}
+          </text>
+        ))}
+
         {/* Seats, in the payload's section → row → number order, which IS the tab order (FR-039a). */}
         {drawnSeats.map((seat) => {
           const label = seatLabel?.(seat) ?? `Ghế ${seat.row}${seat.number}`;
@@ -918,6 +1039,9 @@ function SeatCanvasInner<T extends CanvasSeat>(
           const rr = d / 2;
           const fill = seatFill?.(seat);
           const stroke = seatStroke?.(seat);
+          // The number has to be readable on whatever colour the seat's class carries; with no fill it
+          // keeps the theme ink, which already contrasts with the map's own background.
+          const ink = readableInk(fill);
           return (
             <g
               key={seat.id}
@@ -926,15 +1050,21 @@ function SeatCanvasInner<T extends CanvasSeat>(
               aria-label={label}
               aria-pressed={interactive && selectedIds ? selected : undefined}
               tabIndex={interactive ? 0 : -1}
-              onClick={interactive && !editable ? () => onSeatActivate?.(seat) : undefined}
               onPointerDown={
                 editable
                   ? (e) => {
                       e.stopPropagation();
-                      if (!wantsPan(e)) onSeatPointerDown?.(seat, e.shiftKey);
+                      if (!wantsPan(e)) onSeatPointerDown?.(seat, e.shiftKey, e.altKey);
                       beginGesture(e, "seat");
                     }
-                  : undefined
+                  : interactive
+                    ? () => {
+                        // Deliberately does NOT stop propagation: the <svg> still needs the event to
+                        // start a pan, so a drag across the map keeps working and only a stationary
+                        // press counts as choosing this seat.
+                        tapped.current = seat;
+                      }
+                    : undefined
               }
               onPointerMove={
                 seatTooltip
@@ -997,6 +1127,21 @@ function SeatCanvasInner<T extends CanvasSeat>(
                 className={seatClass?.(seat) ?? "fill-transparent stroke-beige-kem/50"}
                 style={fill || stroke ? { fill, stroke } : undefined}
               />
+              {/* A double seat: one unit, two places. Marked with a divider down the cushion rather
+                  than drawn WIDER, deliberately — the glyph is kept inside the seat's effective
+                  diameter so what is drawn stays exactly what the publish-time overlap rule measures.
+                  A wider double would look right and validate against the wrong footprint. */}
+              {seat.seatType === "double" && (
+                <line
+                  x1={seat.x}
+                  y1={seat.y - rr * (seat.shape === "square" ? 0.7 : 0.26)}
+                  x2={seat.x}
+                  y2={seat.y + rr * (seat.shape === "square" ? 0.7 : 0.5)}
+                  strokeWidth={strokeScale * 0.9}
+                  className={seatClass?.(seat) ?? "stroke-beige-kem/50"}
+                  style={stroke ? { stroke } : fill ? { stroke: readableInk(fill) } : undefined}
+                />
+              )}
               {/* Invisible hit area — a thin chair is hard to grab, and a buyer on a phone hits the
                   gap between backrest and cushion constantly without it. */}
               <rect
@@ -1016,7 +1161,8 @@ function SeatCanvasInner<T extends CanvasSeat>(
                   dominantBaseline="central"
                   fontSize={d * 0.5}
                   pointerEvents="none"
-                  className="fill-beige-kem/80"
+                  className={ink ? "" : "fill-beige-kem/80"}
+                  style={ink ? { fill: ink } : undefined}
                 >
                   ♿
                 </text>
@@ -1029,7 +1175,8 @@ function SeatCanvasInner<T extends CanvasSeat>(
                   dominantBaseline="central"
                   fontSize={d * 0.42}
                   pointerEvents="none"
-                  className="fill-beige-kem/70 font-mono"
+                  className={ink ? "font-mono" : "fill-beige-kem/70 font-mono"}
+                  style={ink ? { fill: ink } : undefined}
                 >
                   {seat.number}
                 </text>

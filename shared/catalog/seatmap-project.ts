@@ -11,7 +11,7 @@
 //
 // Everything here is pure and DOM-free, so it is unit-testable with no database (`npm run test:web`).
 
-import type { ChartDocument, DocumentBlock, DocumentSeat, RowLabelScheme, SeatLabelScheme } from './seatmap-document.js';
+import type { BlockParams, ChartDocument, DocumentBlock, DocumentSeat, RowLabelScheme, SeatLabelScheme } from './seatmap-document.js';
 import { isSeatBearing } from './seatmap-document.js';
 import type {
   ElementKind,
@@ -92,6 +92,50 @@ export function rowLabelFor(
 }
 
 /** The number for seat `c` of `perRow`, under a scheme. */
+/** Inverse of `letterAt`: "A" → 0, "Z" → 25, "AA" → 26. Null when the label is not pure letters. */
+export function letterIndex(label: string): number | null {
+  if (!/^[A-Z]+$/.test(label)) return null;
+  let n = 0;
+  for (const ch of label) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n - 1;
+}
+
+/**
+ * Where a block's existing labelling starts, so making it parametric CONTINUES it rather than
+ * restarting from A1.
+ *
+ * Adopting a chart drawn before the document model produces a block with no parameters and whatever
+ * labels the rows already carry — commonly not starting at 1. Regenerating such a block from the
+ * defaults renumbered it: a row numbered 11..100 became 1..90, so only the overlap kept its database
+ * rows and, worse, every surviving id shifted along the row. The seat a ticket was sold for ended up
+ * ten places from where the buyer chose it.
+ *
+ * Only inferred for labelling this function can read back exactly — pure letters, or plain numbers.
+ * Anything else (a prefix, hand-edited labels) is left alone: guessing wrong would relabel a chart
+ * silently, and doing nothing merely leaves the organizer to set the start themselves.
+ */
+export function inferStartLabels(block: DocumentBlock): Partial<BlockParams> {
+  const seats = block.seats ?? [];
+  if (seats.length === 0) return {};
+
+  const out: Partial<BlockParams> = {};
+
+  // Seat numbers: the lowest in use, so an ascending scheme regenerates onto the same numbers.
+  const lowest = Math.min(...seats.map((s) => s.seatNumber));
+  if (Number.isFinite(lowest) && lowest >= 1) out.startSeatNumber = lowest;
+
+  // Rows: the topmost row's label decides where the lettering starts.
+  const topmost = seats.reduce((a, b) => (b.dy < a.dy ? b : a), seats[0]).rowLabel;
+  const asLetters = letterIndex(topmost);
+  if (asLetters !== null) {
+    out.startRowIndex = asLetters;
+  } else if (/^[0-9]+$/.test(topmost)) {
+    out.rowLabelScheme = 'num-asc';
+    out.startRowIndex = Math.max(0, Number(topmost) - 1);
+  }
+  return out;
+}
+
 export function seatNumberFor(
   c: number,
   perRow: number,
@@ -254,6 +298,9 @@ export function projectDocument(doc: ChartDocument): ProjectedLayout {
         label: block.label ?? null,
         points: block.points ?? null,
         capacity: block.kind === 'ga-zone' ? (block.capacity ?? null) : null,
+        color: block.color ?? null,
+        geometry: block.geometry ?? null,
+        sectionId: block.sectionId,
       });
       elementOrigin.push(block.key);
       continue;
@@ -272,6 +319,9 @@ export function projectDocument(doc: ChartDocument): ProjectedLayout {
         label: block.label ?? block.title,
         points: block.points ?? null,
         capacity: block.capacity ?? null,
+        color: block.color ?? null,
+        geometry: block.geometry ?? null,
+        sectionId: block.sectionId,
         // What makes it a CAPACITY zone rather than a drawing: the price class its capacity is sold
         // under. Without one the publish gate reports `zone_without_category`.
         categoryId: block.categoryId,

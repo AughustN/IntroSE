@@ -17,7 +17,18 @@ import { CATEGORY_COLORS } from "./layoutOps";
  *
  * A category carries NO price. Price is set per showtime, on the ticket tier that names this
  * category — which is what lets the same chart sell at different prices on different nights without
- * being redrawn. Saying so on-screen matters, because "hạng vé" reads like a price to most people.
+ * being redrawn.
+ *
+ * Hence the vocabulary, which is three words for three tables and must not be collapsed again:
+ *
+ *   Khu vực   `sections`            a PLACE.            "Khu A", "Ban công".      Layout-wide.
+ *   Hạng ghế  `layout_categories`   a CLASS of seat.    "VIP", "Thường".          Layout-wide. NO price.
+ *   Hạng vé   `ticket_tiers`        the PRICED thing.   Prices one hạng ghế.      Per showtime.
+ *
+ * This panel used to call a category "hạng vé" — the same words the showtime's tier panel uses for the
+ * priced object — and elsewhere "hạng giá", a third name for the same thing. So the editor asked the
+ * organizer to set a "hạng vé" that had no price field anywhere on it, while the real hạng vé lived on
+ * another screen. A hạng ghế is what a hạng vé attaches a price TO.
  *
  * Unlike a section's, a category's colour is not merely an editor aid: it is what the buyer's map is
  * coloured by, so the swatch here is the real thing rather than a preview.
@@ -66,11 +77,11 @@ export default function CategoryPanel({
   return (
     <div className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
       <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">
-        Hạng vé
+        Hạng ghế
       </h3>
       <p className="mt-1 text-[11px] leading-4 text-beige-kem/50">
-        Hạng vé chỉ có tên và màu. Giá được đặt riêng cho từng suất diễn, nên một sơ đồ dùng lại
-        được cho nhiều suất với các mức giá khác nhau.
+        Hạng ghế chỉ có tên và màu — đây không phải hạng vé. Giá nằm ở hạng vé, đặt riêng cho từng
+        suất diễn, nên một sơ đồ dùng lại được cho nhiều suất với các mức giá khác nhau.
       </p>
 
       <div className="mt-3 flex gap-2">
@@ -79,7 +90,7 @@ export default function CategoryPanel({
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && add()}
           maxLength={40}
-          placeholder="Tên hạng (VD VIP)"
+          placeholder="Tên hạng ghế (VD VIP)"
           className="h-9 w-full rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-xs text-beige-kem outline-none focus:border-burgundy"
         />
         <button onClick={add} disabled={!name.trim()} className={btn}>
@@ -140,8 +151,8 @@ export default function CategoryPanel({
                   <button
                     key={c}
                     type="button"
-                    title={`Đổi màu hạng "${category.name}"`}
-                    aria-label={`Đổi màu hạng ${category.name}`}
+                    title={`Đổi màu hạng ghế "${category.name}"`}
+                    aria-label={`Đổi màu hạng ghế ${category.name}`}
                     aria-pressed={category.color.toLowerCase() === c.toLowerCase()}
                     onClick={() => onRecolor(id, c)}
                     className={`h-5 w-5 rounded-sm border-2 transition ${
@@ -168,7 +179,7 @@ export default function CategoryPanel({
                   Gán {selectedCount > 0 ? `${selectedCount} ghế` : "ghế"}
                 </button>
                 <button className={btn} onClick={() => onRemove(id)}>
-                  Xoá hạng
+                  Xoá hạng ghế
                 </button>
               </div>
             </li>
@@ -178,22 +189,22 @@ export default function CategoryPanel({
 
       {categories.length === 0 && (
         <p className="mt-3 text-[11px] text-beige-kem/50">
-          Chưa có hạng vé nào. Ghế chưa thuộc hạng nào sẽ chặn phát hành, vì không thể đặt giá cho
-          nó.
+          Chưa có hạng ghế nào. Ghế chưa thuộc hạng ghế nào sẽ chặn phát hành, vì không có gì để
+          hạng vé gắn giá vào.
         </p>
       )}
 
       {unclassified > 0 && categories.length > 0 && (
         <div className="mt-3 rounded-lg border-2 border-bubblegum/60 p-2">
           <p className="font-mono text-[11px] text-beige-kem/70">
-            {unclassified} ghế chưa thuộc hạng nào.
+            {unclassified} ghế chưa thuộc hạng ghế nào.
           </p>
           <button
             className={`${btn} mt-1.5`}
             disabled={selectedCount === 0}
             onClick={() => onAssign(null)}
           >
-            Bỏ hạng khỏi {selectedCount} ghế đang chọn
+            Bỏ hạng ghế khỏi {selectedCount} ghế đang chọn
           </button>
         </div>
       )}

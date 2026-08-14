@@ -21,6 +21,8 @@ import {
   renumberSeats,
   rotateSeats,
   seatsInRect,
+  readableInk,
+  rowMarkers,
   snap,
 } from "./layoutOps";
 import { LAYOUT_MAX_SEATS, validateLayout } from "@/shared/catalog/seatmap-validate";
@@ -249,5 +251,111 @@ describe("supporting contracts the editor leans on", () => {
       categories: [{ id: 1, name: "VIP" }],
     });
     expect(issues.some((i) => i.code === "duplicate_label")).toBe(true);
+  });
+});
+
+describe("ink that stays readable on a seat's own colour", () => {
+  /*
+   * Seats are filled with their price class's colour, and a class may be anything the organizer picks.
+   * A fixed ink was legible on some and invisible on others — the seat NUMBER, the one thing on a seat
+   * that must be read, disappeared on exactly the colours chosen to stand out.
+   */
+  const dark = "#17100f";
+  const light = "#ffffff";
+
+  it("puts light ink on dark classes and dark ink on light ones", () => {
+    expect(readableInk("#8a0c24")).toBe(light); // deep burgundy
+    expect(readableInk("#d93025")).toBe(light); // tomato
+    expect(readableInk("#fbd0dc")).toBe(dark); // bubblegum
+    expect(readableInk("#f7a97c")).toBe(dark); // peach
+    expect(readableInk("#bfc0f2")).toBe(dark); // periwinkle
+  });
+
+  it("weights the channels by eye sensitivity, not by average", () => {
+    // Same nominal midpoint in each channel: green reads far lighter than blue, so a naive average
+    // would give both the same ink and be wrong for one of them.
+    expect(readableInk("#008000")).toBe(light);
+    expect(readableInk("#00ff00")).toBe(dark);
+    expect(readableInk("#0000ff")).toBe(light);
+  });
+
+  it("says nothing when there is no fill, so the theme ink is kept", () => {
+    expect(readableInk(undefined)).toBeUndefined();
+    expect(readableInk("not-a-colour")).toBeUndefined();
+    expect(readableInk("#abc")).toBeUndefined();
+  });
+
+  it("accepts a colour with or without the hash, and ignores case", () => {
+    expect(readableInk("D93025")).toBe(readableInk("#d93025"));
+    expect(readableInk("  #FBD0DC  ")).toBe(dark);
+  });
+});
+
+describe("row letters", () => {
+  const seat = (row: string, number: number, x: number, y: number, section: string | null = "Khu A") => ({
+    row,
+    number,
+    x,
+    y,
+    section,
+  });
+
+  it("puts the letter past the last seat, off the right end of the row", () => {
+    const row = [seat("A", 1, 1000, 500), seat("A", 2, 1150, 500), seat("A", 3, 1300, 500)];
+    const [m] = rowMarkers(row, 100);
+    expect(m.label).toBe("A");
+    expect(m.y).toBeCloseTo(500);
+    expect(m.x).toBeGreaterThan(1300);
+  });
+
+  it("one letter per row, however many seats the row has", () => {
+    const seats = [
+      seat("A", 1, 1000, 500),
+      seat("A", 2, 1150, 500),
+      seat("B", 1, 1000, 650),
+      seat("B", 2, 1150, 650),
+    ];
+    expect(rowMarkers(seats, 100).map((m) => m.label).sort()).toEqual(["A", "B"]);
+  });
+
+  it("follows a rotated row instead of pointing world-right", () => {
+    // A block turned 90°: the row runs DOWN the map, so its letter belongs below the last seat, not
+    // beside it. Taking the world x-maximum would drop every letter on the same side regardless.
+    const row = [seat("A", 1, 1000, 1000), seat("A", 2, 1000, 1150), seat("A", 3, 1000, 1300)];
+    const [m] = rowMarkers(row, 100);
+    expect(m.x).toBeCloseTo(1000);
+    expect(m.y).toBeGreaterThan(1300);
+  });
+
+  it("continues a curved row's own tangent, not the chord to its start", () => {
+    // Three points on an arc bending downward. The chord from seat 1 would aim the letter off the
+    // curve; the last leg is the direction the row is actually travelling at its end.
+    const row = [seat("A", 1, 1000, 1000), seat("A", 2, 1140, 1050), seat("A", 3, 1260, 1140)];
+    const [m] = rowMarkers(row, 100);
+    const legAngle = Math.atan2(1140 - 1050, 1260 - 1140);
+    expect(Math.atan2(m.y - 1140, m.x - 1260)).toBeCloseTo(legAngle, 5);
+  });
+
+  it("keeps rows apart when two sections letter their rows the same", () => {
+    // "Khu A · A" and "Khu B · A" are different rows and each needs its own letter — grouping on the
+    // label alone would merge them and draw one marker between two blocks.
+    const seats = [seat("A", 1, 1000, 500, "Khu A"), seat("A", 1, 5000, 500, "Khu B")];
+    expect(rowMarkers(seats, 100)).toHaveLength(2);
+  });
+
+  it("orders by seat number rather than trusting the array", () => {
+    // Seats arrive in whatever order the projection emitted; the END of the row is the highest number.
+    const row = [seat("A", 3, 1300, 500), seat("A", 1, 1000, 500), seat("A", 2, 1150, 500)];
+    expect(rowMarkers(row, 100)[0].x).toBeGreaterThan(1300);
+  });
+
+  it("still letters a row of one, to its right", () => {
+    const [m] = rowMarkers([seat("A", 1, 1000, 500)], 100);
+    expect(m.x).toBeGreaterThan(1000);
+    expect(m.y).toBeCloseTo(500);
+  });
+
+  it("ignores seats with no row label rather than drawing an empty marker", () => {
+    expect(rowMarkers([seat("", 1, 1000, 500)], 100)).toEqual([]);
   });
 });

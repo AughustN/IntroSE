@@ -88,6 +88,31 @@ export function nextRowLabel(seats: LayoutSeat[], sectionId: number | null): str
   return "A";
 }
 
+/**
+ * Black or white, whichever stays readable on `hex`.
+ *
+ * Seats are filled with their price class's colour, and a class may be anything from pale peach to deep
+ * burgundy. A fixed ink was legible on some and invisible on others — the seat NUMBER, the one thing on
+ * a seat that has to be read, would disappear on exactly the classes an organizer picked to stand out.
+ *
+ * Uses WCAG relative luminance, and its crossover point (0.179) rather than a naive midpoint: the eye is
+ * far more sensitive to green than to blue, so averaging the channels picks the wrong ink for saturated
+ * colours — a mid blue is much darker than a mid green of the same nominal brightness.
+ */
+export function readableInk(hex: string | undefined): string | undefined {
+  if (!hex) return undefined;
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return undefined;
+  const n = Number.parseInt(m[1], 16);
+  const channel = (v: number) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance =
+    0.2126 * channel((n >> 16) & 255) + 0.7152 * channel((n >> 8) & 255) + 0.0722 * channel(n & 255);
+  return luminance > 0.179 ? "#17100f" : "#ffffff";
+}
+
 export const snap = (v: number, enabled: boolean): number => (enabled ? Math.round(v / GRID) * GRID : Math.round(v));
 
 const isSelected = (s: LayoutSeat, ids: Set<number>) => s.id !== undefined && ids.has(s.id);
@@ -373,9 +398,6 @@ export function assignSection(
   return seats.map((s) => (isSelected(s, ids) ? { ...s, sectionId } : s));
 }
 
-export function setSeatType(seats: LayoutSeat[], ids: Set<number>, seatType: SeatType): LayoutSeat[] {
-  return seats.map((s) => (isSelected(s, ids) ? { ...s, seatType } : s));
-}
 
 /**
  * Re-letter and renumber a selection as one row, in the order it reads on the map.
@@ -609,4 +631,70 @@ export function seatsInRect(
   return seats
     .filter((s) => s.id !== undefined && s.x >= minX && s.x <= maxX && s.y >= minY && s.y <= maxY)
     .map((s) => s.id as number);
+}
+
+/** A row's letter, and where on the map to draw it. */
+export interface RowMarker {
+  key: string;
+  label: string;
+  x: number;
+  y: number;
+}
+
+/** The minimum a seat needs for its row to be lettered. */
+interface RowMarkerSeat {
+  row: string;
+  number: number;
+  x: number;
+  y: number;
+  section: string | null;
+}
+
+/**
+ * Where to draw each row's letter: just past the end of the row, continuing the row's own direction.
+ *
+ * A seat map without row letters can only be read seat by seat — the number inside a seat says which
+ * seat, never which row, so "K12" was legible on a ticket and nowhere on the chart it refers to.
+ *
+ * The direction comes from the row's LAST LEG rather than from world axes or from the chord back to
+ * the first seat. That is what makes one rule serve every kind of row this editor can draw: a straight
+ * row extends along itself, a rotated block's rows extend along the block, and a curved row leaves on
+ * the tangent it ends at instead of cutting back toward its own start.
+ *
+ * Grouped by section AND label, because two blocks can each hold a row "A" — legitimately, since a
+ * duplicate label is only a duplicate within one section. Grouping on the label alone would merge
+ * them and put a single letter in the gap between two blocks, belonging to neither.
+ */
+export function rowMarkers(seats: RowMarkerSeat[], gap: number): RowMarker[] {
+  const rows = new Map<string, RowMarkerSeat[]>();
+  for (const s of seats) {
+    if (!s.row) continue; // an unlabelled seat has no row to letter
+    const key = `${s.section ?? ""}|${s.row}`;
+    const group = rows.get(key);
+    if (group) group.push(s);
+    else rows.set(key, [s]);
+  }
+
+  const markers: RowMarker[] = [];
+  for (const [key, group] of rows) {
+    // By seat NUMBER, not array order: the projection's emission order is not part of its contract,
+    // and the end of the row is the highest number in it.
+    const ordered = [...group].sort((a, b) => a.number - b.number);
+    const last = ordered[ordered.length - 1];
+    const prev = ordered.length > 1 ? ordered[ordered.length - 2] : null;
+
+    let dx = 1;
+    let dy = 0;
+    if (prev) {
+      const len = Math.hypot(last.x - prev.x, last.y - prev.y);
+      // Two seats stacked exactly on top of each other say nothing about direction; fall back to
+      // rightward rather than dividing by zero and placing the letter at NaN.
+      if (len > 0) {
+        dx = (last.x - prev.x) / len;
+        dy = (last.y - prev.y) / len;
+      }
+    }
+    markers.push({ key, label: last.row, x: last.x + dx * gap, y: last.y + dy * gap });
+  }
+  return markers;
 }

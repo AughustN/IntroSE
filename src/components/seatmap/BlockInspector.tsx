@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useState } from "react";
 import type {
   BlockParams,
   DocumentBlock,
@@ -12,7 +13,7 @@ import type {
   SeatLabelScheme,
 } from "@/shared/catalog/seatmap-document";
 import { isSeatBearing } from "@/shared/catalog/seatmap-document";
-import { BLOCK_LABEL } from "./documentOps";
+import { type BlockGeometry, BLOCK_LABEL } from "./documentOps";
 
 /**
  * The block inspector — the reason the editor moved to a document at all.
@@ -55,6 +56,74 @@ const SEAT_SCHEMES: { value: SeatLabelScheme; label: string }[] = [
 ];
 
 /** Parse a numeric field without letting a half-typed value wipe the block. */
+/**
+ * A number field that commits when you finish, not on every keystroke.
+ *
+ * Each commit regenerates the block's seats, re-projects the chart and revalidates it, so typing "120"
+ * used to build the block three times — at 1, then 12, then 120 seats per row. The two intermediate
+ * charts are pure waste, and on a large block they are the biggest of the three.
+ *
+ * Commits on blur and on Enter; Escape abandons the edit. Arrow keys step by one and commit
+ * immediately, because nudging a value is meant to feel live.
+ */
+function CommittedNumber({
+  value,
+  onCommit,
+  className,
+  title,
+}: {
+  value: number;
+  onCommit: (next: number) => void;
+  className: string;
+  title?: string;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  const [editing, setEditing] = useState(false);
+
+  // While the field is not being edited it mirrors the block, so an undo or a regeneration elsewhere
+  // shows up here instead of leaving a stale number on screen.
+  const shown = editing ? draft : String(value);
+
+  const commit = (raw: string) => {
+    setEditing(false);
+    const next = num(raw, value);
+    if (next !== value) onCommit(next);
+  };
+
+  return (
+    <input
+      value={shown}
+      inputMode="numeric"
+      title={title}
+      className={className}
+      onFocus={() => {
+        setDraft(String(value));
+        setEditing(true);
+      }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={(e) => commit(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit((e.target as HTMLInputElement).value);
+          (e.target as HTMLInputElement).blur();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          setEditing(false);
+          (e.target as HTMLInputElement).blur();
+        } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+          e.preventDefault();
+          const next = Math.max(1, value + (e.key === "ArrowUp" ? 1 : -1));
+          setDraft(String(next));
+          onCommit(next);
+        }
+      }}
+    />
+  );
+}
+
+/** The palette a drawn outline may take. Same family as the price classes, so a chart reads as one set. */
+
 const num = (raw: string, fallback: number): number => {
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? Math.round(n) : fallback;
@@ -68,6 +137,7 @@ export default function BlockInspector({
   onChange,
   onParams,
   onRotate,
+  onGeometry,
   onDuplicate,
   onDelete,
 }: {
@@ -79,6 +149,9 @@ export default function BlockInspector({
   onChange: (patch: Partial<DocumentBlock>) => void;
   onParams: (patch: Partial<BlockParams>) => void;
   onRotate: (degrees: number) => void;
+  /** Regenerate the outline as a named shape. `free` is not offered — a hand-drawn polygon is what a
+   *  shape BECOMES when its points are dragged, not something to pick. */
+  onGeometry?: (geometry: Exclude<BlockGeometry, "free">) => void;
   onDuplicate: () => void;
   onDelete: () => void;
 }) {
@@ -141,14 +214,14 @@ export default function BlockInspector({
       </label>
 
       <label className={`${label} mt-2`}>
-        Hạng vé
+        Hạng ghế
         <select
           value={block.categoryId ?? ""}
           onChange={(e) => onChange({ categoryId: e.target.value === "" ? null : Number(e.target.value) })}
           className={`mt-1 ${input}`}
         >
           <option value="" className="bg-xanh-pho">
-            — chưa thuộc hạng nào —
+            — chưa thuộc hạng ghế nào —
           </option>
           {categories.map((c) => (
             <option key={c.id} value={c.id} className="bg-xanh-pho">
@@ -159,7 +232,7 @@ export default function BlockInspector({
       </label>
       {(block.sectionId === null || block.categoryId === null) && isSeatBearing(block.kind) && (
         <p className="mt-1 text-[10px] leading-4 text-cam-dat">
-          Ghế chưa thuộc khu hoặc hạng nào sẽ chặn phát hành.
+          Ghế chưa thuộc khu vực hoặc hạng ghế nào sẽ chặn phát hành.
         </p>
       )}
 
@@ -172,10 +245,9 @@ export default function BlockInspector({
             {block.kind !== "single-row" && block.kind !== "individual-seat" && (
               <label className={label}>
                 Số hàng
-                <input
+                <CommittedNumber
                   value={rows}
-                  inputMode="numeric"
-                  onChange={(e) => onParams({ rowsCount: num(e.target.value, rows) })}
+                  onCommit={(rowsCount) => onParams({ rowsCount })}
                   className={`mt-1 ${input}`}
                 />
               </label>
@@ -183,10 +255,9 @@ export default function BlockInspector({
             {block.kind !== "individual-seat" && (
               <label className={label}>
                 Ghế mỗi hàng
-                <input
+                <CommittedNumber
                   value={perRow}
-                  inputMode="numeric"
-                  onChange={(e) => onParams({ seatsPerRow: num(e.target.value, perRow) })}
+                  onCommit={(seatsPerRow) => onParams({ seatsPerRow })}
                   className={`mt-1 ${input}`}
                 />
               </label>
@@ -202,19 +273,17 @@ export default function BlockInspector({
           <div className="mt-2 grid grid-cols-2 gap-2">
             <label className={label}>
               Khoảng cách ghế
-              <input
+              <CommittedNumber
                 value={p.seatSpacing ?? 150}
-                inputMode="numeric"
-                onChange={(e) => onParams({ seatSpacing: num(e.target.value, p.seatSpacing ?? 150) })}
+                onCommit={(seatSpacing) => onParams({ seatSpacing })}
                 className={`mt-1 ${input}`}
               />
             </label>
             <label className={label}>
               Khoảng cách hàng
-              <input
+              <CommittedNumber
                 value={p.rowSpacing ?? 150}
-                inputMode="numeric"
-                onChange={(e) => onParams({ rowSpacing: num(e.target.value, p.rowSpacing ?? 150) })}
+                onCommit={(rowSpacing) => onParams({ rowSpacing })}
                 className={`mt-1 ${input}`}
               />
             </label>
@@ -224,10 +293,9 @@ export default function BlockInspector({
             <div className="mt-2 grid grid-cols-2 gap-2">
               <label className={label}>
                 Bán kính
-                <input
+                <CommittedNumber
                   value={p.radius ?? 1500}
-                  inputMode="numeric"
-                  onChange={(e) => onParams({ radius: num(e.target.value, p.radius ?? 1500) })}
+                  onCommit={(radius) => onParams({ radius })}
                   className={`mt-1 ${input}`}
                 />
               </label>
@@ -308,10 +376,9 @@ export default function BlockInspector({
         <div className="mt-3 border-t border-beige-kem/25 pt-3">
           <label className={label}>
             Sức chứa (người)
-            <input
+            <CommittedNumber
               value={block.capacity ?? 0}
-              inputMode="numeric"
-              onChange={(e) => onChange({ capacity: num(e.target.value, block.capacity ?? 0) })}
+              onCommit={(capacity) => onChange({ capacity })}
               className={`mt-1 ${input}`}
             />
             <span className="mt-1 block text-[10px] leading-4 text-beige-kem/45">
@@ -319,17 +386,62 @@ export default function BlockInspector({
             </span>
           </label>
           {block.categoryId === null && (
-            // The zone is drawn but unsellable until it names a price class, and the publish gate will
+            // The zone is drawn but unsellable until it names a seat class, and the publish gate will
             // say so. Saying it here means the organizer finds out while looking at the zone.
             <p className="mt-2 rounded-lg border border-bubblegum px-2 py-1 text-[10px] leading-4 text-bubblegum">
-              Chưa có hạng giá — chọn một hạng ở bảng “Hạng giá” để bán được khu này.
+              Chưa có hạng ghế — chọn một hạng ở bảng “Hạng ghế” để bán được khu này.
             </p>
           )}
         </div>
       )}
 
+      {/* ---- Drawn shape: which shape it is. Colour lives in the palette, with the blocks it
+             applies to — every block kind can take one, not just this one. ---- */}
+      {block.kind === "shape" && (
+        <div className="mt-3 border-t border-beige-kem/25 pt-3">
+          <p className={label}>Hình dạng</p>
+          <div className="mt-1 grid grid-cols-3 gap-1">
+            {(
+              [
+                ["rect", "▭", "Chữ nhật"],
+                ["square", "◻", "Vuông"],
+                ["circle", "◯", "Tròn"],
+                ["oval", "⬭", "Bầu dục"],
+                ["triangle", "△", "Tam giác"],
+                ["hexagon", "⬡", "Lục giác"],
+              ] as const
+            ).map(([geometry, glyph, name]) => (
+              <button
+                key={geometry}
+                title={name}
+                aria-pressed={block.geometry === geometry}
+                onClick={() => onGeometry?.(geometry)}
+                className={`rounded-lg border-2 px-2 py-1.5 text-sm transition ${
+                  block.geometry === geometry
+                    ? "border-beige-kem bg-beige-kem/10 text-beige-kem"
+                    : "border-beige-kem/40 text-beige-kem/70 hover:border-beige-kem"
+                }`}
+              >
+                {glyph}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1 text-[10px] leading-4 text-beige-kem/45">
+            {block.geometry
+              ? "Kéo các điểm trên sơ đồ để chỉnh lại — hình sẽ thành tự do."
+              : "Hình tự do: kéo từng điểm trên sơ đồ để sửa."}
+          </p>
+        </div>
+      )}
+
       {/* ---- Decoration text ---- */}
-      {(block.kind === "stage" || block.kind === "text" || block.kind === "exit") && (
+      {/* `shape` included: a drawn outline is a PLACE — a stand, a wing, a pitch — and until it could
+          be named it was an anonymous polygon in the validation list and on the buyer's map alike. */}
+      {(block.kind === "stage" ||
+        block.kind === "text" ||
+        block.kind === "exit" ||
+        block.kind === "shape" ||
+        block.kind === "ga-zone") && (
         <label className={`${label} mt-3`}>
           Chữ hiển thị
           <input
@@ -346,19 +458,17 @@ export default function BlockInspector({
         <div className="grid grid-cols-2 gap-2">
           <label className={label}>
             Rộng
-            <input
+            <CommittedNumber
               value={block.width}
-              inputMode="numeric"
-              onChange={(e) => onChange({ width: num(e.target.value, block.width) })}
+              onCommit={(width) => onChange({ width })}
               className={`mt-1 ${input}`}
             />
           </label>
           <label className={label}>
             Cao
-            <input
+            <CommittedNumber
               value={block.height}
-              inputMode="numeric"
-              onChange={(e) => onChange({ height: num(e.target.value, block.height) })}
+              onCommit={(height) => onChange({ height })}
               className={`mt-1 ${input}`}
             />
           </label>

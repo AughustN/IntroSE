@@ -198,6 +198,9 @@ export interface DocumentBlock {
   /** Decoration: the rendered text, and the vertices of a `shape`. */
   label?: string | null;
   points?: ShapePoint[] | null;
+  /** A drawn outline's fill colour (six hex digits), and the named shape it was generated as. */
+  color?: string | null;
+  geometry?: string | null;
   /** Seat-bearing kinds only. */
   seats?: DocumentSeat[];
   /**
@@ -543,11 +546,20 @@ export function adoptLayout(layout: Layout, gridSize = 50): ChartDocument {
       rotation: el.rotation,
       width: el.width,
       height: el.height,
-      sectionId: null,
-      categoryId: null,
+      // Both kept, for the same reason the colour below is. Re-adoption happens whenever geometry
+      // changes outside the document — a table placed, a standing area reshaped — and it used to hand
+      // back every element unassigned: a shape detached from the stand it outlines, and, worse, a
+      // capacity zone detached from the price class its capacity is SOLD under, which turned a
+      // publishable chart into `zone_without_category` with nothing to show what had changed.
+      sectionId: el.sectionId ?? null,
+      categoryId: el.categoryId ?? null,
       label: el.label,
       points: el.points ?? null,
       capacity: el.capacity ?? undefined,
+      // Kept, or re-reading a chart after a table edit would strip every outline back to theme ink and
+      // forget that a ring was ever meant to be a circle.
+      color: el.color ?? null,
+      geometry: el.geometry ?? null,
     });
   }
 

@@ -5,9 +5,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BlockKind, BlockParams, ChartDocument, DocumentBlock } from "@/shared/catalog/seatmap-document";
-import { emptyDocument } from "@/shared/catalog/seatmap-document";
+import { emptyDocument, nextBlockKey } from "@/shared/catalog/seatmap-document";
 import { projectDocument } from "@/shared/catalog/seatmap-project";
-import { type ValidationIssue, validateLayout } from "@/shared/catalog/seatmap-validate";
+import { clampCoord, type ValidationIssue, validateLayout } from "@/shared/catalog/seatmap-validate";
 import type { Layout } from "@/shared/catalog/seatmap";
 import ConfirmDialog, { type ConfirmRequest } from "../ConfirmDialog";
 import { layoutApi } from "../../services/catalogClient";
@@ -22,28 +22,47 @@ import ValidationPanel from "./ValidationPanel";
 import {
   addBlock,
   addCategory,
+  BLOCK_DRAG_TYPE,
   addSection,
+  BLOCK_LABEL,
   type BlockAlignEdge,
+  type BlockGeometry,
+  type BlockTarget,
   alignBlocks,
   alignedPosition,
+  allowedDelta,
+  colorable,
   duplicateBlocks,
+  EDITABLE_SEAT_TYPES,
+  type EditableSeatType,
+  geometryPoints,
   moveBlocks,
   movedPosition,
+  nextBlockContext,
+  nextShapeName,
+  parseBlockDrag,
   NUDGE,
   remainingBudget,
   removeBlocks,
   removeCategory,
+  repackRowLabels,
   removeSection,
   rotateBlocks,
+  type SeatRef,
   seatCount,
+  selectionAfterPress,
   selectionBounds,
+  setBlockColor,
+  setSeatType,
   setBlockParams,
   setLocked,
   updateBlock,
   updateCategory,
+  updateSeats,
 } from "./documentOps";
 import SectionPanel from "./SectionPanel";
 import { useLayoutHistory } from "./useLayoutHistory";
+import { CATEGORY_COLORS, snap } from "./layoutOps";
 
 /**
  * The chart editor.
@@ -109,6 +128,35 @@ function forgetStoredDraft(layoutId: number): void {
 /** How long the editor waits after the last edit before parking a recovery copy. */
 const RECOVERY_DEBOUNCE_MS = 800;
 
+/** What a freshly drawn outline is coloured, so it is visible the moment it exists. */
+const SHAPE_DEFAULT_COLOR = "#BFC0F2";
+
+/**
+ * One collapsible group in the right rail.
+ *
+ * The rail carried eight panels in a single scrolling column, none of them foldable, with the
+ * inspector — the one an organizer touches most — sitting third behind two palettes. Folding the
+ * set-up-once tools away puts the working panels within reach without hiding anything.
+ */
+function RailGroup({
+  title,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details open={defaultOpen} className="rounded-2xl border-2 border-beige-kem/40 bg-surface-2/40">
+      <summary className="cursor-pointer select-none px-3 py-2 font-mono text-[11px] font-bold uppercase tracking-widest text-beige-kem/70 marker:text-beige-kem/50">
+        {title}
+      </summary>
+      <div className="space-y-3 p-2">{children}</div>
+    </details>
+  );
+}
+
 export default function ChartEditor({
   layoutId,
   onClose,
@@ -118,6 +166,15 @@ export default function ChartEditor({
 }) {
   const [layout, setLayout] = useState<Layout | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  /**
+   * Individual seats, for the case a block is a default rather than a uniform group: a wheelchair place
+   * in the middle of a row, two VIP seats at the front of an otherwise standard block.
+   *
+   * Mutually exclusive with the block selection, so the toolbar always has one unambiguous subject.
+   * Held as canvas seat ids and resolved to document positions through `originOfSeat`, because a seat
+   * that has never been saved has no database id to hold on to.
+   */
+  const [seatSel, setSeatSel] = useState<Set<number>>(new Set());
   const [grid, setGrid] = useState(true);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -134,6 +191,27 @@ export default function ChartEditor({
    */
   const [serverJson, setServerJson] = useState("");
   const [recovery, setRecovery] = useState<StoredDraft | null>(null);
+  /** Where the last block was put, so the next one goes to the same place. State rather than a ref
+   *  because the palette SHOWS the destination, and a ref read during render is not reactive. */
+  /** Highlights the canvas while a palette item is being dragged over it. */
+  const [dropping, setDropping] = useState(false);
+  /**
+   * Points placed so far while drawing a free-form outline, or null when not drawing.
+   *
+   * A shape is a run of points closed back to the first, so drawing one is just collecting clicks. The
+   * mode is a separate state rather than a variant of the selection gesture: selecting and drawing want
+   * opposite things from a click on empty space, and overloading that is how the seat tap was lost.
+   */
+  const [drawing, setDrawing] = useState<{ x: number; y: number }[] | null>(null);
+  /** What the organizer has PINNED as the destination for new blocks. Both fields start `undefined`,
+   *  which is "nothing said" — the block follows the selection, exactly as it always has. */
+  const [lastUsed, setLastUsed] = useState<BlockTarget>({
+    sectionId: undefined,
+    categoryId: undefined,
+  });
+  /** The colour the next block takes, remembered like the section and class above it: drawing five
+   *  zones in one colour should be five clicks, not five clicks and five trips to a swatch. */
+  const [shapeColor, setShapeColor] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<(ConfirmRequest & { onConfirm: () => void }) | null>(null);
   const [dragDelta, setDragDelta] = useState<{ dx: number; dy: number } | null>(null);
 
@@ -251,6 +329,15 @@ export default function ChartEditor({
     return ids;
   }, [issues]);
 
+  /** Canvas seat id → where that seat lives in the document. */
+  const originOfSeat = useMemo(() => {
+    const map = new Map<number, { blockKey: string; index: number }>();
+    projected.seatOrigin.forEach((origin, i) => {
+      map.set(projected.seats[i]?.id ?? -(i + 1), origin);
+    });
+    return map;
+  }, [projected]);
+
   /** Which block each projected seat came from, so selecting a block highlights its seats. */
   const blockOfSeat = useMemo(() => {
     const map = new Map<number, string>();
@@ -303,15 +390,34 @@ export default function ChartEditor({
     [draft.sections],
   );
 
+  /**
+   * Seat id → the colour of the price class that seat sells under.
+   *
+   * Resolved from the SEAT, not its block, because a block is only a default: a VIP pair inside an
+   * otherwise standard block must read as VIP. This is also what the buyer sees — their map colours by
+   * price too — so the organizer is no longer arranging seats whose class they cannot see.
+   */
+  const colorOfSeat = useMemo(() => {
+    const byCategory = new Map(draft.categories.map((c) => [c.id, c.color]));
+    const map = new Map<number, string>();
+    projected.seats.forEach((s, i) => {
+      const colour = s.categoryId == null ? undefined : byCategory.get(s.categoryId);
+      if (colour) map.set(s.id ?? -(i + 1), colour);
+    });
+    return map;
+  }, [projected.seats, draft.categories]);
+
   /** Section hulls, drawn behind the seats — the canvas already knows how to title a group. */
   const blocks = useMemo<CanvasBlock[]>(
     () =>
-      draft.sections.map((s, i) => ({
+      draft.sections.map((s) => ({
         id: s.id,
         name: s.name,
-        color: draft.categories[i % Math.max(1, draft.categories.length)]?.color ?? "#8a8a8a",
+        // Stable per section id, so a hull keeps its colour as sections are added and removed. It is an
+        // IDENTITY colour, never a price: a section may hold several classes, and the seats carry those.
+        color: CATEGORY_COLORS[Math.abs(s.id) % CATEGORY_COLORS.length],
       })),
-    [draft.sections, draft.categories],
+    [draft.sections],
   );
 
   /**
@@ -332,6 +438,7 @@ export default function ChartEditor({
         number: s.seatNumber,
         section: s.sectionId === null ? null : (sectionName.get(s.sectionId) ?? null),
         isAccessible: s.isAccessible,
+        seatType: s.seatType,
       };
     });
   }, [projected.seats, dragDelta, selected, blockOfSeat, sectionName]);
@@ -353,6 +460,23 @@ export default function ChartEditor({
   );
 
   const budget = remainingBudget(draft);
+
+  /**
+   * What a swatch in the palette would do right now.
+   *
+   * With blocks selected it repaints them; with none it sets the colour the next block takes. The
+   * active swatch follows the same split, and shows nothing when the selection is of mixed colours —
+   * highlighting one of them would claim the others are that colour too.
+   */
+  const paint = useMemo(() => {
+    const targets = draft.blocks.filter(
+      (b) => selected.has(b.key) && colorable(b.kind) && !b.locked,
+    );
+    if (targets.length === 0) return { targets: 0, color: shapeColor };
+    const first = targets[0].color ?? null;
+    const uniform = targets.every((b) => (b.color ?? null) === first);
+    return { targets: targets.length, color: uniform ? first : null };
+  }, [draft.blocks, selected, shapeColor]);
 
   // ---- Persistence -----------------------------------------------------------------------------
 
@@ -470,6 +594,66 @@ export default function ChartEditor({
     await serverOp(fn, done);
   };
 
+  /** How near the first point a click has to land to close the outline, in layout units. */
+  const CLOSE_RADIUS = 250;
+
+  /**
+   * Turn the collected points into a shape block.
+   *
+   * Three points is the minimum that encloses anything; below that the run is discarded rather than
+   * saved as a line nobody can see or select.
+   */
+  const finishDrawing = (points: { x: number; y: number }[]) => {
+    setDrawing(null);
+    if (points.length < 3) return;
+    const xs = points.map((p) => p.x);
+    const ys = points.map((p) => p.y);
+    commit((d) => {
+      const ctx = nextBlockContext(d, selected, lastUsed);
+      const key = nextBlockKey(d);
+      setSelected(new Set([key]));
+      return {
+        ...d,
+        blocks: [
+          ...d.blocks,
+          {
+            key,
+            kind: "shape" as const,
+            title: BLOCK_LABEL.shape,
+            // The box is the outline's bounding centre, so moving the block moves its points with it.
+            x: Math.round((Math.min(...xs) + Math.max(...xs)) / 2),
+            y: Math.round((Math.min(...ys) + Math.max(...ys)) / 2),
+            rotation: 0,
+            width: Math.max(1, Math.max(...xs) - Math.min(...xs)),
+            height: Math.max(1, Math.max(...ys) - Math.min(...ys)),
+            sectionId: ctx.sectionId,
+            categoryId: ctx.categoryId,
+            // Named like one placed from the palette — a drawn shape is a place on the map, and an
+            // anonymous outline cannot be referred to in the validation list or told from its neighbour.
+            label: nextShapeName(d),
+            points,
+            // Hand-drawn: no named geometry to regenerate it from.
+            geometry: null,
+            color: shapeColor ?? SHAPE_DEFAULT_COLOR,
+          },
+        ],
+      };
+    });
+  };
+
+  /** A click while drawing: close the outline if it lands on the first point, else add a point. */
+  const addDrawingPoint = (p: { x: number; y: number }) => {
+    setDrawing((cur) => {
+      if (!cur) return cur;
+      const first = cur[0];
+      if (first && cur.length >= 3 && Math.hypot(p.x - first.x, p.y - first.y) <= CLOSE_RADIUS) {
+        finishDrawing(cur);
+        return null;
+      }
+      return [...cur, { x: clampCoord(snap(p.x, grid)), y: clampCoord(snap(p.y, grid)) }];
+    });
+  };
+
   /** Pose a question before doing something that throws work away. */
   const ask = (req: ConfirmRequest, onConfirm: () => void) => setConfirm({ ...req, onConfirm });
 
@@ -560,6 +744,7 @@ export default function ChartEditor({
         title: tablesLost > 0 ? "Xoá bàn và ghế của bàn?" : "Xoá ghế?",
         message:
           `Sẽ xoá ${doomed.length} khối và ${seatsLost} ghế.` +
+          " Các hàng còn lại trong khu sẽ được đánh lại chữ cho liền mạch (khoá khối để giữ nguyên chữ)." +
           (tablesLost > 0
             ? " Ghế đã bán hoặc đang được giữ sẽ khiến thao tác bị từ chối."
             : " Ghế đã bán ở suất chiếu đang bán sẽ khiến thao tác bị từ chối khi lưu."),
@@ -573,7 +758,9 @@ export default function ChartEditor({
 
   const applyDeleteNow = () => {
     const { tables, others } = partition(selected);
-    const next = others.size > 0 ? removeBlocks(draft, others) : draft;
+    // Re-lettered in the SAME commit as the delete, so one Ctrl+Z puts both the blocks and their old
+    // labels back. Two commits would leave an undo that restored the rows under the wrong letters.
+    const next = others.size > 0 ? repackRowLabels(removeBlocks(draft, others)) : draft;
     if (others.size > 0) op(() => next);
     if (tables.length === 0) {
       if (others.size > 0) setSelected(new Set());
@@ -606,23 +793,114 @@ export default function ChartEditor({
   // ---- Interaction -----------------------------------------------------------------------------
 
   /** Clicking a seat selects the BLOCK it belongs to: blocks are what this editor moves. */
-  const onSeatPointerDown = (seat: CanvasSeat, additive: boolean) => {
+  /**
+   * Put the selected block in a section / price class, and remember the choice.
+   *
+   * Remembering is what makes the NEXT block land in the same place — see `nextBlockContext`. Written
+   * as named handlers because the alternative, an assignment wedged into a `&&` chain, works only
+   * because an object happens to be truthy.
+   */
+  /** The document positions of the seats currently selected, if any. */
+  const selectedSeatRefs = useMemo(
+    () => [...seatSel].map((id) => originOfSeat.get(id)).filter((r): r is SeatRef => r !== undefined),
+    [seatSel, originOfSeat],
+  );
+
+  /** The seats the toolbar is speaking for: the selected seats, else every seat of the selected blocks. */
+  const subjectSeats = useMemo(() => {
+    if (seatSel.size > 0) {
+      return projected.seats.filter((s, i) => seatSel.has(s.id ?? -(i + 1)));
+    }
+    return projected.seats.filter((s, i) => selected.has(blockOfSeat.get(s.id ?? -(i + 1)) ?? ""));
+  }, [projected.seats, seatSel, selected, blockOfSeat]);
+
+  /**
+   * Assign to whatever is selected: the seats if seats are selected, else the blocks.
+   *
+   * Setting it on the block clears any per-seat override in that block as well, so the control means
+   * what it says — otherwise assigning "VIP" to a block would leave individually-classed seats behind
+   * and the toolbar would go on reporting a mix the organizer thought they had just resolved.
+   */
+  const assignTo = (patch: { sectionId?: number | null; categoryId?: number | null }) => {
+    if (seatSel.size > 0) {
+      op((d) => updateSeats(d, selectedSeatRefs, patch));
+      return;
+    }
+    if (selected.size === 0) return;
+    op((d) =>
+      [...selected].reduce((acc, key) => {
+        const withBlock = updateBlock(acc, key, patch);
+        const block = withBlock.blocks.find((b) => b.key === key);
+        const refs = (block?.seats ?? []).map((_, index) => ({ blockKey: key, index }));
+        // `undefined` means "inherit the block", which is exactly what clearing an override is.
+        return updateSeats(withBlock, refs, {
+          ...(patch.sectionId !== undefined ? { sectionId: undefined } : {}),
+          ...(patch.categoryId !== undefined ? { categoryId: undefined } : {}),
+        });
+      }, d),
+    );
+  };
+
+  const assignSectionTo = (id: number | null) => {
+    setLastUsed((cur) => ({ ...cur, sectionId: id }));
+    assignTo({ sectionId: id });
+    // Moving a block OUT of a section leaves the same hole in its lettering that deleting it would.
+    op((d) => repackRowLabels(d));
+  };
+
+  const assignCategoryTo = (id: number | null) => {
+    setLastUsed((cur) => ({ ...cur, categoryId: id }));
+    assignTo({ categoryId: id });
+  };
+
+  /** Mark or unmark the selected seats as accessible — a per-seat property by nature. */
+  const setSeatsAccessible = (accessible: boolean) =>
+    op((d) => updateSeats(d, selectedSeatRefs, { isAccessible: accessible }));
+
+  /** Ordinary seat or love seat. Per seat, like the column and like accessibility above. */
+  const setSeatsType = (seatType: EditableSeatType) =>
+    op((d) => setSeatType(d, selectedSeatRefs, seatType));
+
+  /**
+   * One value if the subject agrees, "mixed" if it does not.
+   *
+   * Read off the SEATS rather than the block. A block is only a default — the projection resolves
+   * `seat.categoryId ?? block.categoryId` — so reading the block would report "VIP" for a block whose
+   * seats had been individually re-classed, and the control would then quietly not apply to them.
+   */
+  const sharedValue = (pick: (s: (typeof subjectSeats)[number]) => number | null): number | null | "mixed" => {
+    if (subjectSeats.length === 0) return null;
+    const first = pick(subjectSeats[0]);
+    return subjectSeats.every((s) => pick(s) === first) ? first : "mixed";
+  };
+
+  /** Shared by seats and decoration, so the two cannot drift apart. The rule itself is pure and lives
+   *  in `documentOps`, where it can be tested — this canvas has no harness. */
+  const selectOnPress = (key: string, additive: boolean) =>
+    setSelected((cur) => selectionAfterPress(cur, key, additive));
+
+  const onSeatPointerDown = (seat: CanvasSeat, additive: boolean, alt?: boolean) => {
+    if (alt) {
+      // Seat-level intent. No drag is armed: a block is what moves, and a seat is only ever re-labelled,
+      // re-classed or marked accessible.
+      dragging.current = false;
+      setSelected(new Set());
+      setSeatSel((cur) => selectionAfterPress(cur, seat.id, additive));
+      return;
+    }
     const key = blockOfSeat.get(seat.id);
     if (!key) return;
     dragging.current = true;
-    setSelected((cur) => {
-      if (!additive) return new Set([key]);
-      const next = new Set(cur);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+    setSeatSel(new Set());
+    selectOnPress(key, additive);
   };
 
   const onSeatDrag = (dx: number, dy: number, phase: "move" | "end") => {
     if (!dragging.current || selected.size === 0) return;
     if (phase === "move") {
-      setDragDelta({ dx, dy });
+      // Previewed through the SAME limit the commit applies, or the block appears to slide past the
+      // edge of the map and then jumps back when the pointer is released.
+      setDragDelta(allowedDelta(draft, selected, dx, dy));
       return;
     }
     setDragDelta(null);
@@ -634,7 +912,7 @@ export default function ChartEditor({
   const onElementDrag = (dx: number, dy: number, phase: "move" | "end") => {
     if (!draggingElement.current || selected.size === 0) return;
     if (phase === "move") {
-      setDragDelta({ dx, dy });
+      setDragDelta(allowedDelta(draft, selected, dx, dy));
       return;
     }
     setDragDelta(null);
@@ -643,34 +921,59 @@ export default function ChartEditor({
   };
 
   /** A marquee selects every block with a seat inside the rectangle. */
-  const onMarquee = (rect: { x1: number; y1: number; x2: number; y2: number }, additive: boolean) => {
+  const onMarquee = (
+    rect: { x1: number; y1: number; x2: number; y2: number },
+    additive: boolean,
+    alt?: boolean,
+  ) => {
     const minX = Math.min(rect.x1, rect.x2);
     const maxX = Math.max(rect.x1, rect.x2);
     const minY = Math.min(rect.y1, rect.y2);
     const maxY = Math.max(rect.y1, rect.y2);
+    const inside = projected.seats
+      .map((s, i) => ({ id: s.id ?? -(i + 1), x: s.x, y: s.y }))
+      .filter((s) => s.x >= minX && s.x <= maxX && s.y >= minY && s.y <= maxY);
+
+    if (alt) {
+      const hitSeats = new Set(inside.map((s) => s.id));
+      setSelected(new Set());
+      setSeatSel((cur) => (additive ? new Set([...cur, ...hitSeats]) : hitSeats));
+      return;
+    }
+
     const hit = new Set<string>();
-    projected.seats.forEach((s, i) => {
-      if (s.x >= minX && s.x <= maxX && s.y >= minY && s.y <= maxY) {
-        const key = blockOfSeat.get(s.id ?? -(i + 1));
-        if (key) hit.add(key);
-      }
-    });
+    for (const s of inside) {
+      const key = blockOfSeat.get(s.id);
+      if (key) hit.add(key);
+    }
+    setSeatSel(new Set());
     setSelected((cur) => (additive ? new Set([...cur, ...hit]) : hit));
   };
 
-  const addAt = (kind: BlockKind) => {
-    // At the centre of what the organizer is looking at, not the centre of the coordinate space —
-    // dropping a block off-screen is how the reference editor ended up with everything stacked.
-    const at = canvas.current?.toLayout(window.innerWidth / 2, window.innerHeight / 2) ?? {
-      x: 5000,
-      y: 5000,
-    };
+  const addAt = (
+    kind: BlockKind,
+    geometry?: Exclude<BlockGeometry, "free">,
+    dropAt?: { clientX: number; clientY: number },
+  ) => {
+    // Where the organizer dropped it, else the centre of what they are looking at — never the centre of
+    // the coordinate space, which is how the reference editor ended up with everything stacked.
+    const at =
+      (dropAt
+        ? canvas.current?.toLayout(dropAt.clientX, dropAt.clientY)
+        : canvas.current?.toLayout(window.innerWidth / 2, window.innerHeight / 2)) ?? { x: 5000, y: 5000 };
     commit((d) => {
-      const made = addBlock(d, kind, at, {
-        sectionId: d.sections[0]?.id ?? null,
-        categoryId: d.categories[0]?.id ?? null,
-        grid,
-      });
+      // Inherit from what is selected, else from the last block placed — see `nextBlockContext`.
+      const ctx = nextBlockContext(d, selected, lastUsed);
+      // A shape is born coloured so it is visible the moment it lands; every other kind keeps the
+      // theme's own ink until it is painted.
+      const color = shapeColor ?? (kind === "shape" ? SHAPE_DEFAULT_COLOR : null);
+      const made = addBlock(d, kind, at, { ...ctx, grid, geometry, color });
+      // Only fills in what has NOT been pinned: overwriting a pin with the resolved value would turn
+      // "tự động" into a fixed choice the moment one block was placed.
+      setLastUsed((cur) => ({
+        sectionId: cur.sectionId === undefined ? undefined : ctx.sectionId,
+        categoryId: cur.categoryId === undefined ? undefined : ctx.categoryId,
+      }));
       setSelected(new Set([made.key]));
       return made.doc;
     });
@@ -710,8 +1013,24 @@ export default function ChartEditor({
         });
         return;
       }
+      if (drawing) {
+        // While drawing, the block shortcuts below would delete or nudge a selection that is not the
+        // subject of what the organizer is doing.
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setDrawing(null);
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          finishDrawing(drawing);
+        } else if (e.key === "Backspace" || e.key === "Delete") {
+          e.preventDefault(); // take back the last point
+          setDrawing((cur) => (cur && cur.length > 0 ? cur.slice(0, -1) : cur));
+        }
+        return;
+      }
       if (e.key === "Escape") {
         setSelected(new Set());
+        setSeatSel(new Set());
         return;
       }
       if ((e.key === "Delete" || e.key === "Backspace") && selected.size > 0) {
@@ -738,7 +1057,7 @@ export default function ChartEditor({
     // version and be refused. The appliers themselves are deliberately absent: they are rebuilt every
     // render, so listing them would re-bind the listener on every render to no purpose, and everything
     // they actually read (`draft.blocks`, `selected`, `grid`, `layout`) is already here.
-  }, [draft.blocks, selected, grid, layout, op, commit, undo, redo]);
+  }, [draft.blocks, selected, grid, layout, drawing, op, commit, undo, redo]);
 
 
   if (error && !layout) return <p className="p-6 text-sm text-on-tint">{error}</p>;
@@ -752,7 +1071,7 @@ export default function ChartEditor({
         <h2 className="font-display text-lg font-black">{layout.name}</h2>
         <span className="font-mono text-[11px] text-beige-kem/50">
           {seats} ghế · {draft.blocks.length} khối · {draft.sections.length} khu ·{" "}
-          {draft.categories.length} hạng
+          {draft.categories.length} hạng ghế
         </span>
         {layout.status === "ready" ? (
           <span className="rounded-lg border border-la-co px-2 py-0.5 font-mono text-[10px] text-la-co">
@@ -798,19 +1117,6 @@ export default function ChartEditor({
           <button onClick={() => canvas.current?.zoomToVenue()} className={btn}>
             Vừa khung
           </button>
-          {selected.size > 0 && (
-            <button
-              onClick={() => {
-                // Mixed selection locks rather than unlocks: the safe direction when it is ambiguous.
-                const anyOpen = draft.blocks.some((b) => selected.has(b.key) && b.locked !== true);
-                op((d) => setLocked(d, selected, anyOpen));
-              }}
-              className={btn}
-              title="Khoá khối đã chọn để không kéo nhầm"
-            >
-              {draft.blocks.some((b) => selected.has(b.key) && b.locked !== true) ? "Khoá" : "Mở khoá"}
-            </button>
-          )}
           <button onClick={() => void save()} disabled={busy} className={btn}>
             Lưu
           </button>
@@ -883,28 +1189,181 @@ export default function ChartEditor({
         <main className="relative flex min-w-0 flex-1 flex-col">
           <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-beige-kem/25 px-3 py-2">
             <span className="font-mono text-[11px] text-beige-kem/55">
-              {selected.size === 0
-                ? "Bấm một khối để chọn · kéo nền để quét chọn"
-                : `${selected.size} khối đang chọn`}
+              {seatSel.size > 0
+                ? `${seatSel.size} ghế đang chọn`
+                : selected.size === 0
+                  ? "Bấm một khối để chọn · kéo nền để quét chọn · giữ Alt để chọn từng ghế"
+                  : `${selected.size} khối đang chọn`}
             </span>
-            {selected.size > 1 && (
+            {/*
+              The contextual toolbar. Pinned above the canvas rather than floating beside the selection:
+              a floating one has to be repositioned on every pan frame, which means re-rendering the
+              editor at pointer speed — the opposite of the responsiveness this was meant to buy. Pinned
+              costs nothing and still puts the two things an organizer reaches for most, the section and
+              the price class, where they are already looking.
+            */}
+            {(selected.size > 0 || seatSel.size > 0) && (
               <>
-                {(["left", "centerX", "right", "top", "centerY", "bottom"] as const).map((edge) => (
-                  <button
-                    key={edge}
-                    className={btn}
-                    onClick={() => applyAlign(edge)}
+                <span className="h-4 w-px bg-beige-kem/25" aria-hidden="true" />
+
+                <label className="flex items-center gap-1 font-mono text-[11px] text-beige-kem/55">
+                  Khu
+                  <select
+                    value={(() => {
+                      const v = sharedValue((s) => s.sectionId ?? null);
+                      return v === "mixed" ? "mixed" : v === null ? "" : String(v);
+                    })()}
+                    onChange={(e) => assignSectionTo(e.target.value === "" ? null : Number(e.target.value))}
+                    className="rounded-lg border-2 border-beige-kem/50 bg-transparent px-1.5 py-0.5 text-beige-kem"
                   >
-                    {{ left: "⇤", centerX: "↔", right: "⇥", top: "⇧", centerY: "↕", bottom: "⇩" }[edge]}
+                    {sharedValue((s) => s.sectionId ?? null) === "mixed" && (
+                      <option value="mixed">— nhiều khu —</option>
+                    )}
+                    <option value="">Chưa thuộc khu</option>
+                    {draft.sections.map((sec) => (
+                      <option key={sec.id} value={sec.id}>
+                        {sec.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="flex items-center gap-1 font-mono text-[11px] text-beige-kem/55">
+                  Hạng ghế
+                  <select
+                    value={(() => {
+                      const v = sharedValue((s) => s.categoryId ?? null);
+                      return v === "mixed" ? "mixed" : v === null ? "" : String(v);
+                    })()}
+                    onChange={(e) => assignCategoryTo(e.target.value === "" ? null : Number(e.target.value))}
+                    className="rounded-lg border-2 border-beige-kem/50 bg-transparent px-1.5 py-0.5 text-beige-kem"
+                  >
+                    {sharedValue((s) => s.categoryId ?? null) === "mixed" && (
+                      <option value="mixed">— nhiều hạng ghế —</option>
+                    )}
+                    <option value="">Chưa có hạng ghế</option>
+                    {draft.categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {seatSel.size > 0 && (
+                  <label className="flex items-center gap-1 font-mono text-[11px] text-beige-kem/55">
+                    Loại ghế
+                    <select
+                      value={(() => {
+                        const types = new Set(subjectSeats.map((s) => s.seatType ?? "single"));
+                        return types.size === 1 ? [...types][0] : "mixed";
+                      })()}
+                      onChange={(e) => setSeatsType(e.target.value as EditableSeatType)}
+                      className="rounded-lg border-2 border-beige-kem/50 bg-transparent px-1.5 py-0.5 text-beige-kem"
+                    >
+                      {new Set(subjectSeats.map((s) => s.seatType ?? "single")).size > 1 && (
+                        <option value="mixed">— nhiều loại —</option>
+                      )}
+                      {EDITABLE_SEAT_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {t === "single" ? "Ghế đơn" : "Ghế đôi"}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
+                {seatSel.size > 0 && (
+                  <button
+                    onClick={() => setSeatsAccessible(!subjectSeats.every((s) => s.isAccessible))}
+                    className={btn}
+                    title="Đánh dấu ghế dành cho xe lăn"
+                  >
+                    ♿ {subjectSeats.every((s) => s.isAccessible) ? "✓" : ""}
                   </button>
-                ))}
+                )}
+
+                <button
+                  onClick={() => {
+                    const anyOpen = draft.blocks.some((b) => selected.has(b.key) && b.locked !== true);
+                    op((d) => setLocked(d, selected, anyOpen));
+                  }}
+                  className={btn}
+                  disabled={selected.size === 0}
+                  title="Khoá khối đã chọn để không kéo nhầm"
+                >
+                  {draft.blocks.some((b) => selected.has(b.key) && b.locked !== true) ? "🔓" : "🔒"}
+                </button>
+
+                <button
+                  onClick={() =>
+                    op((d) => {
+                      const dup = duplicateBlocks(d, selected, 300, 300);
+                      setSelected(dup.keys);
+                      return dup.doc;
+                    })
+                  }
+                  className={btn}
+                  disabled={selected.size === 0}
+                  title="Nhân đôi (Ctrl+D)"
+                >
+                  ⧉
+                </button>
+
+                <button
+                  onClick={applyDelete}
+                  className={btn}
+                  disabled={selected.size === 0}
+                  title="Xoá (Delete)"
+                >
+                  ✕
+                </button>
+
+                {selected.size > 1 &&
+                  (["left", "centerX", "right", "top", "centerY", "bottom"] as const).map((edge) => (
+                    <button key={edge} className={btn} onClick={() => applyAlign(edge)}>
+                      {{ left: "⇤", centerX: "↔", right: "⇥", top: "⇧", centerY: "↕", bottom: "⇩" }[edge]}
+                    </button>
+                  ))}
               </>
             )}
           </div>
 
-          <div className="min-h-0 flex-1">
+          {/*
+            Drop target for the palette. Deliberately HTML5 drag-and-drop rather than the canvas's own
+            pointer gestures: those already carry pan, marquee and block dragging, and threading a
+            fourth meaning through them is how the seat tap got swallowed. Drag events are a separate
+            channel, so nothing existing has to change to make room for this.
+          */}
+          <div
+            className={`min-h-0 flex-1 ${dropping ? "ring-2 ring-inset ring-burgundy" : ""}`}
+            onDragOver={(e) => {
+              if (!e.dataTransfer.types.includes(BLOCK_DRAG_TYPE)) return;
+              e.preventDefault(); // without this the browser refuses the drop
+              e.dataTransfer.dropEffect = "copy";
+              if (!dropping) setDropping(true);
+            }}
+            onDragLeave={(e) => {
+              // Only when the pointer leaves the container itself, not on every child crossing.
+              if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+              setDropping(false);
+            }}
+            onDrop={(e) => {
+              const dragged = parseBlockDrag(e.dataTransfer.getData(BLOCK_DRAG_TYPE));
+              setDropping(false);
+              if (!dragged) return;
+              e.preventDefault();
+              addAt(dragged.kind, dragged.geometry ?? undefined, {
+                clientX: e.clientX,
+                clientY: e.clientY,
+              });
+            }}
+          >
             <SeatCanvas<CanvasSeat>
               ref={canvas}
+              // Authoring wants a CONSTANT ratio: with the viewBox tracking the content, adding a stage
+              // near an edge rescaled the whole chart, and a gap judged by eye changed size between edits.
+              fitContent={false}
               className="h-full"
               heightClass="h-full"
               editable
@@ -918,15 +1377,25 @@ export default function ChartEditor({
                 const key = blockOfElement[index];
                 if (!key) return;
                 draggingElement.current = true;
-                setSelected((cur) => {
-                  if (!additive) return new Set([key]);
-                  const next = new Set(cur);
-                  if (next.has(key)) next.delete(key);
-                  else next.add(key);
-                  return next;
-                });
+                selectOnPress(key, additive);
               }}
               onElementDrag={onElementDrag}
+              // Vertex editing has existed in the canvas all along and was never handed a callback, so
+              // no polygon in this editor could be reshaped. Moving a point also clears `geometry`: the
+              // outline is no longer the circle the generator would produce, and saying otherwise would
+              // mean the next "make it a circle" silently discarded the organizer's edits.
+              onVertexDrag={(elementIndex, vertex, x, y) => {
+                const key = blockOfElement[elementIndex];
+                if (!key) return;
+                op((d) => {
+                  const block = d.blocks.find((b) => b.key === key);
+                  if (!block?.points) return d;
+                  const points = block.points.map((p, i) =>
+                    i === vertex ? { x: clampCoord(x), y: clampCoord(y) } : p,
+                  );
+                  return updateBlock(d, key, { points, geometry: null });
+                });
+              }}
               floorPlan={
                 layout.referenceChart.url
                   ? { ...layout.referenceChart, url: layout.referenceChart.url }
@@ -943,9 +1412,17 @@ export default function ChartEditor({
               seatClass={(s) =>
                 overlapping.has(s.id)
                   ? "fill-bubblegum/40 stroke-bubblegum"
-                  : selected.has(blockOfSeat.get(s.id) ?? "")
+                  : selected.has(blockOfSeat.get(s.id) ?? "") || seatSel.has(s.id)
                     ? "fill-burgundy/40 stroke-burgundy"
                     : "fill-transparent stroke-beige-kem/50"
+              }
+              // Price class as fill. Withheld for a seat that is selected or overlapping, so the state
+              // the organizer is acting on is never hidden behind its colour — the same precedence the
+              // buyer's map uses, where status outranks price.
+              seatFill={(s) =>
+                overlapping.has(s.id) || selected.has(blockOfSeat.get(s.id) ?? "") || seatSel.has(s.id)
+                  ? undefined
+                  : colorOfSeat.get(s.id)
               }
               seatLabel={(s) =>
                 `${s.section ? `${s.section}, ` : ""}hàng ${s.row}, ghế ${s.number}`
@@ -955,25 +1432,131 @@ export default function ChartEditor({
               onSeatDrag={onSeatDrag}
               onSeatActivate={(s) => onSeatPointerDown(s, true)}
               onMarquee={onMarquee}
-              onBackgroundClick={(_p, additive) => {
-                if (!additive) setSelected(new Set());
+              onBackgroundClick={(p, additive) => {
+                if (drawing) {
+                  addDrawingPoint(p);
+                  return;
+                }
+                if (!additive) {
+                  setSelected(new Set());
+                  setSeatSel(new Set());
+                }
               }}
+              // While drawing, the drag rectangle would be a marquee nobody asked for.
+              marqueeStyle={drawing ? "none" : "rect"}
+              overlay={
+                drawing && drawing.length > 0 ? (
+                  <g pointerEvents="none">
+                    <polyline
+                      points={drawing.map((p) => `${p.x},${p.y}`).join(" ")}
+                      fill="none"
+                      stroke={shapeColor ?? SHAPE_DEFAULT_COLOR}
+                      strokeWidth={12}
+                      strokeDasharray="30 20"
+                    />
+                    {drawing.map((p, i) => (
+                      <circle
+                        key={i}
+                        cx={p.x}
+                        cy={p.y}
+                        r={i === 0 ? 90 : 60}
+                        fill={i === 0 ? (shapeColor ?? SHAPE_DEFAULT_COLOR) : "none"}
+                        stroke={shapeColor ?? SHAPE_DEFAULT_COLOR}
+                        strokeWidth={10}
+                      />
+                    ))}
+                  </g>
+                ) : null
+              }
             />
           </div>
 
           <p className="shrink-0 px-3 pb-2 font-mono text-[11px] leading-4 text-beige-kem/45">
-            Kéo khối để dời · giữ Ctrl (hoặc ⌘) và kéo để di chuyển khung nhìn · lăn chuột để phóng to
+            {drawing
+              ? `Đang vẽ: bấm để đặt điểm (${drawing.length}) · bấm lại điểm đầu hoặc Enter để khép hình · Backspace lùi một điểm · Esc huỷ`
+              : null}
+            {drawing ? null : "Kéo khối để dời"} · giữ Ctrl (hoặc ⌘) và kéo để di chuyển khung nhìn · lăn chuột để phóng to
             · Shift+bấm chọn thêm · mũi tên nhích, Shift+mũi tên nhích xa · Ctrl+D nhân đôi · Delete
             xoá khối · Ctrl+Z hoàn tác.
           </p>
         </main>
 
-        <aside className="w-80 shrink-0 space-y-3 overflow-y-auto border-l-2 border-beige-kem p-3">
-          <BlockPalette onAdd={addAt} disabled={busy} remaining={budget} />
+        <aside className="w-80 shrink-0 space-y-2 overflow-y-auto border-l-2 border-beige-kem p-3">
+          {/* Ordered by how often it is reached for, not by the order the features were built. The
+              inspector leads whenever something is selected, because that is the moment the organizer
+              is asking "what is this and how do I change it". */}
+          {selectedBlock && (
+            <RailGroup title="Thuộc tính khối" defaultOpen>
+          <BlockInspector
+            block={selectedBlock}
+            sections={draft.sections}
+            categories={draft.categories}
+            seatBudget={budget}
+            onChange={(patch: Partial<DocumentBlock>) =>
+              selectedBlock && op((d) => updateBlock(d, selectedBlock.key, patch))
+            }
+            onParams={(patch: Partial<BlockParams>) =>
+              selectedBlock &&
+              // Shrinking frees row labels exactly as deleting a block does, so the same close-the-gap
+              // rule applies — otherwise 8 rows cut to 4 would leave the block after it starting at I.
+              op((d) => repackRowLabels(setBlockParams(d, selectedBlock.key, patch)))
+            }
+            onRotate={(deg) => applyRotate(deg)}
+            onGeometry={(geometry) =>
+              selectedBlock &&
+              op((d) =>
+                updateBlock(d, selectedBlock.key, {
+                  geometry,
+                  points: geometryPoints(geometry, selectedBlock),
+                }),
+              )
+            }
+            onDuplicate={() =>
+              commit((d) => {
+                const dup = duplicateBlocks(d, selected, 300, 300);
+                setSelected(dup.keys);
+                return dup.doc;
+              })
+            }
+            // Through the same path as the keyboard, so the inspector button cannot be the one route
+            // that skips the confirmation and the table endpoint.
+            onDelete={applyDelete}
+          />
+            </RailGroup>
+          )}
+
+          {/* Always open, unlike the groups around it. It used to collapse the moment a block was
+              selected — reasonable when it only made blocks, wrong now that it also paints them, which
+              is something you do TO a selection. */}
+          <RailGroup title="Thêm vào sơ đồ" defaultOpen>
+          <BlockPalette
+            onAdd={(kind, geometry) => addAt(kind, geometry)}
+            onDraw={() => {
+              setDrawing((cur) => (cur ? null : []));
+              setSelected(new Set());
+              setSeatSel(new Set());
+            }}
+            drawing={drawing !== null}
+            color={paint.color}
+            colorTarget={paint.targets}
+            onColor={(color) => {
+              // Remembered either way, so the next block matches what was just painted.
+              setShapeColor(color);
+              if (paint.targets > 0) op((d) => setBlockColor(d, selected, color));
+            }}
+            disabled={busy}
+            remaining={budget}
+            sections={draft.sections}
+            categories={draft.categories}
+            pinned={lastUsed}
+            resolved={nextBlockContext(draft, selected, lastUsed)}
+            onPin={(patch) => setLastUsed((cur) => ({ ...cur, ...patch }))}
+          />
 
           {/* Tables and standing areas keep their own endpoints: their seat geometry is computed on the
               server (a table's seats sit outside its edge, a standing area's fall inside a polygon), so
               there is no document equivalent to draw them from. */}
+
           <TablePalette
             sections={draft.sections.map((sec) => ({ id: sec.id, name: sec.name }))}
             tables={layout.tables}
@@ -994,38 +1577,16 @@ export default function ChartEditor({
             // a separate element list.
             onAddElement={() => addAt("shape")}
           />
+          </RailGroup>
 
-          <BlockInspector
-            block={selectedBlock}
-            sections={draft.sections}
-            categories={draft.categories}
-            seatBudget={budget}
-            onChange={(patch: Partial<DocumentBlock>) =>
-              selectedBlock && op((d) => updateBlock(d, selectedBlock.key, patch))
-            }
-            onParams={(patch: Partial<BlockParams>) =>
-              selectedBlock && op((d) => setBlockParams(d, selectedBlock.key, patch))
-            }
-            onRotate={(deg) => applyRotate(deg)}
-            onDuplicate={() =>
-              commit((d) => {
-                const dup = duplicateBlocks(d, selected, 300, 300);
-                setSelected(dup.keys);
-                return dup.doc;
-              })
-            }
-            // Through the same path as the keyboard, so the inspector button cannot be the one route
-            // that skips the confirmation and the table endpoint.
-            onDelete={applyDelete}
-          />
-
+          <RailGroup title="Khu vực & hạng ghế" defaultOpen={!!selectedBlock}>
           <SectionPanel
             sections={draft.sections.map((s) => ({ id: s.id, name: s.name }))}
             seats={projected.seats}
             selectedCount={selected.size}
             activeSectionId={selectedBlock?.sectionId ?? null}
             onActivate={(id) =>
-              selectedBlock && op((d) => updateBlock(d, selectedBlock.key, { sectionId: id }))
+              assignSectionTo(id)
             }
             onAdd={(name) => commit((d) => addSection(d, name).doc)}
             onRename={(id, name) => op((d) => ({ ...d, sections: d.sections.map((s) => (s.id === id ? { ...s, name } : s)) }))}
@@ -1048,7 +1609,7 @@ export default function ChartEditor({
               );
             }}
             onAssign={(id) =>
-              selectedBlock && op((d) => updateBlock(d, selectedBlock.key, { sectionId: id }))
+              assignSectionTo(id)
             }
             onZoom={(id) => {
               const box = selectionBounds(
@@ -1065,7 +1626,7 @@ export default function ChartEditor({
             selectedCount={selected.size}
             activeCategoryId={selectedBlock?.categoryId ?? null}
             onActivate={(id) =>
-              selectedBlock && op((d) => updateBlock(d, selectedBlock.key, { categoryId: id }))
+              assignCategoryTo(id)
             }
             onAdd={(name) => commit((d) => addCategory(d, name).doc)}
             onRename={(id, name) => op((d) => updateCategory(d, id, { name }))}
@@ -1079,9 +1640,9 @@ export default function ChartEditor({
               }
               ask(
                 {
-                  title: "Xoá hạng giá?",
-                  message: `${seats} ghế sẽ mất hạng giá. Suất chiếu nào đang dùng hạng này sẽ phải chọn lại mức giá trước khi bán.`,
-                  confirmLabel: "Xoá hạng giá",
+                  title: "Xoá hạng ghế?",
+                  message: `${seats} ghế sẽ mất hạng ghế. Suất chiếu nào đang bán hạng này sẽ phải chọn lại hạng ghế trước khi bán.`,
+                  confirmLabel: "Xoá hạng ghế",
                   cancelLabel: "Huỷ",
                   tone: "danger",
                 },
@@ -1089,16 +1650,21 @@ export default function ChartEditor({
               );
             }}
             onAssign={(id) =>
-              selectedBlock && op((d) => updateBlock(d, selectedBlock.key, { categoryId: id }))
+              assignCategoryTo(id)
             }
           />
+          </RailGroup>
 
+          {/* Never folded: an unresolved problem must not be something the organizer has to go and
+              look for before pressing publish. */}
           <ValidationPanel
             issues={issues}
             labelOfSeat={(id) => seatLabels.get(id) ?? null}
             onFocusSeat={focusSeat}
           />
 
+          {/* Set up once per venue, then never touched again — folded by default. */}
+          <RailGroup title="Ảnh nền & bản vẽ tham chiếu">
           <FloorPlanPanel
             layoutId={layout.id}
             plan={layout.floorPlan}
@@ -1110,6 +1676,7 @@ export default function ChartEditor({
             reference={layout.referenceChart}
             onChange={(rc) => setLayout({ ...layout, referenceChart: rc })}
           />
+          </RailGroup>
         </aside>
       </div>
       {confirm && (

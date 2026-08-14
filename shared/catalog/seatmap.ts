@@ -163,12 +163,27 @@ export interface LayoutElement {
    */
   capacity?: number | null;
   /**
+   * A drawn outline's fill colour, six hex digits. Absent means the theme's own ink, which is how every
+   * element rendered before shapes could be coloured.
+   */
+  color?: string | null;
+  /** Which named shape this outline was generated as, if any. Absent means a hand-drawn polygon. */
+  geometry?: string | null;
+  /**
    * `area` only: the price class this zone's capacity is sold under.
    *
    * The handle that joins a zone to a `ticket_tiers` row, exactly as `seats.category_id` does for a
    * seat. A zone with a capacity and no category is unpublishable rather than free.
    */
   categoryId?: number | null;
+  /**
+   * Which section this element belongs to, if any (0031).
+   *
+   * Any kind may carry one, unlike `capacity` and `categoryId` above: a boundary outlines a stand, a
+   * door leads into one, a bar serves one. It is decoration either way — nothing prices or sells
+   * through this — so an unassigned element is a normal state, not a validation failure.
+   */
+  sectionId?: number | null;
 }
 
 export interface LayoutFloorPlan {
