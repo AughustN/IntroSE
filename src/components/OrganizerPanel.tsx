@@ -5,7 +5,14 @@
 
 import { FormEvent, type KeyboardEvent, useEffect, useState } from "react";
 import Select from "./Select";
-import { catalogClient, type EventCategory, MyEvent, MyVenue, organizerApi, type ScanTicket } from "../services/catalogClient";
+import {
+  catalogClient,
+  type EventCategory,
+  MyEvent,
+  MyVenue,
+  organizerApi,
+  type ScanTicket,
+} from "../services/catalogClient";
 import { aiClient, type ListingSuggestion } from "../services/aiClient";
 import SeatMapBuilder from "./SeatMapBuilder";
 import QrCameraScan from "./QrCameraScan";
@@ -139,10 +146,17 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
   const onCameraDetect = (code: string) => {
     setScanCode(code);
     setCameraOn(false);
+    setScanBusy(true);
+    setScanErr(null);
+    setScanAlready(false);
     organizerApi
       .ticketLookup(code)
       .then((ticket) => setScanResult(ticket))
-      .catch((e) => setScanErr((e as Error).message));
+      .catch((e) => {
+        setScanResult(null);
+        setScanErr((e as Error).message);
+      })
+      .finally(() => setScanBusy(false));
   };
   const setTierField = (index: number, field: "label" | "price", value: string) =>
     setStTiers((rows) => rows.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
@@ -224,7 +238,11 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
     setAiBusy(true);
     setErr(null);
     try {
-      const result = await aiClient.eventAssistant({ brief: aiBrief.trim(), category: categoryCode, eventType });
+      const result = await aiClient.eventAssistant({
+        brief: aiBrief.trim(),
+        category: categoryCode,
+        eventType,
+      });
       setAiSuggestion(result.suggestion);
       if (result.message) setNotice(result.message);
     } catch (error) {
@@ -239,7 +257,11 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
     setTitle(aiSuggestion.title);
     setDescription(aiSuggestion.description);
     if (aiSuggestion.ticketPriceSuggestions.length) {
-      setStTiers(aiSuggestion.ticketPriceSuggestions.slice(0, MAX_TIERS).map((tier) => ({ label: tier.name, price: String(tier.price) })));
+      setStTiers(
+        aiSuggestion.ticketPriceSuggestions
+          .slice(0, MAX_TIERS)
+          .map((tier) => ({ label: tier.name, price: String(tier.price) })),
+      );
     }
     setNotice("Đã áp dụng gợi ý AI. Hãy kiểm tra và chỉnh sửa trước khi tạo sự kiện.");
   };
@@ -310,15 +332,35 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
         <div className="mt-3 border border-beige-kem/30 p-3">
           <label className="block">
             <span className={label}>Trợ lý AI: mô tả ý tưởng</span>
-            <textarea value={aiBrief} onChange={(event) => setAiBrief(event.target.value)} maxLength={3000} rows={2} placeholder="Ví dụ: đêm EDM ngoài trời cho sinh viên, 500 người, tối thứ 7" className={`${input} h-auto py-2.5`} />
+            <textarea
+              value={aiBrief}
+              onChange={(event) => setAiBrief(event.target.value)}
+              maxLength={3000}
+              rows={2}
+              placeholder="Ví dụ: đêm EDM ngoài trời cho sinh viên, 500 người, tối thứ 7"
+              className={`${input} h-auto py-2.5`}
+            />
           </label>
-          <button type="button" onClick={() => void askListingAssistant()} disabled={aiBusy || !aiBrief.trim()} className={`${ghost} mt-2 disabled:opacity-60`}>{aiBusy ? "Đang tạo gợi ý" : "Tạo gợi ý AI"}</button>
-          {aiSuggestion && <div className="mt-3 border-t border-beige-kem/25 pt-3 text-sm">
-            <p className="font-bold">{aiSuggestion.title}</p>
-            <p className="mt-1 whitespace-pre-wrap text-beige-kem/75">{aiSuggestion.description}</p>
-            <p className="mt-2 text-xs text-beige-kem/65">{aiSuggestion.tags.join(" · ")}</p>
-            <button type="button" onClick={applyListingSuggestion} className={`${btn} mt-3`}>Áp dụng vào form</button>
-          </div>}
+          <button
+            type="button"
+            onClick={() => void askListingAssistant()}
+            disabled={aiBusy || !aiBrief.trim()}
+            className={`${ghost} mt-2 disabled:opacity-60`}
+          >
+            {aiBusy ? "Đang tạo gợi ý" : "Tạo gợi ý AI"}
+          </button>
+          {aiSuggestion && (
+            <div className="mt-3 border-t border-beige-kem/25 pt-3 text-sm">
+              <p className="font-bold">{aiSuggestion.title}</p>
+              <p className="mt-1 whitespace-pre-wrap text-beige-kem/75">
+                {aiSuggestion.description}
+              </p>
+              <p className="mt-2 text-xs text-beige-kem/65">{aiSuggestion.tags.join(" · ")}</p>
+              <button type="button" onClick={applyListingSuggestion} className={`${btn} mt-3`}>
+                Áp dụng vào form
+              </button>
+            </div>
+          )}
         </div>
         <button type="submit" className={`${btn} mt-4`}>
           Tạo bản nháp
@@ -376,7 +418,14 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
           <button className={btn} onClick={doCheckIn} disabled={scanBusy || !scanCode.trim()}>
             Check-in
           </button>
-          <button className={ghost} onClick={() => setCameraOn((on) => !on)}>
+          <button
+            type="button"
+            className={ghost}
+            onClick={() => {
+              setScanErr(null);
+              setCameraOn((on) => !on);
+            }}
+          >
             Camera
           </button>
         </div>
@@ -385,7 +434,10 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
           <QrCameraScan
             onDetect={onCameraDetect}
             onError={setScanErr}
-            onClose={() => setCameraOn(false)}
+            onClose={() => {
+              setCameraOn(false);
+              setScanErr(null);
+            }}
           />
         )}
 
@@ -427,12 +479,16 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
               </div>
               <div>
                 <dt className="label-eyebrow text-beige-kem/50">Giờ diễn</dt>
-                <dd className="text-beige-kem">{new Date(scanResult.startsAt).toLocaleString("vi-VN")}</dd>
+                <dd className="text-beige-kem">
+                  {new Date(scanResult.startsAt).toLocaleString("vi-VN")}
+                </dd>
               </div>
             </dl>
 
             <div className="mt-4 flex items-center gap-2">
-              <span className={`rounded-lg border px-2 py-0.5 font-meta text-eyebrow ${badgeTone(scanResult.status)}`}>
+              <span
+                className={`rounded-lg border px-2 py-0.5 font-meta text-eyebrow ${badgeTone(scanResult.status)}`}
+              >
                 {scanResult.status === "checked_in"
                   ? scanAlready
                     ? "Đã soát vé (quét lại)"

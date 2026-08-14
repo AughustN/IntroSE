@@ -1,23 +1,13 @@
 /**
  * Camera QR scanning for organizer check-in (US6).
  *
- * Uses the native `BarcodeDetector` (Chrome/Edge/Android — the phones gate staff hold) with zero
- * dependencies: `getUserMedia` feeds a video element, a canvas hands each frame to the detector,
- * and a `requestAnimationFrame` loop drains it until one QR resolves. Browsers without
- * `BarcodeDetector` (Safari/Firefox) fall back to typing/pasting the code — the paste field also
- * accepts a USB/HID scanner, the other half of the gate-hardware story.
+ * `jsQR` decodes camera frames in JavaScript, so this works in browsers that
+ * do not expose the experimental native `BarcodeDetector` API (notably iOS
+ * Safari and Firefox).
  */
 
+import jsQR from "jsqr";
 import { useEffect, useRef, useState } from "react";
-
-type DetectedBarcode = { rawValue: string };
-
-interface BarcodeDetectorCtor {
-  new (options: { formats: string[] }): { detect(source: CanvasImageSource): Promise<DetectedBarcode[]> };
-}
-
-// TS 5.8's DOM lib predates the shape-detection API; declare only the slice we call.
-const NativeDetector = (globalThis as { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector;
 
 interface Props {
   onDetect: (code: string) => void;
@@ -28,109 +18,146 @@ interface Props {
 export default function QrCameraScan({ onDetect, onError, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const frameRef = useRef<number | null>(null);
   const runningRef = useRef(false);
   const [state, setState] = useState<"idle" | "starting" | "scanning" | "denied">("idle");
+
+  const stop = () => {
+    runningRef.current = false;
+    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+    frameRef.current = null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setState("idle");
+  };
 
   // Stop the camera whenever the component unmounts or the caller closes it.
   useEffect(
     () => () => {
       runningRef.current = false;
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
       streamRef.current?.getTracks().forEach((track) => track.stop());
     },
     [],
   );
 
-  const stop = () => {
-    runningRef.current = false;
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
+  const beginDetect = () => {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) {
+      stop();
+      onError("Không thể đọc hình ảnh từ camera. Dán mã thủ công hoặc dùng máy quét USB.");
+      return;
+    }
+    runningRef.current = true;
+
+    const tick = () => {
+      if (!runningRef.current) return;
+      const video = videoRef.current;
+      if (video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const result = jsQR(image.data, image.width, image.height, {
+          inversionAttempts: "attemptBoth",
+        });
+        if (result) {
+          runningRef.current = false;
+          onDetect(result.data);
+          return;
+        }
+      }
+      frameRef.current = requestAnimationFrame(tick);
+    };
+
+    frameRef.current = requestAnimationFrame(tick);
   };
 
   const start = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setState("denied");
+      onError("Trình duyệt không hỗ trợ camera. Dán mã thủ công hoặc dùng máy quét USB.");
+      return;
+    }
+
     setState("starting");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
+        video: { facingMode: { ideal: "environment" } },
         audio: false,
       });
       streamRef.current = stream;
+
+      // The video element is always mounted, including while the start button is visible.
       const video = videoRef.current;
-      if (!video) return;
+      if (!video) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       video.srcObject = stream;
       await video.play();
       setState("scanning");
       beginDetect();
     } catch {
-      setState("denied");
-      onError("Không truy cập được camera. Dán mã thủ công hoặc dùng máy quét USB.");
-    }
-  };
-
-  const beginDetect = () => {
-    if (!NativeDetector) {
       stop();
-      onError("Trình duyệt không hỗ trợ quét camera. Dán mã thủ công.");
-      return;
+      setState("denied");
+      onError(
+        "Không truy cập được camera. Hãy cấp quyền camera, hoặc dán mã thủ công / dùng máy quét USB.",
+      );
     }
-    const detector = new NativeDetector({ formats: ["qr_code"] });
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    runningRef.current = true;
-
-    const tick = async () => {
-      if (!runningRef.current) return;
-      const video = videoRef.current;
-      if (video && video.readyState >= video.HAVE_ENOUGH_DATA && video.videoWidth > 0) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0);
-        try {
-          const codes = await detector.detect(canvas);
-          if (codes.length) {
-            runningRef.current = false;
-            onDetect(codes[0].rawValue);
-            return;
-          }
-        } catch {
-          // A frame decode miss is not an error — keep sampling.
-        }
-      }
-      requestAnimationFrame(tick);
-    };
-    void tick();
   };
+
+  const active = state === "starting" || state === "scanning";
 
   return (
     <div className="mt-3 space-y-3 rounded-xl border-2 border-beige-kem p-4">
-      {state === "idle" && (
-        <button type="button" onClick={() => void start()} className="rounded-xl bg-burgundy px-4 py-2.5 text-body font-black text-white transition hover:brightness-95">
+      <video
+        ref={videoRef}
+        muted
+        playsInline
+        autoPlay
+        className={
+          active
+            ? "aspect-video w-full max-w-xs rounded-xl border border-beige-kem/40 bg-black object-cover"
+            : "hidden"
+        }
+      />
+
+      {state === "idle" || state === "denied" ? (
+        <button
+          type="button"
+          onClick={() => void start()}
+          className="rounded-xl bg-burgundy px-4 py-2.5 text-body font-black text-white transition hover:brightness-95"
+        >
           Quét bằng camera
         </button>
-      )}
-
-      {(state === "starting" || state === "scanning") && (
+      ) : (
         <>
-          <video
-            ref={videoRef}
-            muted
-            playsInline
-            className="w-full max-w-xs rounded-xl border border-beige-kem/40 bg-black"
-          />
           <p className="font-meta text-meta text-beige-kem/60">
-            {state === "starting" ? "Đang mở camera…" : "Đưa mã QR vào khung để quét."}
+            {state === "starting" ? "Đang mở camera..." : "Đưa mã QR vào khung để quét."}
           </p>
-          <button type="button" onClick={stop} className="rounded-xl border-2 border-beige-kem px-3 py-2 text-eyebrow font-bold text-beige-kem/80 transition">
+          <button
+            type="button"
+            onClick={stop}
+            className="rounded-xl border-2 border-beige-kem px-3 py-2 text-eyebrow font-bold text-beige-kem/80 transition"
+          >
             Dừng
           </button>
         </>
       )}
 
-      {state !== "idle" && (
-        <button type="button" onClick={onClose} className="ml-2 font-meta text-meta text-ink-soft transition hover:text-beige-kem">
-          Đóng camera
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={() => {
+          stop();
+          onClose();
+        }}
+        className="ml-2 font-meta text-meta text-ink-soft transition hover:text-beige-kem"
+      >
+        Đóng camera
+      </button>
     </div>
   );
 }
