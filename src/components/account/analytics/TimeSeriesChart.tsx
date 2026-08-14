@@ -37,7 +37,7 @@ export function TimeSeriesChart({ data, period, onPeriodChange, onRefresh, loadi
             <TrendingUp className="h-5 w-5" />
           </div>
           <div>
-            <h4 className="text-base font-black text-beige-kem">Thống kê doanh số (Sales Analytics)</h4>
+            <h4 className="text-base font-black text-beige-kem">Thống kê doanh số</h4>
             <p className="text-xs text-beige-kem/60">Xu hướng doanh thu & lượt vé bán ra theo thời gian</p>
           </div>
         </div>

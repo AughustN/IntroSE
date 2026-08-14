@@ -32,7 +32,7 @@ export function RecentTransactionsTable({ transactions }: Props) {
             <Activity className="h-5 w-5" />
           </div>
           <div>
-            <h4 className="text-base font-black text-beige-kem">Hoạt động gần đây (Recent Activity)</h4>
+            <h4 className="text-base font-black text-beige-kem">Hoạt động gần đây</h4>
             <p className="text-xs text-beige-kem/60">Nhật ký giao dịch mua vé & hoàn tiền mới nhất</p>
           </div>
         </div>
@@ -53,7 +53,7 @@ export function RecentTransactionsTable({ transactions }: Props) {
             <Activity className="h-5 w-5" />
           </div>
           <div>
-            <h4 className="text-base font-black text-beige-kem">Hoạt động gần đây (Recent Activity)</h4>
+            <h4 className="text-base font-black text-beige-kem">Hoạt động gần đây</h4>
             <p className="text-xs text-beige-kem/60">Nhật ký đơn hàng & trạng thái thanh toán / hoàn tiền</p>
           </div>
         </div>

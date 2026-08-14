@@ -25,7 +25,7 @@ export function CapacityGauge({ capacityData }: Props) {
             <div className="rounded-xl bg-beige-kem/15 p-2 text-beige-kem/70">
               <Calendar className="h-5 w-5" />
             </div>
-            <h4 className="text-base font-black text-beige-kem">Sự kiện sắp diễn ra (Upcoming Event)</h4>
+            <h4 className="text-base font-black text-beige-kem">Sự kiện sắp diễn ra</h4>
           </div>
           <span className="rounded-full bg-beige-kem/10 px-2.5 py-1 text-xs font-bold text-beige-kem/60">
             0% Lấp đầy
@@ -77,7 +77,7 @@ export function CapacityGauge({ capacityData }: Props) {
             <div className="rounded-xl bg-la-co/20 p-2 text-la-co">
               <Calendar className="h-5 w-5" />
             </div>
-            <h4 className="text-base font-black text-beige-kem">Sự kiện sắp diễn ra (Upcoming Event)</h4>
+            <h4 className="text-base font-black text-beige-kem">Sự kiện sắp diễn ra</h4>
           </div>
           <span className="inline-flex items-center gap-1 rounded-full bg-la-co/20 px-2.5 py-1 text-xs font-bold text-la-co">
             <CheckCircle2 className="h-3.5 w-3.5" /> Đang mở bán

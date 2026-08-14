@@ -25,7 +25,7 @@ export function RevenueDonutCharts({ breakdowns }: Props) {
           <PieChartIcon className="h-5 w-5" />
         </div>
         <div>
-          <h4 className="text-base font-black text-beige-kem">Cơ cấu doanh thu (Conversion & Tier)</h4>
+          <h4 className="text-base font-black text-beige-kem">Cơ cấu doanh thu</h4>
           <p className="text-xs text-beige-kem/60">Tỷ trọng doanh thu hạng vé & danh mục</p>
         </div>
       </div>
@@ -33,7 +33,7 @@ export function RevenueDonutCharts({ breakdowns }: Props) {
       {/* 1. Revenue by Ticket Tier */}
       <div className="rounded-xl border border-beige-kem/20 bg-ink-dark/40 p-4">
         <div className="mb-2 flex items-center justify-between">
-          <h5 className="text-xs font-bold uppercase tracking-wider text-beige-kem/80">Theo Hạng Vé (Ticket Tier)</h5>
+          <h5 className="text-xs font-bold uppercase tracking-wider text-beige-kem/80">Theo Hạng Vé</h5>
           <span className="text-[11px] font-bold text-la-co">{by_tier.length} hạng vé</span>
         </div>
 
@@ -88,7 +88,7 @@ export function RevenueDonutCharts({ breakdowns }: Props) {
       {/* 2. Revenue by Event Category */}
       <div className="rounded-xl border border-beige-kem/20 bg-ink-dark/40 p-4">
         <div className="mb-2 flex items-center justify-between">
-          <h5 className="text-xs font-bold uppercase tracking-wider text-beige-kem/80">Theo Thể Loại (Category)</h5>
+          <h5 className="text-xs font-bold uppercase tracking-wider text-beige-kem/80">Theo Thể Loại</h5>
           <span className="text-[11px] font-bold text-cam-dat">{by_category.length} thể loại</span>
         </div>
 

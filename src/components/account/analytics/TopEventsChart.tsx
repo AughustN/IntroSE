@@ -36,13 +36,10 @@ export function TopEventsChart({ data }: Props) {
             <Flame className="h-5 w-5" />
           </div>
           <div>
-            <h4 className="text-base font-black text-beige-kem">Top sự kiện (Top Events)</h4>
+            <h4 className="text-base font-black text-beige-kem">Top sự kiện</h4>
             <p className="text-xs text-beige-kem/60">Xếp hạng sự kiện theo doanh thu & lượng vé</p>
           </div>
         </div>
-        <span className="rounded-full bg-burgundy/20 px-2.5 py-1 text-xs font-bold text-burgundy">
-          Top {data?.length || 0}
-        </span>
       </div>
 
       {/* Empty State */}

@@ -229,7 +229,7 @@ export default function OrganizerSection({
           {onViewAnalytics && (
             <button type="button" onClick={onViewAnalytics} className={btnSecondary}>
               <BarChart3 className="h-4 w-4" aria-hidden />
-              Thống kê & Analytics
+              Thống kê kinh doanh
             </button>
           )}
         </div>
