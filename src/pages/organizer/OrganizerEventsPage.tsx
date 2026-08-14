@@ -1,13 +1,40 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { Calendar, BarChart3 } from "lucide-react";
 import { EventCard } from "../../components/organizer/EventCard";
 import { PortfolioSummaryHeader } from "../../components/organizer/PortfolioSummaryHeader";
 import { getOrganizerEvents, createOrganizerEvent, CreateEventInput } from "../../services/organizerClient";
 import { aiClient, type ListingSuggestion } from "../../services/aiClient";
 import { OrganizerPortfolioSummary } from "../../types";
+import { OrganizerBusinessAnalytics } from "../../components/account/OrganizerBusinessAnalytics";
 
 export const OrganizerEventsPage: React.FC = () => {
   const navigate = useNavigate();
+
+  // Top-Level Workspace Section: "events" (Quản lý sự kiện) or "analytics" (Thống kê kinh doanh)
+  const [activeSection, setActiveSection] = useState<"events" | "analytics">(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("section") === "analytics" ? "analytics" : "events";
+    }
+    return "events";
+  });
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      setActiveSection(params.get("section") === "analytics" ? "analytics" : "events");
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  const handleSectionSwitch = (section: "events" | "analytics") => {
+    setActiveSection(section);
+    const url = new URL(window.location.href);
+    url.searchParams.set("section", section);
+    window.history.replaceState(null, "", url.toString());
+  };
 
   // Active Part / Tab: "manage" (Quản lý sự kiện) or "create" (Tạo sự kiện mới)
   const [activeTab, setActiveTab] = useState<"manage" | "create">("manage");
@@ -183,6 +210,7 @@ export const OrganizerEventsPage: React.FC = () => {
   }, [activeFilter, searchTerm, activeTab]);
 
   const handleSelectEvent = (eventId: string) => {
+    window.scrollTo(0, 0);
     navigate(`/organizer/${eventId}`);
   };
 
@@ -263,7 +291,7 @@ export const OrganizerEventsPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-xanh-pho text-beige-kem p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-8 transition-colors duration-200">
+    <div className="min-h-screen bg-xanh-pho text-beige-kem p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6 transition-colors duration-200">
       {/* Toast Notification */}
       {toastMsg && (
         <div
@@ -278,21 +306,50 @@ export const OrganizerEventsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Main Page Title & Top Section Navigation */}
-      <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="font-display text-2xl sm:text-3xl font-black tracking-tight text-burgundy-ink">
-              Quản Lý Sự Kiện Ban Tổ Chức
-            </h1>
-            <p className="font-meta text-xs text-ink-soft mt-1">
-              Phân chia thành 2 phần: Quản lý danh mục sự kiện hiện có và Khởi tạo sự kiện mới.
-            </p>
-          </div>
+      {/* Main Workspace Header & Top-Level Section Navigation */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-surface-1 border border-beige-kem/20 p-5 rounded-2xl shadow-xl">
+        <div>
+          <h1 className="font-display text-2xl sm:text-3xl font-black tracking-tight text-beige-kem">
+            Trang quản lí của Nhà tổ chức sự kiện
+          </h1>
         </div>
 
-        {/* 2-Part Section Selector Tabs */}
-        <div className="flex items-center space-x-2 border-b border-beige-kem/20 pb-3">
+        {/* 2 Top-Level Workspace Section Switcher Tabs */}
+        <div className="flex items-center p-1.5 bg-xanh-pho/90 border border-beige-kem/20 rounded-xl space-x-1">
+          <button
+            type="button"
+            onClick={() => handleSectionSwitch("analytics")}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all ${
+              activeSection === "analytics"
+                ? "bg-burgundy text-white shadow-md shadow-burgundy/30"
+                : "text-ink-soft hover:text-beige-kem hover:bg-surface-2"
+            }`}
+          >
+            <BarChart3 className="w-4 h-4" />
+            <span>Thống kê kinh doanh</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSectionSwitch("events")}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all ${
+              activeSection === "events"
+                ? "bg-burgundy text-white shadow-md shadow-burgundy/30"
+                : "text-ink-soft hover:text-beige-kem hover:bg-surface-2"
+            }`}
+          >
+            <Calendar className="w-4 h-4" />
+            <span>Quản lý sự kiện</span>
+          </button>
+        </div>
+      </div>
+
+      {activeSection === "analytics" ? (
+        <OrganizerBusinessAnalytics />
+      ) : (
+        <div className="space-y-6">
+          {/* 2-Part Section Selector Tabs for Event Management */}
+          <div className="flex items-center space-x-2 border-b border-beige-kem/20 pb-3">
           <button
             onClick={() => setActiveTab("manage")}
             className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all duration-200 flex items-center space-x-2 ${
@@ -318,7 +375,6 @@ export const OrganizerEventsPage: React.FC = () => {
             <span>➕ Phần 2: Tạo Sự Kiện Mới</span>
           </button>
         </div>
-      </div>
 
       {/* PART 1: MANAGE CURRENT EVENTS */}
       {activeTab === "manage" && (
@@ -755,6 +811,8 @@ export const OrganizerEventsPage: React.FC = () => {
               </button>
             </div>
           </form>
+        </div>
+      )}
         </div>
       )}
     </div>

@@ -12,9 +12,9 @@
 
 ### Session 2026-08-13
 
-- Q: Navigation entry-point contradiction between US5 and FR-015? → A: Standardized on a dedicated "Thống kê & Analytics" tab/button positioned adjacent to "Quản lý sự kiện" on the `/account` "Nhà tổ chức" panel.
-- Q: Final route path for Analytics page? → A: Primary route is `/account?tab=organizer&section=analytics` (integrated account panel section), with `/organizer/analytics` supported as a direct route link while retaining the account sidebar (Hồ sơ / Bảo mật / Nhà tổ chức / Đăng xuất).
-- Q: Component duplication prevention across routes? → A: Both `/account?tab=organizer&section=analytics` and `/organizer/analytics` MUST render the exact same component via a thin alias/redirect route mounting the single shared Organizer Business Analytics page component.
+- Q: Navigation entry-point contradiction between US5 and FR-015? → A: Consolidated into a single unified Organizer Workspace route at `/organizer` with top-level tabs for "Quản lý sự kiện" (`?section=events`) and "Thống kê kinh doanh" (`?section=analytics`).
+- Q: Final route path for Analytics page & Account button? → A: The single authoritative route is `/organizer`. The `/account` "Nhà tổ chức" panel contains a single button ("Vào trang quản lý Ban Tổ Chức") that opens the `/organizer` hub. Standalone `/account?tab=organizer&section=analytics` was removed in favor of this single hub.
+- Q: Component duplication prevention across routes? → A: Both sections live inside the single `/organizer` route workspace, reusing `OrganizerBusinessAnalytics` and event management components without any duplicated logic.
 - Q: Capacity Gauge behavior when 0 upcoming events exist? → A: Displays an explicit empty state card ("Không có sự kiện sắp diễn ra") with 0/0 capacity and 0% fill rate.
 - Q: Check-in records schema priority? → A: Downgraded `checkin_records` schema requirement to a SHOULD (P3) optional extension so revenue/sales analytics delivery is not blocked.
 - Q: SC-004 500ms filter update latency target assumption? → A: Clarified that 500ms target assumes indexed query / pre-aggregated caching; relaxed unindexed live recalculation target to <= 1.0 second.

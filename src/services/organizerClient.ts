@@ -15,6 +15,7 @@ import {
   TicketTier,
   EventCancellationAuditRecord
 } from "../types";
+import { withAuthRetry } from "./authClient";
 
 // Default authenticated organizer session identity for demo/dev scoping (SEC-04)
 let currentOrganizerId = "org-888";
@@ -27,163 +28,8 @@ export function setCurrentOrganizerId(id: string): void {
   currentOrganizerId = id;
 }
 
-// Initial mock dataset for Organizer org-888
-const INITIAL_ORGANIZER_EVENTS: OrganizerEvent[] = [
-  {
-    eventId: "evt-101",
-    organizerId: "org-888",
-    title: "Đêm Nhạc Trịnh Công Sơn: Hạ Trắng",
-    description: "Đêm nhạc tưởng nhớ nhạc sĩ Trịnh Công Sơn với sự tham gia của nhiều nghệ sĩ nổi tiếng.",
-    category: "music",
-    categoryLabel: "Âm nhạc",
-    bannerUrl: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=1200&q=80",
-    venueName: "Nhà hát Hòa Bình",
-    venueAddress: "240 3 Tháng 2, Phường 12, Quận 10, TP.HCM",
-    city: "TP.HCM",
-    startDatetime: "2026-09-15T19:30:00Z",
-    endDatetime: "2026-09-15T22:30:00Z",
-    salesStartDatetime: "2026-08-01T00:00:00Z",
-    salesEndDatetime: "2026-09-15T18:00:00Z",
-    status: "published",
-    computedStatus: "published",
-    rejectionReason: null,
-    cancellationReason: null,
-    createdAt: "2026-07-20T10:00:00Z",
-    updatedAt: "2026-08-01T12:00:00Z",
-    times: ["19:30"],
-    dates: ["2026-09-15"],
-    ticketTiers: [
-      {
-        id: "tier-v1",
-        label: "Vé VIP",
-        price: 800000,
-        description: "Hàng ghế A-C, tặng nước uống & quà",
-        capacity: 100,
-        soldCount: 100,
-        remaining: 0,
-        isArchived: false
-      },
-      {
-        id: "tier-s1",
-        label: "Vé Standard",
-        price: 400000,
-        description: "Hàng ghế D-M",
-        capacity: 400,
-        soldCount: 220,
-        remaining: 180,
-        isArchived: false
-      }
-    ]
-  },
-  {
-    eventId: "evt-102",
-    organizerId: "org-888",
-    title: "Triển Lãm Nghệ Thuật Đương Đại: Sắc Màu Đô Thị",
-    description: "Không gian trưng bày 50 tác phẩm hội họa và sắp đặt của các nghệ sĩ trẻ Việt Nam.",
-    category: "art",
-    categoryLabel: "Triển lãm",
-    bannerUrl: "https://images.unsplash.com/photo-1561214115-f2f134cc4912?auto=format&fit=crop&w=1200&q=80",
-    venueName: "Trung tâm Nghệ thuật Không gian Xanh",
-    venueAddress: "15 Lê Thánh Tông, Quận 1, TP.HCM",
-    city: "TP.HCM",
-    startDatetime: "2026-08-20T09:00:00Z",
-    endDatetime: "2026-08-25T18:00:00Z",
-    salesStartDatetime: "2026-08-05T00:00:00Z",
-    salesEndDatetime: "2026-08-25T17:00:00Z",
-    status: "pending_review",
-    computedStatus: "pending_review",
-    rejectionReason: null,
-    cancellationReason: null,
-    createdAt: "2026-08-05T08:00:00Z",
-    updatedAt: "2026-08-05T08:30:00Z",
-    times: ["09:00", "14:00"],
-    dates: ["2026-08-20", "2026-08-21", "2026-08-22"],
-    ticketTiers: [
-      {
-        id: "tier-art-1",
-        label: "Vé Phổ Thông",
-        price: 150000,
-        description: "Tham quan tự do triển lãm",
-        capacity: 300,
-        soldCount: 45,
-        remaining: 255,
-        isArchived: false
-      }
-    ]
-  },
-  {
-    eventId: "evt-103",
-    organizerId: "org-888",
-    title: "Hội Thảo Công Nghệ TechTalk 2026: AI & Cloud Infrastructure",
-    description: "Hội thảo chuyên sâu về hạ tầng đám mây và ứng dụng trí tuệ nhân tạo.",
-    category: "conference",
-    categoryLabel: "Hội thảo",
-    bannerUrl: "https://images.unsplash.com/photo-1540575467063-178a50c2df87?auto=format&fit=crop&w=1200&q=80",
-    venueName: "Trung tâm Hội nghị Quốc gia",
-    venueAddress: "Đại lộ Thăng Long, Mễ Trì, Nam Từ Liêm, Hà Nội",
-    city: "Hà Nội",
-    startDatetime: "2026-10-10T08:00:00Z",
-    endDatetime: "2026-10-10T17:00:00Z",
-    salesStartDatetime: "2026-08-10T00:00:00Z",
-    salesEndDatetime: "2026-10-09T23:59:00Z",
-    status: "draft",
-    computedStatus: "draft",
-    rejectionReason: null,
-    cancellationReason: null,
-    createdAt: "2026-08-10T14:00:00Z",
-    updatedAt: "2026-08-10T14:00:00Z",
-    times: ["08:00"],
-    dates: ["2026-10-10"],
-    ticketTiers: [
-      {
-        id: "tier-tech-1",
-        label: "Vé Tham Dự",
-        price: 250000,
-        description: "Bao gồm teabreak và tài liệu hội thảo",
-        capacity: 200,
-        soldCount: 0,
-        remaining: 200,
-        isArchived: false
-      }
-    ]
-  },
-  {
-    eventId: "evt-104",
-    organizerId: "org-888",
-    title: "Lễ Hội Âm Nhạc Mùa Hè: Summer Beats 2026",
-    description: "Đại nhạc hội mùa hè hội tụ dàn DJ và ca sĩ hàng đầu.",
-    category: "concert",
-    categoryLabel: "Concert",
-    bannerUrl: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&w=1200&q=80",
-    venueName: "Sân vận động Quân khu 7",
-    venueAddress: "202 Hoàng Văn Thụ, Phường 2, Tân Bình, TP.HCM",
-    city: "TP.HCM",
-    startDatetime: "2026-07-01T18:00:00Z",
-    endDatetime: "2026-07-01T23:00:00Z",
-    salesStartDatetime: "2026-05-01T00:00:00Z",
-    salesEndDatetime: "2026-07-01T17:00:00Z",
-    status: "published",
-    computedStatus: "completed",
-    rejectionReason: null,
-    cancellationReason: null,
-    createdAt: "2026-04-20T09:00:00Z",
-    updatedAt: "2026-07-02T08:00:00Z",
-    times: ["18:00"],
-    dates: ["2026-07-01"],
-    ticketTiers: [
-      {
-        id: "tier-summer-1",
-        label: "Vé GA",
-        price: 350000,
-        description: "Vé đứng tự do",
-        capacity: 1000,
-        soldCount: 1000,
-        remaining: 0,
-        isArchived: false
-      }
-    ]
-  }
-];
+// Hardcoded mock seed dataset disabled & deleted from source code
+const INITIAL_ORGANIZER_EVENTS: OrganizerEvent[] = [];
 
 // Persistent state holder
 let eventsStore: OrganizerEvent[] = [...INITIAL_ORGANIZER_EVENTS];
@@ -204,18 +50,24 @@ export function computeEventStatus(event: OrganizerEvent): OrganizerEventStatus 
 }
 
 /**
- * Computes metric aggregates for an event.
+ * Calculates aggregate capacity, sold ticket counts, remaining availability,
+ * and total revenue in integer VND for an event across its ticket tiers.
  */
-export function calculateEventMetrics(event: OrganizerEvent) {
+export function calculateEventMetrics(event: OrganizerEvent): {
+  totalCapacity: number;
+  soldTickets: number;
+  remainingTickets: number;
+  totalRevenueVnd: number;
+} {
   let totalCapacity = 0;
   let soldTickets = 0;
   let totalRevenueVnd = 0;
 
-  (event.ticketTiers || []).forEach(tier => {
-    const cap = tier.capacity || 0;
-    const sold = tier.soldCount || 0;
-    const price = tier.price || 0;
-
+  (event.ticketTiers || []).forEach(t => {
+    if (t.isArchived) return;
+    const cap = Number(t.capacity) || 0;
+    const sold = Number(t.soldCount) || 0;
+    const price = Number(t.price) || 0;
     totalCapacity += cap;
     soldTickets += sold;
     totalRevenueVnd += sold * price;
@@ -233,6 +85,7 @@ export function calculateEventMetrics(event: OrganizerEvent) {
 
 /**
  * List all events owned by the currently authenticated organizer (SEC-04).
+ * Fetches from the backend database when signed in, falling back to local session store.
  */
 export async function getOrganizerEvents(params?: {
   status?: string;
@@ -248,9 +101,88 @@ export async function getOrganizerEvents(params?: {
     completedCount: number;
   };
 }> {
-  // SEC-04: Scoped query filter by organizerId
-  const organizerId = getCurrentOrganizerId();
-  const ownedEvents = eventsStore.filter(e => e.organizerId === organizerId);
+  let fetchedDbEvents: OrganizerEvent[] = [];
+
+  try {
+    const res = await withAuthRetry((token) => {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      return fetch("/api/organizer/events", {
+        method: "GET",
+        headers,
+        credentials: "include",
+      });
+    });
+
+    if (res.ok) {
+        const rawList = await res.json();
+        if (Array.isArray(rawList)) {
+          fetchedDbEvents = rawList.map((item: any) => {
+            const rawStatus = item.status || "draft";
+            const modStatus = item.moderation || "pending_review";
+
+            let compStatus: OrganizerEventStatus = "draft";
+            if (rawStatus === "cancelled" || rawStatus === "canceled") compStatus = "canceled";
+            else if (rawStatus === "finished" || rawStatus === "completed") compStatus = "completed";
+            else if (rawStatus === "on_sale" && modStatus === "approved") compStatus = "published";
+            else if (modStatus === "pending_review") compStatus = "pending_review";
+            else if (rawStatus === "draft") compStatus = "draft";
+
+            const tiers = Array.isArray(item.ticketTiers) && item.ticketTiers.length > 0
+              ? item.ticketTiers
+              : [
+                  {
+                    id: `tier-${item.id}-1`,
+                    label: "Vé Tiêu Chuẩn",
+                    price: Number(item.soldTickets) > 0 ? Math.round(Number(item.totalRevenueVnd || 0) / Number(item.soldTickets)) : 0,
+                    capacity: Number(item.totalCapacity || 0),
+                    soldCount: Number(item.soldTickets || 0),
+                    remaining: Math.max(0, Number(item.totalCapacity || 0) - Number(item.soldTickets || 0)),
+                    isArchived: false
+                  }
+                ];
+
+            return {
+              eventId: String(item.id),
+              organizerId: getCurrentOrganizerId(),
+              title: item.title || "Sự kiện",
+              description: item.description || "",
+              category: item.category || "music",
+              categoryLabel: item.category || "Âm nhạc",
+              bannerUrl: item.imageUrl || item.image_url || "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=1200&q=80",
+              venueName: item.venueName || "Sân Vận Động Quân Khu 7",
+              venueAddress: item.venueAddress || "202 Hoàng Văn Thụ, Tân Bình, TP.HCM",
+              city: (item.city as any) || "TP.HCM",
+              startDatetime: item.startDatetime || item.starts_at || new Date().toISOString(),
+              endDatetime: item.endDatetime || item.ends_at || new Date().toISOString(),
+              salesStartDatetime: item.salesStartDatetime || new Date().toISOString(),
+              salesEndDatetime: item.salesEndDatetime || new Date().toISOString(),
+              status: rawStatus as any,
+              computedStatus: compStatus,
+              rejectionReason: null,
+              cancellationReason: null,
+              createdAt: item.createdAt || new Date().toISOString(),
+              updatedAt: item.updatedAt || new Date().toISOString(),
+              times: ["19:00"],
+              dates: ["2026-09-20"],
+              ticketTiers: tiers
+            };
+          });
+        }
+      }
+    } catch {
+      // Network error, fallback to session store
+    }
+
+  // Combine database events with local session created events
+  const dbIds = new Set(fetchedDbEvents.map(e => e.eventId));
+  const localOnly = eventsStore.filter(e => !dbIds.has(e.eventId) && e.organizerId === getCurrentOrganizerId());
+  eventsStore = [...fetchedDbEvents, ...localOnly];
+  const ownedEvents = eventsStore;
 
   let draftCount = 0;
   let pendingCount = 0;
@@ -328,7 +260,12 @@ export async function getOrganizerEventDetail(eventId: string): Promise<{
   };
 }> {
   const organizerId = getCurrentOrganizerId();
-  const event = eventsStore.find(e => e.eventId === eventId);
+  let event = eventsStore.find(e => e.eventId === String(eventId));
+
+  if (!event) {
+    await getOrganizerEvents();
+    event = eventsStore.find(e => e.eventId === String(eventId));
+  }
 
   if (!event) {
     throw new Error("NOT_FOUND: Event not found.");

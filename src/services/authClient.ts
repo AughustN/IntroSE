@@ -10,7 +10,7 @@ import type {
   RegisterBody,
   ResetBody,
   UpdateMeBody,
-} from "@/shared/auth/types";
+} from "../../shared/auth/types";
 import { apiAssetUrl, apiUrl } from "./api";
 import { readApiError } from "./apiError";
 
@@ -31,9 +31,10 @@ export interface OrganizerStatusResponse {
 
 let accessToken: string | null = null;
 export const getAccessToken = (): string | null => accessToken;
-const setToken = (t: string | null): void => {
+export const setAccessToken = (t: string | null): void => {
   accessToken = t;
 };
+const setToken = setAccessToken;
 
 export class ApiClientError extends Error {
   constructor(

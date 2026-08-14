@@ -224,14 +224,8 @@ export default function OrganizerSection({
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <button type="button" onClick={onManageEvents} className={btnPrimary}>
             <Store className="h-4 w-4" aria-hidden />
-            Quản lý sự kiện
+            Vào trang quản lý Ban Tổ Chức
           </button>
-          {onViewAnalytics && (
-            <button type="button" onClick={onViewAnalytics} className={btnSecondary}>
-              <BarChart3 className="h-4 w-4" aria-hidden />
-              Thống kê kinh doanh
-            </button>
-          )}
         </div>
       </InfoCard>
     );

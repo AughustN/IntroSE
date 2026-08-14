@@ -291,7 +291,7 @@ export const SingleEventPage: React.FC = () => {
               onClick={handleRequestPublish}
               className="px-4 py-2 bg-la-co hover:brightness-110 text-on-tint font-bold rounded-xl text-xs transition-colors shadow-md"
             >
-              🚀 Gửi Yêu Cầu Duyệt (Publish)
+              🚀 Gửi Yêu Cầu Duyệt
             </button>
           )}
 

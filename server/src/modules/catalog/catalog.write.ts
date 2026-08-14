@@ -65,12 +65,63 @@ export async function eventOwnerUserId(eventId: number, db: Db = pool): Promise<
 
 export async function listMyEvents(userId: number, db: Db = pool) {
   const { rows } = await db.query(
-    `SELECT e.id, e.slug, e.title, e.status, e.moderation_status AS moderation, e.review_note AS "reviewNote",
-            e.image_url AS "imageUrl", e.event_type AS "eventType", ec.code AS category
-       FROM events e JOIN organizers o ON o.id = e.organizer_id JOIN event_categories ec ON ec.id = e.category_id
-      WHERE o.user_id = $1 ORDER BY e.created_at DESC`,
+    `SELECT e.id, e.slug, e.title, e.description, e.status, e.moderation_status AS moderation, e.review_note AS "reviewNote",
+            e.image_url AS "imageUrl", e.event_type AS "eventType", ec.code AS category,
+            e.created_at AS "createdAt", e.updated_at AS "updatedAt",
+            COALESCE((
+              SELECT SUM(tt.total_quantity)
+                FROM showtimes s2
+                JOIN ticket_tiers tt ON tt.showtime_id = s2.id
+               WHERE s2.event_id = e.id
+            ), 0)::int AS "totalCapacity",
+            COALESCE((
+              SELECT COUNT(t2.id)
+                FROM showtimes s2
+                JOIN reservations r2 ON r2.showtime_id = s2.id
+                JOIN orders o2 ON o2.reservation_id = r2.id AND o2.payment_status IN ('paid', 'completed')
+                JOIN tickets t2 ON t2.order_id = o2.id AND t2.qr_status != 'void'
+               WHERE s2.event_id = e.id
+            ), 0)::int AS "soldTickets",
+            COALESCE((
+              SELECT SUM(t2.price_cents)
+                FROM showtimes s2
+                JOIN reservations r2 ON r2.showtime_id = s2.id
+                JOIN orders o2 ON o2.reservation_id = r2.id AND o2.payment_status IN ('paid', 'completed', 'refunded', 'partially_refunded')
+                JOIN tickets t2 ON t2.order_id = o2.id
+               WHERE s2.event_id = e.id
+            ), 0)::bigint AS "totalRevenueVnd"
+       FROM events e 
+       JOIN organizers o ON o.id = e.organizer_id 
+       JOIN event_categories ec ON ec.id = e.category_id
+      WHERE o.user_id = $1 
+      ORDER BY e.created_at DESC`,
     [userId],
   );
+
+  for (const event of rows) {
+    const tierRes = await db.query(
+      `SELECT tt.id::text, tt.label, tt.price_amount AS price, tt.total_quantity AS capacity,
+              COALESCE(COUNT(t.id), 0)::int AS "soldCount"
+         FROM showtimes s
+         JOIN ticket_tiers tt ON tt.showtime_id = s.id
+         LEFT JOIN reservation_items ri ON ri.ticket_tier_id = tt.id
+         LEFT JOIN tickets t ON t.reservation_item_id = ri.id AND t.qr_status != 'void'
+         LEFT JOIN orders o ON o.id = t.order_id AND o.payment_status IN ('paid', 'completed')
+        WHERE s.event_id = $1
+        GROUP BY tt.id, tt.label, tt.price_amount, tt.total_quantity`,
+      [event.id],
+    );
+    event.ticketTiers = tierRes.rows.map((r) => ({
+      id: String(r.id),
+      label: String(r.label),
+      price: Number(r.price || 0),
+      capacity: Number(r.capacity || 0),
+      soldCount: Number(r.soldCount || 0),
+      remaining: Math.max(0, Number(r.capacity || 0) - Number(r.soldCount || 0)),
+      isArchived: false,
+    }));
+  }
+
   return rows;
 }
 

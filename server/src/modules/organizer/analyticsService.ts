@@ -233,16 +233,31 @@ export async function getOrganizerAnalyticsService(
         e.title,
         e.status,
         COALESCE(ec.label_vi, 'Khác') AS category,
-        COALESCE(SUM(o.final_total_cents), 0)::bigint AS gross_revenue_vnd,
-        COALESCE(COUNT(t.id), 0)::int AS tickets_sold
+        COALESCE((
+          SELECT SUM(tt.total_quantity)
+            FROM showtimes s2
+            JOIN ticket_tiers tt ON tt.showtime_id = s2.id
+           WHERE s2.event_id = e.id
+        ), 0)::int AS total_capacity,
+        COALESCE((
+          SELECT COUNT(t2.id)
+            FROM showtimes s2
+            JOIN reservations r2 ON r2.showtime_id = s2.id
+            JOIN orders o2 ON o2.reservation_id = r2.id AND o2.payment_status IN ('paid', 'completed')
+            JOIN tickets t2 ON t2.order_id = o2.id AND t2.qr_status != 'void'
+           WHERE s2.event_id = e.id
+        ), 0)::int AS tickets_sold,
+        COALESCE((
+          SELECT SUM(t2.price_cents)
+            FROM showtimes s2
+            JOIN reservations r2 ON r2.showtime_id = s2.id
+            JOIN orders o2 ON o2.reservation_id = r2.id AND o2.payment_status IN ('paid', 'completed', 'refunded', 'partially_refunded')
+            JOIN tickets t2 ON t2.order_id = o2.id
+           WHERE s2.event_id = e.id
+        ), 0)::bigint AS gross_revenue_vnd
        FROM events e
        LEFT JOIN event_categories ec ON ec.id = e.category_id
-       LEFT JOIN showtimes s ON s.event_id = e.id
-       LEFT JOIN reservations r ON r.showtime_id = s.id
-       LEFT JOIN orders o ON o.reservation_id = r.id AND o.payment_status IN ('paid', 'completed', 'refunded', 'partially_refunded')
-       LEFT JOIN tickets t ON t.order_id = o.id
       WHERE e.organizer_id = $1 ${eventFilterClause}
-      GROUP BY e.id, e.title, e.status, ec.label_vi
       ORDER BY gross_revenue_vnd DESC
       LIMIT 5`,
     [organizerId],
@@ -251,6 +266,7 @@ export async function getOrganizerAnalyticsService(
   const topEvents = topEventsRes.rows.map((r) => {
     const rev = Number(r.gross_revenue_vnd || 0);
     const sold = Number(r.tickets_sold || 0);
+    const cap = Number(r.total_capacity || 0);
     const statusMap: Record<string, any> = {
       draft: "Draft",
       on_sale: "Published",
@@ -264,8 +280,8 @@ export async function getOrganizerAnalyticsService(
       status: (statusMap[r.status] || "Draft") as any,
       gross_revenue_vnd: rev,
       tickets_sold: sold,
-      total_capacity: sold + 50,
-      fill_percentage: sold > 0 ? Number(((sold / (sold + 50)) * 100).toFixed(1)) : 0,
+      total_capacity: cap,
+      fill_percentage: cap > 0 ? Number(((sold / cap) * 100).toFixed(1)) : 0,
     };
   });
 
@@ -301,7 +317,7 @@ export async function getOrganizerAnalyticsService(
 
   const categoryBreakdownRes = await pool.query(
     `SELECT 
-        COALESCE(ec.label_vi, e.category, 'Khác') AS category_name,
+        COALESCE(ec.label_vi, 'Khác') AS category_name,
         COALESCE(SUM(t.price_cents), 0)::bigint AS revenue_vnd,
         COALESCE(COUNT(t.id), 0)::int AS tickets_sold
        FROM events e
@@ -312,7 +328,7 @@ export async function getOrganizerAnalyticsService(
        LEFT JOIN tickets t ON t.order_id = o.id
       WHERE e.organizer_id = $1
         AND o.created_at >= $2 AND o.created_at <= $3 ${eventFilterClause}
-      GROUP BY COALESCE(ec.label_vi, e.category, 'Khác')`,
+      GROUP BY COALESCE(ec.label_vi, 'Khác')`,
     [organizerId, currentStart.toISOString(), currentEnd.toISOString()],
   );
 
@@ -388,10 +404,11 @@ export async function getOrganizerAnalyticsService(
        LEFT JOIN tickets t ON t.order_id = o.id
        LEFT JOIN reservation_items ri ON ri.id = t.reservation_item_id
        LEFT JOIN ticket_tiers tt ON tt.id = ri.ticket_tier_id
-      WHERE e.organizer_id = $1 ${eventFilterClause}
+      WHERE e.organizer_id = $1
+        AND o.created_at >= $2 AND o.created_at <= $3 ${eventFilterClause}
       ORDER BY o.created_at DESC
-      LIMIT 15`,
-    [organizerId],
+      LIMIT 200`,
+    [organizerId, currentStart.toISOString(), currentEnd.toISOString()],
   );
 
   const recentTransactions = recentTxRes.rows.map((r) => {

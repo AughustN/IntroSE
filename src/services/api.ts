@@ -1,4 +1,4 @@
-const configuredApiUrl = import.meta.env.VITE_API_URL?.trim().replace(/\/+$/, "");
+const configuredApiUrl = (import.meta as any).env?.VITE_API_URL?.trim().replace(/\/+$/, "");
 
 /** Public API origin. Override with VITE_API_URL for a local or staging backend. */
 export const API_ORIGIN = configuredApiUrl || "https://api.tixhub.fit";
