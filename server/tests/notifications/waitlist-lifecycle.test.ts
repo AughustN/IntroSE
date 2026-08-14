@@ -39,6 +39,64 @@ describe('waitlist places close when they can no longer be served (US4, FR-010)'
     expect(rows.every((row) => row.status === 'waiting')).toBe(true);
   });
 
+  it('closes the places of a showtime inside the 24-hour cutoff', async () => {
+    // Past the cutoff no ticket can be cancelled, so the queue's main source of stock is gone and
+    // waiting on in silence would be waiting on nothing.
+    const { showtimeId, tierId } = await wl.seedSoldOutGaShowtime();
+    await wl.fillWaitlist(showtimeId, tierId, 2);
+    await wl.enterCutoff(showtimeId);
+
+    expect(await sweepExpiredWaitlists()).toBe(2);
+    expect((await wl.getEntries(showtimeId)).every((row) => row.status === 'expired')).toBe(true);
+  });
+
+  it('closes the places of a cancelled showtime, however far off it is', async () => {
+    const { showtimeId, tierId } = await wl.seedSoldOutGaShowtime();
+    await wl.fillWaitlist(showtimeId, tierId, 2);
+    await wl.cancelShowtime(showtimeId);
+
+    expect(await sweepExpiredWaitlists()).toBe(2);
+    expect((await wl.getEntries(showtimeId)).every((row) => row.status === 'expired')).toBe(true);
+  });
+
+  it('tells each holder why their place closed, and says it once', async () => {
+    const { showtimeId, tierId, eventId } = await wl.seedSoldOutGaShowtime();
+    const [waiter] = await wl.fillWaitlist(showtimeId, tierId, 1);
+    await wl.enterCutoff(showtimeId);
+
+    await sweepExpiredWaitlists();
+    // A second sweep finds nothing open; even if it did, the message may not be sent twice.
+    await sweepExpiredWaitlists();
+
+    const messages = (await wl.getNotifications(waiter.userId)).filter(
+      (message) => message.type === 'waitlist_closed',
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0].event_id).toBe(eventId);
+    const { rows } = await pool.query<{ payload: Record<string, string>; body: string }>(
+      `SELECT payload, body FROM notifications WHERE user_id = $1 AND type = 'waitlist_closed'`,
+      [waiter.userId],
+    );
+    expect(rows).toHaveLength(2); // one per channel: in-app and email
+    expect(rows.every((row) => row.payload.reason === 'cutoff')).toBe(true);
+    expect(rows.every((row) => row.payload.eventUrl?.includes('/events/'))).toBe(true);
+  });
+
+  it('gives the cancellation as the reason when that is what closed the place', async () => {
+    const { showtimeId, tierId } = await wl.seedSoldOutGaShowtime();
+    const [waiter] = await wl.fillWaitlist(showtimeId, tierId, 1);
+    await wl.cancelShowtime(showtimeId);
+
+    await sweepExpiredWaitlists();
+
+    const { rows } = await pool.query<{ payload: Record<string, string> }>(
+      `SELECT payload FROM notifications WHERE user_id = $1 AND type = 'waitlist_closed'`,
+      [waiter.userId],
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((row) => row.payload.reason === 'cancelled')).toBe(true);
+  });
+
   it('takes an expired place out of the caller’s list and out of the cap', async () => {
     const { showtimeId, tierId } = await wl.seedSoldOutGaShowtime();
     const queued = await wl.fillWaitlistWithSessions(showtimeId, tierId, 1);

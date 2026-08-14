@@ -20,7 +20,20 @@ describe('joining a waitlist — scope (US4, FR-002)', () => {
     expect(res.body.existing).toBe(false);
     expect(res.body.entry.ticketTierId).toBe(soldOutTierId);
     expect(res.body.entry.status).toBe('waiting');
-    expect(res.body.entry.position).toBe(1);
+  });
+
+  it('refuses a join inside the 24-hour cutoff, with the reason (UC-17 A6)', async () => {
+    // The sweep would close this place minutes later — an entry and an apology back to back — so
+    // the door is shut at the door instead.
+    const { showtimeId, tierId } = await wl.seedSoldOutGaShowtime();
+    const user = await registerUser();
+    await wl.enterCutoff(showtimeId);
+
+    const res = await join(user.token, { showtimeId, ticketTierId: tierId });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('waitlist_closed');
+    expect(await wl.getEntries(showtimeId)).toHaveLength(0);
   });
 
   it('refuses a tier that still sells and says to buy instead (UC-17 A3)', async () => {
@@ -51,7 +64,6 @@ describe('joining a waitlist — scope (US4, FR-002)', () => {
     const res = await join(user.token, { showtimeId }).expect(201);
 
     expect(res.body.entry.ticketTierId).toBeNull();
-    expect(res.body.entry.position).toBe(1);
   });
 
   it('reads a seated showtime with no seat map as sold out, whatever its tiers claim', async () => {
@@ -185,31 +197,37 @@ describe('joining a waitlist — duplicates and preconditions (US4)', () => {
   });
 });
 
-describe('position (US1, FR-005)', () => {
-  it('counts from one, in the order people joined', async () => {
+describe('no place in line is reported (US1)', () => {
+  // Waiting earlier buys no claim on a released ticket — everyone told of one races for it equally
+  // — so the entry carries no position. A number would be read as a turn that will come.
+  it('says nothing about order, however many are already waiting', async () => {
     const { showtimeId, soldOutTierId } = await wl.seedMixedGaShowtime();
     await wl.fillWaitlist(showtimeId, soldOutTierId, 2);
     const third = await registerUser();
 
     const res = await join(third.token, { showtimeId, ticketTierId: soldOutTierId }).expect(201);
 
-    expect(res.body.entry.position).toBe(3);
+    expect(res.body.entry.position).toBeUndefined();
+    expect(res.body.entry.status).toBe('waiting');
   });
 
-  it('reports the real position on a repeat request, not one', async () => {
+  it('says nothing about order on a repeat request either', async () => {
     const { showtimeId, soldOutTierId } = await wl.seedMixedGaShowtime();
     await wl.fillWaitlist(showtimeId, soldOutTierId, 4);
     const user = await registerUser();
-    await join(user.token, { showtimeId, ticketTierId: soldOutTierId }).expect(201);
+    const first = await join(user.token, { showtimeId, ticketTierId: soldOutTierId }).expect(201);
 
     const again = await join(user.token, { showtimeId, ticketTierId: soldOutTierId }).expect(200);
 
-    expect(again.body.entry.position).toBe(5);
+    expect(again.body.existing).toBe(true);
+    expect(again.body.entry.id).toBe(first.body.entry.id);
+    expect(again.body.entry.position).toBeUndefined();
   });
 
-  it('is counted per queue, so a second tier starts again at one', async () => {
+  it('keeps each tier a queue of its own, whatever the sibling queues hold', async () => {
     // Two sold-out tiers on one showtime: the any-tier queue and each tier's queue are separate
-    // lines, and a place in one says nothing about a place in another.
+    // lines, and a place in one says nothing about a place in another. The cap of ten is counted
+    // per line, which is the part that still has to hold without positions.
     const { showtimeId, soldOutTierId } = await wl.seedMixedGaShowtime();
     const otherTier = (
       await pool.query<{ id: number }>(
@@ -218,11 +236,12 @@ describe('position (US1, FR-005)', () => {
         [showtimeId],
       )
     ).rows[0].id;
-    await wl.fillWaitlist(showtimeId, soldOutTierId, 3);
+    await wl.fillWaitlist(showtimeId, soldOutTierId, 10);
     const user = await registerUser();
 
+    // The neighbouring queue is full; this one is empty, so the join is accepted.
     const res = await join(user.token, { showtimeId, ticketTierId: otherTier }).expect(201);
 
-    expect(res.body.entry.position).toBe(1);
+    expect(res.body.entry.ticketTierId).toBe(otherTier);
   });
 });

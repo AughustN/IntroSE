@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { BellRing, Check, Loader2 } from "lucide-react";
+import { BellOff, BellRing, Check, Loader2 } from "lucide-react";
 import type { WaitlistEntry } from "../services/waitlistClient";
 
 /**
- * What a sold-out scope offers: a way into the queue, or — once you are in it — where you stand and
- * a way out (UC-17, FR-011).
+ * What a sold-out scope offers: a way into the queue, or — once you are in it — confirmation that
+ * you hold a place and a way out (UC-17, FR-011).
  *
  * One component for both places it appears, because they are the same offer at two sizes: a row in
  * the general-admission price list, and the primary action of a showtime with nothing left at all.
@@ -17,6 +17,7 @@ import type { WaitlistEntry } from "../services/waitlistClient";
 export default function WaitlistControl({
   entry,
   busy,
+  closed = false,
   tone = "row",
   onJoin,
   onLeave,
@@ -24,19 +25,37 @@ export default function WaitlistControl({
   /** The reader's place in this queue, or `null` when they hold none. */
   entry: WaitlistEntry | null;
   busy: boolean;
+  /** Inside the 24-hour cutoff: nothing can come back, so there is no queue to join. */
+  closed?: boolean;
   tone?: "row" | "cta";
   onJoin: () => void;
   onLeave: () => void;
 }) {
   const wide = tone === "cta";
 
+  // Somebody already in the queue still gets their way out, even after it closes to newcomers:
+  // their place is about to be closed by the server, and leaving is theirs to do meanwhile.
+  if (!entry && closed) {
+    return (
+      <span
+        className={`inline-flex items-center gap-2 border border-beige-kem/30 px-3 py-1.5 font-meta text-meta text-ink-soft ${
+          wide ? "w-full justify-center" : ""
+        }`}
+      >
+        <BellOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        Danh sách chờ đã đóng · dưới 24 giờ trước giờ diễn
+      </span>
+    );
+  }
+
   if (entry) {
     return (
       <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 ${wide ? "w-full" : ""}`}>
         <span className="inline-flex items-center gap-2 border border-la-co bg-la-co/10 px-3 py-1.5 font-meta text-meta text-beige-kem">
           <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          {/* The number is the whole point of being in a queue: it says how long the wait is. */}
-          Đang chờ · vị trí {entry.position}
+          {/* No place in line: waiting longer earns no priority, so a number would promise a turn
+              that is never taken. What the queue does promise is the message. */}
+          Đang chờ · sẽ báo khi có vé
         </span>
         <button
           type="button"

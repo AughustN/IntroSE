@@ -2,11 +2,11 @@ import { type NextFunction, type Request, type Response, Router } from "express"
 import type { NotificationItem } from "@shared/notifications/types.js";
 import type { WaitlistEntry } from "@shared/waitlist/types.js";
 import { z } from "zod";
-import { pool, withTransaction, type Db } from "../../db/pool.js";
+import { pool, withTransaction } from "../../db/pool.js";
 import { err } from "../../http.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
 import { validate } from "../../middleware/validate.js";
-import { availableForWaitlist } from "./notifications.service.js";
+import { availableForWaitlist, WAITLIST_CUTOFF_HOURS } from "./notifications.service.js";
 
 export const notificationRouter = Router();
 
@@ -35,35 +35,18 @@ interface WaitlistRow {
 }
 
 /**
- * Where this place stands in its queue.
+ * A queue row as the owner sees it.
  *
- * Counted rather than stored (research.md §2). `status IN ('waiting','notified')` is what "open"
- * means everywhere in this feature — being told does not take a waiter out of the queue, so it must
- * not take them out of the count either, or the people behind them would appear to overtake.
- *
- * `IS NOT DISTINCT FROM` because the any-tier queue is keyed by a NULL tier, and `= NULL` is never
- * true: written the ordinary way, every any-tier waiter would read position 1.
+ * No place in line is reported. Waiting longer confers no priority here — a released ticket goes to
+ * whoever buys it first among those told — so a number would describe an order of service that does
+ * not exist, and the only thing a queue place actually buys is the message.
  */
-async function positionOf(db: Db, row: WaitlistRow): Promise<number> {
-  const { rows } = await db.query<{ ahead: string }>(
-    `SELECT count(*)::text AS ahead
-       FROM waitlists
-      WHERE showtime_id = $1
-        AND ticket_tier_id IS NOT DISTINCT FROM $2
-        AND status IN ('waiting', 'notified')
-        AND joined_at < $3`,
-    [row.showtime_id, row.ticket_tier_id, row.joined_at],
-  );
-  return Number(rows[0]?.ahead ?? 0) + 1;
-}
-
-async function toEntry(db: Db, row: WaitlistRow): Promise<WaitlistEntry> {
+function toEntry(row: WaitlistRow): WaitlistEntry {
   return {
     id: row.id,
     showtimeId: row.showtime_id,
     ticketTierId: row.ticket_tier_id,
     status: row.status,
-    position: await positionOf(db, row),
     joinedAt: row.joined_at.toISOString(),
     notifiedAt: row.notified_at?.toISOString() ?? null,
   };
@@ -157,9 +140,7 @@ notificationRouter.get(
         ORDER BY joined_at DESC`,
       [req.auth!.userId, filter],
     );
-    const entries: WaitlistEntry[] = [];
-    for (const row of rows) entries.push(await toEntry(pool, row));
-    res.json(entries);
+    res.json(rows.map(toEntry));
   }),
 );
 
@@ -172,12 +153,22 @@ notificationRouter.post(
     const result = await withTransaction(async (db) => {
       // The row lock is what serializes two people claiming the last place: both read the count
       // under it, so exactly one can be the tenth (FR-003, SC-003).
-      const showtime = await db.query<{ event_id: number }>(
-        `SELECT s.event_id FROM showtimes s JOIN events e ON e.id = s.event_id
+      const showtime = await db.query<{ event_id: number; within_cutoff: boolean }>(
+        `SELECT s.event_id,
+                s.starts_at <= now() + ($2::int * interval '1 hour') AS within_cutoff
+           FROM showtimes s JOIN events e ON e.id = s.event_id
         WHERE s.id = $1 AND s.starts_at > now() AND s.status <> 'cancelled' FOR UPDATE OF s`,
-        [body.showtimeId],
+        [body.showtimeId, WAITLIST_CUTOFF_HOURS],
       );
       if (!showtime.rowCount) throw err.notFound("showtime_not_found");
+      // The queue closes at the same hour tickets stop being cancellable, so joining inside it
+      // would buy a place that the next sweep closes again — an entry and an apology, minutes
+      // apart. Refused at the door instead, with the reason.
+      if (showtime.rows[0].within_cutoff)
+        throw err.conflict(
+          "waitlist_closed",
+          `Danh sách chờ đã đóng: còn dưới ${WAITLIST_CUTOFF_HOURS} giờ trước giờ diễn nên sẽ không có vé trả lại.`,
+        );
       if (tierId !== null) {
         const tier = await db.query(
           `SELECT 1 FROM ticket_tiers WHERE id = $1 AND showtime_id = $2`,
@@ -220,7 +211,7 @@ notificationRouter.post(
       return { row: inserted.rows[0], existing: false };
     });
     res.status(result.existing ? 200 : 201).json({
-      entry: await toEntry(pool, result.row),
+      entry: toEntry(result.row),
       existing: result.existing,
     });
   }),
@@ -240,8 +231,8 @@ notificationRouter.delete(
     ]);
     if (!rowCount)
       throw err.notFound("waitlist_entry_not_found", "Không tìm thấy lượt chờ này của bạn.");
-    // Nothing else to do: the places behind this one move up on their own, because a position is
-    // counted at read time and never written down.
+    // Nothing else to do: the queue holds no order to repair, only a count of open places, and
+    // deleting the row frees one of the ten.
     res.status(204).end();
   }),
 );

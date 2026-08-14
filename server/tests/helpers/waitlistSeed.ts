@@ -6,6 +6,15 @@ import { registerUser } from './authFixture.js';
 // stock, which the holds fixtures never needed: a tier with nothing left, a seated showtime with no
 // free seat, and — the case the join route used to get wrong — one of each on the same showtime.
 
+/**
+ * Far enough out that the queue is open (`WAITLIST_CUTOFF_HOURS` = 24).
+ *
+ * `seedShowtime` defaults to exactly 24 hours, which lands *on* the cutoff: every queue seeded that
+ * way is closed before the test begins, and the case under test never runs. Three days is simply
+ * unambiguous; tests about the cutoff itself move their showtime deliberately.
+ */
+const OUTSIDE_CUTOFF_MS = 3 * 24 * 60 * 60 * 1000;
+
 export interface MixedGaFixture {
   eventId: number;
   showtimeId: number;
@@ -25,7 +34,7 @@ export async function seedMixedGaShowtime(): Promise<MixedGaFixture> {
   const org = await seed.seedOrganizer(await seed.seedUser());
   const venue = await seed.seedVenue(await seed.seedUser());
   const ev = await seed.seedEvent({ organizerId: org, eventType: 'general_admission' });
-  const showtimeId = await seed.seedShowtime(ev.id, venue);
+  const showtimeId = await seed.seedShowtime(ev.id, venue, OUTSIDE_CUTOFF_MS);
   const soldOutTierId = await seed.seedTier(showtimeId, { label: 'Hạng A', total: 2, sold: 2 });
   const sellingTierId = await seed.seedTier(showtimeId, { label: 'Hạng B', total: 5, sold: 1 });
   return { eventId: ev.id, showtimeId, soldOutTierId, sellingTierId };
@@ -42,7 +51,7 @@ export async function seedSoldOutGaShowtime(total = 2): Promise<SoldOutGaFixture
   const org = await seed.seedOrganizer(await seed.seedUser());
   const venue = await seed.seedVenue(await seed.seedUser());
   const ev = await seed.seedEvent({ organizerId: org, eventType: 'general_admission' });
-  const showtimeId = await seed.seedShowtime(ev.id, venue);
+  const showtimeId = await seed.seedShowtime(ev.id, venue, OUTSIDE_CUTOFF_MS);
   const tierId = await seed.seedTier(showtimeId, { total, sold: total });
   return { eventId: ev.id, showtimeId, tierId };
 }
@@ -74,7 +83,7 @@ export async function seedSoldOutSeated(seatCount = 2): Promise<SoldOutSeatedFix
     await pool.query(`INSERT INTO sections (layout_id, name) VALUES ($1, 'Khu A') RETURNING id`, [layout])
   ).rows[0].id;
   const ev = await seed.seedEvent({ organizerId: org, eventType: 'seated' });
-  const showtimeId = await seed.seedShowtime(ev.id, venue);
+  const showtimeId = await seed.seedShowtime(ev.id, venue, OUTSIDE_CUTOFF_MS);
   const tierId = await seed.seedTier(showtimeId, { label: 'VIP', total: null });
 
   const seatIds: number[] = [];
@@ -107,7 +116,7 @@ export async function seedSeatedWithoutSeatMap(tierCount = 2): Promise<SoldOutSe
   const org = await seed.seedOrganizer(await seed.seedUser());
   const venue = await seed.seedVenue(await seed.seedUser());
   const ev = await seed.seedEvent({ organizerId: org, eventType: 'seated' });
-  const showtimeId = await seed.seedShowtime(ev.id, venue);
+  const showtimeId = await seed.seedShowtime(ev.id, venue, OUTSIDE_CUTOFF_MS);
   let tierId = 0;
   for (let i = 0; i < tierCount; i++) {
     tierId = await seed.seedTier(showtimeId, { label: `Hạng ${i + 1}`, total: 100, sold: 0 });
@@ -199,6 +208,33 @@ export async function beginShowtime(showtimeId: number, agoMs = 60_000): Promise
   await pool.query(
     `UPDATE showtimes SET starts_at = now() - ($2::bigint * interval '1 millisecond') WHERE id = $1`,
     [showtimeId, agoMs],
+  );
+}
+
+/** Move a showtime inside the 24-hour cutoff, still in the future. */
+export async function enterCutoff(showtimeId: number, hoursAway = 6): Promise<void> {
+  await pool.query(
+    `UPDATE showtimes SET starts_at = now() + ($2::int * interval '1 hour') WHERE id = $1`,
+    [showtimeId, hoursAway],
+  );
+}
+
+/** Cancel a showtime, as an organizer calling off one occasion would. */
+export async function cancelShowtime(showtimeId: number): Promise<void> {
+  await pool.query(`UPDATE showtimes SET status = 'cancelled' WHERE id = $1`, [showtimeId]);
+}
+
+/**
+ * Age every "we told you" stamp on a queue, so the next release is outside the re-notify cooldown.
+ *
+ * Tests that fire two releases back to back are seconds apart, which the cooldown is there to
+ * silence. Ageing the stamp is the honest way to say "some time passed" without a real wait.
+ */
+export async function ageNotifications(showtimeId: number, minutes = 30): Promise<void> {
+  await pool.query(
+    `UPDATE waitlists SET notified_at = notified_at - ($2::int * interval '1 minute')
+      WHERE showtime_id = $1 AND notified_at IS NOT NULL`,
+    [showtimeId, minutes],
   );
 }
 

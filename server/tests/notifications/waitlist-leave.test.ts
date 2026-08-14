@@ -50,15 +50,11 @@ describe('leaving a waitlist (US3, UC-17 A4)', () => {
 });
 
 describe('the queue closes up behind somebody who leaves (US3)', () => {
-  it('moves everybody behind up one position', async () => {
+  it('leaves the places of everybody else exactly as they were', async () => {
+    // Nobody moves up, because there is nowhere to move up to: the queue keeps no order, only a
+    // count of open places. What leaving must not do is disturb anybody else's place.
     const { showtimeId, tierId } = await wl.seedSoldOutGaShowtime();
     const [first, second, third] = await wl.fillWaitlistWithSessions(showtimeId, tierId, 3);
-
-    const before = await request(app)
-      .get(`/api/waitlists?showtimeId=${showtimeId}`)
-      .set(bearer(third.token))
-      .expect(200);
-    expect(before.body[0].position).toBe(3);
 
     await request(app).delete(`/api/waitlists/${first.entryId}`).set(bearer(first.token)).expect(204);
 
@@ -71,8 +67,12 @@ describe('the queue closes up behind somebody who leaves (US3)', () => {
       .set(bearer(third.token))
       .expect(200);
 
-    expect(secondAfter.body[0].position).toBe(1);
-    expect(thirdAfter.body[0].position).toBe(2);
+    expect(secondAfter.body).toHaveLength(1);
+    expect(secondAfter.body[0].id).toBe(second.entryId);
+    expect(secondAfter.body[0].status).toBe('waiting');
+    expect(secondAfter.body[0].position).toBeUndefined();
+    expect(thirdAfter.body[0].id).toBe(third.entryId);
+    expect(await wl.getEntries(showtimeId)).toHaveLength(2);
   });
 
   it('frees a place against the cap', async () => {

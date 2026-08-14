@@ -16,6 +16,8 @@ type TicketMailPayload = {
   customerName: string;
   totalAmount: number;
   ticketUrl: string;
+  /** Where the mail sends a reader who has no ticket yet — the event page (waitlist_open). */
+  eventUrl?: string;
   refundPolicy: string | null;
   tickets: Array<{ code: string; tier: string; seat: string | null }>;
 };
@@ -33,6 +35,23 @@ interface EnqueueInput {
 
 const resend = config.resendApiKey ? new Resend(config.resendApiKey) : null;
 const MAX_BATCH = 25;
+
+/**
+ * How long before a showtime its queues close (UC-17 A6).
+ *
+ * The same 24 hours as the self-cancel cutoff, and for that reason: past it a ticket cannot be
+ * cancelled, so the queue's main source of stock is gone.
+ */
+export const WAITLIST_CUTOFF_HOURS = 24;
+
+/**
+ * The least time between two messages to the same queue place.
+ *
+ * Every open place on a queue is told when stock returns — nobody is skipped for joining late — and
+ * a seat held and released a few times over would otherwise mail all ten of them once per release.
+ * The cooldown throttles the messages without touching anybody's place.
+ */
+export const WAITLIST_RENOTIFY_COOLDOWN_MINUTES = 5;
 
 function escapeHtml(value: string): string {
   return value.replace(
@@ -326,25 +345,46 @@ export async function notifyWaitlistForShowtime(showtimeId: number): Promise<voi
       ticket_tier_id: number | null;
       event_id: number;
       title: string;
+      slug: string;
+      starts_at: Date;
+      venue_name: string;
+      city: string;
     }>(
       // `FOR UPDATE OF w` — the lock belongs on the queue rows this run is about to change.
       // Left unqualified it also took row locks on `showtimes` and `events`, which is a lock on
       // the event itself taken by a notification pass.
-      `SELECT w.id, w.user_id, w.ticket_tier_id, e.id AS event_id, e.title
+      `SELECT w.id, w.user_id, w.ticket_tier_id, e.id AS event_id, e.title, e.slug,
+              s.starts_at, v.name AS venue_name, v.city
          FROM waitlists w JOIN showtimes s ON s.id = w.showtime_id JOIN events e ON e.id = s.event_id
-        WHERE w.showtime_id = $1 AND w.status IN ('waiting', 'notified') AND s.starts_at > now()
+         JOIN venues v ON v.id = s.venue_id
+        WHERE w.showtime_id = $1 AND w.status IN ('waiting', 'notified')
+          AND s.starts_at > now() + ($2::int * interval '1 hour')
+          AND s.status <> 'cancelled'
+          AND (w.notified_at IS NULL OR w.notified_at <= now() - ($3::int * interval '1 minute'))
         ORDER BY w.joined_at FOR UPDATE OF w`,
-      [showtimeId],
+      [showtimeId, WAITLIST_CUTOFF_HOURS, WAITLIST_RENOTIFY_COOLDOWN_MINUTES],
     );
+    /*
+     * Everybody open on a queue with stock is told — the whole ten, not a leading few.
+     *
+     * Waiting earlier buys no priority here: the message is an invitation to race, and telling only
+     * the first five would be a priority in all but name, one the entry itself no longer reports.
+     *
+     * Availability is judged once per queue rather than once per waiter. The judgement cannot
+     * change inside this transaction (the queue rows are locked and stock is only read), so a
+     * question asked ten times had ten identical answers.
+     */
+    const availabilityByTier = new Map<string, boolean>();
     const selected: typeof entries.rows = [];
-    const notifiedPerTier = new Map<string, number>();
     for (const entry of entries.rows) {
       const tierKey = String(entry.ticket_tier_id);
-      if ((notifiedPerTier.get(tierKey) ?? 0) >= 5) continue;
-      if (await availableForWaitlist(db, showtimeId, entry.ticket_tier_id)) {
-        selected.push(entry);
-        notifiedPerTier.set(tierKey, (notifiedPerTier.get(tierKey) ?? 0) + 1);
+      if (!availabilityByTier.has(tierKey)) {
+        availabilityByTier.set(
+          tierKey,
+          await availableForWaitlist(db, showtimeId, entry.ticket_tier_id),
+        );
       }
+      if (availabilityByTier.get(tierKey)) selected.push(entry);
     }
     for (const entry of selected) {
       await db.query(
@@ -362,8 +402,16 @@ export async function notifyWaitlistForShowtime(showtimeId: number): Promise<voi
         // differ every release or the outbox's uniqueness would swallow the second message.
         dedupeKey: `waitlist_open:${entry.id}:${Date.now()}`,
         title: `Đã có vé: ${entry.title}`,
-        body: "Vé vừa có lại. Số lượng không được giữ riêng, hãy hoàn tất mua vé sớm.",
-        payload: { eventTitle: entry.title, showtimeId },
+        body: "Vé vừa có lại. Không có suất nào được giữ riêng cho bạn — mở trang sự kiện và mua ngay.",
+        // `eventUrl` is what turns the mail into something actionable: the in-app row can be
+        // clicked because it carries `event_id`, but a mail has only what is written in it.
+        payload: {
+          eventTitle: entry.title,
+          showtimeId,
+          eventUrl: `${config.appUrl.replace(/\/$/, "")}/events/${encodeURIComponent(entry.slug)}`,
+          startsAt: entry.starts_at.toISOString(),
+          venue: `${entry.venue_name}, ${entry.city}`,
+        },
       });
     }
     return selected;
@@ -372,22 +420,74 @@ export async function notifyWaitlistForShowtime(showtimeId: number): Promise<voi
 }
 
 /**
- * Close the places that can no longer be served: their occasion has begun.
+ * Close the places that can no longer be served, and tell their holders why.
  *
- * One statement on the worker's existing tick rather than a scheduler of its own (research.md §4).
- * Lateness is invisible — `notifyWaitlistForShowtime` already refuses to notify a showtime that has
- * started, so a place left open for a few minutes past the start cannot produce a message.
+ * Two things end a queue place before its occasion:
+ *
+ * **The cutoff.** Inside 24 hours of the start nobody can cancel a ticket any more (UC-16), and a
+ * cancellation is one of only two ways stock comes back. What remains — a hold quietly timing out —
+ * is too thin to keep ten people waiting on a promise, so the queue closes at T-24h rather than
+ * going silent while pretending to be open.
+ *
+ * **A cancelled showtime.** Its seats can return to `available` while the occasion itself is off,
+ * and a queue left open over that would invite ten people to buy tickets to nothing.
+ *
+ * Closing is silent from the holder's side unless it is announced, which is why this writes a
+ * message per place rather than only an UPDATE: somebody who joined a queue and hears nothing again
+ * cannot tell "no tickets yet" from "this is over".
+ *
+ * Rides the worker's existing tick (research.md §4). Being a few minutes late is invisible: the
+ * notifier refuses the same showtimes this sweep closes, so no message can slip out in between.
  */
 export async function sweepExpiredWaitlists(db: Db = pool): Promise<number> {
-  const { rowCount } = await db.query(
+  const closed = await db.query<{
+    id: number;
+    user_id: number;
+    event_id: number;
+    title: string;
+    slug: string;
+    starts_at: Date;
+    venue_name: string;
+    city: string;
+    cancelled: boolean;
+  }>(
     `UPDATE waitlists w
         SET status = 'expired'
        FROM showtimes s
+       JOIN events e ON e.id = s.event_id
+       JOIN venues v ON v.id = s.venue_id
       WHERE s.id = w.showtime_id
         AND w.status IN ('waiting', 'notified')
-        AND s.starts_at <= now()`,
+        AND (s.starts_at <= now() + ($1::int * interval '1 hour') OR s.status = 'cancelled')
+    RETURNING w.id, w.user_id, e.id AS event_id, e.title, e.slug,
+              s.starts_at, v.name AS venue_name, v.city,
+              (s.status = 'cancelled') AS cancelled`,
+    [WAITLIST_CUTOFF_HOURS],
   );
-  return rowCount ?? 0;
+
+  for (const row of closed.rows) {
+    await enqueue(db, {
+      userId: row.user_id,
+      eventId: row.event_id,
+      type: "waitlist_closed",
+      // No timestamp in the key: a place closes once and stays closed, so a second sweep finding
+      // the same row must not be able to say so twice.
+      dedupeKey: `waitlist_closed:${row.id}`,
+      title: `Danh sách chờ đã đóng: ${row.title}`,
+      body: row.cancelled
+        ? "Suất diễn này đã bị huỷ nên danh sách chờ đóng lại. Bạn sẽ không nhận thêm thông báo về suất này."
+        : `Còn dưới ${WAITLIST_CUTOFF_HOURS} giờ trước giờ diễn. Từ mốc này vé đã bán không thể huỷ nữa, nên sẽ không có vé trả lại — danh sách chờ đóng lại. Bạn vẫn có thể xem các suất diễn khác của sự kiện.`,
+      payload: {
+        eventTitle: row.title,
+        reason: row.cancelled ? "cancelled" : "cutoff",
+        eventUrl: `${config.appUrl.replace(/\/$/, "")}/events/${encodeURIComponent(row.slug)}`,
+        startsAt: row.starts_at.toISOString(),
+        venue: `${row.venue_name}, ${row.city}`,
+      },
+    });
+  }
+  if (closed.rowCount) kickNotificationWorker();
+  return closed.rowCount ?? 0;
 }
 
 /**
@@ -505,16 +605,26 @@ async function sendMail(
       ? `${ticketPayload.totalAmount.toLocaleString("vi-VN")}₫`
       : "";
   const ticketUrl = ticketPayload.ticketUrl ?? "";
+  /*
+   * One button, two destinations. A mail that carries tickets sends the reader to them; a mail that
+   * announces returned stock sends them to the event page, where the thing to do is buy. The label
+   * has to move with the destination — "MỞ VÉ" over a link to a page selling them is a lie.
+   */
+  const actionUrl = ticketUrl || (ticketPayload.eventUrl ?? "");
+  const actionLabel = ticketUrl ? "MỞ VÉ TRÊN TIXHUB" : "XEM SỰ KIỆN & MUA VÉ";
+  // Ticket chrome — the pass header, the code in the corner — belongs only on a mail that carries a
+  // ticket. Worn by a waitlist announcement it reads as a ticket the reader does not have.
+  const isTicketMail = tickets.length > 0;
   const context = ticketPayload.eventTitle
     ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">
          <tr>
            <td style="padding:0 18px 0 0;vertical-align:top">
-             <div style="display:inline-block;padding:4px 8px;border:2px solid #e0e2ca;border-radius:4px;background:#d97690;color:#ffffff;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;font-weight:700">TIXHUB PASS</div>
+             <div style="display:inline-block;padding:4px 8px;border:2px solid #e0e2ca;border-radius:4px;background:#d97690;color:#ffffff;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;font-weight:700">${isTicketMail ? "TIXHUB PASS" : "SUẤT DIỄN"}</div>
              <div style="margin-top:10px;font-size:27px;font-weight:800;line-height:33px;color:#7a2f35">${escapeHtml(ticketPayload.eventTitle)}</div>
              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:18px;border-collapse:collapse;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px">
                <tr>
                  <td style="padding:0 12px 12px 0;color:#6b7280">THỜI GIAN<br><strong style="display:inline-block;margin-top:4px;color:#12312f">${eventTime ? `${escapeHtml(eventTime)} (UTC+7)` : "Chưa xác định"}</strong></td>
-                 <td style="padding:0 0 12px;color:#6b7280">KHÁN GIẢ<br><strong style="display:inline-block;margin-top:4px;color:#12312f">${escapeHtml(ticketPayload.customerName ?? "Khách TixHub")}</strong></td>
+                 ${ticketPayload.customerName ? `<td style="padding:0 0 12px;color:#6b7280">KHÁN GIẢ<br><strong style="display:inline-block;margin-top:4px;color:#12312f">${escapeHtml(ticketPayload.customerName)}</strong></td>` : ""}
                </tr>
                <tr><td colspan="2" style="color:#6b7280">ĐỊA ĐIỂM<br><strong style="display:inline-block;margin-top:4px;color:#12312f;line-height:18px">${escapeHtml(ticketPayload.venue ?? "Chưa xác định")}</strong></td></tr>
              </table>
@@ -534,15 +644,15 @@ async function sendMail(
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;margin:0 auto;border:4px solid #12312f;border-radius:14px;overflow:hidden;background:#e0e2ca;box-shadow:0 8px 22px rgba(0,0,0,.18)">
       <tr><td style="padding:22px 28px;background:#7a2f35;border-bottom:4px dashed #12312f;color:#ffffff">
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse"><tr>
-          <td><div style="font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#e0e2ca">Vé điện tử TixHub</div><div style="margin-top:8px;font-size:27px;font-weight:900;line-height:30px">TIXHUB <span style="display:inline-block;margin-left:6px;padding:3px 6px;border-radius:3px;background:#e0e2ca;color:#7a2f35;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;vertical-align:middle">QR PASS</span></div></td>
-          <td style="text-align:right;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:#e0e2ca">MÃ VÉ<br><strong style="display:inline-block;max-width:180px;margin-top:5px;color:#ffffff;font-size:12px;line-height:16px;word-break:break-all">${escapeHtml(primaryTicketCode || title)}</strong></td>
+          <td><div style="font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#e0e2ca">${isTicketMail ? "Vé điện tử TixHub" : "Thông báo từ TixHub"}</div><div style="margin-top:8px;font-size:27px;font-weight:900;line-height:30px">TIXHUB <span style="display:inline-block;margin-left:6px;padding:3px 6px;border-radius:3px;background:#e0e2ca;color:#7a2f35;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;vertical-align:middle">${isTicketMail ? "QR PASS" : "CÓ VÉ LẠI"}</span></div></td>
+          ${isTicketMail ? `<td style="text-align:right;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:#e0e2ca">MÃ VÉ<br><strong style="display:inline-block;max-width:180px;margin-top:5px;color:#ffffff;font-size:12px;line-height:16px;word-break:break-all">${escapeHtml(primaryTicketCode)}</strong></td>` : ""}
         </tr></table>
       </td></tr>
       <tr><td style="padding:28px;background:#e0e2ca">
         <p style="margin:0 0 22px;font-size:14px;line-height:22px;color:#12312f">${escapeHtml(body)}</p>
         ${context}
         ${details ? `<div style="margin-top:24px;font-size:15px;font-weight:800;color:#7a2f35">VÉ VÀO CỬA QR</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:4px;border-collapse:collapse">${details}</table>` : ""}
-        ${ticketUrl ? `<div style="margin-top:26px;text-align:center"><a href="${escapeHtml(ticketUrl)}" style="display:inline-block;padding:13px 22px;border:2px solid #12312f;border-radius:6px;background:#12312f;color:#e0e2ca;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;text-decoration:none">MỞ VÉ TRÊN TIXHUB</a></div>` : ""}
+        ${actionUrl ? `<div style="margin-top:26px;text-align:center"><a href="${escapeHtml(actionUrl)}" style="display:inline-block;padding:13px 22px;border:2px solid #12312f;border-radius:6px;background:#12312f;color:#e0e2ca;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;text-decoration:none">${actionLabel}</a></div>` : ""}
         ${refund}
         <div style="margin-top:28px;padding-top:18px;border-top:2px dashed rgba(18,49,47,.35);font-size:13px;line-height:20px;color:#49615c">Cần hỗ trợ? Liên hệ <a href="mailto:support@tixhub.fit" style="color:#7a2f35;font-weight:700">support@tixhub.fit</a>.</div>
       </td></tr>
@@ -552,7 +662,7 @@ async function sendMail(
     from: config.mailFrom,
     to,
     subject: title,
-    text: `${title}\n\n${body}${ticketPayload.eventTitle ? `\n\n${ticketPayload.eventTitle}${eventTime ? `\nThời gian: ${eventTime} (UTC+7)` : ""}${ticketPayload.venue ? `\nĐịa điểm: ${ticketPayload.venue}` : ""}` : ""}${plainTickets ? `\n\n${plainTickets}` : ""}${ticketUrl ? `\n\nMở vé trên TixHub: ${ticketUrl}` : ""}\n\nHỗ trợ: support@tixhub.fit`,
+    text: `${title}\n\n${body}${ticketPayload.eventTitle ? `\n\n${ticketPayload.eventTitle}${eventTime ? `\nThời gian: ${eventTime} (UTC+7)` : ""}${ticketPayload.venue ? `\nĐịa điểm: ${ticketPayload.venue}` : ""}` : ""}${plainTickets ? `\n\n${plainTickets}` : ""}${actionUrl ? `\n\n${ticketUrl ? "Mở vé trên TixHub" : "Xem sự kiện & mua vé"}: ${actionUrl}` : ""}\n\nHỗ trợ: support@tixhub.fit`,
     html,
     attachments,
   });

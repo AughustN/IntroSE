@@ -4,21 +4,45 @@ import { notifyWaitlistForShowtime } from '../../src/modules/notifications/notif
 import * as wl from '../helpers/waitlistSeed.js';
 
 describe('telling the queue that tickets came back (US2, FR-007)', () => {
-  it('tells the five earliest joiners and nobody else', async () => {
+  it('tells everybody on the queue, not a leading few', async () => {
+    // A full queue: ten places, one returned ticket. All ten are told and race for it. Telling
+    // only the earliest handful would be join-order priority, which this feature does not grant —
+    // it is also why the entry reports no position.
     const { showtimeId, tierId } = await wl.seedSoldOutGaShowtime(10);
-    const queued = await wl.fillWaitlist(showtimeId, tierId, 7);
+    const queued = await wl.fillWaitlist(showtimeId, tierId, 10);
     await wl.releaseGaQuantity(tierId, 1);
 
     await notifyWaitlistForShowtime(showtimeId);
 
     const rows = await wl.getEntries(showtimeId);
     const notified = rows.filter((row) => row.status === 'notified');
-    expect(notified).toHaveLength(5);
-    // Earliest five by join time — the first five ids `fillWaitlist` produced, in that order.
+    expect(notified).toHaveLength(10);
     expect(notified.map((row) => row.id).sort((a, b) => a - b)).toEqual(
-      queued.slice(0, 5).map((entry) => entry.entryId).sort((a, b) => a - b),
+      queued.map((entry) => entry.entryId).sort((a, b) => a - b),
     );
     expect(notified.every((row) => row.notified_at !== null)).toBe(true);
+  });
+
+  it('carries a link to the event page in every message it writes', async () => {
+    // The in-app row can be followed because it carries `event_id`; a mail has only what is
+    // written in it, so the destination has to travel in the payload.
+    const { showtimeId, tierId } = await wl.seedSoldOutGaShowtime(10);
+    const [waiter] = await wl.fillWaitlist(showtimeId, tierId, 1);
+    await wl.releaseGaQuantity(tierId, 1);
+
+    await notifyWaitlistForShowtime(showtimeId);
+
+    const { rows } = await pool.query<{ channel: string; payload: Record<string, string> }>(
+      `SELECT channel, payload FROM notifications WHERE user_id = $1 AND type = 'waitlist_open'`,
+      [waiter.userId],
+    );
+    // One per channel: the app row and the mail say the same thing and lead to the same place.
+    expect(rows.map((row) => row.channel).sort()).toEqual(['email', 'in_app']);
+    for (const row of rows) {
+      expect(row.payload.eventUrl).toMatch(/\/events\/[^/]+$/);
+      expect(row.payload.startsAt).toBeTruthy();
+      expect(row.payload.venue).toBeTruthy();
+    }
   });
 
   it('writes one readable message per notified place, carrying its event', async () => {
@@ -45,6 +69,9 @@ describe('telling the queue that tickets came back (US2, FR-007)', () => {
     await notifyWaitlistForShowtime(showtimeId);
     const afterFirst = await wl.getEntries(showtimeId);
 
+    // The two releases are seconds apart here; the re-notify cooldown exists to silence exactly
+    // that, so the clock is moved on rather than the rule bent.
+    await wl.ageNotifications(showtimeId);
     await wl.releaseGaQuantity(tierId, 1);
     await notifyWaitlistForShowtime(showtimeId);
 
@@ -112,5 +139,51 @@ describe('telling the queue that tickets came back (US2, FR-007)', () => {
     expect(
       (await wl.getEntries(showtimeId)).find((row) => row.id === queued[1].entryId)?.status,
     ).toBe('notified');
+  });
+
+  it('says nothing twice inside the cooldown, however often stock flickers', async () => {
+    // A seat held and released repeatedly used to be one mail per release per waiter. Ten waiters
+    // and four flickers is forty mails about the same handful of tickets.
+    const { showtimeId, tierId } = await wl.seedSoldOutGaShowtime(10);
+    const queued = await wl.fillWaitlist(showtimeId, tierId, 3);
+    await wl.releaseGaQuantity(tierId, 1);
+    await notifyWaitlistForShowtime(showtimeId);
+
+    await wl.releaseGaQuantity(tierId, 1);
+    await notifyWaitlistForShowtime(showtimeId);
+
+    for (const entry of queued) {
+      const open = (await wl.getNotifications(entry.userId)).filter(
+        (message) => message.type === 'waitlist_open',
+      );
+      expect(open).toHaveLength(1);
+    }
+  });
+
+  it('tells nobody inside the 24-hour cutoff', async () => {
+    // Stock can still flicker back through an expiring hold, but the queue is closing: telling
+    // people to race for it now would cross the sweep that is about to shut their place.
+    const { showtimeId, tierId } = await wl.seedSoldOutGaShowtime(10);
+    const queued = await wl.fillWaitlist(showtimeId, tierId, 2);
+    await wl.releaseGaQuantity(tierId, 1);
+    await wl.enterCutoff(showtimeId);
+
+    await notifyWaitlistForShowtime(showtimeId);
+
+    expect((await wl.getEntries(showtimeId)).every((row) => row.status === 'waiting')).toBe(true);
+    expect(await wl.getNotifications(queued[0].userId)).toHaveLength(0);
+  });
+
+  it('tells nobody about a cancelled showtime, whatever its seats say', async () => {
+    // Cancelling releases the inventory, which used to read as "tickets came back" and invited ten
+    // people to buy tickets to an occasion that is off.
+    const { showtimeId, tierId } = await wl.seedSoldOutGaShowtime(10);
+    const queued = await wl.fillWaitlist(showtimeId, tierId, 2);
+    await wl.releaseGaQuantity(tierId, 1);
+    await wl.cancelShowtime(showtimeId);
+
+    await notifyWaitlistForShowtime(showtimeId);
+
+    expect(await wl.getNotifications(queued[0].userId)).toHaveLength(0);
   });
 });

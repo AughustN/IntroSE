@@ -1010,18 +1010,20 @@ Refunds go to the **wallet**, per **ticket**, **once only** — rationale in [D3
 
 - Per **showtime + ticket tier** (`ticket_tier_id` NULL = any tier); one row per `(user, showtime, tier)`.
 - Each list holds **at most 10 entries**; reject the join once the tier's list is at 10.
-- Inventory now frees from **two** sources, not three: self-cancel (only until T-24h — after that inventory is frozen, D3) and hold-TTL expiry. The payment-window timeout is gone entirely, since wallet purchases are atomic and no seat waits on a callback (D2). Waitlist notifications therefore go quiet in the final 24 hours.
-- When inventory frees, notify the earliest-joined waiters by `joined_at` — the first **5** if the list holds more than 5, otherwise all of them — with a `waitlist_open` notification; **no seat is reserved** — they race to buy.
-- `status`: `waiting → notified → converted` (bought) or `expired` (showtime started). `notified` is not terminal: a waiter who loses the race stays eligible and keeps `joined_at` priority at the next release, so order by `joined_at` regardless of status. `notified_at` records the most recent notification, not a one-shot burn.
+- Inventory now frees from **two** sources, not three: self-cancel (only until T-24h — after that inventory is frozen, D3) and hold-TTL expiry. The payment-window timeout is gone entirely, since wallet purchases are atomic and no seat waits on a callback (D2). Rather than going quiet in the final 24 hours, the queue **closes** there and says so.
+- When inventory frees, notify **every open entry** on that queue — up to all 10 — with a `waitlist_open` notification; **no seat is reserved** — they race to buy. Join order grants no privilege, so nobody is skipped for joining late.
+- `status`: `waiting → notified → converted` (bought) or `expired` (queue closed). `notified` is not terminal: a waiter who loses the race stays eligible and is told again at the next release. `notified_at` records the most recent notification, and doubles as the re-notify cooldown stamp.
 
 **As built (feature 011).** The table and its indexes are unchanged; what follows records the decisions the implementation settled:
 
-- **Open** means `status IN ('waiting','notified')`. That pair is what the cap of 10 counts, what a position counts over, what the notifier reads, and what leaving deletes — a notified waiter still holds one of the ten places.
-- **Position is derived, never stored**: `count(open entries of the same (showtime, tier) with an earlier joined_at) + 1`, computed per read. So a departure moves everyone behind up with no rewrite, and two rows can never both claim third place. `idx_waitlists_open` already serves the count.
+- **Open** means `status IN ('waiting','notified')`. That pair is what the cap of 10 counts, what the notifier reads, and what leaving deletes — a notified waiter still holds one of the ten places.
+- **No position is stored or reported.** Waiting earlier buys no claim on a released ticket — everyone open is told and they race — so a number would promise an order of service the feature does not keep. `joined_at` survives as an audit fact and a stable read order, not as a rank.
 - **Availability is judged at the joined scope**, by one shared function used by both the join gate and the release notifier — a tier join needs that tier exhausted, an any-tier join needs every tier of the showtime exhausted. The join route previously ran its own showtime-wide test, which refused a sold-out tier whenever a sibling tier still sold (contradicting UC-09 A2).
 - **`converted`** is written inside the checkout transaction that issues the tickets, so a buyer never holds both a ticket and a place in the queue for it. It closes the buyer's place for each tier purchased and their any-tier place for that showtime.
-- **`expired`** is swept by the notification worker's existing 15-minute tick, not a scheduler of its own. Lateness is invisible: the notifier already refuses to notify a showtime that has started.
-- `waitlist_open` notifications carry `event_id`, so the in-app list can lead back to the event without trusting `payload`. Their `dedupe_key` deliberately includes a timestamp, because re-notification is required.
+- **`expired`** is swept by the notification worker's existing 15-minute tick, not a scheduler of its own. Two things close a queue early: **T-24h**, the same mark past which a ticket can no longer be cancelled (so the queue's main source of stock is gone), and a **cancelled showtime**, whose released seats must never read as "tickets came back". Lateness is invisible: the notifier refuses exactly the showtimes this sweep closes.
+- **Closing is announced.** Each swept place gets a `waitlist_closed` message on both channels carrying `reason` — `cutoff` or `cancelled` — because silence is indistinguishable from "no tickets yet". Its `dedupe_key` has no timestamp: a place closes once.
+- **Re-notification is throttled**, not rationed: an open place is told at most once per 5 minutes (`notified_at`), so a seat held and released repeatedly cannot mail ten people once per flicker.
+- `waitlist_open` notifications carry `event_id`, so the in-app list can lead back to the event without trusting `payload`; the mail carries `eventUrl` in `payload`, since a mail has only what is written in it. Their `dedupe_key` deliberately includes a timestamp, because re-notification is required.
 
 ## SEO
 

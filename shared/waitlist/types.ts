@@ -5,7 +5,7 @@
  * Where a place in the queue stands.
  *
  * `waiting` and `notified` are the two **open** states, and everything that matters counts them
- * together: the limit of ten, the position, the notifier's ordering, and what leaving removes.
+ * together: the limit of ten, the notifier's reach, and what leaving removes.
  * Being told is not the end of a place (UC-17 A5) — a waiter who loses the race keeps their turn
  * and is told again at the next release, so `notified` can go back to being notified for ever.
  *
@@ -20,14 +20,13 @@ export interface WaitlistEntry {
   /** The tier queued for; `null` means any tier of this showtime. */
   ticketTierId: number | null;
   status: WaitlistStatus;
-  /**
-   * 1-based place among the open entries of this queue, in the order people joined.
+  /*
+   * No position is carried, deliberately.
    *
-   * Derived on every read, never stored. A stored position would have to be rewritten each time
-   * somebody left, expired or converted, and every one of those rewrites is a chance for two rows
-   * to claim third place. Counting ten rows by `joinedAt` cannot drift.
+   * A number would promise an order of service the feature does not keep: waiting earlier buys no
+   * claim on a released ticket, everyone told of it races for it equally, and the only thing being
+   * in the queue earns is the message. Showing "vị trí 3" would read as a turn that will come.
    */
-  position: number;
   joinedAt: string;
   /** The *most recent* time this place was told of availability, not a one-shot burn. */
   notifiedAt: string | null;
@@ -56,6 +55,13 @@ export type WaitlistErrorCode =
   | 'tickets_available'
   /** The queue already holds ten open places (UC-17 A2). */
   | 'waitlist_full'
+  /**
+   * Too near the start for a queue to mean anything (UC-17 A6).
+   *
+   * Inside the 24-hour cancel cutoff no ticket can come back from a cancellation, so the queues of
+   * that showtime are closed to new places and the open ones are being shut down.
+   */
+  | 'waitlist_closed'
   /** Unknown showtime, or one already begun or cancelled. */
   | 'showtime_not_found'
   /** Unknown entry, or one belonging to somebody else — deliberately indistinguishable. */

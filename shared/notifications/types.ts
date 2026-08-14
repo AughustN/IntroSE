@@ -16,6 +16,8 @@ export type NotificationType =
   | 'event_changed'
   | 'event_cancelled'
   | 'waitlist_open'
+  /** A queue place closed before it could be served, with the reason it closed. */
+  | 'waitlist_closed'
   | 'announcement';
 
 export interface NotificationItem {
@@ -23,7 +25,10 @@ export interface NotificationItem {
   type: NotificationType;
   title: string;
   body: string;
-  /** Type-specific context. For `waitlist_open`: `eventTitle` and `showtimeId`. */
+  /**
+   * Type-specific context. For `waitlist_open`: `eventTitle`, `showtimeId`, `eventUrl`, `startsAt`
+   * and `venue`. For `waitlist_closed`: the same, plus `reason` — `cutoff` or `cancelled`.
+   */
   payload: Record<string, unknown>;
   /**
    * Where this message leads, resolved on the server from the notification's own event reference.

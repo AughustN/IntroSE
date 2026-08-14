@@ -58,7 +58,7 @@ export const waitlistClient = {
    *
    * Omit `ticketTierId` to wait for any tier of the showtime — which the server allows only when
    * every tier is exhausted. Joining twice is not an error: the existing place comes back with
-   * `existing: true`, so the caller can simply show the position either way.
+   * `existing: true`, so the caller can show the same "you are in the queue" state either way.
    */
   join: (input: WaitlistJoinInput) =>
     call<WaitlistJoinResult>("/waitlists", { method: "POST", body: input }),

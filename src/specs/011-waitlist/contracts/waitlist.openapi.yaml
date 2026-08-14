@@ -49,14 +49,16 @@ paths:
         '409':
           description: >
             tickets_available — stock exists in the joined scope, buy instead (UC-17 A3);
-            or waitlist_full — the queue already holds 10 open entries (UC-17 A2).
+            waitlist_full — the queue already holds 10 open entries (UC-17 A2);
+            or waitlist_closed — the showtime starts within 24 hours, past which no ticket can be
+            cancelled, so no ticket can come back (UC-17 A6).
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
 
     get:
       summary: The caller's own open waitlist entries
       description: >
-        Open entries only (waiting or notified), newest queue first, each carrying its live
-        position. Filter to one showtime to drive the controls on an event page.
+        Open entries only (waiting or notified), newest queue first. Filter to one showtime to
+        drive the controls on an event page.
       parameters:
         - in: query
           name: showtimeId
@@ -76,9 +78,9 @@ paths:
     delete:
       summary: Leave a waitlist (UC-17 A4)
       description: >
-        Removes the caller's own entry. Entries behind it move up a position automatically, since
-        position is derived from joined_at and never stored. An entry belonging to another account
-        is indistinguishable from one that does not exist.
+        Removes the caller's own entry, freeing one of the queue's ten places. Nothing else changes:
+        the queue holds no order to repair. An entry belonging to another account is
+        indistinguishable from one that does not exist.
       parameters:
         - in: path
           name: id
@@ -147,12 +149,12 @@ components:
       type: string
       enum: [waiting, notified, expired, converted]
       description: >
-        waiting and notified are the open states — both count against the cap of 10, both hold a
-        position, both are notified in joined_at order. notified is not terminal (UC-17 A5).
+        waiting and notified are the open states — both count against the cap of 10 and both are
+        notified when stock returns. notified is not terminal (UC-17 A5).
 
     WaitlistEntry:
       type: object
-      required: [id, showtimeId, ticketTierId, status, position, joinedAt, notifiedAt]
+      required: [id, showtimeId, ticketTierId, status, joinedAt, notifiedAt]
       properties:
         id: { type: integer, format: int64 }
         showtimeId: { type: integer, format: int64 }
@@ -161,10 +163,8 @@ components:
           format: int64
           description: null means the entry covers any tier of the showtime.
         status: { $ref: '#/components/schemas/WaitlistStatus' }
-        position:
-          type: integer
-          minimum: 1
-          description: 1-based place among open entries of this queue, ordered by joinedAt. Derived, never stored.
+        # No position is carried: waiting earlier confers no priority, everyone notified races for
+        # the released ticket, so a number would describe an order of service that does not exist.
         joinedAt: { type: string, format: date-time }
         notifiedAt:
           type: [string, 'null']
@@ -194,7 +194,7 @@ components:
     NotificationType:
       type: string
       enum:
-        [order_confirmed, ticket_resend, reminder_7d, reminder_1d, event_changed, event_cancelled, waitlist_open, announcement]
+        [order_confirmed, ticket_resend, reminder_7d, reminder_1d, event_changed, event_cancelled, waitlist_open, waitlist_closed, announcement]
 
     NotificationItem:
       type: object
@@ -207,7 +207,10 @@ components:
         payload:
           type: object
           additionalProperties: true
-          description: For waitlist_open — eventTitle and showtimeId.
+          description: >
+            For waitlist_open — eventTitle, showtimeId, eventUrl, startsAt, venue.
+            For waitlist_closed — the same plus reason: cutoff (inside 24h of the start, when no
+            ticket can be cancelled any more) or cancelled (the showtime is off).
         eventSlug:
           type: [string, 'null']
           description: Resolved server-side from event_id so the row can link to the event page.

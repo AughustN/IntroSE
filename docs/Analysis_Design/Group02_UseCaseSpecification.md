@@ -875,22 +875,25 @@ Group 02 · SoE
 **Preconditions**
 - Attendee is signed in.
 - The chosen ticket tier is sold out (no seat available for a seated tier; no quantity remaining for a GA tier).
+- The showtime starts more than 24 hours from now (see A6).
 
 **Basic flow**
 1. Attendee opens an event with a sold-out tier (UC-09) and selects "Join waitlist" on that tier.
 2. System checks the tier's waitlist; it holds fewer than 10 entries, so the system asks the attendee to confirm joining.
-3. Attendee confirms; system records the entry with its join time and shows the attendee their position.
-4. Inventory later frees for that tier from one of **two** sources only: a self-cancel (UC-16, possible until T-24h) or hold-TTL expiry `[REL-02]`. There is no payment-window timeout — wallet purchases are atomic and no seat waits on a callback `[DATA-03]` — so waitlist notifications go quiet in the final 24 hours.
-5. System notifies the earliest-joined waiters (the first 5 if the list holds more than 5, otherwise everyone on it) with a `waitlist_open` notification `[UC-19]`.
-6. Notified attendees follow the notification and buy on a first-come basis (UC-11 seated / UC-12 GA). No seat or quantity is held for any of them.
+3. Attendee confirms; system records the entry with its join time and confirms that they hold a place. **No position is shown**: waiting earlier grants no priority, so a number would describe an order of service that does not exist.
+4. Inventory later frees for that tier from one of **two** sources only: a self-cancel (UC-16, possible until T-24h) or hold-TTL expiry `[REL-02]`. There is no payment-window timeout — wallet purchases are atomic and no seat waits on a callback `[DATA-03]`.
+5. System notifies **every** open entry on that queue — up to all 10, none skipped for joining late — with a `waitlist_open` message delivered both **in-app and by email** `[UC-19]`. Both carry a link to the event's detail page, where the tickets are bought. A queue place is told at most once per 5 minutes, so stock flickering in and out cannot turn into a burst of mail.
+6. Notified attendees follow the link and buy on a first-come basis (UC-11 seated / UC-12 GA). No seat or quantity is held for any of them.
 
 **Alternative flows**
-- **A1 — Already on this waitlist:** system shows the current position; no duplicate entry.
+- **A1 — Already on this waitlist:** system confirms the existing place; no duplicate entry.
 - **A2 — Waitlist full:** the tier already holds 10 entries; system refuses the join, explains the cap, and invites the attendee to check back.
 - **A3 — Inventory frees before joining:** system routes the attendee straight to purchase instead.
-- **A4 — Attendee leaves the waitlist:** system removes the entry; later entries move up a position.
-- **A5 — Notified attendee loses the race:** the entry stays on the list and keeps its join-time priority, so it is notified again at the next release.
-- **A6 — Showtime starts:** remaining entries expire; no further notifications are sent.
+- **A4 — Attendee leaves the waitlist:** system removes the entry, freeing one of the ten places. Nothing else changes — the queue holds no order to repair.
+- **A5 — Notified attendee loses the race:** the entry stays on the list and is notified again at the next release, subject to the 5-minute cooldown.
+- **A6 — Queue closes at T-24h:** 24 hours before the showtime, remaining entries expire and the queue refuses new joins. Past that mark no ticket can be cancelled (UC-16), so the queue's only real source of stock is gone. Each holder is told that their place closed **and why**, in-app and by email.
+- **A7 — Showtime cancelled:** remaining entries expire immediately, whatever the seat rows now say, and holders are told the cancellation was the reason. Releasing a cancelled showtime's inventory must never read as "tickets came back".
+- **A8 — Showtime starts:** any entry still open expires; no further notifications are sent.
 
 **Postconditions**
 - **Success:** the attendee holds an entry on that tier's waitlist and will be notified when inventory frees.
@@ -900,9 +903,11 @@ Group 02 · SoE
 - A waitlist is scoped to one showtime + ticket tier; an any-tier entry is allowed only when every tier of the showtime is sold out.
 - Each waitlist holds at most 10 entries; joining is closed at the cap.
 - Notification is an invitation to race, not an offer. Nothing is reserved, and there is no offer window.
+- Join order carries no privilege. It is not reported to the attendee, and it does not decide who is told.
+- Every message the queue produces — open, closed — goes to both channels and links to the event page.
 - Notification delivery via UC-19.
 
-**Prototype.** Screens: *Sold-out tier with Join-waitlist*, *Waitlist confirmation / position*, *Waitlist-open notification*.
+**Prototype.** Screens: *Sold-out tier with Join-waitlist*, *Waitlist confirmation*, *Waitlist-open notification*.
 `![UC-17 prototype](../prototypes/uc-17-waitlist.png)`
 
 ---
