@@ -47,3 +47,5 @@ uploads/
 
 # Local embedding model weights (downloaded, regenerable)
 .models/
+
+concert-venue-seat-map-editor/
