@@ -56,6 +56,25 @@ function fallback(list: AICandidateEvent[], reply: string, message?: string): Ch
 const FALLBACK_REPLY = 'Đây là những sự kiện sắp diễn ra và vẫn còn vé. Sự kiện đã diễn ra không nằm trong danh sách này.';
 
 /**
+ * Why an answer degraded, in the reader's words — and exported so the tests assert the branch they
+ * mean rather than a fragment of its wording.
+ *
+ * A test matching a substring of the copy fails the next time the copy is edited, which says
+ * nothing about whether the code still takes the right branch. That is what happened to
+ * `GROUNDED_AWAY`: the phrasing moved on and left a red test behind it.
+ */
+export const FALLBACK_NOTE = {
+  /** The model named events, and grounding discarded every one of them. */
+  GROUNDED_AWAY: 'Không có sự kiện nào sắp diễn ra khớp yêu cầu — đây là những lựa chọn gần nhất.',
+  /** No events and no prose either. */
+  EMPTY_ANSWER: 'AI không đưa ra được câu trả lời, đây là gợi ý thay thế.',
+  /** The feature is switched off in settings. */
+  DISABLED: 'Tính năng AI hiện đang tắt.',
+  /** The platform-wide hourly ceiling is reached. */
+  PLATFORM_CEILING: 'Hệ thống đang tạm giới hạn AI, đây là gợi ý thay thế.',
+} as const;
+
+/**
  * Answer one turn of a conversation.
  *
  * The order of the steps is the design, not an implementation detail:
@@ -98,7 +117,7 @@ export async function chat(
 
   const settings = await getSettings();
   if (!settings.ai_features_enabled) {
-    return fallback(list, FALLBACK_REPLY, 'Tính năng AI hiện đang tắt.');
+    return fallback(list, FALLBACK_REPLY, FALLBACK_NOTE.DISABLED);
   }
 
   const history = (input.history ?? []).slice(-HISTORY_LIMIT);
@@ -146,7 +165,7 @@ export async function chat(
         `Bạn đã dùng hết ${AI_REQUEST_LIMIT} yêu cầu AI trong giờ này.`,
       );
     }
-    return fallback(list, FALLBACK_REPLY, 'Hệ thống đang tạm giới hạn AI, đây là gợi ý thay thế.');
+    return fallback(list, FALLBACK_REPLY, FALLBACK_NOTE.PLATFORM_CEILING);
   }
 
   try {
@@ -189,10 +208,10 @@ export async function chat(
     const reply = completion.reply.trim();
     if (!recommendations.length) {
       if (completion.recommendations.length > 0) {
-        return fallback(list, reply || FALLBACK_REPLY, 'Không có sự kiện nào sắp diễn ra khớp yêu cầu — đây là những lựa chọn gần nhất.');
+        return fallback(list, reply || FALLBACK_REPLY, FALLBACK_NOTE.GROUNDED_AWAY);
       }
       if (!reply) {
-        return fallback(list, FALLBACK_REPLY, 'AI không đưa ra được câu trả lời, đây là gợi ý thay thế.');
+        return fallback(list, FALLBACK_REPLY, FALLBACK_NOTE.EMPTY_ANSWER);
       }
     }
 

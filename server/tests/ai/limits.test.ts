@@ -69,13 +69,31 @@ describe('AI allowance and platform ceiling', () => {
     const { token, userId } = await registerUser();
     install(answering());
 
-    for (let i = 0; i < AI_REQUEST_LIMIT; i++) {
-      await ask(token, `câu hỏi khác nhau ${i}`).expect(200);
-    }
+    /*
+     * The hour is spent up to its last unit in one statement rather than by asking fifty times.
+     *
+     * The allowance used to be ten and the loop was affordable; at fifty it is fifty HTTP requests,
+     * each several round trips to a hosted database, and the test simply ran out of time — a
+     * failure that said nothing about the limit it was meant to check. What matters is the
+     * boundary: the last unit is served, the one after it is refused, and that is what is exercised
+     * here. `window_started_at` is written as the current hour so the row counts as this window's.
+     */
+    await pool.query(
+      `INSERT INTO ai_request_limits (user_id, window_started_at, request_count)
+       VALUES ($1, date_trunc('hour', now()), $2)
+       ON CONFLICT (user_id) DO UPDATE
+         SET window_started_at = EXCLUDED.window_started_at, request_count = EXCLUDED.request_count`,
+      [userId, AI_REQUEST_LIMIT - 1],
+    );
+
+    const last = await ask(token, 'câu hỏi cuối cùng trong giờ').expect(200);
+    expect(last.body.source).toBe('ai');
     expect(await usedBy(userId)).toBe(AI_REQUEST_LIMIT);
 
     const refused = await ask(token, 'một câu nữa').expect(429);
     expect(refused.body.error ?? refused.body.code).toBe('ai_rate_limited');
+    // A refusal spends nothing: the count is still exactly the allowance, not one past it.
+    expect(await usedBy(userId)).toBe(AI_REQUEST_LIMIT);
   });
 
   it('resets at the hour boundary', async () => {

@@ -4,6 +4,7 @@ import { pool } from '../../src/db/pool.js';
 import { app } from '../helpers/app.js';
 import { bearer, registerUser } from '../helpers/authFixture.js';
 import { seedEvent, seedOrganizer, seedShowtime, seedTier, seedUser, seedVenue, seedVisibleGaEvent } from '../helpers/catalogSeed.js';
+import { FALLBACK_NOTE } from '../../src/modules/ai/ai.service.js';
 import { FakeAIProvider, useFakeProvider } from '../helpers/fakeAiProvider.js';
 
 let restore: (() => void) | null = null;
@@ -78,7 +79,9 @@ describe('POST /api/ai/chat', () => {
 
     expect(res.body.source).toBe('fallback');
     expect(res.body.recommendations.every((r: { event: { id: number } }) => r.event.id !== 999_999)).toBe(true);
-    expect(res.body.message).toContain('không chọn được');
+    // The reader is told why they are looking at a catalog list rather than an answer. Asserted
+    // against the constant, so editing the wording is not the same as breaking the branch.
+    expect(res.body.message).toBe(FALLBACK_NOTE.GROUNDED_AWAY);
   });
 
   it('never offers a draft, past, or sold-out event (SC-003)', async () => {
