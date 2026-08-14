@@ -13,6 +13,7 @@ import ConfirmDialog, { ConfirmRequest } from "../ConfirmDialog";
 import OrganizerSection from "./OrganizerSection";
 import ProfileSection from "./ProfileSection";
 import SecuritySection from "./SecuritySection";
+import OrganizerBusinessAnalytics from "./OrganizerBusinessAnalytics";
 import { btnSecondary } from "./primitives";
 
 interface Props {
@@ -32,7 +33,7 @@ interface Props {
   initialSection?: SectionId;
 }
 
-export type SectionId = "profile" | "security" | "organizer";
+export type SectionId = "profile" | "security" | "organizer" | "analytics";
 
 const SECTIONS: { id: SectionId; label: string; icon: typeof User }[] = [
   { id: "profile", label: "Hồ sơ", icon: User },
@@ -431,7 +432,11 @@ export default function AccountPage({
                 onNotice={notify}
                 onError={fail}
                 onManageEvents={() => leave(onManageEvents)}
+                onViewAnalytics={() => setSection("analytics")}
               />
+            )}
+            {me && section === "analytics" && (
+              <OrganizerBusinessAnalytics />
             )}
 
             <button

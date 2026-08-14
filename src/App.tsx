@@ -28,6 +28,7 @@ import { formatEventDate } from "./services/formatDate";
 import { formatVnd } from "./services/currency";
 import {
   ACCOUNT_PATH,
+  ORGANIZER_ANALYTICS_PATH,
   isOverlayPath,
   pathToRoute,
   RESET_PASSWORD_PATH,
@@ -382,7 +383,7 @@ export default function App() {
   const eventsRef = useLatest(events);
 
   /** An overlay route (see routes.ts): the address bar is the only state the account page needs. */
-  const showAccountPage = location.pathname === ACCOUNT_PATH;
+  const showAccountPage = location.pathname === ACCOUNT_PATH || location.pathname === ORGANIZER_ANALYTICS_PATH;
 
   /**
    * True once the cached history has been read out of localStorage. `/tickets/:id` cannot decide
@@ -2002,7 +2003,9 @@ export default function App() {
            * history entry the Back button has to walk through before it can close the page.
            */
           initialSection={
-            new URLSearchParams(location.search).get("section") === "organizer"
+            location.pathname === ORGANIZER_ANALYTICS_PATH || new URLSearchParams(location.search).get("section") === "analytics"
+              ? "analytics"
+              : new URLSearchParams(location.search).get("section") === "organizer"
               ? "organizer"
               : "profile"
           }

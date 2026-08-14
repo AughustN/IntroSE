@@ -36,10 +36,14 @@ import {
   queueAnnouncement,
 } from "../notifications/notifications.service.js";
 import { cancelEvent } from "../payments/tickets.service.js";
+import { getOrganizerAnalyticsController } from "../organizer/analyticsController.js";
 
 // Organizer catalog management — approved organizer + ownership (D-D). Mounted at /api.
 export const organizerRouter = Router();
 organizerRouter.use(requireAuth, requireOrganizer);
+
+organizerRouter.get("/analytics/dashboard", getOrganizerAnalyticsController);
+organizerRouter.get("/analytics", getOrganizerAnalyticsController);
 
 const asyncH =
   (fn: (req: Request, res: Response) => Promise<void>) =>

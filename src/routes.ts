@@ -67,6 +67,7 @@ const STATIC_PATHS: ReadonlyArray<readonly [Screen, string]> = [
 ];
 
 export const ACCOUNT_PATH = "/account";
+export const ORGANIZER_ANALYTICS_PATH = "/organizer/analytics";
 export const RESET_PASSWORD_PATH = "/reset-password";
 export const VNPAY_RETURN_PATH = "/vnpay-return";
 
@@ -75,7 +76,7 @@ export const VNPAY_RETURN_PATH = "/vnpay-return";
  * browser to whatever that says, and a mismatch lands the buyer on a 404 instead of the polling
  * screen. Same for `RESET_PASSWORD_PATH` and the link the reset mail builds.
  */
-const OVERLAY_PATHS: readonly string[] = [ACCOUNT_PATH, RESET_PASSWORD_PATH, VNPAY_RETURN_PATH];
+const OVERLAY_PATHS: readonly string[] = [ACCOUNT_PATH, ORGANIZER_ANALYTICS_PATH, RESET_PASSWORD_PATH, VNPAY_RETURN_PATH];
 
 /** Trailing slashes and empty paths are the same page as the canonical form. */
 function normalize(pathname: string): string {
