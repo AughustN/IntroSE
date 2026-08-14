@@ -3,11 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, type KeyboardEvent, useEffect, useState } from "react";
 import Select from "./Select";
-import { catalogClient, type EventCategory, MyEvent, MyVenue, organizerApi } from "../services/catalogClient";
+import { catalogClient, type EventCategory, MyEvent, MyVenue, organizerApi, type ScanTicket } from "../services/catalogClient";
 import { aiClient, type ListingSuggestion } from "../services/aiClient";
 import SeatMapBuilder from "./SeatMapBuilder";
+import QrCameraScan from "./QrCameraScan";
 
 const input =
   "h-11 w-full rounded-xl border-2 border-beige-kem bg-surface-2 px-4 text-body text-beige-kem outline-none focus:border-burgundy";
@@ -17,6 +18,13 @@ const btn =
   "rounded-xl bg-burgundy px-4 py-2.5 text-body font-black text-white transition hover:brightness-95 disabled:opacity-60";
 const ghost =
   "rounded-xl border-2 border-beige-kem px-3 py-2 text-eyebrow font-bold text-beige-kem/80 transition";
+
+const badgeTone = (status: string) =>
+  status === "checked_in"
+    ? "text-on-tint border-beige-kem bg-la-co"
+    : status === "void"
+      ? "text-beige-kem/60 border-beige-kem/25 bg-surface-2"
+      : "text-on-tint border-beige-kem bg-cam-dat";
 
 const badge = (m: string) => {
   const map: Record<string, string> = {
@@ -78,6 +86,64 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
   ]);
 
   const MAX_TIERS = 4;
+
+  // check-in (US6)
+  const [scanCode, setScanCode] = useState("");
+  const [scanResult, setScanResult] = useState<ScanTicket | null>(null);
+  const [scanAlready, setScanAlready] = useState(false);
+  const [scanErr, setScanErr] = useState<string | null>(null);
+  const [scanBusy, setScanBusy] = useState(false);
+  const [cameraOn, setCameraOn] = useState(false);
+
+  const doLookup = () => {
+    const code = scanCode.trim();
+    if (!code) return;
+    setScanBusy(true);
+    setScanErr(null);
+    setScanAlready(false);
+    organizerApi
+      .ticketLookup(code)
+      .then((ticket) => setScanResult(ticket))
+      .catch((e) => {
+        setScanResult(null);
+        setScanErr((e as Error).message);
+      })
+      .finally(() => setScanBusy(false));
+  };
+
+  const doCheckIn = () => {
+    const code = scanCode.trim();
+    if (!code) return;
+    setScanBusy(true);
+    setScanErr(null);
+    organizerApi
+      .checkIn(code)
+      .then(({ ticket, already }) => {
+        setScanResult(ticket);
+        setScanAlready(already);
+      })
+      .catch((e) => {
+        setScanErr((e as Error).message);
+      })
+      .finally(() => setScanBusy(false));
+  };
+
+  const onScanKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      doLookup();
+    }
+  };
+
+  // A camera hit is a code, not a check-in: look it up and show it, let the staff confirm.
+  const onCameraDetect = (code: string) => {
+    setScanCode(code);
+    setCameraOn(false);
+    organizerApi
+      .ticketLookup(code)
+      .then((ticket) => setScanResult(ticket))
+      .catch((e) => setScanErr((e as Error).message));
+  };
   const setTierField = (index: number, field: "label" | "price", value: string) =>
     setStTiers((rows) => rows.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
   const addTierRow = () =>
@@ -293,6 +359,97 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
           </p>
         )}
       </form>
+
+      <div className={card}>
+        <h2 className="mb-3 font-display text-title-s font-bold">Check-in vé (QR)</h2>
+        <div className="flex gap-2">
+          <input
+            value={scanCode}
+            onChange={(e) => setScanCode(e.target.value)}
+            onKeyDown={onScanKey}
+            placeholder="Quét hoặc dán mã QR vé"
+            className={input}
+          />
+          <button className={btn} onClick={doLookup} disabled={scanBusy || !scanCode.trim()}>
+            Tra cứu
+          </button>
+          <button className={btn} onClick={doCheckIn} disabled={scanBusy || !scanCode.trim()}>
+            Check-in
+          </button>
+          <button className={ghost} onClick={() => setCameraOn((on) => !on)}>
+            Camera
+          </button>
+        </div>
+
+        {cameraOn && (
+          <QrCameraScan
+            onDetect={onCameraDetect}
+            onError={setScanErr}
+            onClose={() => setCameraOn(false)}
+          />
+        )}
+
+        {scanBusy && <p className="mt-3 font-meta text-meta text-beige-kem/50">Đang xử lý…</p>}
+
+        {scanErr && (
+          <p className="mt-3 rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-eyebrow">
+            {scanErr}
+          </p>
+        )}
+
+        {scanResult && (
+          <div className="mt-3 rounded-xl border-2 border-beige-kem p-4">
+            <div className="flex items-center gap-2">
+              <span className="label-eyebrow border border-beige-kem/25 px-3 py-2 text-burgundy-ink">
+                QR
+              </span>
+              <div>
+                <p className="font-display text-title-m font-black">{scanResult.eventTitle}</p>
+                <p className="font-meta text-body text-beige-kem/60">
+                  {scanResult.code} · {scanResult.tierLabel}
+                  {scanResult.seatLabel ? ` · Ghế ${scanResult.seatLabel}` : ""}
+                </p>
+              </div>
+            </div>
+
+            <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 font-meta text-body">
+              <div>
+                <dt className="label-eyebrow text-beige-kem/50">Khán giả</dt>
+                <dd className="text-beige-kem">{scanResult.customerName}</dd>
+              </div>
+              <div>
+                <dt className="label-eyebrow text-beige-kem/50">Email</dt>
+                <dd className="text-beige-kem">{scanResult.customerEmail}</dd>
+              </div>
+              <div>
+                <dt className="label-eyebrow text-beige-kem/50">Địa điểm</dt>
+                <dd className="text-beige-kem">{scanResult.venueName}</dd>
+              </div>
+              <div>
+                <dt className="label-eyebrow text-beige-kem/50">Giờ diễn</dt>
+                <dd className="text-beige-kem">{new Date(scanResult.startsAt).toLocaleString("vi-VN")}</dd>
+              </div>
+            </dl>
+
+            <div className="mt-4 flex items-center gap-2">
+              <span className={`rounded-lg border px-2 py-0.5 font-meta text-eyebrow ${badgeTone(scanResult.status)}`}>
+                {scanResult.status === "checked_in"
+                  ? scanAlready
+                    ? "Đã soát vé (quét lại)"
+                    : "Đã soát vé"
+                  : scanResult.status === "void"
+                    ? "Vé đã hủy"
+                    : "Chưa soát vé"}
+              </span>
+              {scanResult.status === "unused" && (
+                <button className={btn} onClick={doCheckIn} disabled={scanBusy}>
+                  Xác nhận check-in
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className={card}>
         <h2 className="mb-3 font-display text-title-s font-bold">

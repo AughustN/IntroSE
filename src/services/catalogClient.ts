@@ -127,6 +127,16 @@ export const organizerApi = {
     b: { venueId: number; startsAt: string; tiers: { label: string; price: number }[] },
   ) =>
     authed<{ id: number }>(`/organizer/events/${eventId}/showtimes`, { method: "POST", body: b }),
+
+  // Check-in (US6). `lookup` reads a QR without mutating it; `checkIn` flips an unused ticket to
+  // checked_in, or returns `already: true` on a rescan of a ticket admitted earlier.
+  ticketLookup: (code: string) =>
+    authed<ScanTicket>(`/organizer/tickets/lookup?code=${encodeURIComponent(code)}`),
+  checkIn: (code: string) =>
+    authed<{ ticket: ScanTicket; already: boolean }>(`/organizer/tickets/check-in`, {
+      method: "POST",
+      body: { code },
+    }),
 };
 
 // ---- Seat map designer (feature 005) ----
@@ -203,6 +213,22 @@ export const layoutApi = {
       body: { showtimeSeatIds, ticketTierId },
     }),
 };
+
+export interface ScanTicket {
+  id: number;
+  code: string;
+  status: "unused" | "checked_in" | "void";
+  tierLabel: string;
+  seatLabel: string | null;
+  customerName: string;
+  customerEmail: string;
+  eventId: number;
+  eventTitle: string;
+  showtimeId: number;
+  startsAt: string;
+  venueName: string;
+  venueAddress: string;
+}
 
 export const adminApi = {
   queue: () => authed<QueueItem[]>("/admin/moderation"),
