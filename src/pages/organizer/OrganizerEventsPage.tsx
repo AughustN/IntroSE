@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Calendar, BarChart3 } from "lucide-react";
+import { Calendar, BarChart3, Armchair } from "lucide-react";
 import { EventCard } from "../../components/organizer/EventCard";
 import { PortfolioSummaryHeader } from "../../components/organizer/PortfolioSummaryHeader";
 import { getOrganizerEvents, createOrganizerEvent, CreateEventInput } from "../../services/organizerClient";
@@ -314,6 +314,15 @@ export const OrganizerEventsPage: React.FC = () => {
             Trang quản lí của Nhà tổ chức sự kiện
           </h1>
         </div>
+
+        <button
+          type="button"
+          onClick={() => navigate("/organizer/seatmaps")}
+          className="inline-flex items-center gap-2 rounded-xl border border-beige-kem/30 bg-surface-2 px-4 py-2 text-xs font-bold text-beige-kem transition-colors hover:border-beige-kem hover:bg-burgundy"
+        >
+          <Armchair className="h-4 w-4" />
+          <span>Sơ đồ ghế</span>
+        </button>
 
         {/* 2 Top-Level Workspace Section Switcher Tabs */}
         <div className="flex items-center p-1.5 bg-xanh-pho/90 border border-beige-kem/20 rounded-xl space-x-1">

@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { LayoutLibraryEntry, LayoutRevision } from "@/shared/catalog/seatmap";
-import { layoutApi } from "../../services/catalogClient";
+import { layoutApi, organizerApi, type MyVenue } from "../../services/catalogClient";
 import { CHANGE_LABEL, compareDocuments, type DocumentDiff } from "./compare";
 import ConfirmDialog, { type ConfirmRequest } from "../ConfirmDialog";
 import OrganizerNav from "../organizer/OrganizerNav";
@@ -38,10 +38,9 @@ function StatusPill({ status }: { status: LayoutLibraryEntry["status"] }) {
       : status === "archived"
         ? "border-beige-kem/30 text-beige-kem/45"
         : "border-cam-dat text-cam-dat";
-  const label = status === "ready" ? "Đã phát hành" : status === "archived" ? "Lưu trữ" : "Bản nháp";
-  return (
-    <span className={`border px-2 py-0.5 font-meta text-[10px] ${style}`}>{label}</span>
-  );
+  const label =
+    status === "ready" ? "Đã phát hành" : status === "archived" ? "Lưu trữ" : "Bản nháp";
+  return <span className={`border px-2 py-0.5 font-meta text-[10px] ${style}`}>{label}</span>;
 }
 
 type Filter = "active" | "archived" | "templates";
@@ -58,6 +57,10 @@ export default function SeatMapLibrary({
   const [filter, setFilter] = useState<Filter>("active");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [venues, setVenues] = useState<MyVenue[] | null>(null);
+  const [venueId, setVenueId] = useState("");
+  const [newLayoutName, setNewLayoutName] = useState("");
+  const [creating, setCreating] = useState(false);
   const [confirm, setConfirm] = useState<(ConfirmRequest & { onConfirm: () => void }) | null>(null);
   /** Which chart's history is open, and what it holds. Loaded on demand — most charts never need it. */
   const [history, setHistory] = useState<{ layoutId: number; rows: LayoutRevision[] } | null>(null);
@@ -184,6 +187,43 @@ export default function SeatMapLibrary({
       return made;
     });
 
+  const loadVenues = async () => {
+    if (venues !== null) return;
+    setCreating(true);
+    setError(null);
+    try {
+      setVenues(await organizerApi.myVenues());
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const createLayout = async () => {
+    const selectedVenueId = Number(venueId);
+    const name = newLayoutName.trim();
+    if (!selectedVenueId) {
+      setError("Vui lòng chọn địa điểm cho sơ đồ.");
+      return;
+    }
+    if (!name) {
+      setError("Vui lòng nhập tên sơ đồ.");
+      return;
+    }
+
+    setCreating(true);
+    setError(null);
+    try {
+      const created = await layoutApi.create(selectedVenueId, name);
+      onOpen(created.id);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
     // A section of the console, laid out like every other page — not a `fixed inset-0` takeover. The
     // overlay was inherited from the modal this replaced and was the last thing making the seat map
@@ -221,15 +261,85 @@ export default function SeatMapLibrary({
           ))}
         </div>
 
+        <section className={card} aria-labelledby="create-seatmap-heading">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 id="create-seatmap-heading" className="font-display text-lg font-bold">
+                Tạo sơ đồ mới
+              </h3>
+              <p className="mt-1 font-meta text-meta text-beige-kem/55">
+                Chọn một địa điểm rồi mở trình thiết kế để bắt đầu đặt ghế.
+              </p>
+            </div>
+            {venues === null && (
+              <button
+                type="button"
+                onClick={() => void loadVenues()}
+                disabled={creating}
+                className={primary}
+              >
+                {creating ? "Đang tải…" : "Bắt đầu thiết kế"}
+              </button>
+            )}
+          </div>
+
+          {venues !== null && (
+            <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+              <label className="sr-only" htmlFor="seatmap-venue">
+                Địa điểm
+              </label>
+              <select
+                id="seatmap-venue"
+                value={venueId}
+                onChange={(e) => setVenueId(e.target.value)}
+                disabled={creating}
+                className="h-10 rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow text-beige-kem"
+              >
+                <option value="" className="bg-xanh-pho">
+                  Chọn địa điểm
+                </option>
+                {venues.map((venue) => (
+                  <option key={venue.id} value={venue.id} className="bg-xanh-pho">
+                    {venue.name} · {venue.city}
+                  </option>
+                ))}
+              </select>
+              <label className="sr-only" htmlFor="seatmap-name">
+                Tên sơ đồ
+              </label>
+              <input
+                id="seatmap-name"
+                value={newLayoutName}
+                onChange={(e) => setNewLayoutName(e.target.value)}
+                maxLength={120}
+                disabled={creating}
+                placeholder="Tên sơ đồ, ví dụ: Khán phòng chính"
+                className="h-10 rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow text-beige-kem outline-none focus:border-burgundy"
+              />
+              <button
+                type="button"
+                onClick={() => void createLayout()}
+                disabled={creating}
+                className={primary}
+              >
+                {creating ? "Đang tạo…" : "Tạo và mở"}
+              </button>
+            </div>
+          )}
+          {venues !== null && venues.length === 0 && (
+            <p className="mt-3 font-meta text-meta text-cam-dat">
+              Bạn chưa có địa điểm nào. Hãy tạo địa điểm trước khi thiết kế sơ đồ.
+            </p>
+          )}
+        </section>
+
         {error && (
           <p className="border-2 border-bubblegum bg-surface-2 px-4 py-2 text-eyebrow text-on-tint">
             {error}
           </p>
         )}
 
-        {rows === null && (
-          <p className="font-meta text-meta text-beige-kem/55">Đang tải sơ đồ…</p>
-        )}
+        {rows === null && <p className="font-meta text-meta text-beige-kem/55">Đang tải sơ đồ…</p>}
 
         {rows !== null && shown.length === 0 && (
           <div className={card}>
@@ -410,7 +520,10 @@ export default function SeatMapLibrary({
                                   layoutApi.get(l.id),
                                 ]);
                                 if (now.document) {
-                                  setDiff({ revisionId: r.id, result: compareDocuments(old_.document, now.document) });
+                                  setDiff({
+                                    revisionId: r.id,
+                                    result: compareDocuments(old_.document, now.document),
+                                  });
                                 }
                               } catch (e) {
                                 setError((e as Error).message);
@@ -455,7 +568,13 @@ export default function SeatMapLibrary({
                                   {diff.result.seatDelta !== 0 && (
                                     <li>
                                       Ghế:{" "}
-                                      <b className={diff.result.seatDelta < 0 ? "text-bubblegum" : "text-la-co"}>
+                                      <b
+                                        className={
+                                          diff.result.seatDelta < 0
+                                            ? "text-bubblegum"
+                                            : "text-la-co"
+                                        }
+                                      >
                                         {diff.result.seatDelta > 0 ? "+" : ""}
                                         {diff.result.seatDelta}
                                       </b>{" "}
@@ -482,7 +601,9 @@ export default function SeatMapLibrary({
                                     </li>
                                   ))}
                                   {diff.result.sectionsRemoved.length > 0 && (
-                                    <li>Khu sẽ lấy lại: {diff.result.sectionsRemoved.join(", ")}</li>
+                                    <li>
+                                      Khu sẽ lấy lại: {diff.result.sectionsRemoved.join(", ")}
+                                    </li>
                                   )}
                                   {diff.result.sectionsAdded.length > 0 && (
                                     <li>Khu sẽ mất: {diff.result.sectionsAdded.join(", ")}</li>
