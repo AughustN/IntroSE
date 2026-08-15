@@ -6,6 +6,7 @@ import { errorHandler, notFound } from "./middleware/error.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
 import { catalogPublicRouter } from "./modules/catalog/catalog.public.routes.js";
 import { organizerRouter } from "./modules/catalog/organizer.routes.js";
+import { studioRouter } from "./modules/studio/studio.routes.js";
 import { adminRouter } from "./modules/admin/admin.routes.js";
 import { reservationsRouter } from "./modules/holds/reservations.routes.js";
 import { seatmapRouter } from "./modules/seatmap/seatmap.routes.js";
@@ -23,7 +24,13 @@ export function createApp(): Express {
     if (origin && config.corsOrigins.includes(origin)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Access-Control-Allow-Credentials", "true");
-      res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,PATCH,DELETE,OPTIONS");
+      // PUT belongs here: five routes use it — the seat-map save
+      // (`PUT /organizer/layouts/:id`) plus the admin category rename, featured events and settings.
+      // Omitting it made the browser's preflight succeed and then refuse to send the request, which
+      // surfaces as a bare network failure ("Load failed" / "Failed to fetch") with no server log and
+      // no status code — indistinguishable from the API being down. GET needs no preflight, so reads
+      // worked and only writes broke, which is what made it look like a save bug.
+      res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS");
       res.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type,X-Idempotency-Key");
       res.vary("Origin");
       if (req.method === "OPTIONS") return res.sendStatus(204);
@@ -59,6 +66,10 @@ export function createApp(): Express {
   // public, signature-verified VNPay IPN callback can reach its handler.
   app.use("/api", reservationsRouter);
   app.use("/api/organizer", seatmapRouter);
+  // Studio owns PATCH /events/:id — it widened the handler beyond four text fields and made it
+  // transactional with re-moderation, so it must be mounted AHEAD of the catalog organizer router
+  // that used to serve that path (feature 006).
+  app.use("/api/organizer", studioRouter);
   app.use("/api/organizer", organizerRouter);
   // One router owns /api/admin.  supersedes the old catalog moderation router: it
   // serves every route that one did and adds organizers, reports and audit logs. Mounting both

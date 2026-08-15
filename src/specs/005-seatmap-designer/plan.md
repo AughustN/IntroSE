@@ -156,3 +156,140 @@ selection screen cannot disagree about where a seat is (US2 scenario 2).
 ## Complexity Tracking
 
 > No constitution violations — section intentionally empty.
+
+---
+
+# Amendment (007-scope): hall-scheme parity
+
+**Date**: 2026-08-06 | **Spec**: [spec.md](./spec.md) — User Story 9 onward, FR-047–FR-083, SC-015–SC-028
+
+Everything above describes the **shipped** 005 architecture and is unchanged. This section covers only
+the amendment: tables, hall boundary and dividers, facility icons, per-section visual style,
+buyer-side price colouring, and the standing-area substitute for fan zones.
+
+## Amendment Summary
+
+Five additions, one of which carries almost all the weight. **Tables** are the only one that touches
+inventory: a table is a drawing object that *owns* seats, so moving it moves them, and deleting it is
+governed by what those seats are worth. Everything else — boundary polygons, dividers, facility icons,
+section colour/shape/size, tier colouring — is decoration or presentation and touches no inventory at
+all. The buyer's map gains one meaning it never had: **colour means price**, derived at read time from
+the tier order, with section colour demoted to an editor-only aid so the map never says two things at
+once. Feature 003's hold path and feature 004's checkout are untouched, again.
+
+## Amendment Technical Context
+
+*(Additive to the Technical Context above; unchanged entries are not repeated.)*
+
+**Storage**: one new migration `server/src/db/migrations/0012_hallscheme.sql`, and it **must** use
+`ADD COLUMN IF NOT EXISTS`: the runner's already-applied codes are `42P07` (duplicate table), `42710`
+(duplicate object) and `42P16` (duplicate index) — **not** `42701` (duplicate column) — so a plain
+`ADD COLUMN` would fail a re-run instead of skipping it. Contents: new table `layout_tables`; `seats`
+gains `table_id`; `sections` gains `color`, `seat_shape`, `seat_size_multiplier`; `layout_elements`
+gains `points JSONB` and its `kind` CHECK is widened exactly as `0010_element_kinds.sql` widened it
+(drop-if-exists, re-add the union). `showtimes.layout_snapshot` needs **no migration** — it is already
+JSONB, and tables and shapes ride inside it.
+
+**Testing**: `server/tests/seatmap/` gains `tables.test.ts` (placement, distribution, move/rotate
+carrying seats, re-count, sold/held refusals, name collision at placement), `shapes-icons.test.ts`
+(points round-trip, kind widening leaves old rows valid, never inventory), and `section-style.test.ts`
+(defaults reproduce today's rendering; multiplier feeds overlap). Buyer-side tier colouring is asserted
+in `server/tests/catalog/seatmap-read.test.ts`. Every refusal path gets an asserting test in the style
+of `apply-rules.test.ts`.
+
+**Performance Goals**: unchanged — the amendment adds at most 100 tables and 200 shapes/icons to a
+layout already bounded at 2,000 seats, and the tier palette is computed from a tier list that is already
+read. The PERF-02 bound (SC-010) is re-measured, not renegotiated.
+
+**Scale/Scope**: new ceilings — **2–20 seats per table**, **100 tables per layout**, **3–64 points per
+boundary polygon**, **exactly 2 per divider**. Table seats count toward the existing 2,000-seat ceiling
+and shapes toward the existing 200-element ceiling, so no new budget is introduced.
+
+## Amendment Constitution Check
+
+*GATE for the new scope only. The original check above stands for the shipped scope.*
+
+| Principle | Gate | Status |
+|---|---|---|
+| I — Reliability Under Load | DB is source of truth; no double-sell; explicit lifecycle; claims proven by tests | **PASS** — a table owns seats but is never inventory; every table operation that would move, relabel or remove a **sold** or **held** seat is refused **whole** through the existing `seat_sold`/`seat_held` path (FR-051), and decoration can never acquire a status |
+| II — Security & Trust | RBAC on every endpoint; server-authoritative; strict validation; output encoding | **PASS** — every new endpoint resolves layout ownership server-side and refuses (FR-079); table and icon labels are length-bounded and output-encoded like existing element text (FR-062) |
+| III — AI non-blocking | n/a — no AI in this scope | **PASS** (n/a) |
+| IV — Verifiable / test-first | refusal tests, not just happy paths; strict TS; green CI | **PASS** — SC-016..SC-023, SC-026..SC-028 are refusal- or invariance-shaped; the table refusals are written before the table write path, mirroring `apply-rules.test.ts` |
+| V — Simplicity & Free-Tier | simplest thing that meets the requirement; no infra ahead of need | **PASS** — fan zones were **declined** rather than accommodated (FR-080); no shape-point table; tier colours derived, not stored; tables and shapes ride in the JSONB snapshot that already exists, so the snapshot needs no migration |
+| VI — Clean Codebase & FE/BE contract | one shared contract; no re-declared payloads; consumers move together | **PASS** — `shared/catalog/seatmap.ts` and `shared/catalog/types.ts` gain the new objects once, and the server, the editor and **both** buyer renderers move in the same change (FR-078); the tier palette is one shared function, not a copy per renderer |
+
+**Integration cap**: untouched. No new external dependency — SVG rendering and `pg` only.
+
+**Governance touch**: none requiring an amendment to the constitution. Four documents are extended and
+are already tracked in the spec's Follow-ups.
+
+**Result: PASS for the amendment scope. Complexity Tracking stays empty.**
+
+### Amendment post-design re-check (after Phase 1)
+
+Re-evaluated against the amendment sections of `research.md`, `data-model.md`, and `contracts/`. Still
+**PASS**, with three points the design made sharper:
+
+- **Principle V held where it was most tempting to break it.** The largest simplification is what was
+  *not* built: fan zones were declined (FR-080), which kept feature 003's "seated or GA, never mixed"
+  invariant closed and avoided a concurrency feature disguised as a drawing feature. Two smaller ones
+  followed — no shape-point table (R-13), and no colour column on the ticket tier (R-17).
+- **Principle I got a boundary it did not have.** R-12 puts `table_id` on `seats` rather than modelling
+  a table as an element, precisely because `layout_elements` carries the rule "never inventory"
+  (FR-017). A foreign key from a seat to an element would have blurred the one line that keeps
+  decoration out of the ticket path.
+- **Principle VI is enforced by derivation, not discipline.** Tier colours are computed from the tier
+  list at read time by one shared function (R-17), so the two buyer renderers cannot drift apart even
+  in principle — there is no stored colour for them to disagree about, and no ticket-tier data changes.
+
+One consequence worth flagging to reviewers: **`showtimes.layout_snapshot` grows** to carry tables and
+shapes. It is already JSONB and already the mechanism that stops a layout edit reshaping a selling show,
+so this is the intended use — but it means FR-081's guarantee is only as good as the snapshot write, and
+`apply.ts` is the single place that must be extended for it.
+
+## Amendment Project Structure
+
+*(Additive. Files marked `←` already exist and are extended, not replaced.)*
+
+```text
+server/src/
+├── db/migrations/0012_hallscheme.sql    # layout_tables; seats.table_id; sections style;
+│                                        #   layout_elements.points; kind CHECK widened (0010 pattern)
+├── config.ts                          ← # + TABLE_MIN_SEATS/TABLE_MAX_SEATS, LAYOUT_MAX_TABLES,
+│                                        #   POLYGON_MIN_POINTS/POLYGON_MAX_POINTS
+├── modules/seatmap/
+│   ├── tables.ts                        # NEW: seat distribution round/rect, move/rotate/re-count,
+│   │                                    #   section inheritance, name-collision check at placement
+│   ├── layouts.repo.ts                ← # tables + points in the versioned full-document save
+│   ├── validate.ts                    ← # + table overlap, polygon enclosure, icon position, section colour
+│   ├── apply.ts                       ← # snapshot tables + shapes into layout_snapshot (FR-081)
+│   └── seatmap.routes.ts              ← # table endpoints, still organizer-scoped
+└── modules/catalog/catalog.repo.ts    ← # buyer read: seat tier + tier legend (name, colour, price)
+
+src/ (web)
+├── components/seatmap/
+│   ├── TablePalette.tsx                 # NEW: round/rectangular tables, seats-per-side
+│   ├── ShapeTools.tsx                   # NEW: boundary polygon + divider drawing
+│   ├── SectionStylePanel.tsx            # NEW: colour, seat shape, size multiplier
+│   ├── ElementPalette.tsx             ← # + exit/restroom/food/smoking/first-aid/lift/wheelchair
+│   ├── SeatCanvas.tsx                 ← # draw tables, shapes, icons; seat shape + size from section
+│   ├── LayoutEditor.tsx               ← # table select-as-one-object; undo covers new ops
+│   └── ValidationPanel.tsx            ← # the four new checks, in the same single pass
+├── components/SeatMapView.tsx         ← # tier colour + legend
+├── components/SeatLayout.tsx          ← # tier colour + legend (identical to the above)
+└── services/catalogClient.ts          ← # table/shape/style calls
+
+shared/catalog/
+├── seatmap.ts                         ← # LayoutTable, shape points, widened element kinds, section style
+├── seatmap-validate.ts                ← # overlap uses EFFECTIVE seat size; four new checks
+├── tier-palette.ts                      # NEW: tier list → colour, ordered by price. ONE definition,
+│                                        #   imported by both buyer renderers (Principle VI)
+└── types.ts                           ← # buyer SeatMap gains seat tier + the tier legend
+```
+
+**Amendment Structure Decision**: the new backend logic lands in one file, `modules/seatmap/tables.ts`,
+because seat distribution is the only genuinely new algorithm here — everything else extends a file that
+already owns that concern (`validate.ts` validates, `apply.ts` snapshots, `SeatCanvas.tsx` draws). On the
+web side `tier-palette.ts` is deliberately in `shared/`, not in a component: it is the single thing that
+makes the two buyer renderers agree about what colour a price is, and a copy in each would be exactly
+the drift Principle VI exists to prevent.

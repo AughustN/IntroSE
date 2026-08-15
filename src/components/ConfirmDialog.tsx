@@ -58,7 +58,7 @@ export default function ConfirmDialog({
         aria-labelledby="confirm-title"
         aria-describedby="confirm-message"
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6"
+        className="w-full max-w-md border-2 border-beige-kem bg-xanh-pho p-6"
       >
         <h2 id="confirm-title" className="font-display text-title-m font-black text-beige-kem">
           {title}
@@ -74,14 +74,13 @@ export default function ConfirmDialog({
           <button
             ref={cancelRef}
             onClick={onCancel}
-            className="rounded-xl border-2 border-beige-kem px-4 py-2.5 font-meta text-body text-beige-kem/80 transition hover:border-beige-kem/40 hover:text-beige-kem"
+            className="border-2 border-beige-kem px-4 py-2.5 font-meta text-body text-beige-kem/80 transition hover:border-beige-kem/40 hover:text-beige-kem"
           >
             {cancelLabel}
           </button>
           <button
             onClick={onConfirm}
-            className={`rounded-xl px-4 py-2.5 font-meta text-body font-bold text-beige-kem transition ${
-              tone === "danger"
+            className={`px-4 py-2.5 font-meta text-body font-bold text-beige-kem transition ${ tone === "danger"
                 ? "bg-burgundy hover:brightness-95"
                 : "bg-cam-dat hover:brightness-95"
             }`}

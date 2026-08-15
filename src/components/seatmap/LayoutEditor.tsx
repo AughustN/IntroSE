@@ -21,7 +21,7 @@ import {
 import ElementPalette from "./ElementPalette";
 import FloorPlanPanel from "./FloorPlanPanel";
 import ValidationPanel from "./ValidationPanel";
-import { useLayoutHistory } from "./useLayoutHistory";
+import { LayoutDraft, useLayoutHistory } from "./useLayoutHistory";
 
 /**
  * The seat-map authoring canvas (FR-009..FR-014).
@@ -57,7 +57,12 @@ export default function LayoutEditor({
   const [cloning, setCloning] = useState(false);
   const [venues, setVenues] = useState<{ id: number; name: string }[]>([]);
 
-  const history = useLayoutHistory({ sections: [], seats: [], elements: [] });
+  const history = useLayoutHistory<LayoutDraft>({
+    sections: [],
+    categories: [],
+    seats: [],
+    elements: [],
+  });
   const { draft, commit, reset, undo, redo, canUndo, canRedo } = history;
 
   useEffect(() => {
@@ -65,7 +70,12 @@ export default function LayoutEditor({
       .get(layoutId)
       .then((l) => {
         setLayout(l);
-        reset({ sections: l.sections, seats: l.seats, elements: l.elements });
+        reset({
+          sections: l.sections,
+          categories: l.categories ?? [],
+          seats: l.seats,
+          elements: l.elements,
+        });
       })
       .catch((e) => setError((e as Error).message));
   }, [layoutId, reset]);
@@ -116,7 +126,12 @@ export default function LayoutEditor({
         elements: draft.elements,
       });
       setLayout(saved);
-      reset({ sections: saved.sections, seats: saved.seats, elements: saved.elements });
+      reset({
+        sections: saved.sections,
+        categories: saved.categories ?? [],
+        seats: saved.seats,
+        elements: saved.elements,
+      });
       setStatus("Đã lưu bản nháp.");
     } catch (e) {
       // A stale version means another session saved first — reload rather than overwrite (FR-015).

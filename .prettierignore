@@ -6,6 +6,10 @@ package-lock.json
 cloneweb/
 .codegraph/
 
+# Reference spike used as the source for the seatmap editor port. Not ours to format, and it is
+# deleted once the port lands (see the plan's Phase 7).
+concert-venue-seat-map-editor/
+
 # Spec Kit: authored markdown, formatted by hand
 src/specs/
 src/.specify/

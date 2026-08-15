@@ -3,7 +3,7 @@ import sharp from 'sharp';
 import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { pool } from '../../src/db/pool.js';
-import { floorplanDir } from '../../src/modules/seatmap/floorplan.js';
+import { ImageRejected, floorplanDir, processFloorPlan } from '../../src/modules/seatmap/floorplan.js';
 import { resetUploadThrottle } from '../../src/modules/seatmap/upload.throttle.js';
 import { app } from '../helpers/app.js';
 import { bearer, makeApprovedOrganizer, registerUser } from '../helpers/authFixture.js';
@@ -162,9 +162,70 @@ describe('upload abuse bound (FR-023a, SC-005b)', () => {
     let version = layout.version;
     for (let i = 0; i < 25; i += 1) {
       const res = await request(app).put(`/api/organizer/layouts/${layout.id}`).set(o.h)
-        .send({ version, sections: [], seats: [], elements: [] })
+        .send({ version, sections: [], categories: [], seats: [], elements: [] })
         .expect(200);
       version = res.body.version;
     }
+  });
+});
+
+describe('an SVG floor plan is rasterised, never stored as SVG (§24)', () => {
+  const svg = (inner: string, attrs = '') =>
+    Buffer.from(
+      `<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" ${attrs}>${inner}</svg>`,
+    );
+
+  it('accepts a plain SVG and returns a WEBP', async () => {
+    const out = await processFloorPlan(svg('<rect width="200" height="100" fill="#333"/>'));
+    // RIFF….WEBP — what lands on disk is a picture, whatever was uploaded.
+    expect(out.subarray(0, 4).toString('ascii')).toBe('RIFF');
+    expect(out.subarray(8, 12).toString('ascii')).toBe('WEBP');
+  });
+
+  it('refuses one carrying a script', async () => {
+    await expect(processFloorPlan(svg('<script>alert(1)</script>'))).rejects.toBeInstanceOf(ImageRejected);
+  });
+
+  it('refuses a foreignObject', async () => {
+    await expect(
+      processFloorPlan(svg('<foreignObject><body xmlns="http://www.w3.org/1999/xhtml">x</body></foreignObject>')),
+    ).rejects.toBeInstanceOf(ImageRejected);
+  });
+
+  it('refuses an external reference — the renderer would fetch it from inside our network', async () => {
+    await expect(
+      processFloorPlan(svg('<image href="http://169.254.169.254/latest/meta-data/" width="10" height="10"/>')),
+    ).rejects.toBeInstanceOf(ImageRejected);
+    await expect(
+      processFloorPlan(svg('<image xlink:href="//evil.example/x.png" width="10" height="10"/>')),
+    ).rejects.toBeInstanceOf(ImageRejected);
+  });
+
+  it('refuses a local-file reference', async () => {
+    await expect(
+      processFloorPlan(svg('<image href="file:///etc/passwd" width="10" height="10"/>')),
+    ).rejects.toBeInstanceOf(ImageRejected);
+  });
+
+  it('refuses an entity-expansion bomb', async () => {
+    const bomb = Buffer.from(
+      `<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY a "aaaaaaaaaa">]>` +
+        `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><text>&a;</text></svg>`,
+    );
+    await expect(processFloorPlan(bomb)).rejects.toBeInstanceOf(ImageRejected);
+  });
+
+  it('refuses one whose viewBox renders past the pixel ceiling', async () => {
+    await expect(
+      processFloorPlan(
+        Buffer.from(
+          `<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="100000" height="100000"/>`,
+        ),
+      ),
+    ).rejects.toBeInstanceOf(ImageRejected);
+  });
+
+  it('still refuses a file that is neither a known raster nor an SVG', async () => {
+    await expect(processFloorPlan(Buffer.from('not an image at all'))).rejects.toBeInstanceOf(ImageRejected);
   });
 });

@@ -71,6 +71,7 @@ export const config = {
 
   googleClientId: process.env.GOOGLE_CLIENT_ID ?? "", // gated (US3)
   resendApiKey: process.env.RESEND_API_KEY ?? "", // empty → ConsoleMailer
+  geminiApiKey: process.env.GEMINI_API_KEY ?? "", // empty → FakeListingModel (UC-22 degrades, never fails)
   mailFrom: process.env.MAIL_FROM ?? "TixHub <no-reply@tixhub.fit>",
 
   // AI is optional: the request path falls back to database-ranked events when no provider is set.
@@ -205,6 +206,15 @@ export const SEAT_DIAMETER = ms("SEAT_DIAMETER", 100);
 /** Ceilings — chosen to keep the editor and the buyer map inside PLAT-01 and PERF-02 (FR-007, FR-019). */
 export const LAYOUT_MAX_SEATS = ms("LAYOUT_MAX_SEATS", 2_000);
 export const LAYOUT_MAX_ELEMENTS = ms("LAYOUT_MAX_ELEMENTS", 200);
+/**
+ * How many people one capacity zone may hold.
+ *
+ * Deliberately far above `LAYOUT_MAX_SEATS`, and not related to it. The seat ceiling exists because
+ * every seat is a row, a bookable unit and an SVG node; a zone is one row and one polygon whatever
+ * its capacity, so capping it at the seat limit would defeat the reason zones exist — a stadium floor
+ * holding 20,000 is the case they were added for.
+ */
+export const ZONE_MAX_CAPACITY = ms("ZONE_MAX_CAPACITY", 100_000);
 export const VENUE_MAX_LAYOUTS = ms("VENUE_MAX_LAYOUTS", 20);
 /** Floor-plan upload bounds. Dimensions are checked before re-encoding, so a decompression bomb is
  *  refused rather than allocated (FR-023). */
@@ -215,3 +225,44 @@ export const FLOORPLAN_MAX_PX = ms("FLOORPLAN_MAX_PX", 4_000);
 export const UPLOAD_RATE_LIMIT = ms("UPLOAD_RATE_LIMIT", 10);
 export const UPLOAD_RATE_WINDOW_MS = ms("UPLOAD_RATE_WINDOW_MS", 60 * 1000);
 export const UPLOAD_CONCURRENCY = ms("UPLOAD_CONCURRENCY", 2);
+
+// ---- Hall-scheme parity (feature 005 amendment). Settings with defaults, not hard-coded constants.
+/** A table seats 2–20. Fewer than 2 is a loose seat, not a table (FR-054). */
+export const TABLE_MIN_SEATS = ms("TABLE_MIN_SEATS", 2);
+export const TABLE_MAX_SEATS = ms("TABLE_MAX_SEATS", 20);
+/** Tables per layout. Their seats still count toward LAYOUT_MAX_SEATS — no separate budget (FR-055). */
+export const LAYOUT_MAX_TABLES = ms("LAYOUT_MAX_TABLES", 100);
+/** A boundary polygon needs 3+ points; a divider is exactly 2 (FR-059). */
+export const POLYGON_MIN_POINTS = ms("POLYGON_MIN_POINTS", 3);
+export const POLYGON_MAX_POINTS = ms("POLYGON_MAX_POINTS", 64);
+/**
+ * How far a section may scale its seats (FR-065). The overlap test uses the EFFECTIVE size, so these
+ * bounds also bound how far the drawing and the publish gate can diverge — they cannot.
+ * Stored as hundredths because `ms()` yields integers; 100 = 1.0× = today's rendering.
+ */
+export const SEAT_SIZE_MIN_PCT = ms("SEAT_SIZE_MIN_PCT", 50);
+export const SEAT_SIZE_MAX_PCT = ms("SEAT_SIZE_MAX_PCT", 200);
+
+// ---- Organizer event studio (feature 006). Settings with defaults, not constants (UC-36).
+/** A showtime carries at most this many ACTIVE tiers — the layout rule established in 002 (FR-002). */
+export const MAX_TIERS_PER_SHOWTIME = ms("MAX_TIERS_PER_SHOWTIME", 4);
+
+// AI listing assistant (UC-22). The assistant is assistive and non-blocking: every one of these
+// bounds degrades it, none of them can fail a request the organizer needs (Principle III).
+/** Per-authenticated-user fairness limit (SEC-08). Counts EVERY request, cache hits included —
+ *  SEC-08's verification fires 11 identical calls and expects the 11th blocked, and eleven identical
+ *  calls are ten cache hits. The limit governs the endpoint; the cache governs the upstream call. */
+export const AI_RATE_LIMIT = ms("AI_RATE_LIMIT", 10);
+export const AI_RATE_WINDOW_MS = ms("AI_RATE_WINDOW_MS", 60 * 60 * 1000);
+/** Hard timeout on the model call; past it the assistant degrades to manual entry (PERF-05). */
+export const AI_TIMEOUT_MS = ms("AI_TIMEOUT_MS", 8_000);
+/** How long an identical listing request is served without another upstream call (SCAL-02). */
+export const AI_LISTING_CACHE_TTL_MS = ms("AI_LISTING_CACHE_TTL_MS", 24 * 60 * 60 * 1000);
+/** Bounded: the cache key derives from user input, so an unbounded map is a slow leak with a
+ *  user-controlled key in a process held under ~450 MB (PERF-07). */
+export const AI_CACHE_MAX_ENTRIES = ms("AI_CACHE_MAX_ENTRIES", 500);
+/** Platform-wide daily ceiling on upstream calls — the shared free-tier guard (SCAL-03). */
+export const AI_DAILY_QUOTA = ms("AI_DAILY_QUOTA", 200);
+/** Fewest comparable published events needed before a price is suggested at all. Below this the
+ *  suggestion is omitted rather than guessed — the price is the one factual number here (FR-033). */
+export const AI_MIN_COMPARABLES = ms("AI_MIN_COMPARABLES", 5);

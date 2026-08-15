@@ -76,7 +76,9 @@ export default function SeatMapBuilder({
       return;
     }
     run(async () => {
-      await organizerApi.generateSeatMap(st.id, sectionTiers);
+      const { layouts } = await layoutApi.list(st.venueId);
+      const layoutId = layouts[0]?.id ?? (await layoutApi.create(st.venueId, "Sơ đồ mặc định")).id;
+      await organizerApi.generateSeatMap(st.id, layoutId);
     }, "Đã tạo sơ đồ ghế.");
   };
 

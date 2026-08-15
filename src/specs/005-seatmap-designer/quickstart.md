@@ -202,3 +202,61 @@ and pan stay interactive.
 Scenarios 0–11 pass, `npm run lint && npm run typecheck && npm run test` are green, and the four
 follow-up documents named in [spec.md](./spec.md) (UC-21, `SCHEMA_DATABASE.md`, the `CONTEXT.md`
 glossary, feature 002's spec/contract) have been amended.
+
+---
+
+# Amendment (007-scope) validation — 2026-08-06
+
+Additive to the guide above. Prerequisites are unchanged, plus one migration:
+
+```bash
+npm run db:migrate                 # applies 0012_hallscheme.sql
+VITEST=1 npm run db:migrate        # and the TEST branch — the suite runs against TEST_DATABASE_URL
+```
+
+> The two must be migrated separately. `config.ts` resolves `TEST_DATABASE_URL` only under vitest, so a
+> plain `db:migrate` leaves the test database on the old schema and every new test fails on a missing
+> column rather than on its assertion.
+
+## Automated
+
+```bash
+npx vitest run server/tests/seatmap        # incl. tables, shapes-icons, section-style
+npx vitest run server/tests/catalog        # buyer read: seat tier + legend
+npx vitest run server/tests/holds          # MUST pass unmodified (SC-025)
+npm run typecheck
+```
+
+| File | Covers |
+|---|---|
+| `seatmap/tables.test.ts` | placement and distribution (round + rect), move/rotate carrying seats, re-count redistributing, **refusals** on sold/held for move, rotate, re-count, delete and re-section, name collision at placement (SC-016, SC-017, SC-028) |
+| `seatmap/shapes-icons.test.ts` | points round-trip with the bounding box, the widened `kind` CHECK leaving pre-amendment rows valid, decoration never entering inventory (SC-018, SC-019) |
+| `seatmap/section-style.test.ts` | defaults reproduce today's rendering and today's overlap outcomes; a scaled section overlaps when it visibly overlaps (SC-020) |
+| `seatmap/apply-rules.test.ts` (extended) | tables and shapes snapshotted; a layout edit changes nothing on a showtime that already generated (SC-027) |
+| `catalog/seatmap-read.test.ts` (extended) | every seat carries a tier; the legend names tier, colour and whole-đồng price; section colour is **absent** from the buyer payload (SC-021) |
+
+## Manual — the three worth seeing
+
+**1. A gala dinner (US9, SC-015).** Place 20 round tables of 10, set a section, drag one across the hall
+and confirm its ten seats travel with it. Change one table from 8 to 10 and watch the seats redistribute.
+Apply to a showtime and confirm a buyer can select **"Bàn 3 - Ghế 7"**.
+
+**2. The refusal that protects a buyer (SC-017).** Sell one seat at a table, then try to move, rotate,
+re-count, re-section, and delete that table. Each is refused naming the sold seat, and the table is
+exactly where it was afterwards. This is the case the whole tables design is shaped around.
+
+**3. Colour means price (US10, SC-021).** Open a three-tier showtime at 360, 768 and 1920 px on **both**
+the event page and the seat-selection screen. The colours, legend and shapes must be identical on both;
+the legend names each tier and its price in đồng; sold and held seats stay visibly unavailable and
+unclickable whatever their tier colour. Then set two sections to different colours in the editor and
+confirm **buyers see no change** — section colour is an editor aid only.
+
+## Rollback
+
+`0012_hallscheme.sql` is additive: one new table, four nullable-or-defaulted columns, one widened CHECK.
+Reverting the application code leaves the new columns unread and the new table unreferenced — nothing
+breaks, because every default reproduces the pre-amendment rendering.
+
+The one thing that must **not** be rolled back independently is `apply.ts`'s snapshot write while tables
+are in use: without it a showtime keeps its seats but loses the tables they are named after, so buyers
+would see "Bàn 5 - Ghế 3" with no table drawn.

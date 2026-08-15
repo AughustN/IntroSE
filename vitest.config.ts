@@ -6,7 +6,12 @@ export default defineConfig({
   // The holds contract also exports runtime values (event names, room key), so the alias has to
   // exist for the bundler too. `.js` specifiers map back to the TS source.
   resolve: {
-    alias: [{ find: /^@shared\/(.*)\.js$/, replacement: path.resolve(__dirname, "shared/$1.ts") }],
+    alias: [
+      { find: /^@shared\/(.*)\.js$/, replacement: path.resolve(__dirname, "shared/$1.ts") },
+      // Mirrors tsconfig.web.json, so an integration test can drive the EDITOR's own pure operations
+      // against the real API rather than hand-rolling a payload that only resembles what it sends.
+      { find: /^@\//, replacement: `${path.resolve(__dirname)}/` },
+    ],
   },
   test: {
     include: ["server/tests/**/*.test.ts"],
@@ -37,6 +42,16 @@ export default defineConfig({
         // The seat-map designer edits maps with money already taken: a sold seat must never be
         // deleted or re-tiered, and a held seat must never be touched (005 SC-003/SC-004, MAIN-03).
         "server/src/modules/seatmap/**": {
+          lines: 60,
+          functions: 60,
+          branches: 60,
+          statements: 60,
+        },
+        // The organizer studio edits tiers with money already taken and carries the UC-24 A6
+        // moderation gate: capacity may never fall below sold + reserved, a sold tier is archived
+        // rather than deleted, and every material edit returns the event for review
+        // (006 SC-002/SC-003/SC-009, MAIN-03).
+        "server/src/modules/studio/**": {
           lines: 60,
           functions: 60,
           branches: 60,

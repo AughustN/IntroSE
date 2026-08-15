@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { pool } from '../../src/db/pool.js';
 import { app } from '../helpers/app.js';
 import { bearer, makeApprovedOrganizer, registerUser } from '../helpers/authFixture.js';
+import { bindAndGenerate, defaultLayoutOf } from '../helpers/seatmapSeed.js';
 
 const soon = () => new Date(Date.now() + 86_400_000).toISOString();
 
@@ -20,7 +21,8 @@ async function seatedSetup(o: { h: Record<string, string> }, seatCount = 5) {
   const ev = (await request(app).post('/api/organizer/events').set(o.h).send({ title: 'Seated Show', categoryCode: 'theatre', description: 'd', eventType: 'seated' }).expect(201)).body.id;
   const showtime = (await request(app).post(`/api/organizer/events/${ev}/showtimes`).set(o.h).send({ venueId: venue, startsAt: soon(), tiers: [{ label: 'VIP', price: 500000 }] }).expect(201)).body.id;
   const tierId = (await pool.query(`SELECT id FROM ticket_tiers WHERE showtime_id = $1 LIMIT 1`, [showtime])).rows[0].id;
-  return { venue, section, showtime, tierId, eventId: ev };
+  const layoutId = await defaultLayoutOf(venue);
+  return { venue, section, showtime, tierId, eventId: ev, layoutId };
 }
 
 describe('venues & seat-map generation (US5)', () => {
@@ -28,25 +30,44 @@ describe('venues & seat-map generation (US5)', () => {
     const o = await organizer();
     const s = await seatedSetup(o, 5);
 
-    const gen = await request(app).post(`/api/organizer/showtimes/${s.showtime}/seat-map`).set(o.h).send({ sectionTiers: [{ sectionId: s.section, ticketTierId: s.tierId }] }).expect(201);
-    expect(gen.body.seats).toBe(5);
+    await bindAndGenerate(o.h, { showtime: s.showtime, layoutId: s.layoutId, publish: false });
     const count = await pool.query(`SELECT count(*)::int AS c FROM showtime_seats WHERE showtime_id = $1 AND status = 'available'`, [s.showtime]);
     expect(count.rows[0].c).toBe(5);
 
     // regenerate over a live map → 409
-    await request(app).post(`/api/organizer/showtimes/${s.showtime}/seat-map`).set(o.h).send({ sectionTiers: [{ sectionId: s.section, ticketTierId: s.tierId }] }).expect(409);
+    await request(app).post(`/api/organizer/showtimes/${s.showtime}/seat-map`).set(o.h).send({ layoutId: s.layoutId }).expect(409);
   });
 
-  it('refuses a section with seats that has no tier mapping (400)', async () => {
+  it('refuses a category with seats that no tier prices (400)', async () => {
     const o = await organizer();
     const s = await seatedSetup(o, 3);
-    // map a non-existent section instead of the real one → the seated section is unmapped
+    // The tier exists but names no category, so the seats it would have to price are unreachable.
     await request(app)
       .post(`/api/organizer/showtimes/${s.showtime}/seat-map`)
       .set(o.h)
-      .send({ sectionTiers: [{ sectionId: 999999, ticketTierId: s.tierId }] })
+      .send({ layoutId: s.layoutId })
       .expect(400)
-      .expect((r) => expect(r.body.error).toBe('section_without_tier'));
+      .expect((r) => expect(r.body.error).toBe('category_without_tier'));
+  });
+
+  it('refuses generating from a layout that is still a draft (409 layout_not_published)', async () => {
+    const o = await organizer();
+    const s = await seatedSetup(o, 3);
+    const category = (await request(app).get(`/api/organizer/layouts/${s.layoutId}`).set(o.h).expect(200)).body.categories[0];
+    await pool.query(`UPDATE ticket_tiers SET category_id = $2 WHERE id = $1`, [s.tierId, category.id]);
+    // A draft is a work in progress: binding one would sell seats the organizer is still moving.
+    await pool.query(`UPDATE venue_layouts SET status = 'draft' WHERE id = $1`, [s.layoutId]);
+
+    await request(app)
+      .post(`/api/organizer/showtimes/${s.showtime}/seat-map`)
+      .set(o.h)
+      .send({ layoutId: s.layoutId })
+      .expect(409)
+      .expect((r) => expect(r.body.error).toBe('layout_not_published'));
+
+    // Publishing it makes the same call succeed.
+    await request(app).post(`/api/organizer/layouts/${s.layoutId}/publish`).set(o.h).expect(200);
+    await request(app).post(`/api/organizer/showtimes/${s.showtime}/seat-map`).set(o.h).send({ layoutId: s.layoutId }).expect(201);
   });
 
   it('refuses another organizer managing my venue, and deleting a seat in a live map (D-F, FR-024)', async () => {
@@ -58,7 +79,7 @@ describe('venues & seat-map generation (US5)', () => {
     await request(app).post(`/api/organizer/venues/${s.venue}/sections`).set(b.h).send({ name: 'Hack' }).expect(403);
 
     // generate, then a seat in the live map cannot be deleted
-    await request(app).post(`/api/organizer/showtimes/${s.showtime}/seat-map`).set(a.h).send({ sectionTiers: [{ sectionId: s.section, ticketTierId: s.tierId }] }).expect(201);
+    await bindAndGenerate(a.h, { showtime: s.showtime, layoutId: s.layoutId, publish: false });
     const seatId = (await pool.query(`SELECT id FROM seats WHERE section_id = $1 LIMIT 1`, [s.section])).rows[0].id;
     await request(app).delete(`/api/organizer/seats/${seatId}`).set(a.h).expect(409);
   });

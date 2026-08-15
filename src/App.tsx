@@ -12,6 +12,8 @@ import AuthModal from "./components/AuthModal";
 import AccountPage from "./components/account/AccountPage";
 import { OrganizerEventsPage } from "./pages/organizer/OrganizerEventsPage";
 import { SingleEventPage } from "./pages/organizer/SingleEventPage";
+import SeatMapLibrary from "./components/seatmap/SeatMapLibrary";
+import ChartEditor from "./components/seatmap/ChartEditor";
 import ResetPassword from "./components/ResetPassword";
 import type { Me } from "@/shared/auth/types";
 import type { EventDetail as CatalogEventDetail, Showtime } from "@/shared/catalog/types";
@@ -394,6 +396,17 @@ export default function App() {
       window.scrollTo({ top: 0, behavior: "smooth" });
     },
     [navigate],
+  );
+
+  /**
+   * Which chart the address bar has open, if any.
+   *
+   * Read from the URL rather than kept in state: a deep link, a Back and a click then all arrive by
+   * the same path, and there is no second copy of "which chart" to fall out of step with the bar.
+   */
+  const seatmapLayoutId = useMemo(
+    () => pathToRoute(location.pathname)?.organizerLayoutId ?? null,
+    [location.pathname],
   );
 
   const activeScreenRef = useLatest(activeScreen);
@@ -2099,11 +2112,20 @@ export default function App() {
           ))}
         {(activeScreen === "organizer" || activeScreen === "organizer-events") && <OrganizerEventsPage />}
         {activeScreen === "organizer-event-detail" && <SingleEventPage />}
-        {/*
-         * `/moderation` used to be a second console drawing the same queue as `/admin`, in a
-         * different visual language. It is one screen inside the console now; the old path still
-         * resolves so a bookmark lands somewhere sensible rather than on a blank page.
-         */}
+        {activeScreen === "seatmaps" &&
+          (seatmapLayoutId !== null ? (
+            <ChartEditor
+              layoutId={seatmapLayoutId}
+              // Back to the library, not out of the section — the editor is a level, not a modal.
+              onClose={() => navigate(screenToPath("seatmaps"))}
+            />
+          ) : (
+            <SeatMapLibrary
+              onOpen={(id) => navigate(screenToPath("seatmaps", { organizerLayoutId: id }))}
+              onClose={() => goTo("organizer")}
+            />
+          ))}
+        {/* `/moderation` remains an alias for the current server-backed admin console. */}
         {activeScreen === "moderation" && <AdminConsole onBack={goHome} />}
 
         {activeScreen === "about-us" && (

@@ -17,17 +17,19 @@ import {
   eventShowtimesManage,
   finishEvent,
   listSections,
+  categoriesWithInventory,
+  defaultLayoutId,
   generateSeatMap,
+  layoutBinding,
+  pricedCategories,
   getApprovedOrganizerId,
   listMyEvents,
   listMyVenues,
   publishEvent,
-  sectionsWithSeats,
   seatInLiveMap,
   seatVenueOwnerUserId,
   showtimeHasSeatMap,
   showtimeInfo,
-  tiersOfShowtime,
   unpublishEvent,
   updateEvent,
   venueOwnerUserId,
@@ -98,6 +100,8 @@ const showtimeSchema = z.object({
         label: z.string().trim().min(1),
         price: z.number().int().nonnegative(),
         totalQuantity: z.number().int().positive().optional().nullable(),
+        /** Seated only: the chart class this price applies to (feature 005 categories). */
+        categoryId: z.number().int().optional().nullable(),
       }),
     )
     .min(1)
@@ -134,17 +138,10 @@ organizerRouter.post(
   }),
 );
 
-organizerRouter.patch(
-  "/events/:id",
-  validate(updateEventSchema),
-  asyncH(async (req, res) => {
-    const id = Number(req.params.id);
-    await assertEventOwner(req, id);
-    const updated = await updateEvent(id, req.body as z.infer<typeof updateEventSchema>);
-    kickNotificationWorker();
-    res.json(updated);
-  }),
-);
+// PATCH /events/:id now lives in modules/studio (feature 006). It was widened beyond the four text
+// fields and had to become transactional with the UC-24 A6 re-moderation, so keeping a second handler
+// for the same resource would be exactly the contract drift Principle VI forbids. `studioRouter` is
+// mounted ahead of this router in app.ts.
 
 organizerRouter.post(
   "/events/:id/publish",
@@ -302,10 +299,11 @@ const seatsSchema = z.object({
   rowLabel: z.string().trim().min(1),
   count: z.number().int().min(1).max(200),
 });
+// The category→tier mapping is no longer sent here: it lives on `ticket_tiers.category_id`. All this
+// call still has to say is WHICH chart of the venue to bind; omit it and the venue's default is used,
+// which is what the venue-level helper paths have always done.
 const seatMapSchema = z.object({
-  sectionTiers: z
-    .array(z.object({ sectionId: z.number().int(), ticketTierId: z.number().int() }))
-    .min(1),
+  layoutId: z.number().int().optional(),
 });
 
 organizerRouter.get(
@@ -383,15 +381,27 @@ organizerRouter.post(
       );
     }
 
-    const { sectionTiers } = req.body as z.infer<typeof seatMapSchema>;
-    const mappedSections = new Set(sectionTiers.map((m) => m.sectionId));
-    const withSeats = await sectionsWithSeats(info.venueId);
-    if (withSeats.some((s) => !mappedSections.has(s)))
-      throw err.badRequest("section_without_tier", "Mỗi khu vực có ghế phải được gán một hạng vé.");
-    const validTiers = new Set(await tiersOfShowtime(showtimeId));
-    if (sectionTiers.some((m) => !validTiers.has(m.ticketTierId)))
-      throw err.badRequest("validation_failed", "Hạng vé không thuộc suất chiếu này.");
+    const { layoutId } = req.body as z.infer<typeof seatMapSchema>;
+    const chart = layoutId ?? (await defaultLayoutId(info.venueId));
+    const binding = await layoutBinding(chart);
+    if (!binding) throw err.notFound("not_found", "Không tìm thấy sơ đồ.");
+    if (binding.venueId !== info.venueId)
+      throw err.badRequest("validation_failed", "Sơ đồ không thuộc địa điểm của suất chiếu này.");
+    // A draft is a work in progress: binding one would sell seats the organizer is still moving.
+    // `layout_not_published` has been in the error contract since 005 shipped; this is its throw site.
+    if (binding.status !== "ready")
+      throw err.conflict(
+        "layout_not_published",
+        "Sơ đồ chưa được phát hành. Hãy phát hành sơ đồ trước khi tạo bản đồ ghế.",
+      );
 
-    res.status(201).json({ seats: await generateSeatMap(showtimeId, sectionTiers) });
+    // Every class that holds INVENTORY must have a price, or it would be unsellable. Seats and
+    // capacity zones both count — a zone-only class used to slip through here and be dropped silently.
+    const priced = new Set(await pricedCategories(showtimeId));
+    const unpriced = (await categoriesWithInventory(chart)).filter((c) => !priced.has(c));
+    if (unpriced.length > 0)
+      throw err.badRequest("category_without_tier", "Mỗi hạng vé có ghế phải được gán một giá vé.");
+
+    res.status(201).json({ seats: await generateSeatMap(showtimeId, chart) });
   }),
 );

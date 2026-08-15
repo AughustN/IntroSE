@@ -1,12 +1,15 @@
-import type { EventCard, EventDetail, SeatMap, SeatMapElement, Showtime, Tier } from '@shared/catalog/types.js';
+import type { EventCard, EventDetail, SeatMap, SeatMapElement, SeatMapTable, Showtime, Tier } from '@shared/catalog/types.js';
 import { LAYOUT_SPACE, SEAT_DIAMETER } from '../../config.js';
 import type { Db } from '../../db/pool.js';
 import { pool } from '../../db/pool.js';
+import { buildTierLegend } from '@shared/catalog/tier-palette.js';
 import { SHOWTIME_HAS_AVAILABILITY, UPCOMING_SHOWTIME, VISIBLE_JOIN, VISIBLE_WHERE } from './visibility.js';
 
 // Correlated subqueries reused in the list projection (event alias `e`).
 const EARLIEST = `(SELECT min(s.starts_at) FROM showtimes s WHERE ${UPCOMING_SHOWTIME})`;
-const START_PRICE = `(SELECT min(tt.price_amount) FROM ticket_tiers tt JOIN showtimes s2 ON s2.id = tt.showtime_id WHERE s2.event_id = e.id)`;
+// Archived tiers are retired: never priced, never offered, never counted (006 FR-006).
+const ACTIVE_TIER = `tt.archived_at IS NULL`;
+const START_PRICE = `(SELECT min(tt.price_amount) FROM ticket_tiers tt JOIN showtimes s2 ON s2.id = tt.showtime_id WHERE s2.event_id = e.id AND ${ACTIVE_TIER})`;
 const CITY = `(SELECT v.city FROM showtimes s3 JOIN venues v ON v.id = s3.venue_id WHERE s3.event_id = e.id ORDER BY s3.starts_at LIMIT 1)`;
 const HAS_UPCOMING = `EXISTS (SELECT 1 FROM showtimes s WHERE ${UPCOMING_SHOWTIME})`;
 const HAS_AVAILABLE = `EXISTS (SELECT 1 FROM showtimes s WHERE ${UPCOMING_SHOWTIME} AND ${SHOWTIME_HAS_AVAILABILITY})`;
@@ -158,7 +161,7 @@ export async function getEventDetail(slug: string, db: Db = pool): Promise<Event
   const tiersRes = await db.query<{ label: string; price: string }>(
     `SELECT tt.label, min(tt.price_amount)::text AS price
        FROM ticket_tiers tt JOIN showtimes s ON s.id = tt.showtime_id
-      WHERE s.event_id = $1 GROUP BY tt.label ORDER BY min(tt.price_amount)`,
+      WHERE s.event_id = $1 AND tt.archived_at IS NULL GROUP BY tt.label ORDER BY min(tt.price_amount)`,
     [r.id],
   );
   const tiers: Tier[] = tiersRes.rows.map((t, i) => ({ id: i, label: t.label, price: Number(t.price), remaining: null }));
@@ -229,6 +232,10 @@ export async function getShowtimes(eventId: number, db: Db = pool): Promise<Show
  *  here is ever inventory, and the floor plan never determines a seat's status (Principle I). */
 interface SeatMapSnapshot {
   elements: SeatMapElement[];
+  /** Tables the showtime snapshotted with its geometry (FR-081). Absent on pre-amendment snapshots. */
+  tables?: SeatMapTable[];
+  /** Per-section seat shape and size, keyed by section name (FR-064). Absent before the amendment. */
+  sectionStyles?: { name: string; seatShape: 'circle' | 'square'; seatSizeMultiplier: number }[];
   planUrl: string | null;
   planScale: number;
   planOffsetX: number;
@@ -263,9 +270,16 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
       pos_y: number | null;
       rotation: number;
       section: string | null;
+      category: string | null;
+      tier_id: number;
+      is_accessible: boolean;
+      table_id: number | null;
+      table_booking_mode: 'per_seat' | 'whole_table' | null;
     }>(
       `SELECT ss.id, ss.row_label, ss.seat_number, tt.label, tt.price_amount::text AS price, ss.status,
-              ss.pos_x, ss.pos_y, ss.rotation, ss.section_name AS section
+              ss.pos_x, ss.pos_y, ss.rotation, ss.section_name AS section,
+              ss.category_name AS category, tt.id AS tier_id,
+              ss.is_accessible, ss.table_id, ss.table_booking_mode
          FROM showtime_seats ss
          JOIN ticket_tiers tt ON tt.id = ss.ticket_tier_id
         WHERE ss.showtime_id = $1
@@ -279,8 +293,30 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
     );
     const s = snap.rows[0]?.layout_snapshot ?? null;
 
+    // Colour by price, derived at read time from the showtime's tiers (FR-067). Nothing is stored and
+    // no ticket-tier column exists for it — feature 006 owns that table — so the map re-colours itself
+    // whenever a price changes, and the two buyer renderers cannot disagree about a value that is not
+    // persisted anywhere.
+    const tiers = await db.query<{ id: number; label: string; price: string; color: string | null }>(
+      `SELECT tt.id, tt.label, tt.price_amount::text AS price, c.color
+         FROM ticket_tiers tt
+         LEFT JOIN layout_categories c ON c.id = tt.category_id
+        WHERE tt.showtime_id = $1 AND tt.archived_at IS NULL`,
+      [showtimeId],
+    );
+    // Style is looked up by section NAME: that is the only section identity a seat row carries, and
+    // the snapshot is what makes the lookup safe — both sides came from the same apply.
+    const styleOf = new Map((s?.sectionStyles ?? []).map((st) => [st.name, st]));
+
+    const tierLegend = buildTierLegend(
+      tiers.rows.map((t) => ({ id: t.id, label: t.label, price: Number(t.price), color: t.color })),
+    );
+
     return {
       eventType: 'seated',
+      tierLegend,
+      // Snapshotted tables, so a seat labelled "Bàn 5 - Ghế 3" is drawn at the table it names (FR-082).
+      tables: s?.tables ?? [],
       space: { width: LAYOUT_SPACE, height: LAYOUT_SPACE, seatDiameter: SEAT_DIAMETER },
       seats: seats.rows.map((r) => ({
         id: r.id,
@@ -293,6 +329,13 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
         y: r.pos_y ?? 0,
         rotation: r.rotation,
         section: r.section,
+        category: r.category,
+        tierId: r.tier_id,
+        isAccessible: r.is_accessible,
+        tableId: r.table_id,
+        tableBookingMode: r.table_booking_mode,
+        shape: r.section ? styleOf.get(r.section)?.seatShape : undefined,
+        sizeMultiplier: r.section ? styleOf.get(r.section)?.seatSizeMultiplier : undefined,
       })),
       elements: s?.elements ?? [],
       // Omitted entirely unless the organizer made the plan buyer-visible (FR-026). The toggle governs
@@ -314,7 +357,7 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
     `SELECT id, label, price_amount::text AS price,
             CASE WHEN total_quantity IS NULL THEN NULL
                  ELSE (total_quantity - sold_quantity - reserved_quantity)::text END AS remaining
-       FROM ticket_tiers WHERE showtime_id = $1 ORDER BY price_amount`,
+       FROM ticket_tiers WHERE showtime_id = $1 AND archived_at IS NULL ORDER BY price_amount`,
     [showtimeId],
   );
   return {

@@ -4,7 +4,12 @@
  */
 
 import { useCallback, useRef, useState } from "react";
-import type { LayoutElement, LayoutSeat, LayoutSection } from "@/shared/catalog/seatmap";
+import type {
+  LayoutCategory,
+  LayoutElement,
+  LayoutSeat,
+  LayoutSection,
+} from "@/shared/catalog/seatmap";
 
 /**
  * Undo/redo for the layout editor (FR-012).
@@ -21,21 +26,28 @@ export const UNDO_DEPTH = 50;
 
 export interface LayoutDraft {
   sections: LayoutSection[];
+  categories: LayoutCategory[];
   seats: LayoutSeat[];
   elements: LayoutElement[];
 }
 
-export function useLayoutHistory(initial: LayoutDraft) {
-  const [present, setPresent] = useState<LayoutDraft>(initial);
-  const past = useRef<LayoutDraft[]>([]);
-  const future = useRef<LayoutDraft[]>([]);
+/**
+ * Generic over what is being edited, so the same 50-snapshot history serves the seat draft and the
+ * authoring document (`ChartDocument`). A document snapshot is the SMALLER of the two — it stores each
+ * seat once per block as a relative offset rather than as an absolute row — so widening this costs
+ * nothing.
+ */
+export function useLayoutHistory<T>(initial: T) {
+  const [present, setPresent] = useState<T>(initial);
+  const past = useRef<T[]>([]);
+  const future = useRef<T[]>([]);
   const [, force] = useState(0);
   const rerender = () => force((n) => n + 1);
 
   /** Commit a new state as ONE undoable step. */
-  const commit = useCallback((next: LayoutDraft | ((current: LayoutDraft) => LayoutDraft)) => {
+  const commit = useCallback((next: T | ((current: T) => T)) => {
     setPresent((current) => {
-      const value = typeof next === "function" ? next(current) : next;
+      const value = typeof next === "function" ? (next as (c: T) => T)(current) : next;
       past.current = [...past.current, current].slice(-UNDO_DEPTH);
       future.current = [];
       return value;
@@ -45,7 +57,7 @@ export function useLayoutHistory(initial: LayoutDraft) {
 
   /** Replace the baseline without creating an undo step — for a load or a save round trip. Undo
    *  history is per editing session and never reaches back past a save into another session's work. */
-  const reset = useCallback((next: LayoutDraft) => {
+  const reset = useCallback((next: T) => {
     past.current = [];
     future.current = [];
     setPresent(next);

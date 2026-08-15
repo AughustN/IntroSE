@@ -13,7 +13,20 @@ import type { ValidationIssue } from "@/shared/catalog/seatmap-validate";
  * gate will decide. Advisory here — the server still refuses (R-11). A draft is allowed to sit in a
  * failing state; the gate is at publish, not at every keystroke (FR-032).
  */
-export default function ValidationPanel({ issues }: { issues: ValidationIssue[] }) {
+interface ValidationPanelProps {
+  issues: ValidationIssue[];
+  /** Optional editor affordances; omitted by the legacy layout editor. */
+  labelOfSeat?: (seatId: number) => string | null;
+  onFocusSeat?: (seatId: number) => void;
+  onRenumberSection?: (sectionId: number) => void;
+}
+
+export default function ValidationPanel({
+  issues,
+  labelOfSeat,
+  onFocusSeat,
+  onRenumberSection,
+}: ValidationPanelProps) {
   if (issues.length === 0) {
     return (
       <div className="rounded-2xl border-2 border-la-co bg-surface-2 p-4">

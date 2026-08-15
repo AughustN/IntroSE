@@ -101,8 +101,7 @@ export function BookingSteps({
             ) : (
               <span
                 aria-current={active ? "step" : undefined}
-                className={`px-2 py-1 ${
-                  active ? "bg-burgundy font-bold text-white" : "text-ink-soft"
+                className={`px-2 py-1 ${ active ? "bg-burgundy font-bold text-white" : "text-ink-soft"
                 }`}
               >
                 {number} {label}
@@ -373,8 +372,7 @@ export function OrderSummary({
 
           {holdMs !== undefined && (
             <div
-              className={`mt-3 flex items-center justify-between gap-3 border px-3 py-2 font-meta text-meta ${
-                holding ? "border-burgundy/50 text-beige-kem" : "border-beige-kem/25 text-ink-soft"
+              className={`mt-3 flex items-center justify-between gap-3 border px-3 py-2 font-meta text-meta ${ holding ? "border-burgundy/50 text-beige-kem" : "border-beige-kem/25 text-ink-soft"
               }`}
             >
               <span className="flex items-center gap-1.5">

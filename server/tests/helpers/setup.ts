@@ -23,7 +23,7 @@ beforeEach(async () => {
   // not blocked by the BEFORE UPDATE OR DELETE trigger and stays valid for test isolation.
   await pool.query(
     `TRUNCATE users, wallets, refresh_tokens, password_resets, auth_events, organizers,
-             venues, venue_layouts, layout_elements, sections, seats,
+             venues, venue_layouts, layout_elements, layout_tables, sections, seats,
              events, showtimes, ticket_tiers, showtime_seats, audit_logs,
              reservations, reservation_items, orders, payment_transactions, tickets, wallet_transactions,
              content_reports, moderation_actions, moderation_notifications,

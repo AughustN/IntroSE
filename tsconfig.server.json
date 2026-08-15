@@ -4,7 +4,8 @@
     "moduleResolution": "bundler",
     "types": ["node"],
     "paths": {
-      "@shared/*": ["./shared/*"]
+      "@shared/*": ["./shared/*"],
+      "@/*": ["./*"]
     }
   },
   "include": ["server/**/*.ts", "shared/**/*.ts"],

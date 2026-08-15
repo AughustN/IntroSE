@@ -91,8 +91,15 @@ _Avoid_: session (that's the auth term), screening, occurrence.
 
 **Ticket tier**:
 A price class within a Showtime (label + whole-đồng price; for general admission, a capacity with
-sold/reserved counts).
-_Avoid_: ticket type, price band, category (that's the event classification).
+sold/reserved counts). A tier is **active** or **archived**. Archiving is what happens instead of
+deleting once a tier has sold anything: it becomes unpurchasable and disappears from buyer-facing
+reads, but stays resolvable so existing orders and tickets still show their label and price. Archived
+tiers do **not** count toward the four-active-tier layout limit — otherwise retiring a sold-out tier
+would permanently consume one of a Showtime's four slots — and they can be restored while fewer than
+four are active. On the wire the API says `held` where the column says `reserved_quantity`; same
+number, buyer-facing name.
+_Avoid_: ticket type, price band, category (that's the event classification); "deleted tier" (say
+archived).
 
 **Venue / Layout / Seat / Showtime seat**:
 **Venue** = a reusable physical place (name, city, address). A **Layout** is one named arrangement of

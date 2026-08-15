@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { pool } from '../../src/db/pool.js';
 import { app } from '../helpers/app.js';
 import { bearer, makeApprovedOrganizer, registerUser } from '../helpers/authFixture.js';
+import { bindAndGenerate, defaultLayoutOf } from '../helpers/seatmapSeed.js';
 
 // The heart of US3: editing a map that is already on sale (FR-027..FR-029, SC-003/004/005).
 //
@@ -27,8 +28,7 @@ async function liveMap(o: { h: Record<string, string> }, count = 3) {
   const showtime = (await request(app).post(`/api/organizer/events/${ev}/showtimes`).set(o.h)
     .send({ venueId: venue, startsAt: new Date(Date.now() + 86_400_000).toISOString(), tiers: [{ label: 'VIP', price: 500_000 }, { label: 'Thường', price: 200_000 }] }).expect(201)).body.id;
   const tiers = (await pool.query<{ id: number }>(`SELECT id FROM ticket_tiers WHERE showtime_id = $1 ORDER BY price_amount`, [showtime])).rows;
-  await request(app).post(`/api/organizer/showtimes/${showtime}/seat-map`).set(o.h)
-    .send({ sectionTiers: [{ sectionId: section, ticketTierId: tiers[0].id }] }).expect(201);
+  await bindAndGenerate(o.h, { showtime, layoutId: await defaultLayoutOf(venue) });
 
   const seats = (await pool.query<{ id: number; seat_id: number; row_label: string; seat_number: number; section_name: string; ticket_tier_id: number; pos_x: number; pos_y: number; rotation: number }>(
     `SELECT id, seat_id, row_label, seat_number, section_name, ticket_tier_id, pos_x, pos_y, rotation
@@ -180,6 +180,7 @@ describe('the snapshot isolates showtimes from layout edits (FR-005, SC-005a)', 
     await request(app).put(`/api/organizer/layouts/${layoutId}`).set(o.h).send({
       version: layout.version,
       sections: layout.sections,
+      categories: layout.categories,
       seats: layout.seats.map((s: { x: number }) => ({ ...s, x: s.x + 1000 })),
       elements: layout.elements,
     }).expect(200);
@@ -242,5 +243,56 @@ describe('block and marquee tier assignment (US7, FR-033/FR-034)', () => {
     const res = await request(app).post(`/api/organizer/showtimes/${m.showtime}/seats/tier`).set(o.h)
       .send({ showtimeSeatIds: [a.id, sold.id], ticketTierId: m.tiers[0].id }).expect(409);
     expect(res.body.refusals[0].reason).toBe('seat_sold');
+  });
+});
+
+// The organizer's own read of a showtime's map (FR-033..FR-035).
+//
+// Selecting seats to block or re-price happens ON this map, so it has to be readable in exactly the
+// state an organizer arranges seats in: draft, not yet approved, not yet on sale. The buyer's
+// `GET /api/showtimes/:id/seat-map` cannot serve that — it is gated on public visibility and returns
+// nothing until the event is on sale AND admin-approved.
+describe("the organizer's read of a showtime map", () => {
+  it('returns the map for an event that is not publicly visible yet', async () => {
+    const o = await organizer();
+    const m = await liveMap(o, 3);
+
+    // The same showtime is invisible to the public read, which is the whole reason this route exists.
+    await request(app).get(`/api/showtimes/${m.showtime}/seat-map`).expect(404);
+
+    const res = await request(app).get(`/api/organizer/showtimes/${m.showtime}/seat-map`).set(o.h).expect(200);
+    expect(res.body.seats).toHaveLength(3);
+    expect(res.body.space.seatDiameter).toBeGreaterThan(0);
+
+    // Everything a selection acts on: the showtime_seats id, the tier id, the status, the geometry.
+    const seat = res.body.seats[0];
+    expect(seat.id).toBe(m.seats[0].id);
+    expect(seat.ticketTierId).toBe(m.tiers[0].id);
+    expect(seat.status).toBe('available');
+    expect(seat.section).toBe('Khu A');
+    expect(typeof seat.x).toBe('number');
+
+    // The tier colours are the BUYER's, built by the same function, so the organizer checking which
+    // block is the expensive one reads the picture their customer will (FR-067).
+    expect(res.body.tierLegend.length).toBeGreaterThan(0);
+    expect(res.body.tierLegend[0].color).toMatch(/^#/);
+  });
+
+  it('reflects a block, so the map an organizer selects on is the map they just changed', async () => {
+    const o = await organizer();
+    const m = await liveMap(o, 2);
+    await request(app).post(`/api/organizer/showtimes/${m.showtime}/seats/block`).set(o.h)
+      .send({ showtimeSeatIds: [m.seats[0].id], blocked: true }).expect(200);
+
+    const res = await request(app).get(`/api/organizer/showtimes/${m.showtime}/seat-map`).set(o.h).expect(200);
+    const blocked = res.body.seats.find((s: { id: number }) => s.id === m.seats[0].id);
+    expect(blocked.status).toBe('blocked');
+  });
+
+  it("refuses another organizer's showtime — a refusal, never an empty map (SEC-04)", async () => {
+    const o = await organizer();
+    const m = await liveMap(o, 1);
+    const other = await organizer();
+    await request(app).get(`/api/organizer/showtimes/${m.showtime}/seat-map`).set(other.h).expect(403);
   });
 });

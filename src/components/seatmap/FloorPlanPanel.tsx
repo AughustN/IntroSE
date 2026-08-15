@@ -16,7 +16,7 @@ import { layoutApi } from "../../services/catalogClient";
  */
 
 const btn =
-  "rounded-lg border-2 border-beige-kem px-2.5 py-1.5 text-eyebrow font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
+  " border-2 border-beige-kem px-2.5 py-1.5 text-eyebrow font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
 
 export default function FloorPlanPanel({
   layoutId,
@@ -55,14 +55,14 @@ export default function FloorPlanPanel({
     );
 
   return (
-    <div className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
+    <div className="border-2 border-beige-kem bg-surface-2 p-4">
       <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-beige-kem/70">
         Bản vẽ mặt bằng
       </h3>
 
       <input
         type="file"
-        accept="image/jpeg,image/png,image/webp"
+        accept="image/jpeg,image/png,image/webp,image/svg+xml,.svg"
         disabled={busy}
         onChange={(e) => {
           const file = e.target.files?.[0];
@@ -70,6 +70,10 @@ export default function FloorPlanPanel({
         }}
         className="mt-2 w-full text-meta text-beige-kem/70"
       />
+      <p className="mt-1 font-meta text-[10px] leading-4 text-beige-kem/45">
+        JPG, PNG, WEBP hoặc SVG. File SVG được chuyển thành ảnh khi tải lên — nét vẽ giữ nguyên, còn
+        phần mã bên trong thì không được lưu.
+      </p>
 
       {error && <p className="mt-2 text-meta text-on-tint">{error}</p>}
 

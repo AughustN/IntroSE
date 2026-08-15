@@ -1,4 +1,5 @@
 // Public catalog data layer plus authed organizer/admin calls.
+import type { ChartDocument } from "@/shared/catalog/seatmap-document";
 import type {
   EventCard,
   EventDetail,
@@ -9,11 +10,24 @@ import type {
 import type {
   ApplyPreview,
   Layout,
+  LayoutTable,
   LayoutFloorPlan,
+  LayoutReferenceChart,
+  LayoutLibraryEntry,
+  LayoutRevision,
   LayoutSummary,
   SaveLayoutRequest,
+  ShowtimeMap,
   ValidateResponse,
 } from "../../shared/catalog/seatmap";
+import type {
+  ListingResponse,
+  ManagedTierList,
+  TierMutationResult,
+  TierRemovalResult,
+  ShowtimeMutationResult,
+  EventMutationResult,
+} from "@/shared/catalog/types";
 import { withAuthRetry } from "./authClient";
 import { apiUrl } from "./api";
 import { readApiError } from "./apiError";
@@ -100,8 +114,25 @@ export interface ManageShowtime {
   venueId: number;
   venueName: string;
   hasSeatMap: boolean;
-  tiers: { id: number; label: string; price: number }[];
+  /** How many bookable seats this showtime actually has — 0 until the layout is applied. */
+  bookableSeats: number;
+  tiers: {
+    id: number;
+    label: string;
+    price: number;
+    capacity: number | null;
+    sold: number;
+    held: number;
+    /** Which chart class this tier prices. Null until the organizer binds it. */
+    categoryId: number | null;
+    archived: boolean;
+  }[];
   sections: Section[];
+  /** The chart this showtime binds to: the one it generated from, else the venue's default. */
+  layoutId: number | null;
+  layoutStatus: "draft" | "ready" | "archived" | null;
+  /** That chart's price classes — what a tier is bound TO. */
+  categories: { id: number; name: string; color: string; seatCount: number }[];
 }
 
 export const organizerApi = {
@@ -116,13 +147,12 @@ export const organizerApi = {
     }),
   addSeats: (venueId: number, b: { sectionId: number; rowLabel: string; count: number }) =>
     authed<{ count: number }>(`/organizer/venues/${venueId}/seats`, { method: "POST", body: b }),
-  generateSeatMap: (
-    showtimeId: number,
-    sectionTiers: { sectionId: number; ticketTierId: number }[],
-  ) =>
+  /** Bind a published chart to a showtime. Which class costs what is already recorded on the tiers,
+   *  so all this call names is the chart. */
+  generateSeatMap: (showtimeId: number, layoutId: number) =>
     authed<{ seats: number }>(`/organizer/showtimes/${showtimeId}/seat-map`, {
       method: "POST",
-      body: { sectionTiers },
+      body: { layoutId },
     }),
   createEvent: (b: {
     title: string;
@@ -183,6 +213,43 @@ export const layoutApi = {
   clone: (id: number, b: { targetVenueId: number; name: string }) =>
     authed<Layout>(`/organizer/layouts/${id}/clone`, { method: "POST", body: b }),
 
+  // The library: every chart across every venue, with the usage count that decides whether archiving
+  // and deleting are offered at all.
+  library: () => authed<{ layouts: LayoutLibraryEntry[] }>(`/organizer/layouts`),
+  archive: (id: number) => authed<Layout>(`/organizer/layouts/${id}/archive`, { method: "POST" }),
+
+  // History. A revision is taken at publish, and restoring one goes back through the ordinary save
+  // path on the server — so it inherits the refusal to delete a seat somebody has bought.
+  revisions: (id: number) =>
+    authed<{ revisions: LayoutRevision[] }>(`/organizer/layouts/${id}/revisions`),
+  /** One revision's document, for showing what a restore would change before it happens (§31). */
+  revisionDocument: (id: number, revisionId: number) =>
+    authed<{ document: ChartDocument }>(`/organizer/layouts/${id}/revisions/${revisionId}`),
+  restoreRevision: (id: number, revisionId: number) =>
+    authed<Layout>(`/organizer/layouts/${id}/revisions/${revisionId}/restore`, { method: "POST" }),
+  saveAsTemplate: (id: number, name: string) =>
+    authed<Layout>(`/organizer/layouts/${id}/save-as-template`, { method: "POST", body: { name } }),
+  restore: (id: number) => authed<Layout>(`/organizer/layouts/${id}/restore`, { method: "POST" }),
+  rename: (id: number, name: string) =>
+    authed<Layout>(`/organizer/layouts/${id}`, { method: "PATCH", body: { name } }),
+
+  // Tables (feature 005 amendment). Placing one generates its seats server-side, where the sold/held
+  // guards can see them; moving, re-counting or deleting is refused whole if any seat is committed.
+  addTable: (layoutId: number, body: Record<string, unknown>) =>
+    authed<LayoutTable>(`/organizer/layouts/${layoutId}/tables`, { method: 'POST', body }),
+  updateTable: (tableId: number, body: Record<string, unknown>) =>
+    authed<LayoutTable>(`/organizer/tables/${tableId}`, { method: 'PATCH', body }),
+  deleteTable: (tableId: number) => authed<{ ok: true }>(`/organizer/tables/${tableId}`, { method: 'DELETE' }),
+
+  // Standing area (FR-080) — the fan-zone substitute. Positions are generated server-side inside the
+  // drawn shape, as ordinary seats of type `standing`; a shape too small to hold the count is refused
+  // rather than quietly generating fewer.
+  addStandingArea: (layoutId: number, body: Record<string, unknown>) =>
+    authed<{ created: number; layout: Layout }>(`/organizer/layouts/${layoutId}/standing-area`, {
+      method: 'POST',
+      body,
+    }),
+
   // Floor plan — a background layer only; it never moves a seat (FR-020, FR-024).
   uploadPlan: async (id: number, file: File): Promise<LayoutFloorPlan> => {
     const form = new FormData();
@@ -205,10 +272,44 @@ export const layoutApi = {
   },
   alignPlan: (id: number, b: Omit<LayoutFloorPlan, "url">) =>
     authed<LayoutFloorPlan>(`/organizer/layouts/${id}/floorplan`, { method: "PATCH", body: b }),
+  /** The tracing layer. Same upload pipeline as the plan; the server never lets it reach a buyer. */
+  uploadReference: async (id: number, file: File): Promise<LayoutReferenceChart> => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await withAuthRetry((token) =>
+      fetch(`/api/organizer/layouts/${id}/reference`, {
+        method: "POST",
+        headers: token
+          ? { Authorization: `Bearer ${token}`, Accept: "application/json" }
+          : { Accept: "application/json" },
+        credentials: "include",
+        body: form,
+      }),
+    );
+    if (!res.ok) {
+      const e = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+      throw new Error(e.message ?? e.error ?? `error ${res.status}`);
+    }
+    return (await res.json()) as LayoutReferenceChart;
+  },
+  alignReference: (id: number, b: Omit<LayoutReferenceChart, "url">) =>
+    authed<LayoutReferenceChart>(`/organizer/layouts/${id}/reference`, { method: "PATCH", body: b }),
+  removeReference: (id: number) =>
+    authed<void>(`/organizer/layouts/${id}/reference`, { method: "DELETE" }),
+  /** Re-shape a standing area and regenerate its positions. Refused whole if any is sold or held. */
+  reshapeArea: (id: number, elementId: number, b: { points: { x: number; y: number }[]; capacity: number }) =>
+    authed<{ created: number; layout: Layout }>(`/organizer/layouts/${id}/areas/${elementId}`, {
+      method: "PATCH",
+      body: b,
+    }),
   removePlan: (id: number) =>
     authed<void>(`/organizer/layouts/${id}/floorplan`, { method: "DELETE" }),
 
   // Showtime map — the only inventory-aware calls (FR-027..FR-029, FR-033..FR-035).
+  /** The owner's read. Not `catalogClient.getSeatMap`, which is gated on public visibility and so
+   *  returns nothing for the draft events an organizer is most often arranging. */
+  showtimeMap: (showtimeId: number) =>
+    authed<ShowtimeMap>(`/organizer/showtimes/${showtimeId}/seat-map`),
   reapplyPreview: (showtimeId: number) =>
     authed<ApplyPreview>(`/organizer/showtimes/${showtimeId}/seat-map/reapply`, {
       method: "POST",
@@ -369,4 +470,68 @@ export const catalogClient = {
       body: { reason },
     });
   },
+};
+
+// ---- Organizer event studio (feature 006) ----
+// Derived from src/specs/006-organizer-studio/contracts/studio.openapi.yaml. Shapes come from the
+// shared contract, so a server change that breaks this fails at compile time (Principle VI).
+export const studioApi = {
+  // Tiers (UC-26). `remove` is delete-or-archive — the server decides on live inventory and reports
+  // which happened, so the console can word it correctly.
+  tiers: (showtimeId: number) =>
+    authed<ManagedTierList>(`/organizer/showtimes/${showtimeId}/tiers`),
+  addTier: (showtimeId: number, b: { label: string; price: number; capacity?: number | null }) =>
+    authed<TierMutationResult>(`/organizer/showtimes/${showtimeId}/tiers`, {
+      method: "POST",
+      body: b,
+    }),
+  updateTier: (
+    tierId: number,
+    b: { label?: string; price?: number; capacity?: number; categoryId?: number | null },
+  ) =>
+    authed<TierMutationResult>(`/organizer/tiers/${tierId}`, { method: "PATCH", body: b }),
+  removeTier: (tierId: number) =>
+    authed<TierRemovalResult>(`/organizer/tiers/${tierId}`, { method: "DELETE" }),
+  restoreTier: (tierId: number) =>
+    authed<TierMutationResult>(`/organizer/tiers/${tierId}/restore`, { method: "POST" }),
+
+  // Showtimes (UC-23). Each refusal names what blocked it; render the message as-is.
+  updateShowtime: (showtimeId: number, b: { startsAt?: string; venueId?: number }) =>
+    authed<ShowtimeMutationResult>(`/organizer/showtimes/${showtimeId}`, {
+      method: "PATCH",
+      body: b,
+    }),
+  deleteShowtime: (showtimeId: number) =>
+    authed<ShowtimeMutationResult>(`/organizer/showtimes/${showtimeId}`, { method: "DELETE" }),
+
+  // Events. Deletion is permitted only for one never approved, with no inventory, not under an
+  // admin's hand (FR-020).
+  updateEvent: (
+    eventId: number,
+    b: {
+      title?: string;
+      description?: string;
+      imageUrl?: string | null;
+      refundPolicy?: string | null;
+      ageRestriction?: string;
+      categoryCode?: string;
+    },
+  ) => authed<EventMutationResult>(`/organizer/events/${eventId}`, { method: "PATCH", body: b }),
+  deleteEvent: (eventId: number) =>
+    authed<void>(`/organizer/events/${eventId}`, { method: "DELETE" }),
+};
+
+/**
+ * UC-22. `available: false` is a NORMAL response, not a failure — the assistant degrades to manual
+ * entry on timeout, error or quota, and the UI must never render that as an error (Principle III).
+ * Only the per-user rate limit (429) throws, because that is the one case the organizer can act on.
+ */
+export const aiApi = {
+  listing: (b: {
+    eventId?: number;
+    topic: string;
+    keywords?: string[];
+    categoryCode?: string;
+    city?: string;
+  }) => authed<ListingResponse>("/organizer/ai/listing", { method: "POST", body: b }),
 };

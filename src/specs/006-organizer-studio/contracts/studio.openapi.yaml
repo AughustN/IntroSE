@@ -1,0 +1,487 @@
+openapi: 3.1.0
+info:
+  title: TixHub Organizer Event Studio (feature 006)
+  version: 1.0.0
+  description: >
+    Organizer-scoped write endpoints for ticket tiers, showtimes, and events. Every path requires an
+    authenticated, approved organizer (requireAuth + requireOrganizer) and resolves ownership on the
+    server through event → organizer → user. Another organizer's resource is a refusal, never a
+    filtered list (SEC-04, FR-035). Mounted under /api/organizer.
+
+    Every write on an approved event returns it to pending_review and writes an audit row, EXCEPT a
+    general-admission capacity change (FR-021). Responses that carry an event's new moderation state
+    include `returnedToReview` so the console can tell the organizer what just happened (FR-042).
+
+servers:
+  - url: /api/organizer
+
+security:
+  - bearerAuth: []
+
+paths:
+  /showtimes/{showtimeId}/tiers:
+    get:
+      summary: List a showtime's tiers with live inventory
+      description: >
+        Includes archived tiers, flagged. `sold`, `held`, and `remaining` are computed live and branch
+        on event type (FR-009). For a seated showtime `capacity` is null — it comes from the seat map.
+      parameters:
+        - $ref: '#/components/parameters/ShowtimeId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [eventType, tiers]
+                properties:
+                  eventType: { $ref: '#/components/schemas/EventType' }
+                  tiers:
+                    type: array
+                    items: { $ref: '#/components/schemas/ManagedTier' }
+        '403': { $ref: '#/components/responses/NotOwner' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    post:
+      summary: Add a ticket tier (FR-001)
+      parameters:
+        - $ref: '#/components/parameters/ShowtimeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label, price]
+              properties:
+                label: { type: string, minLength: 1, maxLength: 80 }
+                price: { $ref: '#/components/schemas/Dong' }
+                capacity:
+                  description: General admission only. Refused on a seated showtime (FR-005).
+                  type: integer
+                  minimum: 0
+                  nullable: true
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TierMutationResult' }
+        '409':
+          description: >
+            `tier_limit_reached` — the showtime already has 4 active tiers (FR-002).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '422':
+          description: '`manual_capacity_seated` — capacity is seat-map-derived here (FR-005).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/NotOwner' }
+
+  /tiers/{tierId}:
+    patch:
+      summary: Rename, reprice, or change capacity (FR-003, FR-004, FR-005)
+      description: >
+        Any subset of the three fields. Capacity is evaluated under SELECT … FOR UPDATE against live
+        sold + reserved, so a concurrent hold and a capacity reduction serialize (R-3). A refusal names
+        both numbers in `details`.
+      parameters:
+        - $ref: '#/components/parameters/TierId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                label: { type: string, minLength: 1, maxLength: 80 }
+                price: { $ref: '#/components/schemas/Dong' }
+                capacity: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TierMutationResult' }
+        '409':
+          description: >
+            `capacity_below_committed` — the requested capacity is below sold + reserved. `details`
+            carries `{ sold, held, requested }` so the message can name them (FR-004, FR-018).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+              example:
+                error: capacity_below_committed
+                message: 'Không thể giảm sức chứa xuống 10: đã bán 12 vé và đang giữ 3 vé.'
+                details: { sold: 12, held: 3, requested: 10 }
+        '422':
+          description: '`manual_capacity_seated` (FR-005).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/NotOwner' }
+
+    delete:
+      summary: Remove a tier — the server decides delete vs archive (FR-006, FR-007, FR-008)
+      description: >
+        A tier with sales is archived, never deleted, and the response says which happened so the
+        console can word it correctly. A tier with live holds is refused: archive it instead.
+      parameters:
+        - $ref: '#/components/parameters/TierId'
+      responses:
+        '200':
+          description: Removed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/TierMutationResult'
+                  - type: object
+                    required: [outcome]
+                    properties:
+                      outcome:
+                        type: string
+                        enum: [deleted, archived]
+        '409':
+          description: >
+            `tier_has_holds` (FR-008), `tier_last_active` (FR-007), or `tier_has_seats` — a seated
+            price class still carrying bookable seats, which belongs to feature 005.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '403': { $ref: '#/components/responses/NotOwner' }
+
+  /tiers/{tierId}/restore:
+    post:
+      summary: Restore an archived tier (FR-006)
+      description: Refused when the showtime already has 4 active tiers. Counts as a material edit.
+      parameters:
+        - $ref: '#/components/parameters/TierId'
+      responses:
+        '200':
+          description: Restored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TierMutationResult' }
+        '409':
+          description: '`tier_limit_reached` (FR-002, FR-006).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '403': { $ref: '#/components/responses/NotOwner' }
+
+  /showtimes/{showtimeId}:
+    patch:
+      summary: Reschedule or relocate a showtime (FR-012, FR-013, FR-016, FR-017)
+      parameters:
+        - $ref: '#/components/parameters/ShowtimeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                startsAt: { type: string, format: date-time }
+                venueId: { type: integer }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShowtimeMutationResult' }
+        '409':
+          description: >
+            `showtime_started` (FR-013), `showtime_has_sales` / `showtime_has_holds` on relocate
+            (FR-016), or `seat_map_locks_venue` — a seated showtime whose map is snapshotted from the
+            old venue's layout; relocating it belongs to feature 005's re-apply.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '400':
+          description: '`starts_at_in_past` (FR-012) or a schema failure.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '403':
+          description: '`not_owner` — the event, or the target venue (FR-017).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+
+    delete:
+      summary: Delete a showtime (FR-014, FR-015)
+      parameters:
+        - $ref: '#/components/parameters/ShowtimeId'
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShowtimeMutationResult' }
+        '409':
+          description: >
+            `showtime_has_sales` — cancelling with refunds is UC-25, out of scope — or
+            `showtime_has_holds`, which leaves every reservation untouched (FR-015).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '403': { $ref: '#/components/responses/NotOwner' }
+
+  /events/{eventId}:
+    patch:
+      summary: Edit an event beyond the four fields available today (FR-011)
+      description: >
+        Widens the existing PATCH. Every accepted field is buyer-visible content, so on an approved
+        event the response carries `returnedToReview: true` (FR-021).
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                title: { type: string, minLength: 1, maxLength: 200 }
+                description: { type: string, minLength: 1 }
+                imageUrl: { type: string, format: uri, nullable: true }
+                refundPolicy: { type: string, nullable: true }
+                ageRestriction: { type: string, enum: ['all', '13+', '16+', '18+'] }
+                categoryCode: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EventMutationResult' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/NotOwner' }
+
+    delete:
+      summary: Delete an event (FR-020)
+      description: >
+        Permitted only for an event that was never approved, carries no inventory, and is not flagged
+        or removed. "Never approved" is derived from the audit trail (R-1) — an admin's takedown is not
+        erasable by its subject.
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '204': { description: Deleted }
+        '409':
+          description: >
+            `event_was_approved`, `event_under_moderation`, or `event_has_inventory` — exactly which
+            condition blocked it (FR-018).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '403': { $ref: '#/components/responses/NotOwner' }
+
+  /ai/listing:
+    post:
+      summary: Draft a listing from rough inputs (UC-22)
+      description: >
+        See `ai-listing.md` for the fallback semantics. In short: degradation is a 200 with
+        `available:false`, never an error status, because AI must never block a user (Principle III).
+        The per-user limit is checked BEFORE the cache, so a cache hit still consumes allowance.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [topic]
+              properties:
+                eventId:
+                  description: Optional — the draft being edited. Must be owned by the caller.
+                  type: integer
+                topic: { type: string, minLength: 1, maxLength: 200 }
+                keywords:
+                  type: array
+                  maxItems: 10
+                  items: { type: string, maxLength: 40 }
+                categoryCode: { type: string }
+                city: { type: string, maxLength: 80 }
+      responses:
+        '200':
+          description: >
+            Either a suggestion, or `available:false` when the assistant timed out, errored, or the
+            platform quota is exhausted (PERF-05, SCAL-03).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListingResponse' }
+        '429':
+          description: '`ai_rate_limited` — 10 requests/hour/user (SEC-08, UC-22 A2).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '409':
+          description: '`ai_unavailable_live_event` — refused on an approved, on-sale event (FR-027).'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '403': { $ref: '#/components/responses/NotOwner' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  parameters:
+    ShowtimeId:
+      name: showtimeId
+      in: path
+      required: true
+      schema: { type: integer }
+    TierId:
+      name: tierId
+      in: path
+      required: true
+      schema: { type: integer }
+    EventId:
+      name: eventId
+      in: path
+      required: true
+      schema: { type: integer }
+
+  responses:
+    NotOwner:
+      description: '`not_owner` — the caller does not own this resource (SEC-04).'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    NotFound:
+      description: '`not_found`'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    ValidationFailed:
+      description: '`validation_failed` — schema rejection before any processing (SEC-07).'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+
+  schemas:
+    Dong:
+      description: Whole Vietnamese đồng. Never fractional, never negative (STD-03).
+      type: integer
+      minimum: 0
+
+    EventType:
+      type: string
+      enum: [general_admission, seated]
+
+    ManagedTier:
+      type: object
+      required: [id, label, price, capacity, sold, held, remaining, archived]
+      properties:
+        id: { type: integer }
+        label: { type: string }
+        price: { $ref: '#/components/schemas/Dong' }
+        capacity:
+          description: null for a seated tier — derived from the seat map (FR-005).
+          type: integer
+          nullable: true
+        sold: { type: integer }
+        held: { type: integer }
+        remaining:
+          type: integer
+          nullable: true
+        archived: { type: boolean }
+        archivedAt: { type: string, format: date-time, nullable: true }
+
+    TierMutationResult:
+      type: object
+      required: [tier, returnedToReview]
+      properties:
+        tier: { $ref: '#/components/schemas/ManagedTier' }
+        returnedToReview:
+          description: >
+            true when this write returned an approved event to pending_review (FR-021). Always false
+            for a capacity-only change — the one exemption.
+          type: boolean
+
+    ShowtimeMutationResult:
+      type: object
+      required: [showtimeId, returnedToReview]
+      properties:
+        showtimeId: { type: integer }
+        startsAt: { type: string, format: date-time }
+        venueId: { type: integer }
+        returnedToReview: { type: boolean }
+
+    EventMutationResult:
+      type: object
+      required: [id, slug, title, status, moderation, returnedToReview]
+      properties:
+        id: { type: integer }
+        slug: { type: string }
+        title: { type: string }
+        status: { type: string }
+        moderation:
+          type: string
+          enum: [pending_review, approved, flagged, removed]
+        returnedToReview: { type: boolean }
+
+    ListingSuggestion:
+      type: object
+      properties:
+        titles:
+          type: array
+          maxItems: 3
+          items: { type: string }
+        description: { type: string }
+        tags:
+          type: array
+          maxItems: 8
+          items: { type: string }
+        price:
+          description: >
+            Computed in SQL from comparable published events, never produced by the model (R-6).
+            Absent when there are too few comparables.
+          allOf: [{ $ref: '#/components/schemas/Dong' }]
+          nullable: true
+        priceBasis:
+          description: How many comparable events the price was derived from — shown to the organizer.
+          type: integer
+          nullable: true
+
+    ListingResponse:
+      type: object
+      required: [available]
+      properties:
+        available: { type: boolean }
+        cached: { type: boolean }
+        suggestion: { $ref: '#/components/schemas/ListingSuggestion' }
+        reason:
+          description: Present only when available is false. Advisory; the client falls back either way.
+          type: string
+          enum: [timeout, error, quota_exhausted]
+
+    ApiError:
+      description: >
+        The one error shape every consumer already handles (Principle VI) — flat, as shipped by
+        `server/src/middleware/error.ts` since feature 001. `error` is the machine code itself, not a
+        nested object; this feature reuses it unchanged rather than introducing a second shape.
+      type: object
+      required: [error]
+      properties:
+        error:
+          description: Stable machine code, e.g. `capacity_below_committed`.
+          type: string
+        message:
+          description: Vietnamese, rendered as-is by the console (FR-041).
+          type: string
+        details:
+          description: Numbers the client acts on — the sold/held counts a refusal must name (FR-018).
+          type: object
+          additionalProperties: { oneOf: [{ type: number }, { type: string }] }

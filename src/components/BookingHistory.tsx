@@ -138,8 +138,7 @@ export default function BookingHistory({ bookings, onBack, onSelectBooking }: Bo
                   type="button"
                   onClick={() => setPile(tab.id)}
                   aria-current={active ? "true" : undefined}
-                  className={`-mb-px border-b-2 pb-3 font-display text-body font-bold uppercase tracking-[0.06em] transition ${
-                    active
+                  className={`-mb-px border-b-2 pb-3 font-display text-body font-bold uppercase tracking-[0.06em] transition ${ active
                       ? "border-burgundy text-beige-kem"
                       : "border-transparent text-ink-soft hover:text-beige-kem"
                   }`}

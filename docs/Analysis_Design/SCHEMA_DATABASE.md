@@ -292,6 +292,19 @@ organizer's event, venue, or seat is a refusal, not a filter the client can drop
   part of a live seat map)
 - `POST /api/organizer/showtimes/:id/seat-map` — generate the bookable map: exactly one
   `showtime_seats` row per physical seat, per-section tier assignment.
+- **Ticket tiers (feature 006, UC-26).** `GET`/`POST /api/organizer/showtimes/:id/tiers` ·
+  `PATCH`/`DELETE /api/organizer/tiers/:id` · `POST /api/organizer/tiers/:id/restore`. Removal is
+  delete-or-archive decided by the server on live inventory and reported back; capacity is refused
+  below sold + reserved (checked under the same row lock UC-11 takes) and refused outright on a
+  seated showtime.
+- **Showtimes & events (feature 006, UC-23).** `PATCH`/`DELETE /api/organizer/showtimes/:id` ·
+  `PATCH`/`DELETE /api/organizer/events/:id`. Every edit that contradicts sold or held inventory is
+  refused with a specific code; `PATCH /events/:id` moved here from the catalog module because it had
+  to become transactional with the UC-24 A6 re-moderation.
+- **AI listing assistant (feature 006, UC-22).** `POST /api/organizer/ai/listing`. Degradation
+  (timeout, upstream error, exhausted platform quota) is a **200 with `available:false`**, never an
+  error status; only the per-user rate limit returns 429. The suggested price is computed in SQL from
+  comparable published events and never requested from the model.
 - *Planned:* `POST /api/organizer/events/:id/cancel` (void tickets, refund 100% to wallets, release
   seats), `POST /api/organizer/checkins` (idempotent QR check-in), attendee list + export, announcements.
 
@@ -301,7 +314,9 @@ organizer's event, venue, or seat is a refusal, not a filter the client can drop
 - `POST /api/admin/events/:id/approve` — the single positive gate that makes an event public.
 - `POST /api/admin/events/:id/reject` · `POST /api/admin/events/:id/flag` ·
   `POST /api/admin/events/:id/remove` — each takes a reason and writes an `audit_logs` row (SEC-09).
-- *Planned:* `POST /api/admin/organizers/:id/approve` / `:id/suspend` (audit-logged),
+- *Planned (still unbuilt — an organizer application therefore cannot be approved through the API at
+  all; the row has to be flipped directly in the database):* `POST /api/admin/organizers/:id/approve` /
+  `:id/suspend` (audit-logged),
   `GET /api/admin/orders`, `GET/POST/PATCH/DELETE /api/admin/vouchers`,
   `GET /api/admin/reports` / `PATCH /api/admin/reports/:id`, `GET /api/admin/reports/revenue`,
   category & homepage management, system settings.
@@ -616,10 +631,16 @@ CREATE TABLE ticket_tiers (
   total_quantity INT,                     -- GA capacity; NULL for seated (capacity = seat rows)
   sold_quantity INT NOT NULL DEFAULT 0,
   reserved_quantity INT NOT NULL DEFAULT 0,
+  archived_at TIMESTAMPTZ,                -- NULL = active. Set = retired: unpurchasable, hidden from
+                                          -- buyers, still resolvable by existing orders/tickets, and
+                                          -- NOT counted toward the 4-tier layout limit (006 FR-006).
+                                          -- Restore is `SET archived_at = NULL`.
   CHECK (sold_quantity + reserved_quantity <= COALESCE(total_quantity, sold_quantity + reserved_quantity))
 );
 
 CREATE INDEX idx_ticket_tiers_showtime ON ticket_tiers(showtime_id);
+-- "Active" is the hot predicate: the 4-tier check and every buyer read filter on it (006).
+CREATE INDEX idx_ticket_tiers_active ON ticket_tiers(showtime_id) WHERE archived_at IS NULL;
 
 -- ---------- SHOWTIME SEATS ----------
 -- Seated events only. Bookable instance of a physical seat for one showtime.

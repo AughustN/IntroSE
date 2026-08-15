@@ -29,6 +29,8 @@ export interface TierRow {
   total_quantity: number | null;
   sold_quantity: number;
   reserved_quantity: number;
+  /** Set once the organizer retires the tier (006 FR-006). An archived tier is unpurchasable. */
+  archived_at: Date | null;
 }
 
 export interface ReservationRow {
@@ -155,7 +157,7 @@ export async function syncSeatExpiry(
 
 export async function lockTier(client: pg.PoolClient, tierId: number): Promise<TierRow | null> {
   const { rows } = await client.query<TierRow>(
-    `SELECT id, showtime_id, price_amount, total_quantity, sold_quantity, reserved_quantity
+    `SELECT id, showtime_id, price_amount, total_quantity, sold_quantity, reserved_quantity, archived_at
        FROM ticket_tiers WHERE id = $1 FOR UPDATE`,
     [tierId],
   );
@@ -165,6 +167,25 @@ export async function lockTier(client: pg.PoolClient, tierId: number): Promise<T
 /** capacity − sold − reserved. `null` capacity = unlimited (seated tiers and uncapped GA). */
 export function tierRemaining(tier: TierRow): number | null {
   return tier.total_quantity === null ? null : tier.total_quantity - tier.sold_quantity - tier.reserved_quantity;
+}
+
+/**
+ * Does this tier have seat rows behind it?
+ *
+ * The question a quantity selection has to answer before it is allowed. A tier is sold EITHER as
+ * individual seats or by count, and the honest test is not the event's type but the inventory itself:
+ * if `showtime_seats` rows exist for the tier, every ticket is a specific seat and a bare quantity
+ * would sell one that nothing reserves — the double-sell this whole module exists to prevent.
+ *
+ * A capacity zone's tier (0027) has no seat rows, which is exactly why it can be sold by count, and
+ * why a seated showtime with a standing floor works without a second inventory mechanism.
+ */
+export async function tierHasSeats(client: pg.PoolClient, tierId: number): Promise<boolean> {
+  const { rows } = await client.query(
+    `SELECT 1 FROM showtime_seats WHERE ticket_tier_id = $1 LIMIT 1`,
+    [tierId],
+  );
+  return rows.length > 0;
 }
 
 export async function bumpReserved(client: pg.PoolClient, tierId: number, delta: number): Promise<void> {

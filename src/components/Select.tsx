@@ -22,8 +22,8 @@ interface SelectProps {
    * Styling for the trigger. Defaults to the filter bar's hairline.
    *
    * A prop rather than a fixed set of variants, because the two admin panels already keep their own
-   * `input` constant and they do not agree with each other — one is `h-11 rounded-xl`, the other
-   * `h-10 rounded-lg`. Passing that constant straight through is what keeps a dropdown looking like
+   * `input` constant and they do not agree with each other — one is `h-11`, the other
+   * `h-10`. Passing that constant straight through is what keeps a dropdown looking like
    * the text field next to it instead of like a third kind of control.
    */
   triggerClassName?: string;
@@ -114,8 +114,7 @@ export default function Select({
         className={`flex w-full items-center justify-between gap-2 text-left text-beige-kem transition ${triggerClassName ?? UNDERLINE_TRIGGER}`}
       >
         <span
-          className={`truncate ${
-            multiple
+          className={`truncate ${ multiple
               ? selectedValues.length === 0
                 ? "text-ink-soft"
                 : ""
@@ -127,8 +126,7 @@ export default function Select({
           {multiple ? multiLabel : (current?.label ?? placeholder ?? "—")}
         </span>
         <ChevronDown
-          className={`h-3.5 w-3.5 shrink-0 text-ink-soft transition-transform duration-300 ${
-            open ? "rotate-180" : ""
+          className={`h-3.5 w-3.5 shrink-0 text-ink-soft transition-transform duration-300 ${ open ? "rotate-180" : ""
           }`}
         />
       </button>
@@ -166,8 +164,7 @@ export default function Select({
                       // three round trips through the trigger.
                       if (!multiple) setOpen(false);
                     }}
-                    className={`flex w-full items-center justify-between gap-3 overflow-clip px-4 py-2 text-left font-meta text-eyebrow transition-colors ${
-                      selected
+                    className={`flex w-full items-center justify-between gap-3 overflow-clip px-4 py-2 text-left font-meta text-eyebrow transition-colors ${ selected
                         ? "bg-bubblegum/50 text-on-tint"
                         : "text-beige-kem hover:bg-bubblegum/30"
                     }`}
@@ -187,12 +184,11 @@ export default function Select({
                     {multiple ? (
                       <Check
                         aria-hidden="true"
-                        className={`h-3.5 w-3.5 shrink-0 text-burgundy ${
-                          selected ? "opacity-100" : "opacity-0"
+                        className={`h-3.5 w-3.5 shrink-0 text-burgundy ${ selected ? "opacity-100" : "opacity-0"
                         }`}
                       />
                     ) : (
-                      selected && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-burgundy" />
+                      selected && <span className="h-1.5 w-1.5 shrink-0 bg-burgundy" />
                     )}
                   </button>
                 </li>

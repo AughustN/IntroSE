@@ -32,6 +32,8 @@ export type Screen =
   | "organizer"
   | "organizer-events"
   | "organizer-event-detail"
+  /** The seat map library, and the editor beneath it at `/organizer/seatmaps/:id`. */
+  | "seatmaps"
   | "moderation"
   | "about-us"
   | "terms-of-service"
@@ -46,6 +48,8 @@ export interface Route {
   bookingId?: string;
   /** From `/organizer/events/:eventId`. */
   organizerEventId?: string;
+  /** From `/organizer/seatmaps/:id`. */
+  organizerLayoutId?: number;
 }
 
 /** Screens whose URL carries no parameter. Order is irrelevant; lookup goes both ways. */
@@ -64,6 +68,7 @@ const STATIC_PATHS: ReadonlyArray<readonly [Screen, string]> = [
   ["admin", "/admin"],
   ["organizer", "/organizer"],
   ["organizer-events", "/organizer/events"],
+  ["seatmaps", "/organizer/seatmaps"],
   ["moderation", "/moderation"],
   ["about-us", "/about-us"],
   ["terms-of-service", "/terms-of-service"],
@@ -98,9 +103,18 @@ export function isOverlayPath(pathname: string): boolean {
  */
 export function screenToPath(
   screen: Screen,
-  params: { eventSlug?: string | null; bookingId?: string | null; organizerEventId?: string | null } = {},
+  params: {
+    eventSlug?: string | null;
+    bookingId?: string | null;
+    organizerEventId?: string | null;
+    organizerLayoutId?: number | null;
+  } = {},
 ): string {
   switch (screen) {
+    case "seatmaps":
+      return params.organizerLayoutId
+        ? `/organizer/seatmaps/${params.organizerLayoutId}`
+        : "/organizer/seatmaps";
     case "detail":
       return params.eventSlug ? `/events/${encodeURIComponent(params.eventSlug)}` : "/";
     case "seats":
@@ -110,8 +124,9 @@ export function screenToPath(
     case "ticket":
       return params.bookingId ? `/tickets/${encodeURIComponent(params.bookingId)}` : "/bookings";
     case "organizer-event-detail":
-      return params.organizerEventId ? `/organizer/events/${encodeURIComponent(params.organizerEventId)}` : "/organizer/events";
-    // Analytics is the default landing section for the organizer workspace.
+      return params.organizerEventId
+        ? `/organizer/events/${encodeURIComponent(params.organizerEventId)}`
+        : "/organizer/events";
     case "organizer":
       return "/organizer?section=analytics";
     default: {
@@ -150,11 +165,20 @@ export function pathToRoute(pathname: string): Route | null {
     return { screen: "ticket", bookingId: segments[1] };
   }
 
+  // `/organizer/seatmaps/:id` is a standalone Studio editor route. It does not alter the
+  // event-management routes below, which retain the current branch's string-id contract.
+  if (segments[0] === "organizer" && segments[1] === "seatmaps" && segments.length === 3) {
+    const id = Number(segments[2]);
+    if (Number.isInteger(id) && id > 0) return { screen: "seatmaps", organizerLayoutId: id };
+  }
+
   if (segments[0] === "organizer") {
     if (segments.length === 1) return { screen: "organizer" };
-    if (segments.length === 2 && segments[1] === "events") return { screen: "organizer" };
+    if (segments.length === 2 && segments[1] === "events") return { screen: "organizer-events" };
     if (segments.length === 2) return { screen: "organizer-event-detail", organizerEventId: segments[1] };
-    if (segments.length === 3 && segments[1] === "events") return { screen: "organizer-event-detail", organizerEventId: segments[2] };
+    if (segments.length === 3 && segments[1] === "events") {
+      return { screen: "organizer-event-detail", organizerEventId: segments[2] };
+    }
   }
 
   return null;

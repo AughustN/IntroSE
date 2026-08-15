@@ -97,6 +97,88 @@ moderation (002); the hold algorithm itself (003)."
   venue could not both have a "Khu A", and cloning a layout would not be self-contained. Section names
   are unique within a layout.
 
+### Amendment — Session 2026-08-06 (hall-scheme parity)
+
+> **This scope was added after feature 005 shipped.** Everything above — layouts, sections, coordinate
+> seats, arc/align/distribute/rotate, marquee select, grid snap, undo/redo, templates and clone,
+> floor-plan upload with opacity and buyer visibility, optimistic locking, validate/publish,
+> apply-to-showtime with sold/held refusals, per-seat block and per-seat tier assignment, and buyer
+> zoom/pan — is **shipped and not re-opened**. The requirements below (FR-047 onward) close the gap
+> between this designer and a commercial hall-scheme builder, benchmarked against
+> `regtoevent.com/en/hallscheme`. Original numbering, wording, and clarifications are unchanged.
+
+- Q: Where do a boundary polygon's points live — on the element row, or in a separate shape table? → A:
+  **On the element, as an ordered list of points.** The element model is rectangle-only today
+  (`x, y, width, height`), and a polygon needs N vertices. A separate `shape_points` table would make
+  every layout read a second join and every save a delete-and-reinsert, for geometry that is never
+  queried by point — it is only ever read whole, drawn, and written whole, exactly like the layout
+  snapshot already is. The points ride on the element as an ordered JSON array, and the rectangle fields
+  stay as the shape's bounding box so existing readers that ignore points still position it sensibly.
+- Q: A section can now scale its seats. Does the overlap rule use the nominal diameter or the scaled
+  one? → A: **The scaled one — overlap uses the *effective* size of the two seats compared.** Keeping
+  the test on the nominal diameter would let a 2× section draw seats visibly on top of each other while
+  validation called the layout clean, and a picture that contradicts the publish gate is worse than no
+  picture. The default multiplier is **1.0**, which reproduces today's behaviour exactly, so no existing
+  layout changes its publishability the day this ships; only a layout that opts into a larger multiplier
+  can newly fail, and it fails for something the organizer can see.
+- Q: Do tables introduce a new kind of inventory? → A: **No. A table is a drawing object; its seats are
+  ordinary seats.** Each seat generated around a table belongs to a section, carries a tier, and is held
+  and sold through feature 003 and 004 completely unchanged. The table row exists so the editor can move,
+  rotate, relabel, and re-count a group as one object — it is never sold, never appears in inventory, and
+  deleting it is governed by the seats it holds, not by itself.
+- Q: On the buyer's map, when a seat's section colour and its price-tier colour disagree, which wins? →
+  A: **Section colour is an editor-only tool; the buyer map colours by tier.** The two audiences want
+  different things — an organizer drawing needs to see which block is which, a buyer choosing a seat
+  wants to know the price — and a map whose fill means two things at once means nothing. Seat **shape**
+  and **size** from the section still carry through to buyers, so sections stay distinguishable by form
+  while colour is reserved entirely for price. This is also what makes the tier legend honest and the two
+  renderers trivially identical (FR-069).
+
+- Q: Where does a price tier's colour come from — organizer-chosen or auto-assigned? → A:
+  **Auto-assigned from a fixed palette, ordered by price** (cheapest to most expensive). A chosen colour
+  would mean adding a field to the ticket tier, which feature **006** owns, and widening its forms —
+  cross-feature work that would have to land in the same change for no requirement that asks for it.
+  Ordering the palette by price also makes the visual order consistent across every event on the
+  platform, so a buyer learns it once. The legend names every tier and its price regardless, so nothing
+  depends on a colour being memorable. An organizer override remains **additive** if it is ever asked
+  for, and would invalidate nothing decided here.
+- Q: The editor grew canvas fit/zoom controls and element deletion while this amendment was being built,
+  neither of which any requirement asked for. Fold them in or take them out? → A: **Folded in, as FR-084
+  and FR-085.** Both turned out to be preconditions for the amendment's own scope rather than extras: a
+  hall of tables, a boundary polygon, and 200 standing positions cannot be placed accurately at a fixed
+  scale, and a palette that can *add* a facility icon but not remove one is a trap. Neither touches
+  inventory — zoom is a view control that changes no stored value, and an element is by definition never
+  sellable — so folding them in adds no refusal path and no risk to a live map (SC-029). The alternative,
+  deleting working code that the new palette needs, would have made the feature worse to satisfy a
+  numbering technicality.
+
+- Q: When a layout is applied to a showtime, are tables, boundary shapes and facility icons copied into
+  that showtime too? → A: **Yes — they are snapshotted with the seats, exactly as the geometry already
+  is.** The snapshot rule already exists precisely so a later layout edit cannot reshape a show that is
+  selling, and decoration sits in the same picture as the seats: reading it live would let an organizer
+  tidying the venue outline silently change the map under a live show, which is the failure the rule was
+  written to prevent. Extending the existing rule keeps **one** rule rather than two contradictory ones,
+  and keeps the previewed re-apply as the single way any layout edit reaches a live showtime. It also
+  means a buyer looking at "Bàn 5 - Ghế 3" can actually see the table it names.
+
+- Q: When a table is placed, how do its seats get a section? → A: **The table carries a section and its
+  seats inherit it.** A gala hall really is organised as "Khu VIP quanh sân khấu" versus "Khu thường phía
+  sau" — that is a section — and tables are placed in groups inside those areas, so asking per seat would
+  be ten answers to one question. Holding it on the table also makes moving a table between sections one
+  operation that re-parents all its seats, and makes the uniqueness of "Bàn 5" checkable **at placement**
+  rather than at save, where a collision is far more annoying to unpick.
+
+- Q: Are "fan zones" — an area bought by headcount rather than by seat — in scope? → A: **No. A showtime
+  stays seated **or** general admission, never both; a fan zone is expressed as a section of
+  pre-generated `standing` positions inside a drawn area.** Mixing the two on one showtime would reopen
+  feature 003's reservation invariant ("either seated or GA, never mixed", 003 FR-012) and feature 004's
+  conversion against it — the two places where money and double-selling live — which is a feature with
+  its own concurrency work, not a line item in a seat-map amendment. The substitute costs nothing new:
+  the original spec already permits seats of type `standing`, each an ordinary individually-held seat, so
+  a fan zone of 200 is 200 standing positions the buyer picks from. The honest difference is that a buyer
+  chooses a **spot** rather than a **headcount**; that is accepted in exchange for changing nothing about
+  how a seat is claimed.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Draw a layout that matches the real venue (Priority: P1)
@@ -380,6 +462,174 @@ editing the clone leaves the original untouched.
 
 ---
 
+---
+
+### User Story 9 - Lay out a gala dinner with tables (Priority: P1)
+
+An organizer running a year-end party, a wedding, or an awards dinner places round tables across the
+hall, sets how many guests each seats, and the seats appear already arranged around each table. They
+drag a table to make room for the dance floor and its ten seats travel with it. They change one table
+from eight covers to ten and the seats redistribute evenly. Guests then buy a specific chair at a
+specific table.
+
+**Why this priority**: This is the largest single gap against a commercial builder, and it is the
+layout Vietnamese gala dinners, weddings, and year-end parties actually use — the product cannot
+express it at all today. Everything else in this amendment improves a map an organizer can already
+draw; this one makes a whole category of event drawable for the first time.
+
+**Independent Test**: Place three round tables of 10 and one rectangular table of 12, drag one table
+across the hall, change another's count from 8 to 10, and confirm the seats follow and redistribute —
+then generate a showtime's map and confirm a buyer can select "Bàn 3 - Ghế 7" and nothing else changed
+about how it is held.
+
+**Acceptance Scenarios**:
+
+1. **Given** an empty area of the canvas, **When** the organizer places a round table for 10, **Then**
+   one table object appears with 10 seats spaced evenly around its perimeter, each belonging to a section
+   and labelled so it reads as a table seat.
+2. **Given** a rectangular table, **When** the organizer sets how many seats sit on each side, **Then**
+   the seats distribute along those sides in that arrangement.
+3. **Given** a table with seats, **When** the organizer drags or rotates the table, **Then** every one of
+   its seats moves and rotates with it, keeping its place at the table.
+4. **Given** a table of 8 with nothing sold, **When** the organizer changes it to 10, **Then** the seats
+   redistribute evenly and the two new seats are labelled in sequence.
+5. **Given** a table whose seats include one **sold** or **held** seat, **When** the organizer changes the
+   count or deletes the table, **Then** it is refused for that seat with the existing reason vocabulary,
+   and the table and all its seats are left exactly as they were.
+6. **Given** a table selected on the canvas, **When** the organizer clicks it, **Then** one object is
+   selected — not a loose scatter of seats — and one undo reverses whatever they do to it.
+7. **Given** a generated showtime map containing table seats, **When** a buyer holds and buys one,
+   **Then** it behaves identically to any other seat: nothing about holding, releasing, or selling
+   changes.
+
+---
+
+### User Story 10 - Buyers can read the price off the map (Priority: P1)
+
+A buyer opening a seat map sees at a glance which seats cost what: each price tier has its own colour
+and a legend naming the tier and its price. Seats already taken still read as taken and stay
+unclickable, so the buyer never has to choose between knowing the price and knowing what is available.
+
+**Why this priority**: The map currently colours by status only (Còn trống / Đang giữ / Đã bán), so a
+buyer on a multi-tier event has to click a seat to learn what it costs. That is the single most common
+thing a buyer wants from a seat map, and it is buyer-facing value on the critical purchase path.
+
+**Independent Test**: Open a showtime with three tiers at 360, 768, and 1920 px on both the event-page
+preview and the selection screen; confirm the tier colours and the legend are identical on both, that
+the legend names each tier and its price in đồng, and that sold and held seats remain visibly
+unavailable and cannot be selected.
+
+**Acceptance Scenarios**:
+
+1. **Given** a showtime with several tiers, **When** a buyer opens the map, **Then** each seat is
+   coloured by its tier and a legend names every tier with its colour and its price in whole đồng.
+2. **Given** a seat that is sold or held, **When** the buyer looks at it, **Then** it still reads as
+   unavailable and cannot be selected, regardless of its tier colour.
+3. **Given** the same showtime, **When** the buyer compares the event-page preview with the seat-selection
+   screen, **Then** the colours, the legend, and the seat shapes are the same on both — one visual
+   language, not two.
+4. **Given** any of the supported widths, **When** the buyer zooms and pans, **Then** the legend stays
+   readable and the map stays usable.
+
+---
+
+### User Story 11 - Draw the shape of the hall (Priority: P2)
+
+An organizer outlines the room itself — an L-shaped ballroom, a room with a cut corner — and draws
+straight dividers to separate the dance floor from the dining area, so the map reads as *that* room
+rather than as seats floating on a blank field.
+
+**Why this priority**: Orientation. Buyers judge "where am I sitting" from the room's shape, and today
+the only way to suggest it is an uploaded floor plan, which many organizers do not have. It improves a
+map that is already drawable, so it follows the tables work.
+
+**Independent Test**: Draw a five-point boundary and two dividers, save, reopen, and confirm the shape
+persists; then generate a showtime map and confirm the bookable seat count is completely unchanged.
+
+**Acceptance Scenarios**:
+
+1. **Given** the canvas, **When** the organizer draws a boundary of several points, **Then** it is stored
+   with the layout and drawn behind the seats in both the editor and the buyer's map.
+2. **Given** a boundary or a divider, **When** the organizer moves or reshapes it, **Then** no seat moves
+   and no seat changes status.
+3. **Given** a layout with a boundary, **When** its showtime map is generated, **Then** the number of
+   bookable seats is exactly the number of seats — boundaries and dividers are never inventory.
+4. **Given** a boundary that does not enclose every seat, **When** the organizer tries to publish,
+   **Then** validation reports it and names the seats left outside.
+
+---
+
+### User Story 12 - Show buyers where the facilities are (Priority: P2)
+
+An organizer marks the exits, the toilets, the food and drink counters, the smoking area, first aid,
+the lift or stairs, and wheelchair access, so a buyer choosing a seat can see what is near it.
+
+**Why this priority**: It is a small, self-contained addition to a vocabulary that already exists
+(stage, aisle, door, bar, label), and it answers real buyer questions — "is there a toilet near this
+block?", "can I get a wheelchair to this row?" — without touching inventory at all.
+
+**Independent Test**: Place one of each facility icon with Vietnamese labels, save, and confirm all of
+them render in the editor and in the buyer's map, and that layouts saved before this change still load.
+
+**Acceptance Scenarios**:
+
+1. **Given** the palette, **When** the organizer places a facility icon, **Then** it is drawn distinctly
+   from seats in both the editor and the buyer's map and is never selectable as inventory.
+2. **Given** a facility icon, **When** the organizer gives it a Vietnamese label, **Then** the label is
+   shown intact and is never interpreted as markup.
+3. **Given** layouts created before this amendment, **When** they are opened, **Then** every existing
+   element still loads and displays exactly as before.
+
+---
+
+### User Story 13 - Tell the sections apart at a glance (Priority: P2)
+
+An organizer gives each section its own colour, and picks whether its seats are drawn as circles or
+squares and how large, so a VIP block reads differently from the back stalls at a glance while they
+draw. The colour is a working aid for the organizer; buyers see the same shapes and sizes but are
+coloured by price instead.
+
+**Why this priority**: Every seat is currently an identical circle, so a map with five sections is a
+uniform field of dots and the organizer cannot verify visually that they tiered the right block. It
+also gives the buyer-side tier colouring (US10) a coherent visual system to sit in.
+
+**Independent Test**: Give three sections distinct colours, shapes, and sizes; confirm the editor and
+both buyer renderers show them; then place two seats of a scaled-up section close together and confirm
+validation reports the overlap it now visibly has.
+
+**Acceptance Scenarios**:
+
+1. **Given** a section, **When** the organizer sets its colour, seat shape, and size, **Then** its seats
+   are drawn that way in the **editor**; the shape and size also reach both buyer renderers, while the
+   buyer's fill colour comes from the seat's price tier, not from the section.
+2. **Given** a section whose seats are scaled larger, **When** two of them are placed closer than their
+   drawn size, **Then** validation reports them as overlapping — what is drawn and what is checked agree.
+3. **Given** a layout created before this amendment, **When** it is opened, **Then** its seats look
+   exactly as they did, because the default size is unchanged.
+4. **Given** a section with no colour chosen, **When** the organizer tries to publish, **Then** validation
+   reports it.
+
+---
+
+### User Story 14 - One palette for the new objects (Priority: P3)
+
+The organizer picks tables, shapes, and facility icons from one palette on the canvas, the same way
+they already place a stage or an aisle, and undo reverses any of it in one step.
+
+**Why this priority**: Pure ergonomics over capabilities delivered by US9–US13. The objects are usable
+without a dedicated palette; the palette makes them findable.
+
+**Independent Test**: Place one table, one boundary, and one icon from the palette, then press undo
+three times and confirm each object disappears in one step, in reverse order.
+
+**Acceptance Scenarios**:
+
+1. **Given** the canvas, **When** the organizer opens the palette, **Then** tables, shapes, and facility
+   icons are offered alongside the existing elements.
+2. **Given** any new object operation — placing, moving, resizing, re-counting, deleting — **When** the
+   organizer undoes, **Then** exactly one step reverses the whole operation.
+
+
 ### Edge Cases
 
 - **A layout bound to a live showtime is deleted**: refused. A layout with any generated seat map on a
@@ -429,6 +679,46 @@ editing the clone leaves the original untouched.
 - **A GA showtime pointed at a layout**: refused — layouts bind only to seated showtimes.
 - **Text label in Vietnamese with diacritics, or an emoji**: stored and displayed intact; label length is
   bounded and content is escaped, never interpreted.
+
+*Added by the 2026-08-06 amendment:*
+
+- **A table dragged so its seats land on another table's seats**: allowed while drafting, reported by
+  validation, blocking at publish — the same permissive-draft / strict-publish rule seats already follow.
+- **A table's seat count reduced below the number already sold at it**: refused, naming the sold seats;
+  the count never silently drops a seat someone bought.
+- **A table rotated when one of its seats is held**: refused, because rotating moves that seat. The
+  organizer waits for the hold to lapse, exactly as with any other move of a held seat.
+- **A table deleted whose seats are all `available`**: deleted together with its seats, one undo step.
+- **Two tables given the same name in one section**: refused at placement, naming the existing table. The
+  same name in a *different* section is fine — "Bàn 5" in Khu VIP and "Bàn 5" in Khu thường are distinct
+  seats, which is exactly what per-section uniqueness allows.
+- **A table moved to another section while one of its seats is sold**: refused, because re-parenting
+  changes that seat's identity; the existing sold/held vocabulary reports it.
+- **A round table of 2**: allowed — two seats opposite each other. A table of 1 or 0 is refused; that is
+  a loose seat, not a table.
+- **A boundary polygon drawn with two points**: refused as a polygon; a two-point shape is a divider,
+  which is its own object.
+- **A boundary polygon that crosses itself**: allowed and drawn as-is. Enclosure is tested by whether the
+  seats fall inside it, and a self-crossing outline that still contains every seat is the organizer's
+  aesthetic choice, not an error.
+- **A layout's boundary redrawn while one of its showtimes is selling**: the selling showtime is
+  untouched — it holds its own snapshot. The change reaches it only when the organizer re-applies, under
+  the existing preview and the existing inventory rules.
+- **A facility icon placed outside the boundary**: allowed — a smoking area or an exit is often outside
+  the room proper.
+- **A section coloured the same as another section**: allowed but reported as a warning at publish, since
+  two identical colours defeat the purpose without being wrong. It never reaches buyers either way —
+  section colour is editor-only.
+- **A tier with no colour assigned on the buyer map**: falls back to a neutral colour and is still named
+  in the legend with its price; the map never renders a seat the buyer cannot price.
+- **More tiers than distinct colours in the palette**: colours repeat, and the legend remains the
+  authority — the legend, not the colour, is what names the price.
+- **Two tiers priced identically**: they sort adjacently and may receive adjacent palette colours; the
+  legend still names both, so a buyer is never asked to tell them apart by colour alone.
+- **A tier's price changed by feature 006 after the map is drawn**: the colour order is derived at read
+  time, so the map re-colours itself on the next read; no stored colour goes stale.
+- **A buyer using colour alone cannot distinguish two tiers**: colour is never the only signal; the
+  legend names every tier and its price, and a seat's tier is available to assistive technology.
 
 ## Requirements *(mandatory)*
 
@@ -606,6 +896,141 @@ editing the clone leaves the original untouched.
 - **FR-046**: All prices surfaced alongside seats MUST remain whole Vietnamese đồng integers, and the
   user-facing language MUST be Vietnamese.
 
+*The requirements below were added by the 2026-08-06 amendment and are additive: FR-001–FR-046 above are
+unchanged and none of the behaviour they describe is re-opened.*
+
+**Tables (the gala-dinner layout)**
+
+- **FR-047**: System MUST support a **table** as a first-class layout object carrying a shape (**round**
+  or **rectangular**), a position, a size, a rotation, an optional label, and a seat count.
+- **FR-048**: Placing a table MUST generate its seats **already distributed around its perimeter** —
+  evenly around the circumference for a round table, and along the sides for a rectangular one with a
+  **per-side count** the organizer can set.
+- **FR-049**: A table's seats MUST be **ordinary seats**: they belong to a section, carry a ticket tier,
+  and are held and sold through features 003 and 004 **entirely unchanged**. A table itself MUST NEVER be
+  sellable and MUST NEVER appear in inventory. A **table carries a section** and its seats MUST inherit
+  it; changing the table's section MUST re-parent every one of its seats in one operation, subject to the
+  same sold/held refusals as any other change (FR-051).
+- **FR-050**: Moving or rotating a table MUST carry its seats with it, preserving each seat's place at the
+  table; changing its seat count MUST redistribute its seats.
+- **FR-051**: Any table operation that would move, relabel, or remove a seat that is **sold** or **held**
+  MUST be refused using the existing `seat_sold` / `seat_held` reason vocabulary, and MUST be refused
+  **whole** — the table and every one of its seats MUST be left exactly as they were (FR-029's rule,
+  applied to tables).
+- **FR-052**: Deleting a table MUST delete its seats with it when they are all free, and MUST be refused
+  when any of them is sold or held, naming those seats.
+- **FR-053**: Table seats MUST be labelled so they read naturally in Vietnamese — **"Bàn 5 - Ghế 3"** —
+  while satisfying the existing per-section uniqueness rule (FR-003): the table's name acts as the seat's
+  row label and its position at the table as the seat number, so `(section, row label, number)` stays
+  unique without a new constraint. Because a table carries its section (FR-049), a table name that would
+  collide with an existing table in the **same section** MUST be refused **at placement**, naming the
+  clash, rather than failing on save.
+- **FR-054**: A table MUST hold at least **2** seats and at most **20**, and a layout MUST be capped at
+  **100** tables; a table of 0 or 1 MUST be refused as a loose seat rather than a table.
+- **FR-055**: Table seats MUST count toward the existing **2,000 seats per layout** ceiling; tables add no
+  separate inventory budget.
+- **FR-056**: Selecting a table on the canvas MUST select **one object**, not its seats individually, and
+  each table operation MUST be **one undo step**.
+
+**Venue boundary and dividing lines**
+
+- **FR-057**: System MUST support a **boundary polygon** describing the hall outline and a straight-line
+  **divider** for separating spaces. Both are **decorative geometry only**: never sellable, never in
+  inventory, never clickable on the buyer's map.
+- **FR-058**: A shape's points MUST be stored **on the element itself** as an ordered list, with the
+  existing rectangle fields retained as its bounding box, so a reader that does not understand points
+  still positions the shape sensibly. A separate shape-point table MUST NOT be introduced: this geometry
+  is only ever read whole and written whole.
+- **FR-059**: A boundary polygon MUST hold at least **3** and at most **64** points; a divider MUST hold
+  exactly **2**. Shapes MUST count toward the existing **200 elements per layout** ceiling.
+- **FR-060**: Boundaries and dividers MUST be drawn behind the seats in the editor and in **both** buyer
+  renderers, and MUST NOT intercept pointer or keyboard interaction intended for a seat.
+
+**Facility icons**
+
+- **FR-061**: The non-sellable element vocabulary MUST be extended with **exit, restroom, food and drink,
+  smoking area, first aid, lift/stairs, and wheelchair access**, in addition to the existing stage, aisle,
+  door, bar, and label.
+- **FR-062**: Each facility icon MUST accept an **optional Vietnamese label**, length-bounded and
+  output-encoded wherever displayed, and MUST render in the editor and in both buyer renderers.
+- **FR-063**: Widening the element vocabulary MUST be **additive**: every element stored before this
+  change MUST continue to load and display unchanged.
+
+**Per-section visual style**
+
+- **FR-064**: A **section** MUST carry a **colour**, a **seat shape** (circle or square), and a **seat
+  size multiplier**. The **colour is an editor-only** aid and MUST NOT be used to fill seats on the buyer
+  map, where colour is reserved for price tier (FR-067); the **shape and size MUST** be carried through
+  to both buyer renderers, so sections stay distinguishable to buyers by form rather than by fill.
+- **FR-065**: The multiplier MUST scale the existing nominal seat diameter, defaulting to **1.0** so that
+  a layout created before this amendment renders and validates exactly as it did, and MUST be bounded to
+  **0.5–2.0**; a value outside that range MUST be refused. The overlap test (FR-030a) MUST use the
+  **effective** size of the two seats being compared, so that what is drawn and what is validated always
+  agree.
+- **FR-066**: A section without a colour MUST be reported by validation and MUST block publishing.
+
+**Buyer-side price reading**
+
+- **FR-067**: The buyer map MUST colour seats **by ticket tier** and MUST show a **legend** naming every
+  tier, its colour, and its price in **whole Vietnamese đồng**. Tier colours MUST be **assigned
+  automatically from a fixed palette ordered by price**, cheapest to most expensive, so the visual order
+  is consistent across events; the organizer MUST NOT be required to choose one, and this amendment MUST
+  NOT add a colour field to the ticket tier, which feature 006 owns.
+- **FR-068**: Seat **status MUST remain legible** alongside tier colour: a sold or held seat MUST stay
+  visibly unavailable and MUST remain unclickable and unselectable.
+- **FR-069**: Both buyer renderers MUST express **one visual language** — identical colours, legend, seat
+  shapes, and status treatment — driven by one shared definition rather than two implementations.
+- **FR-070**: Tier colouring and the legend MUST work within the existing **zoom and pan** and MUST meet
+  the existing **360–1920 px** bar.
+- **FR-071**: Colour MUST NOT be the only carrier of price: the legend names every tier and price, and a
+  seat's tier MUST be available to assistive technology alongside its identity, status, and price.
+
+**Validation of the new objects (one gate, not a second)**
+
+- **FR-072**: Validation MUST report a **table whose seats overlap another object**, naming the seats.
+- **FR-073**: Validation MUST report a **boundary polygon that does not enclose every seat**, naming the
+  seats left outside.
+- **FR-074**: Validation MUST report a **facility icon with no position**.
+- **FR-075**: Every new check MUST run inside the **existing validate/publish gate** (FR-030) and be
+  reported in the same single pass; a second validation path MUST NOT be introduced.
+
+**Carrying the new objects onto a showtime**
+
+- **FR-081**: Generating or re-applying a showtime's seat map MUST **snapshot the tables, boundary
+  shapes, dividers, and facility icons** into that showtime alongside its seats and their geometry, so a
+  later edit to the source layout MUST NOT change what buyers see on a showtime that is already selling.
+- **FR-082**: The buyer map MUST draw a showtime's snapshotted tables, so a seat labelled "Bàn 5 - Ghế 3"
+  is shown at the table it names. Tables, shapes, and icons MUST remain non-interactive on the buyer map.
+- **FR-083**: A layout edit MUST reach a live showtime's decoration only through the **existing previewed
+  re-apply** (FR-027a); no second update path may be introduced for the new objects.
+
+**Standing areas (the fan-zone substitute)**
+
+- **FR-080**: A **standing area** MUST be expressible as a section whose seats are of type `standing`,
+  positioned inside a drawn shape, and MUST be sold **seat by seat** through the unchanged 003/004 path.
+  A showtime MUST remain either seated or general admission; this amendment MUST NOT introduce a
+  showtime that is both, and MUST NOT introduce any inventory sold by quantity against a drawn area.
+
+**Editor ergonomics and contract**
+
+- **FR-076**: The editor MUST offer **one palette** from which tables, shapes, and facility icons are
+  placed, alongside the existing elements.
+- **FR-077**: The existing **undo/redo history** MUST cover every new operation, at one step per
+  operation, within the existing depth.
+- **FR-078**: Every new object MUST be carried by the **single-sourced layout contract**, imported by the
+  server, the editor, and **both** buyer renderers in the same change; no consumer may keep its own idea
+  of the payload.
+- **FR-079**: Every endpoint touching tables, shapes, icons, or section style MUST remain scoped **on the
+  server** to the owning organizer, and MUST refuse another organizer's layout.
+- **FR-084**: The **editor canvas** MUST support zoom and a fit-to-content control. This is separate from
+  FR-039, which governs the *buyer* map: a hall of tables, a boundary polygon and 200 standing positions
+  cannot be placed accurately at a fixed scale, so the drawing surface needs its own framing. It is a
+  view control only — zooming MUST NOT move a seat, change a coordinate, or produce an undo step.
+- **FR-085**: Organizers MUST be able to **delete a decorative element** — an aisle, a shape, a facility
+  icon — from the canvas, as one undo step. FR-009 grants delete for *seats*; elements are never
+  inventory, so removing one can refuse nothing and take nothing from anyone. Deleting a **table** is
+  governed by FR-053 instead, because a table owns seats.
+
 ### Key Entities *(include if feature involves data)*
 
 - **Seat Layout**: a named arrangement of one venue — its coordinate space, its status (draft or
@@ -630,6 +1055,25 @@ editing the clone leaves the original untouched.
 - **Showtime Seat** (unchanged in shape): the bookable instance feature 002 generates and feature 003
   holds. This feature changes only *which layout snapshot* it is generated from and adds the organizer's
   block/unblock and marquee tier controls over it — never its status machine.
+
+*Added by the 2026-08-06 amendment:*
+
+- **Table**: a drawing object grouping seats around a shape — round or rectangular, with position, size,
+  rotation, a name, a section, and a seat count (with a per-side count when rectangular). Its seats
+  inherit its section, and its name is what their labels read from. It is never
+  sellable and never appears in inventory; it exists so the editor can move, rotate, rename, and re-count
+  a group of seats as one thing. The seats it generates are ordinary seats in every other respect.
+- **Layout Shape**: a boundary polygon or a straight divider, described by an ordered list of points with
+  the rectangle fields kept as its bounding box. Decorative geometry with no status and no price.
+- **Facility Icon**: a non-sellable element marking exit, restroom, food and drink, smoking area, first
+  aid, lift/stairs, or wheelchair access, with an optional Vietnamese label.
+- **Section Style**: the colour, seat shape, and seat size multiplier a section carries. The **colour is
+  editor-only** — it gives a sector an identity while drawing; the **shape and size** reach buyers too.
+  The multiplier scales the existing nominal diameter and defaults to 1.0.
+- **Tier Legend**: the buyer-facing mapping from ticket tier to colour and price in whole đồng. Colours
+  are derived, not stored — assigned from a fixed palette ordered by price — so no ticket-tier data
+  changes. The legend is the authority for what a seat costs; colour is the shorthand, never the only
+  signal.
 
 ## Success Criteria *(mandatory)*
 
@@ -679,6 +1123,47 @@ editing the clone leaves the original untouched.
 - **SC-014**: The seat-map read payload has exactly one shared definition, consumed by the API and both
   renderers — verified by the type-check passing with no independently re-declared seat-map shape.
 
+*Added by the 2026-08-06 amendment:*
+
+- **SC-015**: An organizer can lay out a 20-table gala dinner — placing tables, setting covers, and
+  arranging them around a dance floor — without positioning a single seat by hand, and every seat reads as
+  "Bàn N - Ghế M".
+- **SC-016**: Moving or rotating a table carries **100%** of its seats, and changing its count
+  redistributes them evenly — verified by comparing every seat's position relative to its table before and
+  after.
+- **SC-017**: Every table refusal has an asserting test: changing the count, moving, rotating, or deleting
+  a table holding a **sold** seat and a **held** seat each refuse with the existing reason vocabulary and
+  leave the table and its seats byte-identical.
+- **SC-018**: Boundaries, dividers, and facility icons never become inventory: a layout containing them
+  generates a bookable-seat count exactly equal to its seat count, unchanged from before the amendment.
+- **SC-019**: Every layout, element, and seat saved before this amendment loads and renders unchanged
+  after it — verified by opening pre-amendment layouts and comparing what is drawn.
+- **SC-020**: A seat scaled up by its section's multiplier is reported as overlapping when it visibly
+  overlaps — what the organizer sees and what the publish gate enforces agree at any multiplier.
+- **SC-021**: A buyer can tell what a seat costs **without clicking it**, on both renderers, at 360, 768,
+  and 1920 px — verified by a legend naming each tier and its price in whole đồng and by the two renderers
+  producing the same colours, shapes, and legend.
+- **SC-022**: A sold or held seat remains visibly unavailable and cannot be selected on either renderer,
+  whatever its tier colour — verified by an asserting test per status.
+- **SC-023**: Each new validation failure — overlapping table seats, a boundary that leaves a seat
+  outside, an icon with no position, a section with no colour — blocks publishing **independently**, and
+  all of them are reported in one pass by the existing gate.
+- **SC-024**: Undo reverses every new operation in exactly one step, in reverse order, within the existing
+  history depth.
+- **SC-028**: Two tables may share a name across different sections but never within one, and a colliding
+  name is refused at placement — verified by an asserting test per case.
+- **SC-027**: Editing a layout's tables, boundary, or icons changes nothing on a showtime that has
+  already generated its map — verified by comparing the showtime's buyer payload before and after the
+  layout edit — and the change appears only after an explicit re-apply.
+- **SC-026**: A fan-zone-style standing area of 200 positions can be drawn and sold, and no showtime in
+  the system is ever both seated and general admission — verified by an asserting test that a mixed
+  showtime cannot be created and that feature 003's reservation invariant holds unchanged.
+- **SC-025**: Feature 003's and 004's behaviour is unchanged by this amendment: their existing test suites
+  pass **unmodified**, and a table seat is held, released, and sold exactly as any other seat.
+- **SC-029**: The editor's own zoom and fit controls change no stored value — verified by comparing every
+  seat, element, and table coordinate before and after zooming and fitting — and deleting a decorative
+  element removes exactly that element, leaving the seat count unchanged.
+
 ## Assumptions
 
 - **Features 001, 002, and 003 are the substrate.** Organizer identity and ownership come from 001;
@@ -722,6 +1207,40 @@ editing the clone leaves the original untouched.
   pointer-driven task and no requirement asks for it. No formal WCAG conformance level is claimed by this
   feature.
 
+*Added by the 2026-08-06 amendment:*
+
+- **A table is a drawing object, not an inventory model.** Its seats are ordinary seats on the unchanged
+  003/004 path. Nothing about holding, releasing, or selling a seat changes because it sits at a table.
+- **Shape points ride on the element row** as an ordered list, with the rectangle fields kept as the
+  bounding box (see the amendment clarification). No new shape-point table is introduced.
+- **The section seat-size multiplier defaults to 1.0**, which reproduces today's rendering and today's
+  overlap outcomes exactly; only a layout that opts into a different multiplier can change either.
+- **New ceilings**: **2 to 20 seats per table**, **100 tables per layout**, **3 to 64 points per boundary
+  polygon**, **exactly 2 per divider**. Table seats count toward the existing 2,000-seat ceiling and
+  shapes toward the existing 200-element ceiling, so the amendment adds no new budget — only new limits
+  on the shapes of the things inside the old ones. These are settings with these defaults.
+- **The next migration is 0012**, and it MUST use `ADD COLUMN IF NOT EXISTS`: the migration runner's
+  already-applied error codes cover duplicate tables, objects, and indexes, but **not** a duplicate
+  column (42701), so a re-run would otherwise fail rather than skip.
+- **Vietnamese** remains the user-facing language and **VND integers** the only money.
+
+### Explicitly out of scope for this amendment
+
+- **Mixed seated + general-admission showtimes ("fan zones" sold by headcount).** Decided 2026-08-06:
+  out of scope. It would reopen feature 003's reservation invariant and feature 004's conversion, so it
+  is its own feature with its own concurrency and checkout work. The in-scope substitute is FR-080's
+  standing area.
+- **Multi-level and tiered charts** (balcony, stadium decks, mezzanines). One plane per layout stays the
+  rule (Principle V). Levels would change the buyer map, the apply diff, and the hold broadcast at the
+  same time, which is a feature, not a line item.
+- **Embeddable widgets, iframes, and public share links.** That is a chart-builder *vendor's* model, where
+  the map must live on someone else's site. TixHub **is** the marketplace: the map belongs on the event
+  page, and adding an embed surface would add a public, unauthenticated rendering path with its own
+  caching and abuse questions for no requirement here.
+- **Any change to how a seat is held or sold.** Feature 003's `showtime_seats` path and feature 004's
+  checkout stay untouched. This amendment changes **where a seat is drawn and how it looks**, never how it
+  is claimed — which is why 003's and 004's suites must pass unmodified (SC-025).
+
 ## Contract Impact
 
 - The **seat-map read contract** (`shared/catalog/types.ts` — `SeatMap`, `SeatMapSeat`) gains geometry:
@@ -738,6 +1257,21 @@ editing the clone leaves the original untouched.
 - The organizer seat-map generation endpoint's blanket `409 seat_map_exists` is **replaced** by the
   per-seat inventory evaluation of FR-027–FR-029. Consumers relying on that refusal must move to the new
   outcome shape.
+
+*Added by the 2026-08-06 amendment:*
+
+- The **layout contract stays single-sourced in `shared/catalog/seatmap.ts`** and gains tables, shapes
+  with their point lists, the widened element vocabulary, and section style. Under Principle VI this is
+  one change that updates the shared definition, the server, the editor, and **both** buyer renderers
+  together.
+- The **buyer seat-map read** gains what the map needs to price itself: each seat's tier, and the tier
+  legend (name, colour, price in whole đồng). This is a change to an existing public read and needs its
+  own test — a buyer must be able to price a seat without a second request.
+- The **live seat-update payload** from feature 003 is **unchanged again**: geometry, tables, shapes, and
+  section style are static per layout and belong to the map read, never to a per-hold broadcast. The
+  optional tier label and price added by FR-035 remain the only additive change to it.
+- The element `kind` vocabulary is **widened additively**, exactly as migration 0010 widened it once
+  before, so no stored element becomes invalid.
 
 ## Dependencies
 
@@ -774,3 +1308,15 @@ editing the clone leaves the original untouched.
   venue" to unique within their section.
 - **Feature 002's spec and contract** — the seat-map read shape and the `409 seat_map_exists` behaviour
   it documents are changed here; amend rather than leave two conflicting descriptions.
+
+*Added by the 2026-08-06 amendment:*
+
+- **`SCHEMA_DATABASE.md`** — `sections` gains colour, seat shape, and seat size multiplier; a table object
+  is added; `layout_elements` gains its point list and the widened `kind` vocabulary. Record that the
+  points ride on the element rather than in a shape-point table, and why.
+- **`CONTEXT.md` glossary** — add **Table** and **Layout Shape** beside Layout, and note that a table is a
+  drawing object whose seats are ordinary seats.
+- **UC-21** — the designer flow gains tables, hall boundary, facility icons, and per-section style; the
+  buyer-facing steps gain price-by-colour with a legend.
+- **Feature 002's spec and contract** — the buyer seat-map read shape changes again (tier + legend);
+  amend it there rather than leaving two conflicting descriptions.
