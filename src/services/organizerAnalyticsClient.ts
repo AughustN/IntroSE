@@ -3,6 +3,7 @@ import type {
   OrganizerAnalyticsDashboardResponse,
 } from "../../shared/types/analytics";
 import { withAuthRetry } from "./authClient";
+import { apiUrl } from "./api";
 
 /**
  * Fetch Organizer Business Analytics Dashboard Data (UC-31)
@@ -23,7 +24,7 @@ export async function fetchOrganizerAnalytics(
     };
     if (token) headers.Authorization = `Bearer ${token}`;
 
-    return fetch(`/api/organizer/analytics/dashboard?${query.toString()}`, {
+    return fetch(apiUrl(`/api/organizer/analytics/dashboard?${query.toString()}`), {
       method: "GET",
       headers,
       credentials: "include",

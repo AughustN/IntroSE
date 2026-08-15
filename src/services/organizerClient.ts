@@ -17,6 +17,7 @@ import {
 } from "../types";
 import { withAuthRetry } from "./authClient";
 import { organizerApi } from "./catalogClient";
+import { apiUrl } from "./api";
 
 // Default authenticated organizer session identity for demo/dev scoping (SEC-04)
 let currentOrganizerId = "org-888";
@@ -112,7 +113,7 @@ export async function getOrganizerEvents(params?: {
       };
       if (token) headers.Authorization = `Bearer ${token}`;
 
-      return fetch("/api/organizer/events", {
+      return fetch(apiUrl("/api/organizer/events"), {
         method: "GET",
         headers,
         credentials: "include",

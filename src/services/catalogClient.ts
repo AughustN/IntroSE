@@ -255,7 +255,7 @@ export const layoutApi = {
     const form = new FormData();
     form.append("file", file);
     const res = await withAuthRetry((token) =>
-      fetch(`/api/organizer/layouts/${id}/floorplan`, {
+      fetch(apiUrl(`/api/organizer/layouts/${id}/floorplan`), {
         method: "POST",
         headers: token
           ? { Authorization: `Bearer ${token}`, Accept: "application/json" }
@@ -277,7 +277,7 @@ export const layoutApi = {
     const form = new FormData();
     form.append("file", file);
     const res = await withAuthRetry((token) =>
-      fetch(`/api/organizer/layouts/${id}/reference`, {
+      fetch(apiUrl(`/api/organizer/layouts/${id}/reference`), {
         method: "POST",
         headers: token
           ? { Authorization: `Bearer ${token}`, Accept: "application/json" }

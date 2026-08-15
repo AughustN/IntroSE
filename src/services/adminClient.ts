@@ -17,6 +17,7 @@ import type {
   SystemSettings,
 } from "@shared/admin/types.js";
 import { withAuthRetry } from "./authClient";
+import { apiUrl } from "./api";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const send = (token: string | null) => {
@@ -25,7 +26,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...((init?.headers as Record<string, string>) ?? {}),
     };
     if (token) headers.Authorization = `Bearer ${token}`;
-    return fetch(`/api/admin${path}`, {
+    return fetch(apiUrl(`/api/admin${path}`), {
       ...init,
       headers,
       credentials: "include",
@@ -131,7 +132,7 @@ export const adminClient = {
    */
   attendeesCsv: async (eventId: number, showtimeId?: number): Promise<Blob> => {
     const response = await withAuthRetry((token) =>
-      fetch(`/api/admin/events/${eventId}/attendees${qs({ showtimeId, format: "csv" })}`, {
+      fetch(apiUrl(`/api/admin/events/${eventId}/attendees${qs({ showtimeId, format: "csv" })}`), {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         credentials: "include",
       }),
