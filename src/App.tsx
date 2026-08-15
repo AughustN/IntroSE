@@ -10,7 +10,6 @@ import { Booking, CheckoutPayload, HoldSession, MovieEvent, Seat } from "./types
 import AdminConsole from "./components/admin/AdminConsole";
 import AuthModal from "./components/AuthModal";
 import AccountPage from "./components/account/AccountPage";
-import OrganizerPanel from "./components/OrganizerPanel";
 import { OrganizerEventsPage } from "./pages/organizer/OrganizerEventsPage";
 import { SingleEventPage } from "./pages/organizer/SingleEventPage";
 import ResetPassword from "./components/ResetPassword";
@@ -2098,7 +2097,7 @@ export default function App() {
               </div>
             </div>
           ))}
-        {activeScreen === "organizer" && <OrganizerEventsPage />}
+        {(activeScreen === "organizer" || activeScreen === "organizer-events") && <OrganizerEventsPage />}
         {activeScreen === "organizer-event-detail" && <SingleEventPage />}
         {/*
          * `/moderation` used to be a second console drawing the same queue as `/admin`, in a

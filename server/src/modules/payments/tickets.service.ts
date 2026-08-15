@@ -1,4 +1,4 @@
-import { withTransaction, type Db } from "../../db/pool.js";
+import { pool, withTransaction, type Db } from "../../db/pool.js";
 import { err } from "../../http.js";
 import { broadcastSeatUpdate } from "../../realtime/io.js";
 import {
@@ -143,4 +143,99 @@ export async function cancelEvent(eventId: number): Promise<{ refundedTickets: n
   const result = await withTransaction(async (db) => settleEventCancellation(db, eventId));
   kickNotificationWorker();
   return { refundedTickets: result.refundedTickets };
+}
+
+/** A QR-scanned ticket, for the organizer's check-in screen. */
+export interface ScanTicket {
+  id: number;
+  code: string;
+  status: "unused" | "checked_in" | "void";
+  tierLabel: string;
+  seatLabel: string | null;
+  customerName: string;
+  customerEmail: string;
+  eventId: number;
+  eventTitle: string;
+  showtimeId: number;
+  startsAt: string;
+  venueName: string;
+  venueAddress: string;
+}
+
+/** Ticket + owning organizer, restricted to the caller's events (organizer cannot see other shows). */
+async function readScannableTicket(
+  code: string,
+  organizerUserId: number,
+  db: Db = pool,
+): Promise<ScanTicket | null> {
+  const { rows } = await db.query(
+    `SELECT t.id, t.barcode_value AS code, t.qr_status AS status, tt.label AS "tierLabel",
+            CASE WHEN ss.id IS NULL THEN NULL ELSE se.row_label || se.seat_number::text END AS "seatLabel",
+            o.customer_name AS "customerName", o.customer_email AS "customerEmail",
+            e.id AS "eventId", e.title AS "eventTitle", s.id AS "showtimeId",
+            s.starts_at AS "startsAt", v.name AS "venueName", v.raw_address AS "venueAddress"
+       FROM tickets t
+       JOIN orders o ON o.id = t.order_id
+       JOIN reservations r ON r.id = o.reservation_id
+       JOIN showtimes s ON s.id = r.showtime_id
+       JOIN events e ON e.id = s.event_id
+       JOIN organizers org ON org.id = e.organizer_id
+       JOIN venues v ON v.id = s.venue_id
+       JOIN reservation_items ri ON ri.id = t.reservation_item_id
+       JOIN ticket_tiers tt ON tt.id = ri.ticket_tier_id
+       LEFT JOIN showtime_seats ss ON ss.id = ri.showtime_seat_id
+       LEFT JOIN seats se ON se.id = ss.seat_id
+      WHERE t.barcode_value = $1 AND org.user_id = $2`,
+    [code, organizerUserId],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return { ...row, startsAt: row.startsAt.toISOString() };
+}
+
+/** Look a ticket up by its QR code, scoped to the organizer's own events (US6 check-in). */
+export async function lookupTicket(
+  code: string,
+  organizerUserId: number,
+  db: Db = pool,
+): Promise<ScanTicket> {
+  const ticket = await readScannableTicket(code, organizerUserId, db);
+  if (!ticket) throw err.notFound("ticket_not_found", "Không tìm thấy vé trong sự kiện của bạn.");
+  return ticket;
+}
+
+/**
+ * Check a ticket in (US6). The QR payload is the ticket's own `barcode_value`.
+ *
+ * A real check-in is not just "was this code issued" — a void ticket is a refunded one and must stay
+ * closed, an unused one should only be admitted once (a copied QR scanned twice would admit two
+ * people), and a rescan of an already-checked-in ticket is a read, not an error. The row lock plus
+ * the status guard make the "already" case race-free: two concurrent scans of the same unused ticket
+ * settle with one winner, the loser reads the freshly set `checked_in`.
+ */
+export async function checkInTicket(
+  code: string,
+  organizerUserId: number,
+  db: Db = pool,
+): Promise<{ ticket: ScanTicket; already: boolean }> {
+  const existing = await readScannableTicket(code, organizerUserId, db);
+  if (!existing) throw err.notFound("ticket_not_found", "Không tìm thấy vé trong sự kiện của bạn.");
+  if (existing.status === "void")
+    throw err.conflict("ticket_void", "Vé này đã bị hủy/hoàn tiền, không thể soát.");
+  if (existing.status === "checked_in") return { ticket: existing, already: true };
+
+  const { rows } = await db.query(
+    `UPDATE tickets SET qr_status = 'checked_in', checked_in_at = now(), checked_in_by = $2
+      WHERE id = $1 AND qr_status = 'unused'
+      RETURNING id`,
+    [existing.id, organizerUserId],
+  );
+  if (!rows.length) {
+    // Lost the race — the other scanner flipped it first. Re-read and treat as a benign rescan.
+    return { ticket: await readScannableTicket(code, organizerUserId, db) ?? existing, already: true };
+  }
+  return {
+    ticket: { ...existing, status: "checked_in" },
+    already: false,
+  };
 }

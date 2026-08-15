@@ -2,6 +2,7 @@ import type { Db } from "../../db/pool.js";
 import { pool, withTransaction } from "../../db/pool.js";
 import { generateUniqueSlug } from "./slug.js";
 import { queueEventNotification } from "../notifications/notifications.service.js";
+import { err } from "../../http.js";
 
 /** The caller's approved organizer row id, or null (events bind to this — D-E). */
 export async function getApprovedOrganizerId(
@@ -65,12 +66,63 @@ export async function eventOwnerUserId(eventId: number, db: Db = pool): Promise<
 
 export async function listMyEvents(userId: number, db: Db = pool) {
   const { rows } = await db.query(
-    `SELECT e.id, e.slug, e.title, e.status, e.moderation_status AS moderation, e.review_note AS "reviewNote",
-            e.image_url AS "imageUrl", e.event_type AS "eventType", ec.code AS category
-       FROM events e JOIN organizers o ON o.id = e.organizer_id JOIN event_categories ec ON ec.id = e.category_id
-      WHERE o.user_id = $1 ORDER BY e.created_at DESC`,
+    `SELECT e.id, e.slug, e.title, e.description, e.status, e.moderation_status AS moderation, e.review_note AS "reviewNote",
+            e.image_url AS "imageUrl", e.event_type AS "eventType", ec.code AS category,
+            e.created_at AS "createdAt", e.updated_at AS "updatedAt",
+            COALESCE((
+              SELECT SUM(tt.total_quantity)
+                FROM showtimes s2
+                JOIN ticket_tiers tt ON tt.showtime_id = s2.id
+               WHERE s2.event_id = e.id
+            ), 0)::int AS "totalCapacity",
+            COALESCE((
+              SELECT COUNT(t2.id)
+                FROM showtimes s2
+                JOIN reservations r2 ON r2.showtime_id = s2.id
+                JOIN orders o2 ON o2.reservation_id = r2.id AND o2.payment_status IN ('paid', 'completed')
+                JOIN tickets t2 ON t2.order_id = o2.id AND t2.qr_status != 'void'
+               WHERE s2.event_id = e.id
+            ), 0)::int AS "soldTickets",
+            COALESCE((
+              SELECT SUM(t2.price_cents)
+                FROM showtimes s2
+                JOIN reservations r2 ON r2.showtime_id = s2.id
+                JOIN orders o2 ON o2.reservation_id = r2.id AND o2.payment_status IN ('paid', 'completed', 'refunded', 'partially_refunded')
+                JOIN tickets t2 ON t2.order_id = o2.id
+               WHERE s2.event_id = e.id
+            ), 0)::bigint AS "totalRevenueVnd"
+       FROM events e 
+       JOIN organizers o ON o.id = e.organizer_id 
+       JOIN event_categories ec ON ec.id = e.category_id
+      WHERE o.user_id = $1 
+      ORDER BY e.created_at DESC`,
     [userId],
   );
+
+  for (const event of rows) {
+    const tierRes = await db.query(
+      `SELECT tt.id::text, tt.label, tt.price_amount AS price, tt.total_quantity AS capacity,
+              COALESCE(COUNT(t.id), 0)::int AS "soldCount"
+         FROM showtimes s
+         JOIN ticket_tiers tt ON tt.showtime_id = s.id
+         LEFT JOIN reservation_items ri ON ri.ticket_tier_id = tt.id
+         LEFT JOIN tickets t ON t.reservation_item_id = ri.id AND t.qr_status != 'void'
+         LEFT JOIN orders o ON o.id = t.order_id AND o.payment_status IN ('paid', 'completed')
+        WHERE s.event_id = $1
+        GROUP BY tt.id, tt.label, tt.price_amount, tt.total_quantity`,
+      [event.id],
+    );
+    event.ticketTiers = tierRes.rows.map((r) => ({
+      id: String(r.id),
+      label: String(r.label),
+      price: Number(r.price || 0),
+      capacity: Number(r.capacity || 0),
+      soldCount: Number(r.soldCount || 0),
+      remaining: Math.max(0, Number(r.capacity || 0) - Number(r.soldCount || 0)),
+      isArchived: false,
+    }));
+  }
+
   return rows;
 }
 
@@ -134,6 +186,39 @@ export async function publishEvent(eventId: number, db: Db = pool): Promise<bool
 
 export async function unpublishEvent(eventId: number, db: Db = pool): Promise<void> {
   await db.query(`UPDATE events SET status = 'draft', updated_at = now() WHERE id = $1`, [eventId]);
+}
+
+/**
+ * Mark an event as finished (Hoàn Tất). Only a published (on_sale) event whose
+ * owner organizer initiates it may be finished. Finishing is irreversible — no
+ * ticket sales or edits are allowed once the status is 'finished'.
+ *
+ * Unlike cancellation, no refunds are issued: attendees already attended.
+ * The DB enum only allows 'draft' | 'on_sale' | 'finished' | 'cancelled', so
+ * 'finished' is the correct value (not 'completed', which is a frontend alias).
+ */
+export async function finishEvent(eventId: number, db: Db = pool): Promise<void> {
+  const { rows } = await db.query<{ status: string }>(
+    `SELECT status FROM events WHERE id = $1`,
+    [eventId],
+  );
+  if (!rows[0]) throw err.notFound('not_found', 'Không tìm thấy sự kiện.');
+  if (rows[0].status === 'finished') return; // idempotent
+  if (rows[0].status === 'cancelled') {
+    throw err.conflict('already_cancelled', 'Sự kiện đã bị hủy, không thể hoàn tất.');
+  }
+  if (rows[0].status === 'draft') {
+    throw err.conflict('not_published', 'Chỉ có thể hoàn tất sự kiện đang đăng bán.');
+  }
+  await db.query(
+    `UPDATE events SET status = 'finished', updated_at = now() WHERE id = $1`,
+    [eventId],
+  );
+  // Mark all future showtimes (if any remain) as finished too.
+  await db.query(
+    `UPDATE showtimes SET status = 'finished' WHERE event_id = $1 AND status NOT IN ('cancelled', 'finished')`,
+    [eventId],
+  );
 }
 
 // ---- venues (US5, minimal — needed for showtimes) ----

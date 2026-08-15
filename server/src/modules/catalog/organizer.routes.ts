@@ -15,6 +15,7 @@ import {
   deleteSeat,
   eventOwnerUserId,
   eventShowtimesManage,
+  finishEvent,
   listSections,
   generateSeatMap,
   getApprovedOrganizerId,
@@ -35,12 +36,16 @@ import {
   kickNotificationWorker,
   queueAnnouncement,
 } from "../notifications/notifications.service.js";
-import { cancelEvent } from "../payments/tickets.service.js";
+import { cancelEvent, checkInTicket, lookupTicket } from "../payments/tickets.service.js";
 import { attendees, checkIn, toCsv } from "../checkin/checkin.service.js";
+import { getOrganizerAnalyticsController } from "../organizer/analyticsController.js";
 
 // Organizer catalog management — approved organizer + ownership (D-D). Mounted at /api.
 export const organizerRouter = Router();
 organizerRouter.use(requireAuth, requireOrganizer);
+
+organizerRouter.get("/analytics/dashboard", getOrganizerAnalyticsController);
+organizerRouter.get("/analytics", getOrganizerAnalyticsController);
 
 const asyncH =
   (fn: (req: Request, res: Response) => Promise<void>) =>
@@ -102,7 +107,10 @@ const announcementSchema = z.object({
   title: z.string().trim().min(1).max(120),
   body: z.string().trim().min(1).max(5000),
 });
-const checkinSchema = z.object({ barcode: z.string().trim().min(4).max(120) }).strict();
+const checkInSchema = z.union([
+  z.object({ code: z.string().trim().min(1).max(200) }).strict(),
+  z.object({ barcode: z.string().trim().min(4).max(120) }).strict(),
+]);
 
 // ---- events ----
 
@@ -185,6 +193,27 @@ organizerRouter.post(
 );
 
 organizerRouter.post(
+  '/events/:id/complete',
+  asyncH(async (req, res) => {
+    const id = Number(req.params.id);
+    await assertEventOwner(req, id);
+    await finishEvent(id);
+    res.json({ ok: true, message: 'Sự kiện đã được đánh dấu hoàn tất.' });
+  }),
+);
+
+// ---- check-in (US6) ----
+
+organizerRouter.get(
+  "/tickets/lookup",
+  asyncH(async (req, res) => {
+    const code = String(req.query.code ?? "").trim();
+    if (!code) throw err.badRequest("validation_failed", "Thiếu mã vé.");
+    res.json(await lookupTicket(code, req.auth!.userId));
+  }),
+);
+
+organizerRouter.post(
   "/events/:id/showtimes",
   validate(showtimeSchema),
   asyncH(async (req, res) => {
@@ -210,9 +239,13 @@ organizerRouter.post(
  */
 organizerRouter.post(
   "/tickets/check-in",
-  validate(checkinSchema),
+  validate(checkInSchema),
   asyncH(async (req, res) => {
-    const body = req.body as z.infer<typeof checkinSchema>;
+    const body = req.body as z.infer<typeof checkInSchema>;
+    if ("code" in body) {
+      res.json(await checkInTicket(body.code, req.auth!.userId));
+      return;
+    }
     res.json(
       await checkIn({ userId: req.auth!.userId, isAdmin: req.auth!.user.isAdmin }, body.barcode),
     );

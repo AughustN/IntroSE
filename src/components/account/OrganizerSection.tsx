@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Check, Clock, Loader2, PauseCircle, Store } from "lucide-react";
+import { BarChart3, Check, Clock, Loader2, PauseCircle, Store } from "lucide-react";
 import { FormEvent, useState } from "react";
 import type { OrganizerApplicationView } from "../../services/authClient";
 import { authClient } from "../../services/authClient";
@@ -17,6 +17,7 @@ import {
   btnHeader,
   btnHeaderPrimary,
   btnPrimary,
+  btnSecondary,
   inputClass,
   inputErrorClass,
   textareaClass,
@@ -29,6 +30,7 @@ interface Props {
   onNotice: (message: string) => void;
   onError: (message: string) => void;
   onManageEvents: () => void;
+  onViewAnalytics?: () => void;
 }
 
 const DESCRIPTION_MIN = 20;
@@ -99,6 +101,7 @@ export default function OrganizerSection({
   onNotice,
   onError,
   onManageEvents,
+  onViewAnalytics,
 }: Props) {
   const rejected = latest?.status === "rejected";
   const noApplication = !latest;
@@ -224,10 +227,12 @@ export default function OrganizerSection({
           <Field label="Ngày gửi đơn" value={formatDate(latest.applied_at)} />
           <Field label="Mô tả" value={latest.description} full />
         </FieldGrid>
-        <button type="button" onClick={onManageEvents} className={`${btnPrimary} mt-5`}>
-          <Store className="h-4 w-4" aria-hidden />
-          Quản lý sự kiện
-        </button>
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <button type="button" onClick={onManageEvents} className={btnPrimary}>
+            <Store className="h-4 w-4" aria-hidden />
+            Vào trang quản lý Ban Tổ Chức
+          </button>
+        </div>
       </InfoCard>
     );
   }

@@ -23,6 +23,7 @@ import ConfirmDialog, { ConfirmRequest } from "../ConfirmDialog";
 import OrganizerSection from "./OrganizerSection";
 import ProfileSection from "./ProfileSection";
 import SecuritySection from "./SecuritySection";
+import OrganizerBusinessAnalytics from "./OrganizerBusinessAnalytics";
 import { btnSecondary } from "./primitives";
 
 interface Props {
