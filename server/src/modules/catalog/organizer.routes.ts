@@ -15,6 +15,7 @@ import {
   deleteSeat,
   eventOwnerUserId,
   eventShowtimesManage,
+  finishEvent,
   listSections,
   generateSeatMap,
   getApprovedOrganizerId,
@@ -35,7 +36,7 @@ import {
   kickNotificationWorker,
   queueAnnouncement,
 } from "../notifications/notifications.service.js";
-import { cancelEvent } from "../payments/tickets.service.js";
+import { cancelEvent, checkInTicket, lookupTicket } from "../payments/tickets.service.js";
 import { getOrganizerAnalyticsController } from "../organizer/analyticsController.js";
 
 // Organizer catalog management — approved organizer + ownership (D-D). Mounted at /api.
@@ -183,6 +184,39 @@ organizerRouter.post(
     const id = Number(req.params.id);
     await assertEventOwner(req, id);
     res.json(await cancelEvent(id));
+  }),
+);
+
+organizerRouter.post(
+  '/events/:id/complete',
+  asyncH(async (req, res) => {
+    const id = Number(req.params.id);
+    await assertEventOwner(req, id);
+    await finishEvent(id);
+    res.json({ ok: true, message: 'Sự kiện đã được đánh dấu hoàn tất.' });
+  }),
+);
+
+// ---- check-in (US6) ----
+
+const checkInSchema = z.object({ code: z.string().trim().min(1).max(200) });
+
+organizerRouter.get(
+  "/tickets/lookup",
+  asyncH(async (req, res) => {
+    const code = String(req.query.code ?? "").trim();
+    if (!code) throw err.badRequest("validation_failed", "Thiếu mã vé.");
+    res.json(await lookupTicket(code, req.auth!.userId));
+  }),
+);
+
+organizerRouter.post(
+  "/tickets/check-in",
+  validate(checkInSchema),
+  asyncH(async (req, res) => {
+    const { code } = req.body as z.infer<typeof checkInSchema>;
+    const { ticket, already } = await checkInTicket(code, req.auth!.userId);
+    res.json({ ticket, already });
   }),
 );
 

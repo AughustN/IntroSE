@@ -104,6 +104,9 @@ export function screenToPath(
       return params.bookingId ? `/tickets/${encodeURIComponent(params.bookingId)}` : "/bookings";
     case "organizer-event-detail":
       return params.organizerEventId ? `/organizer/events/${encodeURIComponent(params.organizerEventId)}` : "/organizer/events";
+    // Analytics is the default landing section for the organizer workspace.
+    case "organizer":
+      return "/organizer?section=analytics";
     default: {
       const match = STATIC_PATHS.find(([candidate]) => candidate === screen);
       return match ? match[1] : "/";

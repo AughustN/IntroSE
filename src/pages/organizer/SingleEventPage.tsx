@@ -6,13 +6,16 @@ import {
   updateEventDetails,
   deleteOrArchiveTier,
   saveTicketTier,
-  cancelEvent
+  cancelEvent,
+  completeEvent
 } from "../../services/organizerClient";
+import { organizerApi, ScanTicket } from "../../services/catalogClient";
 import { OrganizerEvent, TicketTier } from "../../types";
 import { EventMetricsSummary } from "../../components/organizer/EventMetricsSummary";
 import { TicketTierBreakdown } from "../../components/organizer/TicketTierBreakdown";
 import { EditEventForm } from "../../components/organizer/EditEventForm";
 import { CancelEventModal } from "../../components/organizer/CancelEventModal";
+import QrCameraScan from "../../components/QrCameraScan";
 
 export const SingleEventPage: React.FC = () => {
   const params = useParams<{ id?: string; organizerEventId?: string }>();
@@ -34,6 +37,8 @@ export const SingleEventPage: React.FC = () => {
 
   const [showEditModal, setShowEditModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showCompleteModal, setShowCompleteModal] = useState(false);
+  const [completeBusy, setCompleteBusy] = useState(false);
   const [editingTier, setEditingTier] = useState<TicketTier | null>(null);
   const [showTierModal, setShowTierModal] = useState(false);
 
@@ -41,6 +46,39 @@ export const SingleEventPage: React.FC = () => {
   const [tierPrice, setTierPrice] = useState(100000);
   const [tierCapacity, setTierCapacity] = useState(100);
   const [tierDesc, setTierDesc] = useState("");
+
+  // QR Scan / Check-in Modal State (reusing QrCameraScan & catalogClient)
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [scanCode, setScanCode] = useState("");
+  const [scanResult, setScanResult] = useState<ScanTicket | null>(null);
+  const [scanAlready, setScanAlready] = useState(false);
+  const [scanErr, setScanErr] = useState<string | null>(null);
+  const [scanBusy, setScanBusy] = useState(false);
+  const [cameraOn, setCameraOn] = useState(false);
+
+  const doCheckIn = async (codeToScan: string) => {
+    const code = codeToScan.trim();
+    if (!code) return;
+    setScanBusy(true);
+    setScanErr(null);
+    setScanAlready(false);
+    try {
+      const { ticket, already } = await organizerApi.checkIn(code);
+      setScanResult(ticket);
+      setScanAlready(already);
+      if (already) {
+        showToast("warning", `Vé ${ticket.code} đã được check-in trước đó!`);
+      } else {
+        showToast("success", `Check-in thành công cho khán giả ${ticket.customerName}!`);
+        loadEvent(); // refresh attendance metrics
+      }
+    } catch (e: any) {
+      setScanResult(null);
+      setScanErr(e.message || "Không thể thực hiện check-in cho vé này.");
+    } finally {
+      setScanBusy(false);
+    }
+  };
 
   const loadEvent = async () => {
     if (!eventId) return;
@@ -168,6 +206,21 @@ export const SingleEventPage: React.FC = () => {
     }
   };
 
+  const handleConfirmCompleteEvent = async () => {
+    if (!eventId) return;
+    setCompleteBusy(true);
+    try {
+      await completeEvent(eventId);
+      setShowCompleteModal(false);
+      showToast('success', 'Sự kiện đã được đánh dấu Hoàn Tất. Bán vé và chỉnh sửa đã bị khóa.');
+      loadEvent();
+    } catch (err: any) {
+      showToast('error', err.message || 'Hoàn tất sự kiện thất bại.');
+    } finally {
+      setCompleteBusy(false);
+    }
+  };
+
   const getStatusBanner = (status: string, cancellationReason?: string | null) => {
     switch (status) {
       case "published":
@@ -254,6 +307,15 @@ export const SingleEventPage: React.FC = () => {
   }
 
   const isCanceledOrCompleted = eventData.computedStatus === "canceled" || eventData.computedStatus === "completed";
+  const statusStr = String(eventData.computedStatus || eventData.status || "");
+  const isPublished = statusStr === "published" || statusStr === "on_sale";
+
+  // Show the Complete button when the event is published AND end time has passed.
+  // This lets the organizer manually trigger the 'finished' DB write rather than
+  // relying on a computed-only client-side flip that never persists.
+  const endDatePassed =
+    eventData.endDatetime ? new Date() > new Date(eventData.endDatetime) : false;
+  const canManuallyComplete = isPublished && endDatePassed;
 
   return (
     <div className="min-h-screen bg-xanh-pho text-beige-kem p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-8 transition-colors duration-200">
@@ -287,6 +349,33 @@ export const SingleEventPage: React.FC = () => {
         </div>
 
         <div className="flex items-center space-x-2 flex-wrap gap-y-2">
+          {/* Scan Vé / Check-in button visible ONLY when event status is Published ('published' or 'on_sale') */}
+          {isPublished && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowScanModal(true);
+                setScanErr(null);
+                setScanResult(null);
+              }}
+              className="px-4 py-2 bg-la-co hover:brightness-110 text-on-tint font-bold rounded-xl text-xs transition-colors shadow-md flex items-center gap-1.5 cursor-pointer"
+            >
+              <span>📷</span>
+              <span>Scan Vé / Check-in</span>
+            </button>
+          )}
+
+          {canManuallyComplete && (
+            <button
+              type="button"
+              onClick={() => setShowCompleteModal(true)}
+              className="px-4 py-2 bg-beige-kem/15 hover:bg-beige-kem/25 text-beige-kem font-bold rounded-xl text-xs transition-colors border border-beige-kem/40 flex items-center gap-1.5 cursor-pointer"
+            >
+              <span>✓</span>
+              <span>Hoàn Tất Sự Kiện</span>
+            </button>
+          )}
+
           {eventData.computedStatus === "draft" && (
             <button
               onClick={handleRequestPublish}
@@ -365,6 +454,59 @@ export const SingleEventPage: React.FC = () => {
           onConfirm={handleConfirmCancelEvent}
           onClose={() => setShowCancelModal(false)}
         />
+      )}
+
+      {showCompleteModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-surface-2 border border-beige-kem/30 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-beige-kem/20 pb-3">
+              <h3 className="font-display text-lg font-bold text-beige-kem">Xác Nhận Hoàn Tất Sự Kiện</h3>
+              <button
+                onClick={() => setShowCompleteModal(false)}
+                className="text-ink-soft hover:text-beige-kem text-lg"
+                disabled={completeBusy}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-beige-kem/80">
+              <p>
+                Bạn sắp đánh dấu sự kiện{' '}
+                <strong className="text-beige-kem">{eventData?.title}</strong>{' '}
+                là <strong className="text-beige-kem">Đã Hoàn Tất</strong>.
+              </p>
+              <div className="bg-xanh-pho border border-beige-kem/20 rounded-xl p-3 space-y-1.5">
+                <p className="font-bold text-beige-kem">Điều này sẽ:</p>
+                <ul className="space-y-1 list-disc list-inside text-beige-kem/70">
+                  <li>Khóa tất cả bán vé và đặt chỗ mới</li>
+                  <li>Vô hiệu hóa chỉnh sửa thông tin sự kiện</li>
+                  <li>Cập nhật trạng thái thành <strong>Đã Kết Thúc</strong></li>
+                </ul>
+              </div>
+              <p className="text-beige-kem/50 italic">Hành động này không thể hoàn tác và không ảnh hưởng đến vé đã bán.</p>
+            </div>
+
+            <div className="flex items-center justify-end space-x-2 pt-3 border-t border-beige-kem/20">
+              <button
+                type="button"
+                onClick={() => setShowCompleteModal(false)}
+                disabled={completeBusy}
+                className="px-4 py-2 rounded-xl bg-xanh-pho text-beige-kem font-semibold hover:bg-beige-kem/10 border border-beige-kem/20 text-xs"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmCompleteEvent()}
+                disabled={completeBusy}
+                className="px-4 py-2 rounded-xl bg-beige-kem/20 hover:bg-beige-kem/30 text-beige-kem font-bold border border-beige-kem/40 text-xs transition-colors disabled:opacity-50"
+              >
+                {completeBusy ? 'Đang xử lý...' : '✓ Xác Nhận Hoàn Tất'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showTierModal && (
@@ -473,6 +615,160 @@ export const SingleEventPage: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* QR Code Scanner / Check-in Modal for Published Events */}
+      {showScanModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="relative w-full max-w-lg rounded-2xl border-2 border-beige-kem/40 bg-surface-2 p-6 shadow-2xl text-beige-kem space-y-4">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-beige-kem/20 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">📷</span>
+                <div>
+                  <h3 className="font-display text-lg font-bold text-beige-kem">Quét Vé & Check-in</h3>
+                  <p className="text-xs text-beige-kem/60">{eventData.title}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowScanModal(false);
+                  setScanResult(null);
+                  setScanErr(null);
+                  setCameraOn(false);
+                }}
+                className="rounded-lg p-1.5 text-beige-kem/60 hover:bg-beige-kem/10 hover:text-beige-kem transition cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Manual Input / Action Bar */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-beige-kem/70">Mã QR vé / Barcode</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={scanCode}
+                  onChange={(e) => setScanCode(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      doCheckIn(scanCode);
+                    }
+                  }}
+                  placeholder="Quét hoặc nhập mã vé..."
+                  className="flex-1 rounded-xl border border-beige-kem/30 bg-xanh-pho px-3 py-2 text-xs font-mono text-beige-kem focus:border-burgundy focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => doCheckIn(scanCode)}
+                  disabled={scanBusy || !scanCode.trim()}
+                  className="rounded-xl bg-la-co px-4 py-2 text-xs font-bold text-on-tint hover:brightness-110 disabled:opacity-50 transition shadow cursor-pointer"
+                >
+                  Check-in
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCameraOn((on) => !on)}
+                  className={`rounded-xl border border-beige-kem/30 px-3 py-2 text-xs font-bold transition cursor-pointer ${
+                    cameraOn ? "bg-burgundy text-white" : "bg-beige-kem/10 text-beige-kem hover:bg-beige-kem/20"
+                  }`}
+                >
+                  {cameraOn ? "Tắt Camera" : "Mở Camera"}
+                </button>
+              </div>
+            </div>
+
+            {/* Camera Stream Component Reused from QrCameraScan */}
+            {cameraOn && (
+              <div className="overflow-hidden rounded-xl border border-beige-kem/30">
+                <QrCameraScan
+                  onDetect={(code) => {
+                    setScanCode(code);
+                    doCheckIn(code);
+                  }}
+                  onError={(msg) => setScanErr(msg)}
+                  onClose={() => setCameraOn(false)}
+                />
+              </div>
+            )}
+
+            {/* Loading Indicator */}
+            {scanBusy && (
+              <div className="flex items-center gap-2 text-xs text-beige-kem/70 font-bold animate-pulse">
+                <span className="animate-spin">⏳</span> Đang kiểm tra mã vé...
+              </div>
+            )}
+
+            {/* Error Message Alert */}
+            {scanErr && (
+              <div className="rounded-xl border border-burgundy bg-burgundy/20 p-3 text-xs text-beige-kem font-bold">
+                ⚠️ {scanErr}
+              </div>
+            )}
+
+            {/* Scan Result Card */}
+            {scanResult && (
+              <div className="rounded-xl border border-beige-kem/30 bg-xanh-pho p-4 space-y-3">
+                <div className="flex items-center justify-between border-b border-beige-kem/10 pb-2">
+                  <div>
+                    <span className="font-mono text-xs font-bold text-burgundy-ink">{scanResult.code}</span>
+                    <h4 className="font-display text-sm font-bold text-beige-kem">{scanResult.eventTitle}</h4>
+                  </div>
+                  <span
+                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                      scanResult.status === "checked_in"
+                        ? "bg-la-co/20 text-la-co border border-la-co/40"
+                        : scanResult.status === "void"
+                        ? "bg-burgundy/20 text-burgundy border border-burgundy/40"
+                        : "bg-cam-dat/20 text-cam-dat border border-cam-dat/40"
+                    }`}
+                  >
+                    {scanResult.status === "checked_in"
+                      ? scanAlready
+                        ? "Đã soát vé (quét lại)"
+                        : "Đã check-in thành công"
+                      : scanResult.status === "void"
+                      ? "Vé đã bị hủy"
+                      : "Chưa check-in"}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="text-beige-kem/50 block text-[10px] uppercase font-bold">Khán giả</span>
+                    <span className="font-semibold text-beige-kem">{scanResult.customerName}</span>
+                  </div>
+                  <div>
+                    <span className="text-beige-kem/50 block text-[10px] uppercase font-bold">Hạng vé</span>
+                    <span className="font-semibold text-beige-kem">{scanResult.tierLabel}</span>
+                  </div>
+                  <div>
+                    <span className="text-beige-kem/50 block text-[10px] uppercase font-bold">Email</span>
+                    <span className="font-semibold text-beige-kem">{scanResult.customerEmail}</span>
+                  </div>
+                  <div>
+                    <span className="text-beige-kem/50 block text-[10px] uppercase font-bold">Chỗ ngồi</span>
+                    <span className="font-semibold text-beige-kem">{scanResult.seatLabel || "Vé thường"}</span>
+                  </div>
+                </div>
+
+                {scanResult.status === "unused" && (
+                  <button
+                    type="button"
+                    onClick={() => doCheckIn(scanResult.code)}
+                    disabled={scanBusy}
+                    className="w-full rounded-xl bg-la-co py-2 text-xs font-bold text-on-tint hover:brightness-110 transition shadow cursor-pointer"
+                  >
+                    Xác Nhận Check-in Ngay
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -16,6 +16,7 @@ import {
   EventCancellationAuditRecord
 } from "../types";
 import { withAuthRetry } from "./authClient";
+import { organizerApi } from "./catalogClient";
 
 // Default authenticated organizer session identity for demo/dev scoping (SEC-04)
 let currentOrganizerId = "org-888";
@@ -510,6 +511,52 @@ export async function cancelEvent(
     event,
     auditRecord
   };
+}
+
+/**
+ * Mark event as Hoàn Tất (Completed/Finished) — SEC-04 ownership scoped.
+ *
+ * Unlike cancellation, no refunds are issued and no audit record is written:
+ * the event ran, attendees attended, and the organizer is closing the books.
+ * The DB 'finished' status locks further edits and ticket sales.
+ *
+ * Also updates the in-memory store so the UI reflects the new state immediately
+ * without a full reload, consistent with how cancelEvent handles local state.
+ */
+export async function completeEvent(
+  eventId: string
+): Promise<{ event: OrganizerEvent }> {
+  const organizerId = getCurrentOrganizerId();
+  const event = eventsStore.find(e => e.eventId === eventId);
+
+  if (!event) throw new Error('NOT_FOUND: Event not found.');
+  if (event.organizerId !== organizerId) throw new Error('FORBIDDEN: You do not own this event.');
+
+  const compStatus = computeEventStatus(event);
+  if (compStatus === 'canceled') {
+    throw new Error('VALIDATION_ERROR: Không thể hoàn tất sự kiện đã hủy.');
+  }
+  if (compStatus === 'completed') {
+    // Already finished — treat as success (idempotent)
+    return { event };
+  }
+  if (compStatus !== 'published') {
+    throw new Error('VALIDATION_ERROR: Chỉ có thể hoàn tất sự kiện đang được đăng bán (đã duyệt).');
+  }
+
+  // Call the real server endpoint
+  try {
+    await organizerApi.completeEvent(eventId);
+  } catch (err: any) {
+    throw new Error(err.message || 'Lỗi server khi hoàn tất sự kiện');
+  }
+
+  // Update local store
+  event.status = 'completed';
+  event.computedStatus = 'completed';
+  event.updatedAt = new Date().toISOString();
+
+  return { event };
 }
 
 /**

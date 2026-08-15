@@ -10,7 +10,6 @@ import { Booking, CheckoutPayload, HoldSession, MovieEvent, Seat } from "./types
 import AdminPanel from "./components/AdminPanel";
 import AuthModal from "./components/AuthModal";
 import AccountPage from "./components/account/AccountPage";
-import OrganizerPanel from "./components/OrganizerPanel";
 import { OrganizerEventsPage } from "./pages/organizer/OrganizerEventsPage";
 import { SingleEventPage } from "./pages/organizer/SingleEventPage";
 import AdminModeration from "./components/AdminModeration";
@@ -1914,7 +1913,7 @@ export default function App() {
               </div>
             </div>
           ))}
-        {activeScreen === "organizer" && <OrganizerEventsPage />}
+        {(activeScreen === "organizer" || activeScreen === "organizer-events") && <OrganizerEventsPage />}
         {activeScreen === "organizer-event-detail" && <SingleEventPage />}
         {activeScreen === "moderation" && <AdminModeration onBack={goHome} />}
 

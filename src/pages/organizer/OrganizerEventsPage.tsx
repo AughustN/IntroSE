@@ -15,15 +15,16 @@ export const OrganizerEventsPage: React.FC = () => {
   const [activeSection, setActiveSection] = useState<"events" | "analytics">(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
-      return params.get("section") === "analytics" ? "analytics" : "events";
+      // Default to "analytics" when no section param is present; "events" is still reachable via ?section=events.
+      return params.get("section") === "events" ? "events" : "analytics";
     }
-    return "events";
+    return "analytics";
   });
 
   useEffect(() => {
     const handlePopState = () => {
       const params = new URLSearchParams(window.location.search);
-      setActiveSection(params.get("section") === "analytics" ? "analytics" : "events");
+      setActiveSection(params.get("section") === "events" ? "events" : "analytics");
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
