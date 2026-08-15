@@ -4,6 +4,7 @@ import { pool } from "../../src/db/pool.js";
 import { app } from "../helpers/app.js";
 import { bearer, registerUser } from "../helpers/authFixture.js";
 import { seedSale } from "../helpers/salesSeed.js";
+import * as wl from "../helpers/waitlistSeed.js";
 import {
   auditRows,
   countAudit,
@@ -299,6 +300,36 @@ describe("T025 [US3] pre-publish approve/reject gate", () => {
     expect((await eventModeration(ev.eventId)).moderation_status).toBe("pending_review");
     await request(app).post(`/api/admin/events/${ev.eventId}/approve`).set(admin.h).expect(200);
     expect(await isPublic("Sự Kiện Bị Từ Chối")).toBe(true);
+  });
+
+  it("reject closes an event waitlist immediately without cancelling its showtime", async () => {
+    const admin = await seedAdmin();
+    const org = await seedApprovedOrganizer();
+    const ev = await seedPendingEvent(org, "Sự Kiện Có Hàng Chờ");
+    const tierId = (
+      await pool.query<{ id: number }>(
+        `SELECT id FROM ticket_tiers WHERE showtime_id = $1 LIMIT 1`,
+        [ev.showtimeId],
+      )
+    ).rows[0].id;
+    const [waiter] = await wl.fillWaitlist(ev.showtimeId, tierId, 1);
+
+    await request(app)
+      .post(`/api/admin/events/${ev.eventId}/reject`)
+      .set(admin.h)
+      .send({ reason: "Nội dung không phù hợp." })
+      .expect(200);
+
+    expect((await eventModeration(ev.eventId)).status).toBe("on_sale");
+    expect((await eventModeration(ev.eventId)).moderation_status).toBe("removed");
+    expect((await wl.getEntries(ev.showtimeId))[0].status).toBe("expired");
+    const { rows } = await pool.query<{ channel: string; payload: Record<string, string> }>(
+      `SELECT channel, payload FROM notifications
+        WHERE user_id = $1 AND type = 'waitlist_closed'`,
+      [waiter.userId],
+    );
+    expect(rows.map((row) => row.channel).sort()).toEqual(["email", "in_app"]);
+    expect(rows.every((row) => row.payload.reason === "event_removed")).toBe(true);
   });
 
   it("a material edit of an approved event returns it to review and hides it (FR-013, scenario 3)", async () => {

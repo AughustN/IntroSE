@@ -360,6 +360,7 @@ export async function notifyWaitlistForShowtime(showtimeId: number): Promise<voi
         WHERE w.showtime_id = $1 AND w.status IN ('waiting', 'notified')
           AND s.starts_at > now() + ($2::int * interval '1 hour')
           AND s.status <> 'cancelled'
+          AND e.moderation_status <> 'removed'
           AND (w.notified_at IS NULL OR w.notified_at <= now() - ($3::int * interval '1 minute'))
         ORDER BY w.joined_at FOR UPDATE OF w`,
       [showtimeId, WAITLIST_CUTOFF_HOURS, WAITLIST_RENOTIFY_COOLDOWN_MINUTES],
@@ -419,6 +420,78 @@ export async function notifyWaitlistForShowtime(showtimeId: number): Promise<voi
   if (allowed.length > 0) kickNotificationWorker();
 }
 
+type WaitlistClosureReason = "event_removed" | "cancelled" | "cutoff";
+
+interface WaitlistClosureRow {
+  id: number;
+  user_id: number;
+  event_id: number;
+  title: string;
+  slug: string;
+  starts_at: Date;
+  venue_name: string;
+  city: string;
+  reason: WaitlistClosureReason;
+}
+
+async function enqueueWaitlistClosed(db: Db, row: WaitlistClosureRow): Promise<void> {
+  const body =
+    row.reason === "event_removed"
+      ? "Sự kiện đã bị gỡ nên danh sách chờ đóng lại. Bạn sẽ không nhận thêm thông báo về suất này."
+      : row.reason === "cancelled"
+        ? "Suất diễn này đã bị huỷ nên danh sách chờ đóng lại. Bạn sẽ không nhận thêm thông báo về suất này."
+        : `Còn dưới ${WAITLIST_CUTOFF_HOURS} giờ trước giờ diễn. Từ mốc này vé đã bán không thể huỷ nữa, nên sẽ không có vé trả lại — danh sách chờ đóng lại. Bạn vẫn có thể xem các suất diễn khác của sự kiện.`;
+
+  await enqueue(db, {
+    userId: row.user_id,
+    eventId: row.event_id,
+    type: "waitlist_closed",
+    // A place closes once and stays closed, so repeated sweeps cannot send it twice.
+    dedupeKey: `waitlist_closed:${row.id}`,
+    title: `Danh sách chờ đã đóng: ${row.title}`,
+    body,
+    payload: {
+      eventTitle: row.title,
+      reason: row.reason,
+      eventUrl: `${config.appUrl.replace(/\/$/, "")}/events/${encodeURIComponent(row.slug)}`,
+      startsAt: row.starts_at.toISOString(),
+      venue: `${row.venue_name}, ${row.city}`,
+    },
+  });
+}
+
+/**
+ * Close every open waitlist place for an event in the caller's transaction.
+ *
+ * Moderation and cancellation both make every showtime of the event unavailable. Keeping the update
+ * and its user-facing outbox rows on the same Db client prevents a removed event from committing
+ * while its queue remains open (or a notification from surviving a rolled-back moderation action).
+ */
+export async function closeWaitlistsForEvent(
+  db: Db,
+  eventId: number,
+  reason: "event_removed" | "cancelled",
+): Promise<number> {
+  const closed = await db.query<WaitlistClosureRow>(
+    `UPDATE waitlists w
+        SET status = 'expired'
+       FROM showtimes s
+       JOIN events e ON e.id = s.event_id
+       JOIN venues v ON v.id = s.venue_id
+      WHERE s.id = w.showtime_id
+        AND s.event_id = $1
+        AND w.status IN ('waiting', 'notified')
+    RETURNING w.id, w.user_id, e.id AS event_id, e.title, e.slug,
+              s.starts_at, v.name AS venue_name, v.city`,
+    [eventId],
+  );
+
+  for (const row of closed.rows) {
+    await enqueueWaitlistClosed(db, { ...row, reason });
+  }
+  return closed.rowCount ?? 0;
+}
+
 /**
  * Close the places that can no longer be served, and tell their holders why.
  *
@@ -440,17 +513,7 @@ export async function notifyWaitlistForShowtime(showtimeId: number): Promise<voi
  * notifier refuses the same showtimes this sweep closes, so no message can slip out in between.
  */
 export async function sweepExpiredWaitlists(db: Db = pool): Promise<number> {
-  const closed = await db.query<{
-    id: number;
-    user_id: number;
-    event_id: number;
-    title: string;
-    slug: string;
-    starts_at: Date;
-    venue_name: string;
-    city: string;
-    cancelled: boolean;
-  }>(
+  const closed = await db.query<WaitlistClosureRow>(
     `UPDATE waitlists w
         SET status = 'expired'
        FROM showtimes s
@@ -458,34 +521,22 @@ export async function sweepExpiredWaitlists(db: Db = pool): Promise<number> {
        JOIN venues v ON v.id = s.venue_id
       WHERE s.id = w.showtime_id
         AND w.status IN ('waiting', 'notified')
-        AND (s.starts_at <= now() + ($1::int * interval '1 hour') OR s.status = 'cancelled')
+        AND (
+          s.starts_at <= now() + ($1::int * interval '1 hour')
+          OR s.status = 'cancelled'
+          OR e.moderation_status = 'removed'
+        )
     RETURNING w.id, w.user_id, e.id AS event_id, e.title, e.slug,
               s.starts_at, v.name AS venue_name, v.city,
-              (s.status = 'cancelled') AS cancelled`,
+              CASE
+                WHEN e.moderation_status = 'removed' THEN 'event_removed'
+                WHEN s.status = 'cancelled' THEN 'cancelled'
+                ELSE 'cutoff'
+              END AS reason`,
     [WAITLIST_CUTOFF_HOURS],
   );
 
-  for (const row of closed.rows) {
-    await enqueue(db, {
-      userId: row.user_id,
-      eventId: row.event_id,
-      type: "waitlist_closed",
-      // No timestamp in the key: a place closes once and stays closed, so a second sweep finding
-      // the same row must not be able to say so twice.
-      dedupeKey: `waitlist_closed:${row.id}`,
-      title: `Danh sách chờ đã đóng: ${row.title}`,
-      body: row.cancelled
-        ? "Suất diễn này đã bị huỷ nên danh sách chờ đóng lại. Bạn sẽ không nhận thêm thông báo về suất này."
-        : `Còn dưới ${WAITLIST_CUTOFF_HOURS} giờ trước giờ diễn. Từ mốc này vé đã bán không thể huỷ nữa, nên sẽ không có vé trả lại — danh sách chờ đóng lại. Bạn vẫn có thể xem các suất diễn khác của sự kiện.`,
-      payload: {
-        eventTitle: row.title,
-        reason: row.cancelled ? "cancelled" : "cutoff",
-        eventUrl: `${config.appUrl.replace(/\/$/, "")}/events/${encodeURIComponent(row.slug)}`,
-        startsAt: row.starts_at.toISOString(),
-        venue: `${row.venue_name}, ${row.city}`,
-      },
-    });
-  }
+  for (const row of closed.rows) await enqueueWaitlistClosed(db, row);
   if (closed.rowCount) kickNotificationWorker();
   return closed.rowCount ?? 0;
 }

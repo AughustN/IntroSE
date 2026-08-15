@@ -97,6 +97,23 @@ describe('waitlist places close when they can no longer be served (US4, FR-010)'
     expect(rows.every((row) => row.payload.reason === 'cancelled')).toBe(true);
   });
 
+  it('closes a queue when moderation removes its event, even before showtime cancellation', async () => {
+    const { eventId, showtimeId, tierId } = await wl.seedSoldOutGaShowtime();
+    const [waiter] = await wl.fillWaitlist(showtimeId, tierId, 1);
+    await pool.query(`UPDATE events SET moderation_status = 'removed' WHERE id = $1`, [eventId]);
+
+    expect(await sweepExpiredWaitlists()).toBe(1);
+    expect((await wl.getEntries(showtimeId))[0].status).toBe('expired');
+
+    await sweepExpiredWaitlists();
+    const { rows } = await pool.query<{ payload: Record<string, string> }>(
+      `SELECT payload FROM notifications WHERE user_id = $1 AND type = 'waitlist_closed'`,
+      [waiter.userId],
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.payload.reason === 'event_removed')).toBe(true);
+  });
+
   it('takes an expired place out of the caller’s list and out of the cap', async () => {
     const { showtimeId, tierId } = await wl.seedSoldOutGaShowtime();
     const queued = await wl.fillWaitlistWithSessions(showtimeId, tierId, 1);

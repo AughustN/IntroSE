@@ -22,7 +22,10 @@ import {
   updateOrganizer,
 } from "./admin.repo.js";
 import { settleEventCancellation } from "../payments/tickets.service.js";
-import { kickNotificationWorker } from "../notifications/notifications.service.js";
+import {
+  closeWaitlistsForEvent,
+  kickNotificationWorker,
+} from "../notifications/notifications.service.js";
 
 const categoryCode = (label: string) =>
   `custom_${
@@ -180,7 +183,7 @@ export async function moderateEvent(
   const result = await withTransaction((db) =>
     moderateEventIn(db, actorUserId, id, next, reason, settle),
   );
-  if (settle) kickNotificationWorker();
+  if (settle || next === "removed") kickNotificationWorker();
   return result;
 }
 
@@ -210,6 +213,8 @@ async function moderateEventIn(
       id,
       "Sự kiện đã bị gỡ vì vi phạm. Vé chưa sử dụng của bạn đã được hoàn lại vào ví TixHub.",
     );
+  } else if (next === "removed") {
+    await closeWaitlistsForEvent(db, id, "event_removed");
   }
   await insertNotification(db, {
     recipientUserId: current.organizer_user_id,

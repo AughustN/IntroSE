@@ -186,4 +186,20 @@ describe('telling the queue that tickets came back (US2, FR-007)', () => {
 
     expect(await wl.getNotifications(queued[0].userId)).toHaveLength(0);
   });
+
+  it('tells nobody after the event is removed, even when the showtime still sells', async () => {
+    const { eventId, showtimeId, tierId } = await wl.seedSoldOutGaShowtime(10);
+    const queued = await wl.fillWaitlist(showtimeId, tierId, 2);
+    await wl.releaseGaQuantity(tierId, 1);
+    await pool.query(`UPDATE events SET moderation_status = 'removed' WHERE id = $1`, [eventId]);
+
+    await notifyWaitlistForShowtime(showtimeId);
+
+    expect((await wl.getEntries(showtimeId)).every((row) => row.status === 'waiting')).toBe(true);
+    expect(
+      (await wl.getNotifications(queued[0].userId)).filter(
+        (message) => message.type === 'waitlist_open',
+      ),
+    ).toHaveLength(0);
+  });
 });

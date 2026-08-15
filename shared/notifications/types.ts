@@ -27,7 +27,7 @@ export interface NotificationItem {
   body: string;
   /**
    * Type-specific context. For `waitlist_open`: `eventTitle`, `showtimeId`, `eventUrl`, `startsAt`
-   * and `venue`. For `waitlist_closed`: the same, plus `reason` — `cutoff` or `cancelled`.
+   * and `venue`. For `waitlist_closed`: the same, plus `reason` — `cutoff`, `cancelled`, or `event_removed`.
    */
   payload: Record<string, unknown>;
   /**

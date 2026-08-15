@@ -5,6 +5,7 @@ import {
   notifyWaitlistForShowtime,
   kickNotificationWorker,
   queueEventNotification,
+  closeWaitlistsForEvent,
 } from "../notifications/notifications.service.js";
 
 type RefundRow = {
@@ -132,6 +133,7 @@ export async function settleEventCancellation(
   );
   for (const ticket of tickets.rows) await refundTicket(db, ticket);
   await updateOrderRefundStatus(db, [...new Set(tickets.rows.map((ticket) => ticket.order_id))]);
+  await closeWaitlistsForEvent(db, eventId, "cancelled");
   await queueEventNotification(db, eventId, "event_cancelled", body, "cancellation");
   return {
     refundedTickets: tickets.rowCount ?? 0,
