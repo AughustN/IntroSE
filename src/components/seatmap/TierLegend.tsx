@@ -23,7 +23,7 @@ export default function TierLegend({ legend }: { legend?: SeatMapTierLegendEntry
       {legend.map((t) => (
         <span key={t.tierId} className="flex items-center gap-1.5">
           <span
-            className="inline-block h-3 w-3 shrink-0 rounded-sm border border-beige-kem/40"
+            className="inline-block h-3 w-3 shrink-0 border border-beige-kem/40"
             style={{ backgroundColor: t.color }}
             aria-hidden="true"
           />

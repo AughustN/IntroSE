@@ -52,8 +52,7 @@ function Stepper({ current }: { current: 0 | 1 | 2 }) {
           <li key={label} className="flex flex-1 items-center gap-2">
             <span
               aria-current={active ? "step" : undefined}
-              className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border font-meta text-meta font-bold ${
-                done
+              className={`grid h-6 w-6 shrink-0 place-items-center border font-meta text-meta font-bold ${ done
                   ? "border-la-co bg-la-co text-on-tint"
                   : active
                     ? "border-cam-dat bg-cam-dat text-on-tint"
@@ -63,8 +62,7 @@ function Stepper({ current }: { current: 0 | 1 | 2 }) {
               {done ? <Check className="h-3 w-3" aria-hidden /> : i + 1}
             </span>
             <span
-              className={`truncate font-meta text-meta uppercase ${
-                active ? "text-beige-kem" : "text-beige-kem/70"
+              className={`truncate font-meta text-meta uppercase ${ active ? "text-beige-kem" : "text-beige-kem/70"
               }`}
             >
               {label}
@@ -243,7 +241,7 @@ export default function OrganizerSection({
           <Field label="Ngày gửi đơn" value={formatDate(latest.applied_at)} />
           <Field label="Mô tả" value={latest.description} full />
         </FieldGrid>
-        <div className="mt-5 flex items-start gap-3 rounded-xl border-2 border-beige-kem bg-cam-dat p-4">
+        <div className="mt-5 flex items-start gap-3 border-2 border-beige-kem bg-cam-dat p-4">
           <Clock className="mt-0.5 h-4 w-4 shrink-0 text-ink-soft" aria-hidden />
           <p className="text-eyebrow leading-5 text-beige-kem/80">
             Bạn không cần làm gì thêm. Khi được duyệt, mục này sẽ mở ra trang quản lý sự kiện. Trong

@@ -76,12 +76,12 @@ export default function VnpayReturn({ onDone }: { onDone: (topup: Topup | null) 
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-xanh-pho/95 px-4">
-      <div className="w-full max-w-md space-y-5 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-8">
+      <div className="w-full max-w-md space-y-5 border-2 border-beige-kem bg-xanh-pho p-8">
         <h2 className="font-display text-title-m font-black text-beige-kem">{heading}</h2>
         <p className="font-meta text-eyebrow leading-6 text-ink-soft">{body}</p>
 
         {topup?.status === "paid" && topup.reservationId !== null && (
-          <p className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-meta leading-5 text-on-tint">
+          <p className="border-2 border-beige-kem bg-la-co p-3 text-meta leading-5 text-on-tint">
             Nếu chỗ bạn giữ vẫn còn hạn, bạn có thể quay lại thanh toán ngay. Nếu đã hết hạn, tiền
             vẫn nằm an toàn trong ví — chỉ cần chọn lại chỗ.
           </p>
@@ -90,7 +90,7 @@ export default function VnpayReturn({ onDone }: { onDone: (topup: Topup | null) 
         <button
           onClick={() => onDone(topup)}
           disabled={!settled}
-          className="w-full rounded-xl bg-burgundy px-6 py-3 text-body font-black text-white transition hover:brightness-95 disabled:bg-surface-2 disabled:text-white/60"
+          className="w-full bg-burgundy px-6 py-3 text-body font-black text-white transition hover:brightness-95 disabled:bg-surface-2 disabled:text-white/60"
         >
           {settled ? "Tiếp tục" : "Đang kiểm tra..."}
         </button>

@@ -11,11 +11,20 @@
 //
 // Everything here is pure and DOM-free, so it is unit-testable with no database (`npm run test:web`).
 
-import type { BlockParams, ChartDocument, DocumentBlock, DocumentSeat, RowLabelScheme, SeatLabelScheme } from './seatmap-document.js';
+import type {
+  BlockParams,
+  ChartDocument,
+  DocumentBlock,
+  DocumentRow,
+  DocumentSeat,
+  RowLabelScheme,
+  SeatLabelScheme,
+} from './seatmap-document.js';
 import { isSeatBearing } from './seatmap-document.js';
 import type {
   ElementKind,
   LayoutCategory,
+  LayoutRow,
   LayoutElement,
   LayoutSeat,
   LayoutSection,
@@ -25,6 +34,12 @@ import { LAYOUT_MAX_SEATS, clampCoord, normaliseRotation } from './seatmap-valid
 export interface ProjectedLayout {
   sections: LayoutSection[];
   categories: LayoutCategory[];
+  /**
+   * The chart's rows (0032), one per distinct `(sectionId, rowLabel)` plus any the document declares
+   * that hold no seats yet. A negative `id` is a placeholder the writer resolves, exactly as it does
+   * for a section or a category the editor has just created.
+   */
+  rows: LayoutRow[];
   /** ABSOLUTE positions in layout units, clamped into the space. */
   seats: LayoutSeat[];
   elements: LayoutElement[];
@@ -83,12 +98,13 @@ export function rowLabelFor(
   scheme: RowLabelScheme = 'alpha-asc',
   prefix = '',
   startIndex = 0,
+  suffix = '',
 ): string {
   const i = scheme === 'alpha-desc' || scheme === 'num-desc' ? rows - 1 - r : r;
   const body = scheme === 'num-asc' || scheme === 'num-desc' ? String(startIndex + i + 1) : letterAt(startIndex + i);
-  // `seats.row_label` is capped at 8 characters by the route schema, so a long prefix is truncated
-  // here rather than rejected at save time after the organizer has drawn the block.
-  return `${prefix}${body}`.slice(0, 8);
+  // `seats.row_label` is capped at 8 characters by the route schema, so a long prefix or suffix is
+  // truncated here rather than rejected at save time after the organizer has drawn the block.
+  return `${prefix}${body}${suffix}`.slice(0, 8);
 }
 
 /** The number for seat `c` of `perRow`, under a scheme. */
@@ -141,18 +157,36 @@ export function seatNumberFor(
   perRow: number,
   scheme: SeatLabelScheme = 'num-asc',
   start = 1,
+  /** How far apart consecutive seats number (§13). 1 is what every stored chart has. */
+  step = 1,
 ): number {
+  const by = Math.max(1, Math.floor(step));
   switch (scheme) {
     case 'num-desc':
-      return start + (perRow - 1 - c);
+      return start + (perRow - 1 - c) * by;
     // Odd/even numbering is how a centre-aisle row is labelled: 1,3,5 to the left, 2,4,6 to the right.
+    // The step is deliberately NOT applied here: these schemes already ARE a step of two, and
+    // multiplying them again would produce 1,5,9 for a request that says "odd".
     case 'even':
       return start * 2 + c * 2;
     case 'odd':
       return start * 2 - 1 + c * 2;
     default:
-      return start + c;
+      return start + c * by;
   }
+}
+
+/**
+ * A seat number as the organizer wants it READ: zero-padded, per §13.
+ *
+ * Padding is presentation and lives here rather than in the stored value, because `seats.seat_number`
+ * is `INT NOT NULL` — the column cannot hold "01", and widening it to text would make every ordering,
+ * comparison and gap-check in the system string-based. A chart numbered 1..10 would then sort
+ * 1, 10, 2. So the integer stays the number and this is how it is shown.
+ */
+export function seatDisplay(seatNumber: number, padding = 0): string {
+  const digits = Math.max(0, Math.floor(padding));
+  return String(seatNumber).padStart(digits, '0');
 }
 
 // ---- Regeneration ------------------------------------------------------------------------------
@@ -229,8 +263,12 @@ export function regenerateBlock(
   for (let i = 0; i < limit; i += 1) {
     const r = Math.floor(i / perRow);
     const c = i % perRow;
-    const rowLabel = rowLabelFor(r, rows, p.rowLabelScheme, p.rowLabelPrefix ?? '', p.startRowIndex ?? 0);
-    const seatNumber = seatNumberFor(c, perRow, p.seatLabelScheme, p.startSeatNumber ?? 1);
+    const rowLabel = rowLabelFor(
+      r, rows, p.rowLabelScheme, p.rowLabelPrefix ?? '', p.startRowIndex ?? 0, p.rowLabelSuffix ?? '',
+    );
+    const seatNumber = seatNumberFor(
+      c, perRow, p.seatLabelScheme, p.startSeatNumber ?? 1, p.seatNumberStep ?? 1,
+    );
     const kept = existing.get(`${rowLabel}|${seatNumber}`);
     seats.push({
       // Identity survives iff the label survives.
@@ -278,6 +316,38 @@ export function projectDocument(doc: ChartDocument): ProjectedLayout {
     name: c.name,
     color: c.color,
   }));
+
+  /*
+   * Rows.
+   *
+   * Seeded from what the document declares, so a stored row keeps its id — which is the entire reason
+   * the table exists: a rename must change what the row is CALLED without changing which row it IS.
+   * Anything a seat refers to that is not declared is minted here, which is what makes every chart
+   * written before 0032 project without its blob being migrated.
+   *
+   * Keyed on section AND label, because two sections may each hold a row "A" and they are not the
+   * same row — the same scoping `uq_seat_label` uses.
+   */
+  const rows: LayoutRow[] = (doc.rows ?? []).map((r) => ({
+    id: r.id,
+    sectionId: r.sectionId,
+    label: r.label,
+    displayOrder: r.displayOrder,
+  }));
+  const rowKey = (sectionId: number | null, label: string) => `${sectionId ?? 'none'}|${label}`;
+  const rowIdByKey = new Map(rows.map((r) => [rowKey(r.sectionId, r.label), r.id]));
+  let nextRowPlaceholder = -1;
+
+  const rowIdFor = (sectionId: number | null, label: string): number => {
+    const key = rowKey(sectionId, label);
+    const known = rowIdByKey.get(key);
+    if (known !== undefined) return known;
+    const id = nextRowPlaceholder;
+    nextRowPlaceholder -= 1;
+    rows.push({ id, sectionId, label, displayOrder: rows.length });
+    rowIdByKey.set(key, id);
+    return id;
+  };
 
   const seats: LayoutSeat[] = [];
   const seatOrigin: { blockKey: string; index: number }[] = [];
@@ -348,12 +418,60 @@ export function projectDocument(doc: ChartDocument): ProjectedLayout {
         y: clampCoord(block.y + s.dx * sin + s.dy * cos),
         rotation: normaliseRotation(s.rotation + block.rotation),
         isAccessible: s.isAccessible ?? false,
+        rowId: rowIdFor(s.sectionId ?? block.sectionId, s.rowLabel),
       });
       seatOrigin.push({ blockKey: block.key, index });
     }
   }
 
-  return { sections, categories, seats, elements, seatOrigin, elementOrigin };
+  return { sections, categories, rows, seats, elements, seatOrigin, elementOrigin };
+}
+
+/**
+ * Write real row ids back into the document after a save (0032).
+ *
+ * The counterpart of `stitchSeatIds`, and needed for the same reason with a sharper edge. The editor
+ * does not build rows — the projection derives them and mints a negative placeholder for each — so
+ * without this the stored document would hold those placeholders, the NEXT save would present them as
+ * new rows again, and the INSERT would collide with `layout_rows_label_idx`. Not a silent drift but a
+ * hard 23505 on the second save of every chart.
+ *
+ * Seats are addressed through `seatOrigin`, exactly as `stitchSeatIds` addresses them, so a seat the
+ * projection skipped keeps whatever it had rather than being handed a row it is not in.
+ */
+export function stitchRows(
+  doc: ChartDocument,
+  projected: Pick<ProjectedLayout, 'rows' | 'seats' | 'seatOrigin'>,
+  resolve: (placeholderOrRealId: number) => number,
+): ChartDocument {
+  const rows: DocumentRow[] = projected.rows.map((r) => ({
+    id: resolve(r.id),
+    label: r.label,
+    sectionId: r.sectionId,
+    displayOrder: r.displayOrder,
+  }));
+
+  const rowIdByBlock = new Map<string, Map<number, number>>();
+  projected.seatOrigin.forEach((origin, i) => {
+    const rowId = projected.seats[i]?.rowId;
+    if (rowId === null || rowId === undefined) return;
+    const forBlock = rowIdByBlock.get(origin.blockKey) ?? new Map<number, number>();
+    forBlock.set(origin.index, resolve(rowId));
+    rowIdByBlock.set(origin.blockKey, forBlock);
+  });
+
+  return {
+    ...doc,
+    rows,
+    blocks: doc.blocks.map((b) => {
+      const forBlock = rowIdByBlock.get(b.key);
+      if (!forBlock || !b.seats) return b;
+      return {
+        ...b,
+        seats: b.seats.map((s, i) => (forBlock.has(i) ? { ...s, rowId: forBlock.get(i)! } : s)),
+      };
+    }),
+  };
 }
 
 /**

@@ -285,15 +285,14 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
-        <nav className="rounded-2xl border border-beige-kem/10 bg-white/[0.025] p-2">
+        <nav className="border border-beige-kem/10 bg-white/[0.025] p-2">
           {adminTabs.map((tab) => {
             const selected = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`mb-1 flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-body font-bold transition ${
-                  selected
+                className={`mb-1 flex w-full items-center gap-3 px-4 py-3 text-left text-body font-bold transition ${ selected
                     ? "bg-beige-kem text-xanh-pho"
                     : "text-beige-kem/70 hover:bg-white/[0.05] hover:text-beige-kem"
                 }`}
@@ -304,17 +303,17 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
           })}
         </nav>
 
-        <section className="min-h-[520px] rounded-2xl border border-beige-kem/10 bg-xanh-pho/40 p-6">
+        <section className="min-h-[520px] border border-beige-kem/10 bg-xanh-pho/40 p-6">
           {activeTab === "events" && (
             <div className="space-y-5">
               <PanelTitle title="Quản lý sự kiện, suất diễn, địa điểm, sơ đồ ghế" />
               {moderationError && (
-                <div className="rounded-xl border border-burgundy/40 bg-burgundy/10 p-3 text-body text-beige-kem">
+                <div className="border border-burgundy/40 bg-burgundy/10 p-3 text-body text-beige-kem">
                   {moderationError}
                 </div>
               )}
               {moderation && (
-                <div className="space-y-4 rounded-xl border border-beige-kem/10 p-4">
+                <div className="space-y-4 border border-beige-kem/10 p-4">
                   <p className="font-meta text-eyebrow uppercase text-beige-kem/60">
                     Hàng chờ kiểm duyệt: {moderation.events.length} sự kiện ·{" "}
                     {moderation.organizers.length} ban tổ chức
@@ -337,7 +336,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                             onClick={() =>
                               moderate(() => adminClient.approveOrganizer(organizer.id))
                             }
-                            className="rounded-lg bg-la-co/20 px-3 py-2 text-eyebrow font-bold text-la-co"
+                            className="bg-la-co/20 px-3 py-2 text-eyebrow font-bold text-la-co"
                           >
                             Duyệt
                           </button>
@@ -350,7 +349,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                                   adminClient.rejectOrganizer(organizer.id, value),
                                 );
                             }}
-                            className="rounded-lg bg-burgundy/20 px-3 py-2 text-eyebrow font-bold text-beige-kem"
+                            className="bg-burgundy/20 px-3 py-2 text-eyebrow font-bold text-beige-kem"
                           >
                             Từ chối
                           </button>
@@ -366,7 +365,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                                 adminClient.suspendOrganizer(organizer.id, value),
                               );
                           }}
-                          className="rounded-lg bg-burgundy/20 px-3 py-2 text-eyebrow font-bold text-beige-kem"
+                          className="bg-burgundy/20 px-3 py-2 text-eyebrow font-bold text-beige-kem"
                         >
                           Đình chỉ
                         </button>
@@ -388,7 +387,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                         <button
                           disabled={moderationBusy}
                           onClick={() => moderate(() => adminClient.approveEvent(event.id))}
-                          className="rounded-lg bg-la-co/20 px-3 py-2 text-eyebrow font-bold text-la-co"
+                          className="bg-la-co/20 px-3 py-2 text-eyebrow font-bold text-la-co"
                         >
                           Duyệt
                         </button>
@@ -399,7 +398,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                             if (value)
                               void moderate(() => adminClient.removeEvent(event.id, value));
                           }}
-                          className="rounded-lg bg-burgundy/20 px-3 py-2 text-eyebrow font-bold text-beige-kem"
+                          className="bg-burgundy/20 px-3 py-2 text-eyebrow font-bold text-beige-kem"
                         >
                           Gỡ
                         </button>
@@ -431,7 +430,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                           {event.dates.length} ngày / {event.times.length} giờ
                         </td>
                         <td className="py-4 pr-4">
-                          <span className="rounded-full border border-cam-dat/30 bg-cam-dat/10 px-2.5 py-1 font-meta text-eyebrow uppercase text-cam-dat">
+                          <span className="border border-cam-dat/30 bg-cam-dat/10 px-2.5 py-1 font-meta text-eyebrow uppercase text-cam-dat">
                             {event.status}
                           </span>
                         </td>
@@ -456,7 +455,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                   {bookings.map((booking) => (
                     <div
                       key={booking.id}
-                      className="rounded-xl border border-beige-kem/10 bg-white/[0.03] p-4"
+                      className="border border-beige-kem/10 bg-white/[0.03] p-4"
                     >
                       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                         <div>
@@ -472,13 +471,13 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                         </div>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2 font-meta text-meta text-beige-kem/65">
-                        <span className="rounded border border-beige-kem/10 px-2 py-1">
+                        <span className="border border-beige-kem/10 px-2 py-1">
                           Ghế {booking.selectedSeats.map((seat) => seat.id).join(", ")}
                         </span>
-                        <span className="rounded border border-beige-kem/10 px-2 py-1">
+                        <span className="border border-beige-kem/10 px-2 py-1">
                           Email {booking.customerEmail}
                         </span>
-                        <span className="rounded border border-burgundy/30 px-2 py-1 text-burgundy-ink">
+                        <span className="border border-burgundy/30 px-2 py-1 text-burgundy-ink">
                           Hoàn tiền mock
                         </span>
                       </div>
@@ -496,7 +495,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                 {["WEEKEND50", "FIRSTBOOK", "GROUP4"].map((code, index) => (
                   <div
                     key={code}
-                    className="rounded-2xl border border-beige-kem/10 bg-white/[0.035] p-5"
+                    className="border border-beige-kem/10 bg-white/[0.035] p-5"
                   >
                     <p className="font-display text-title-m font-black text-beige-kem">{code}</p>
                     <p className="mt-2 text-body text-beige-kem/65">
@@ -508,7 +507,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                   </div>
                 ))}
               </div>
-              <div className="rounded-xl border border-la-co/20 bg-la-co/5 p-4 text-body leading-6 text-la-co">
+              <div className="border border-la-co/20 bg-la-co/5 p-4 text-body leading-6 text-la-co">
                 Combo vé và affiliate hiện đang là mock field trên từng event. Backend cần quản lý
                 campaign, usage limit, min order và commission.
               </div>
@@ -522,15 +521,15 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                 <input
                   value={scanCode}
                   onChange={(event) => setScanCode(event.target.value)}
-                  className="h-12 rounded-xl border border-beige-kem/20 bg-xanh-pho px-4 font-meta text-body text-beige-kem outline-none focus:border-cam-dat"
+                  className="h-12 border border-beige-kem/20 bg-xanh-pho px-4 font-meta text-body text-beige-kem outline-none focus:border-cam-dat"
                 />
-                <button className="rounded-xl bg-burgundy px-6 py-3 text-body font-black text-beige-kem">
+                <button className="bg-burgundy px-6 py-3 text-body font-black text-beige-kem">
                   Xác nhận check-in
                 </button>
               </div>
-              <div className="rounded-2xl border border-la-co/20 bg-la-co/5 p-5">
+              <div className="border border-la-co/20 bg-la-co/5 p-5">
                 <div className="flex items-center gap-3">
-                  <span className="rounded-lg border border-la-co/30 bg-la-co/10 px-3 py-2 font-meta text-eyebrow font-black uppercase text-la-co">
+                  <span className="border border-la-co/30 bg-la-co/10 px-3 py-2 font-meta text-eyebrow font-black uppercase text-la-co">
                     QR
                   </span>
                   <div>
@@ -554,7 +553,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                 <Metric label="Seats sold" value={`${soldSeats}`} />
                 <Metric label="Fill rate" value={`${fillRate}%`} />
               </div>
-              <div className="rounded-2xl border border-beige-kem/10 p-5">
+              <div className="border border-beige-kem/10 p-5">
                 <div className="mb-3 flex items-center justify-between font-meta text-eyebrow text-beige-kem/60">
                   <span>Biểu đồ doanh thu</span>
                   <span>7 ngày gần nhất</span>
@@ -563,7 +562,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                   {[40, 72, 56, 88, 64, 92, 76].map((height, index) => (
                     <div key={index} className="flex flex-1 flex-col items-center gap-2">
                       <div
-                        className="w-full rounded-t-xl bg-cam-dat"
+                        className="w-full bg-cam-dat"
                         style={{ height: `${height}%` }}
                       />
                       <span className="font-meta text-eyebrow text-beige-kem/45">D{index + 1}</span>
@@ -578,18 +577,18 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
             <div className="space-y-5">
               <PanelTitle title="Danh mục và sự kiện nổi bật" />
               {catalogError && (
-                <div className="rounded-xl border border-burgundy/40 bg-burgundy/10 p-3 text-body text-beige-kem">
+                <div className="border border-burgundy/40 bg-burgundy/10 p-3 text-body text-beige-kem">
                   {catalogError}
                 </div>
               )}
               {catalogSuccess && (
-                <div className="rounded-xl border border-la-co/40 bg-la-co/10 p-3 text-body text-la-co">
+                <div className="border border-la-co/40 bg-la-co/10 p-3 text-body text-la-co">
                   {catalogSuccess}
                 </div>
               )}
 
               {/* Create Category Form */}
-              <div className="rounded-xl border border-beige-kem/10 p-4 space-y-3">
+              <div className="border border-beige-kem/10 p-4 space-y-3">
                 <p className="font-meta text-eyebrow uppercase text-beige-kem/60">
                   Tạo danh mục mới
                 </p>
@@ -598,18 +597,18 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                     value={newCatVi}
                     onChange={(e) => setNewCatVi(e.target.value)}
                     placeholder="Tên tiếng Việt *"
-                    className="h-10 flex-1 min-w-[180px] rounded-lg border border-beige-kem/15 bg-xanh-pho px-3 text-body text-beige-kem placeholder:text-beige-kem/35 outline-none focus:border-cam-dat"
+                    className="h-10 flex-1 min-w-[180px] border border-beige-kem/15 bg-xanh-pho px-3 text-body text-beige-kem placeholder:text-beige-kem/35 outline-none focus:border-cam-dat"
                   />
                   <input
                     value={newCatEn}
                     onChange={(e) => setNewCatEn(e.target.value)}
                     placeholder="Tên tiếng Anh (tuỳ chọn)"
-                    className="h-10 flex-1 min-w-[180px] rounded-lg border border-beige-kem/15 bg-xanh-pho px-3 text-body text-beige-kem placeholder:text-beige-kem/35 outline-none focus:border-cam-dat"
+                    className="h-10 flex-1 min-w-[180px] border border-beige-kem/15 bg-xanh-pho px-3 text-body text-beige-kem placeholder:text-beige-kem/35 outline-none focus:border-cam-dat"
                   />
                   <button
                     disabled={catBusy || !newCatVi.trim()}
                     onClick={handleCreateCategory}
-                    className="h-10 rounded-lg bg-la-co/20 px-4 text-eyebrow font-bold text-la-co disabled:opacity-40"
+                    className="h-10 bg-la-co/20 px-4 text-eyebrow font-bold text-la-co disabled:opacity-40"
                   >
                     Tạo
                   </button>
@@ -621,7 +620,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                 {categories.map((category) => (
                   <div
                     key={category.id}
-                    className="flex items-center justify-between rounded-xl border border-beige-kem/10 p-4"
+                    className="flex items-center justify-between border border-beige-kem/10 p-4"
                   >
                     <div>
                       <p className="font-bold text-beige-kem">
@@ -636,13 +635,13 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                     </div>
                     <div className="flex gap-2">
                       <button
-                        className="rounded-lg bg-cam-dat/20 px-3 py-2 text-eyebrow text-beige-kem"
+                        className="bg-cam-dat/20 px-3 py-2 text-eyebrow text-beige-kem"
                         onClick={() => handleRenameCategory(category)}
                       >
                         Đổi tên
                       </button>
                       <button
-                        className="rounded-lg bg-burgundy/20 px-3 py-2 text-eyebrow text-beige-kem"
+                        className="bg-burgundy/20 px-3 py-2 text-eyebrow text-beige-kem"
                         onClick={() => handleDeleteCategory(category)}
                       >
                         Xóa
@@ -663,7 +662,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                   return (
                     <div
                       key={f.eventId}
-                      className="flex items-center justify-between rounded-xl border border-beige-kem/10 p-3 text-body text-beige-kem"
+                      className="flex items-center justify-between border border-beige-kem/10 p-3 text-body text-beige-kem"
                     >
                       <div className="flex items-center gap-3">
                         <span className="font-meta text-cam-dat">#{f.displayOrder}</span>
@@ -673,22 +672,22 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                         <button
                           onClick={() => handleMoveFeatured(index, -1)}
                           disabled={index === 0}
-                          className="rounded px-2 py-1 text-eyebrow text-beige-kem/60 hover:text-beige-kem disabled:opacity-30"
+                          className="px-2 py-1 text-eyebrow text-beige-kem/60 hover:text-beige-kem disabled:opacity-30"
                         >
                           ▲
                         </button>
                         <button
                           onClick={() => handleMoveFeatured(index, 1)}
                           disabled={index === featuredDraft.length - 1}
-                          className="rounded px-2 py-1 text-eyebrow text-beige-kem/60 hover:text-beige-kem disabled:opacity-30"
+                          className="px-2 py-1 text-eyebrow text-beige-kem/60 hover:text-beige-kem disabled:opacity-30"
                         >
                           ▼
                         </button>
                         <button
                           onClick={() => handleRemoveFeatured(f.eventId)}
-                          className="rounded px-2 py-1 text-eyebrow text-burgundy hover:text-beige-kem"
+                          className="px-2 py-1 text-eyebrow text-burgundy hover:text-beige-kem"
                         >
-                          ✕
+                          Gỡ
                         </button>
                       </div>
                     </div>
@@ -701,18 +700,18 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                     onChange={(e) => setNewFeaturedId(e.target.value)}
                     placeholder="Event ID"
                     type="number"
-                    className="h-10 w-32 rounded-lg border border-beige-kem/15 bg-xanh-pho px-3 text-body text-beige-kem placeholder:text-beige-kem/35 outline-none focus:border-cam-dat"
+                    className="h-10 w-32 border border-beige-kem/15 bg-xanh-pho px-3 text-body text-beige-kem placeholder:text-beige-kem/35 outline-none focus:border-cam-dat"
                   />
                   <button
                     onClick={handleAddFeatured}
-                    className="h-10 rounded-lg bg-cam-dat/20 px-3 text-eyebrow font-bold text-beige-kem"
+                    className="h-10 bg-cam-dat/20 px-3 text-eyebrow font-bold text-beige-kem"
                   >
                     Thêm
                   </button>
                   <button
                     disabled={featuredBusy}
                     onClick={handleSaveFeatured}
-                    className="h-10 rounded-lg bg-burgundy px-4 text-eyebrow font-black text-beige-kem disabled:opacity-50"
+                    className="h-10 bg-burgundy px-4 text-eyebrow font-black text-beige-kem disabled:opacity-50"
                   >
                     Lưu featured
                   </button>
@@ -725,12 +724,12 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
             <div className="space-y-5">
               <PanelTitle title="Cấu hình vận hành" />
               {settingsError && (
-                <div className="rounded-xl border border-burgundy/40 bg-burgundy/10 p-3 text-body text-beige-kem">
+                <div className="border border-burgundy/40 bg-burgundy/10 p-3 text-body text-beige-kem">
                   {settingsError}
                 </div>
               )}
               {settingsSuccess && (
-                <div className="rounded-xl border border-la-co/40 bg-la-co/10 p-3 text-body text-la-co">
+                <div className="border border-la-co/40 bg-la-co/10 p-3 text-body text-la-co">
                   {settingsSuccess}
                 </div>
               )}
@@ -750,10 +749,10 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                             <button
                               type="button"
                               onClick={() => handleSettingChange(key, !value)}
-                              className={`relative h-7 w-12 rounded-full transition ${value ? "bg-la-co" : "bg-beige-kem/20"}`}
+                              className={`relative h-7 w-12 transition ${value ? "bg-la-co" : "bg-beige-kem/20"}`}
                             >
                               <span
-                                className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform ${value ? "translate-x-5" : "translate-x-0.5"}`}
+                                className={`absolute top-0.5 h-6 w-6 bg-white shadow transition-transform ${value ? "translate-x-5" : "translate-x-0.5"}`}
                               />
                             </button>
                             <span className="font-meta text-eyebrow text-beige-kem/60">
@@ -767,7 +766,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                             min={meta.min}
                             max={meta.max}
                             onChange={(e) => handleSettingChange(key, Number(e.target.value))}
-                            className="h-11 w-full rounded-xl border border-beige-kem/15 bg-xanh-pho px-3 text-beige-kem outline-none focus:border-cam-dat"
+                            className="h-11 w-full border border-beige-kem/15 bg-xanh-pho px-3 text-beige-kem outline-none focus:border-cam-dat"
                           />
                         )}
                       </label>
@@ -781,7 +780,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                 <button
                   disabled={settingsBusy}
                   onClick={handleSaveSettings}
-                  className="rounded-xl bg-burgundy px-5 py-3 text-body font-black text-beige-kem disabled:opacity-50"
+                  className="bg-burgundy px-5 py-3 text-body font-black text-beige-kem disabled:opacity-50"
                 >
                   {settingsBusy ? "Đang lưu..." : "Lưu cấu hình"}
                 </button>
@@ -799,7 +798,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                   {auditLogs.map((log) => (
                     <div
                       key={log.id}
-                      className="rounded-xl border border-beige-kem/10 p-3 text-eyebrow text-beige-kem/75"
+                      className="border border-beige-kem/10 p-3 text-eyebrow text-beige-kem/75"
                     >
                       <span className="font-meta">{log.createdAt}</span> ·{" "}
                       <strong>{log.action}</strong> · {log.targetType} #{log.targetId ?? "-"} ·{" "}
@@ -816,14 +815,14 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
                 ].map(([role, desc]) => (
                   <div
                     key={role}
-                    className="rounded-2xl border border-beige-kem/10 bg-white/[0.035] p-5"
+                    className="border border-beige-kem/10 bg-white/[0.035] p-5"
                   >
                     <p className="font-display text-title-m font-black text-beige-kem">{role}</p>
                     <p className="mt-2 text-body leading-6 text-beige-kem/65">{desc}</p>
                   </div>
                 ))}
               </div>
-              <div className="rounded-xl border border-la-co/20 bg-la-co/5 p-4 text-body leading-6 text-la-co">
+              <div className="border border-la-co/20 bg-la-co/5 p-4 text-body leading-6 text-la-co">
                 <span>
                   Audit log chỉ đọc. Backend thực thi RBAC và PostgreSQL chặn UPDATE/DELETE.
                 </span>
@@ -838,7 +837,7 @@ export default function AdminPanel({ events, bookings, onBack }: AdminPanelProps
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-beige-kem/10 bg-white/[0.03] p-5">
+    <div className="border border-beige-kem/10 bg-white/[0.03] p-5">
       <p className="font-meta text-eyebrow uppercase text-beige-kem/50">{label}</p>
       <p className="mt-2 font-display text-title-m font-black text-beige-kem">{value}</p>
     </div>
@@ -855,7 +854,7 @@ function PanelTitle({ title }: { title: string }) {
 
 function EmptyState({ text }: { text: string }) {
   return (
-    <div className="rounded-2xl border border-dashed border-beige-kem/15 p-12 text-center text-body text-beige-kem/55">
+    <div className="border border-dashed border-beige-kem/15 p-12 text-center text-body text-beige-kem/55">
       {text}
     </div>
   );

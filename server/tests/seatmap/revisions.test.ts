@@ -203,3 +203,50 @@ describe('templates', () => {
       .send({ name: 'Cướp' }).expect(403);
   });
 });
+
+describe('reading one revision’s document, for comparison (§31)', () => {
+  it('hands back the document that revision stored', async () => {
+    const o = await organizer();
+    const { layoutId } = await chart(o, 6);
+    const { revisions } = (
+      await request(app).get(`/api/organizer/layouts/${layoutId}/revisions`).set(o.h).expect(200)
+    ).body;
+
+    const res = await request(app)
+      .get(`/api/organizer/layouts/${layoutId}/revisions/${revisions[0].id}`)
+      .set(o.h)
+      .expect(200);
+    expect(res.body.document).toBeTruthy();
+    expect(Array.isArray(res.body.document.blocks)).toBe(true);
+  });
+
+  it('refuses a revision id belonging to another chart', async () => {
+    // Scoped by layout_id as well as by id: the route checks ownership of the LAYOUT, so a revision
+    // from elsewhere must read as absent rather than be handed over on the strength of that check.
+    const o = await organizer();
+    const mine = await chart(o, 4);
+    const other = await chart(o, 4);
+    const { revisions } = (
+      await request(app).get(`/api/organizer/layouts/${other.layoutId}/revisions`).set(o.h).expect(200)
+    ).body;
+
+    await request(app)
+      .get(`/api/organizer/layouts/${mine.layoutId}/revisions/${revisions[0].id}`)
+      .set(o.h)
+      .expect(404);
+  });
+
+  it('refuses another organizer entirely', async () => {
+    const mine = await organizer();
+    const { layoutId } = await chart(mine, 4);
+    const { revisions } = (
+      await request(app).get(`/api/organizer/layouts/${layoutId}/revisions`).set(mine.h).expect(200)
+    ).body;
+
+    const stranger = await organizer();
+    const res = await request(app)
+      .get(`/api/organizer/layouts/${layoutId}/revisions/${revisions[0].id}`)
+      .set(stranger.h);
+    expect([403, 404]).toContain(res.status);
+  });
+});

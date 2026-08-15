@@ -155,6 +155,23 @@ export interface SeatCanvasProps<T extends CanvasSeat> {
    * a standing-only floor, or a thumbnail too small to read them.
    */
   showRowLabels?: boolean;
+  /**
+   * Click a row's letter to select the row (§19 seat mode, §49 row properties).
+   *
+   * Optional and undefined on the buyer's screens, so the letters stay inert there — the rule for
+   * anything editor-only in this file, since it draws the buyer's map too.
+   */
+  onRowSelect?: (section: string | null, label: string) => void;
+  /**
+   * Report the zoom factor and the pointer's LAYOUT position, for a status bar (§3).
+   *
+   * Pushed out rather than exposed on the imperative handle because both change at pointer speed: a
+   * handle would have to be polled, and polling a value that changes every frame is how a status bar
+   * ends up driving the render loop of the canvas it is reporting on.
+   */
+  onViewReport?: (report: { zoom: number; x: number | null; y: number | null }) => void;
+  /** The row currently selected, as `section|label`, so it can be drawn as selected. */
+  selectedRowKey?: string | null;
 
   // ---- Authoring (FR-009..FR-014). All inert unless `editable`. ----
   editable?: boolean;
@@ -183,6 +200,13 @@ export interface SeatCanvasProps<T extends CanvasSeat> {
    * a control a buyer can reach is a control a buyer can break.
    */
   onVertexDrag?: (elementIndex: number, vertex: number, x: number, y: number) => void;
+  /**
+   * Drag one of the eight handles on the selected element's bounding box (§6).
+   *
+   * Reports a CUMULATIVE delta from where the drag began, like `onElementDrag`, so the editor applies
+   * one resize rather than a hundred — and one undo step, not a hundred (§28).
+   */
+  onResize?: (elementIndex: number, handle: string, dx: number, dy: number, phase: "move" | "end") => void;
   onElementDrag?: (dx: number, dy: number, phase: "move" | "end") => void;
   onTablePointerDown?: (index: number) => void;
   /**
@@ -279,6 +303,9 @@ function SeatCanvasInner<T extends CanvasSeat>(
     interactive = false,
     fitContent = true,
     showRowLabels = true,
+    onRowSelect,
+    onViewReport,
+    selectedRowKey,
     editable = false,
     selectedIds,
     onSeatPointerDown,
@@ -286,6 +313,7 @@ function SeatCanvasInner<T extends CanvasSeat>(
     selectedElementIndex = null,
     onElementPointerDown,
     onVertexDrag,
+    onResize,
     onElementDrag,
     onTableDrag,
     selectedTableIndex = null,
@@ -608,7 +636,43 @@ function SeatCanvasInner<T extends CanvasSeat>(
     svgRef.current?.setPointerCapture(e.pointerId);
   };
 
+  /**
+   * Begin a resize-handle drag.
+   *
+   * Hoisted out of the JSX deliberately. Inline, it captured a value derived from a ref inside the
+   * element map's callback, and the React Compiler then declined to compile that whole map — one
+   * handler cost the memoisation of every element on the canvas. Out here it is an ordinary event
+   * handler, which is exactly what it is.
+   */
+  const beginResize = (index: number, handle: string, e: React.PointerEvent<SVGRectElement>) => {
+    if (wantsPan(e) || !onResize) return;
+    e.stopPropagation();
+    const from = toLayout(e.clientX, e.clientY);
+    if (!from) return;
+    (e.target as Element).setPointerCapture(e.pointerId);
+
+    const report = (ev: PointerEvent, phase: "move" | "end") => {
+      const at = toLayout(ev.clientX, ev.clientY);
+      onResize(index, handle, (at?.x ?? from.x) - from.x, (at?.y ?? from.y) - from.y, phase);
+    };
+    const move = (ev: PointerEvent) => report(ev, "move");
+    const up = (ev: PointerEvent) => {
+      report(ev, "end");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    // Reported on EVERY move, gesture or not: a status bar's coordinates are most useful while
+    // simply hovering, which is exactly when there is no gesture in flight.
+    if (onViewReport) {
+      const at = toLayout(e.clientX, e.clientY);
+      onViewReport({ zoom, x: at ? Math.round(at.x) : null, y: at ? Math.round(at.y) : null });
+    }
+
     const g = gesture.current;
     if (!g) return;
     const p = toLayout(e.clientX, e.clientY);
@@ -698,7 +762,7 @@ function SeatCanvasInner<T extends CanvasSeat>(
           type="button"
           onClick={() => zoomAt(1.4)}
           aria-label="Phóng to sơ đồ"
-          className="grid h-7 w-7 place-items-center rounded-md border border-beige-kem/40 bg-surface-2 text-beige-kem"
+          className="grid h-7 w-7 place-items-center border border-beige-kem/40 bg-surface-2 text-beige-kem"
         >
           +
         </button>
@@ -706,7 +770,7 @@ function SeatCanvasInner<T extends CanvasSeat>(
           type="button"
           onClick={() => zoomAt(1 / 1.4)}
           aria-label="Thu nhỏ sơ đồ"
-          className="grid h-7 w-7 place-items-center rounded-md border border-beige-kem/40 bg-surface-2 text-beige-kem"
+          className="grid h-7 w-7 place-items-center border border-beige-kem/40 bg-surface-2 text-beige-kem"
         >
           −
         </button>
@@ -714,7 +778,7 @@ function SeatCanvasInner<T extends CanvasSeat>(
           type="button"
           onClick={resetView}
           aria-label="Đặt lại khung nhìn"
-          className="grid h-7 w-auto place-items-center rounded-md border border-beige-kem/40 bg-surface-2 px-2 text-beige-kem"
+          className="grid h-7 w-auto place-items-center border border-beige-kem/40 bg-surface-2 px-2 text-beige-kem"
         >
           ⟲
         </button>
@@ -755,7 +819,11 @@ function SeatCanvasInner<T extends CanvasSeat>(
         onPointerMove={onPointerMove}
         onPointerUp={endGesture}
         onPointerCancel={endGesture}
-        onPointerLeave={() => setHover(null)}
+        onPointerLeave={() => {
+          setHover(null);
+          // The status bar's coordinates go blank rather than freezing at the last point inside.
+          onViewReport?.({ zoom, x: null, y: null });
+        }}
       >
         {/* Background layer only. Drawn behind everything, never interactive, and it can never
             determine a seat's status — the database decides (Principle I, FR-020). */}
@@ -782,7 +850,6 @@ function SeatCanvasInner<T extends CanvasSeat>(
               y={hull.y}
               width={hull.w}
               height={hull.h}
-              rx={space.seatDiameter}
               fill={`${hull.block.color}14`}
               stroke={`${hull.block.color}66`}
               strokeWidth={strokeScale}
@@ -828,7 +895,6 @@ function SeatCanvasInner<T extends CanvasSeat>(
                 y={t.y - t.height / 2 - 30}
                 width={t.width + 60}
                 height={t.height + 60}
-                rx={14}
                 fill="none"
                 className="stroke-burgundy"
                 strokeWidth={strokeScale * 1.5}
@@ -849,7 +915,6 @@ function SeatCanvasInner<T extends CanvasSeat>(
                 y={t.y - t.height / 2}
                 width={t.width}
                 height={t.height}
-                rx={24}
                 className="fill-beige-kem/10 stroke-beige-kem/40"
                 strokeWidth={8}
               />
@@ -895,7 +960,6 @@ function SeatCanvasInner<T extends CanvasSeat>(
                 y={el.y - el.height / 2 - 20}
                 width={el.width + 40}
                 height={el.height + 40}
-                rx={12}
                 fill="none"
                 className="stroke-burgundy"
                 strokeWidth={strokeScale * 1.5}
@@ -925,6 +989,32 @@ function SeatCanvasInner<T extends CanvasSeat>(
               />
             )}
             {/* Vertex handles — only for the selected shape, and only when an editor asked for them. */}
+            {/*
+              Resize handles (§6). Only on a single selected element, and only where `width`/`height`
+              ARE the geometry — a drawn shape is defined by its points, and dragging a box around it
+              would claim to resize something the box only approximates.
+            */}
+            {onResize &&
+              selectedElementIndex === i &&
+              !SHAPE_KINDS.has(el.kind) &&
+              (["nw", "n", "ne", "w", "e", "sw", "s", "se"] as const).map((handle) => {
+                const hx = el.x + (handle.includes("w") ? -el.width / 2 : handle.includes("e") ? el.width / 2 : 0);
+                const hy = el.y + (handle.includes("n") ? -el.height / 2 : handle.includes("s") ? el.height / 2 : 0);
+                return (
+                  <rect
+                    key={handle}
+                    x={hx - Math.max(14, 44 / Math.sqrt(zoom))}
+                    y={hy - Math.max(14, 44 / Math.sqrt(zoom))}
+                    width={Math.max(28, 88 / Math.sqrt(zoom))}
+                    height={Math.max(28, 88 / Math.sqrt(zoom))}
+                    className="fill-burgundy stroke-beige-kem"
+                    strokeWidth={strokeScale}
+                    style={{ cursor: `${handle}-resize` }}
+                    onPointerDown={(e) => beginResize(i, handle, e)}
+                  />
+                );
+              })}
+
             {onVertexDrag &&
               selectedElementIndex === i &&
               SHAPE_KINDS.has(el.kind) &&
@@ -959,7 +1049,6 @@ function SeatCanvasInner<T extends CanvasSeat>(
                 y={el.y - el.height / 2}
                 width={el.width}
                 height={el.height}
-                rx={el.kind === "stage" ? 40 : 8}
                 strokeWidth={6}
                 strokeDasharray={el.kind === "aisle" ? "40 30" : undefined}
                 // A chosen colour replaces the theme's own ink for this element, the same way it does
@@ -1013,20 +1102,42 @@ function SeatCanvasInner<T extends CanvasSeat>(
         {/* The row's letter, past the end of the row. Drawn BEFORE the seats so that a letter which
             lands near a seat on a tight layout sits under it rather than over its number, and marked
             aria-hidden because every seat already announces its own row in its label. */}
-        {drawnMarkers.map((m) => (
-          <text
-            key={m.key}
-            x={m.x}
-            y={m.y}
-            textAnchor="middle"
-            dominantBaseline="central"
-            fontSize={space.seatDiameter * 0.95}
-            aria-hidden="true"
-            className="pointer-events-none fill-beige-kem/55 font-mono font-bold"
-          >
-            {m.label}
-          </text>
-        ))}
+        {drawnMarkers.map((m) => {
+          const picked = selectedRowKey === m.key;
+          return (
+            <g key={m.key}>
+              {/* A letter is a thin target. The disc behind it is what makes the row clickable at any
+                  zoom, and it doubles as the selected state — the same trick the seat hit-area uses. */}
+              {onRowSelect && (
+                <circle
+                  cx={m.x}
+                  cy={m.y}
+                  r={space.seatDiameter * 0.62}
+                  className={picked ? "fill-burgundy/35 stroke-burgundy" : "fill-transparent stroke-none"}
+                  strokeWidth={strokeScale}
+                  style={{ cursor: "pointer" }}
+                  role="button"
+                  aria-label={`Hàng ${m.label}`}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    onRowSelect(m.key.split("|")[0] || null, m.label);
+                  }}
+                />
+              )}
+              <text
+                x={m.x}
+                y={m.y}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontSize={space.seatDiameter * 0.95}
+                aria-hidden="true"
+                className={`pointer-events-none font-mono font-bold ${picked ? "fill-beige-kem" : "fill-beige-kem/55"}`}
+              >
+                {m.label}
+              </text>
+            </g>
+          );
+        })}
 
         {/* Seats, in the payload's section → row → number order, which IS the tab order (FR-039a). */}
         {drawnSeats.map((seat) => {
@@ -1151,23 +1262,30 @@ function SeatCanvasInner<T extends CanvasSeat>(
                 height={d}
                 fill="transparent"
               />
-              {/* The accessibility mark. Drawn instead of the number, not beside it: at the size a
-                  seat renders, two glyphs in one cushion is illegible. The label still announces it. */}
-              {seat.isAccessible && showNumbers && (
-                <text
-                  x={seat.x}
-                  y={seat.y}
-                  textAnchor="middle"
-                  dominantBaseline="central"
-                  fontSize={d * 0.5}
+              {/*
+                The accessibility mark: a ring around the seat, not a pictogram inside it.
+
+                It used to be a wheelchair glyph drawn INSTEAD of the seat number, because two
+                characters do not fit in one cushion — so an accessible seat was the only seat on the
+                map whose number you could not read. A ring says the same thing in the margin the seat
+                already has, and the number stays. The label still announces it for anyone who cannot
+                see either.
+              */}
+              {seat.isAccessible && (
+                <rect
+                  x={seat.x - rr - strokeScale * 1.5}
+                  y={seat.y - rr - strokeScale * 1.5}
+                  width={d + strokeScale * 3}
+                  height={d + strokeScale * 3}
+                  fill="none"
+                  strokeWidth={strokeScale * 1.2}
+                  strokeDasharray={`${strokeScale * 3} ${strokeScale * 2}`}
                   pointerEvents="none"
-                  className={ink ? "" : "fill-beige-kem/80"}
-                  style={ink ? { fill: ink } : undefined}
-                >
-                  ♿
-                </text>
+                  className={ink ? "" : "stroke-beige-kem/80"}
+                  style={ink ? { stroke: ink } : undefined}
+                />
               )}
-              {showNumbers && !seat.isAccessible && (
+              {showNumbers && (
                 <text
                   x={seat.x}
                   y={seat.y}
@@ -1203,7 +1321,7 @@ function SeatCanvasInner<T extends CanvasSeat>(
       {/* Hover card. Pointer-transparent, so it can never eat the click it is describing. */}
       {hover && seatTooltip && (
         <div
-          className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-[calc(100%+12px)] whitespace-nowrap rounded-lg border-2 border-beige-kem bg-surface-2 px-2.5 py-1.5 font-mono text-xs text-beige-kem shadow-lg"
+          className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-[calc(100%+12px)] whitespace-nowrap border-2 border-beige-kem bg-surface-2 px-2.5 py-1.5 font-mono text-xs text-beige-kem shadow-lg"
           style={{ left: hover.left, top: hover.top }}
           role="presentation"
         >

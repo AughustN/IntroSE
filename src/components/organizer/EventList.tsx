@@ -7,7 +7,7 @@ import { MyEvent } from "../../services/catalogClient";
 import { Empty } from "./states";
 
 const ghost =
-  "rounded-lg border-2 border-beige-kem px-3 py-1.5 text-xs font-bold text-beige-kem/80";
+  " border-2 border-beige-kem px-3 py-1.5 text-xs font-bold text-beige-kem/80";
 
 const BADGE: Record<string, { cls: string; text: string }> = {
   pending_review: { cls: "text-on-tint border-beige-kem bg-cam-dat", text: "Chờ duyệt" },
@@ -54,14 +54,14 @@ export default function EventList({
           <button
             key={ev.id}
             onClick={() => onOpen(ev)}
-            className="w-full rounded-xl border-2 border-beige-kem p-3 text-left transition hover:border-burgundy"
+            className="w-full border-2 border-beige-kem p-3 text-left transition hover:border-burgundy"
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <span className="font-bold">{ev.title}</span>
                 <span className="ml-2 font-mono text-[10px] text-beige-kem/40">{ev.status}</span>
                 <span
-                  className={`ml-2 rounded-lg border px-2 py-0.5 font-mono text-[10px] ${badge.cls}`}
+                  className={`ml-2 border px-2 py-0.5 font-mono text-[10px] ${badge.cls}`}
                 >
                   {badge.text}
                 </span>

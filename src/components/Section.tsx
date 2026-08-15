@@ -56,8 +56,7 @@ export default function Section({
 
   return (
     <section
-      className={`bg-xanh-pho ${pad} ${divided ? "border-t border-beige-kem/25" : ""} ${
-        bleed ? "" : GUTTER
+      className={`bg-xanh-pho ${pad} ${divided ? "border-t border-beige-kem/25" : ""} ${ bleed ? "" : GUTTER
       } ${className}`}
     >
       {bleed ? (

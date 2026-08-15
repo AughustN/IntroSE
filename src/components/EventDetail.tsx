@@ -493,8 +493,7 @@ export default function EventDetail({
                         onClick={() => chooseDate(date)}
                         disabled={gone}
                         aria-pressed={isActive}
-                        className={`shrink-0 border px-4 py-2.5 text-center transition ${
-                          isActive
+                        className={`shrink-0 border px-4 py-2.5 text-center transition ${ isActive
                             ? "border-burgundy bg-burgundy text-white"
                             : gone
                               ? "cursor-not-allowed border-beige-kem/20 text-ink-soft/50"
@@ -525,8 +524,7 @@ export default function EventDetail({
                         onClick={() => setSelectedSlotKey(slot.key)}
                         disabled={slot.soldOut}
                         aria-pressed={isSelected}
-                        className={`border p-3 text-left transition ${
-                          isSelected
+                        className={`border p-3 text-left transition ${ isSelected
                             ? "border-burgundy bg-burgundy/10 text-beige-kem"
                             : slot.soldOut
                               ? "cursor-not-allowed border-beige-kem/20 text-ink-soft/60"
@@ -540,8 +538,7 @@ export default function EventDetail({
                           {slot.venue}
                         </span>
                         <span
-                          className={`mt-0.5 block font-meta text-eyebrow ${
-                            slot.soldOut ? "text-ink-soft" : "text-burgundy-ink"
+                          className={`mt-0.5 block font-meta text-eyebrow ${ slot.soldOut ? "text-ink-soft" : "text-burgundy-ink"
                           }`}
                         >
                           {slot.soldOut ? "Hết vé" : "Còn vé"}
@@ -713,8 +710,7 @@ export default function EventDetail({
                   type="button"
                   onClick={() => onToggleWishlist(event.id)}
                   aria-pressed={isWishlisted}
-                  className={`border px-3 py-1.5 font-meta text-meta transition ${
-                    isWishlisted
+                  className={`border px-3 py-1.5 font-meta text-meta transition ${ isWishlisted
                       ? "border-burgundy bg-burgundy text-white"
                       : "border-beige-kem/50 text-beige-kem hover:border-beige-kem"
                   }`}

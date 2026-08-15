@@ -146,7 +146,7 @@ export default function ProfileSection({ me, onSaved, onError, onDirtyChange }: 
   return (
     <div className="space-y-4">
       {/* Summary: who this is, at a glance. The old screen never showed the email at all. */}
-      <section className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-5 shadow-black/20 sm:p-6">
+      <section className="border-2 border-beige-kem bg-surface-2 p-5 shadow-black/20 sm:p-6">
         <div className="flex flex-wrap items-center gap-5">
           <AvatarWithBadge
             url={shownAvatar}

@@ -276,7 +276,7 @@ export default function AccountPage({
           </h2>
           <button
             onClick={requestClose}
-            className="grid h-10 place-items-center rounded-xl border-2 border-beige-kem px-4 font-meta text-meta font-bold uppercase text-beige-kem/80 transition hover:text-beige-kem"
+            className="grid h-10 place-items-center border-2 border-beige-kem px-4 font-meta text-meta font-bold uppercase text-beige-kem/80 transition hover:text-beige-kem"
           >
             ← Quay lại
           </button>
@@ -285,7 +285,7 @@ export default function AccountPage({
         {/* One live region for both outcomes, so a screen reader announces either without duplicates. */}
         <div aria-live="polite" className="mt-4 space-y-2 empty:mt-0">
           {notice && (
-            <div className="flex items-start gap-2 rounded-xl border-2 border-beige-kem bg-la-co p-3 text-eyebrow leading-5 text-on-tint">
+            <div className="flex items-start gap-2 border-2 border-beige-kem bg-la-co p-3 text-eyebrow leading-5 text-on-tint">
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
               {notice}
             </div>
@@ -293,7 +293,7 @@ export default function AccountPage({
           {err && (
             <div
               role="alert"
-              className="flex items-start gap-2 rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-eyebrow leading-5 text-on-tint"
+              className="flex items-start gap-2 border-2 border-beige-kem bg-bubblegum p-3 text-eyebrow leading-5 text-on-tint"
             >
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-burgundy-ink" aria-hidden />
               {err}
@@ -305,7 +305,7 @@ export default function AccountPage({
           {/* Menu selection for navigation: little typing, hard to get wrong (lecture, slide 14). */}
           <nav
             aria-label="Mục tài khoản"
-            className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-3 shadow-black/20 lg:sticky lg:top-10"
+            className="border-2 border-beige-kem bg-surface-2 p-3 shadow-black/20 lg:sticky lg:top-10"
           >
             {/*
               The overlay covers the site header, so the wordmark is what keeps the screen anchored
@@ -329,15 +329,14 @@ export default function AccountPage({
                       type="button"
                       onClick={() => selectSection(id)}
                       aria-current={active ? "page" : undefined}
-                      className={`relative flex h-11 w-full items-center gap-2.5 whitespace-nowrap rounded-xl px-3.5 text-body font-bold transition ${
-                        active
+                      className={`relative flex h-11 w-full items-center gap-2.5 whitespace-nowrap px-3.5 text-body font-bold transition ${ active
                           ? "bg-cam-dat text-on-tint"
                           : "text-beige-kem/70 hover:bg-surface-2 hover:text-beige-kem"
                       }`}
                     >
                       {active && (
                         <span
-                          className="absolute left-0 top-2.5 hidden h-6 w-0.5 rounded-full bg-cam-dat lg:block"
+                          className="absolute left-0 top-2.5 hidden h-6 w-0.5 bg-cam-dat lg:block"
                           aria-hidden
                         />
                       )}
@@ -359,11 +358,11 @@ export default function AccountPage({
                   <img
                     src={me.avatarUrl}
                     alt=""
-                    className="h-9 w-9 shrink-0 rounded-full object-cover"
+                    className="h-9 w-9 shrink-0 object-cover"
                   />
                 ) : (
                   <div
-                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full font-display text-eyebrow font-black"
+                    className="grid h-9 w-9 shrink-0 place-items-center font-display text-eyebrow font-black"
                     style={{ backgroundColor: avatarColor(me?.email), color: DEFAULT_AVATAR_FG }}
                     aria-hidden
                   >
@@ -382,7 +381,7 @@ export default function AccountPage({
               <button
                 type="button"
                 onClick={confirmLogout}
-                className="mt-3 flex h-10 w-full items-center gap-2.5 rounded-xl px-3.5 text-body font-bold text-ink-soft transition hover:bg-bubblegum hover:text-on-tint"
+                className="mt-3 flex h-10 w-full items-center gap-2.5 px-3.5 text-body font-bold text-ink-soft transition hover:bg-bubblegum hover:text-on-tint"
               >
                 <LogOut className="h-4 w-4 shrink-0" aria-hidden />
                 Đăng xuất
@@ -394,7 +393,7 @@ export default function AccountPage({
             {loadFailed && !me && (
               <div
                 role="alert"
-                className="rounded-2xl border-2 border-beige-kem bg-bubblegum p-5 text-body leading-6"
+                className="border-2 border-beige-kem bg-bubblegum p-5 text-body leading-6"
               >
                 Không tải được thông tin tài khoản. Kiểm tra kết nối rồi thử lại.
               </div>
@@ -402,8 +401,8 @@ export default function AccountPage({
 
             {!me && !loadFailed && (
               <div className="space-y-3" aria-hidden>
-                <div className="h-24 animate-pulse rounded-2xl bg-surface-2" />
-                <div className="h-40 animate-pulse rounded-2xl bg-surface-2" />
+                <div className="h-24 animate-pulse bg-surface-2" />
+                <div className="h-40 animate-pulse bg-surface-2" />
               </div>
             )}
 

@@ -13,7 +13,7 @@ import { ReactNode } from "react";
  * here is Vietnamese (USE-03).
  */
 
-const box = "rounded-xl border-2 border-beige-kem/40 bg-surface-2 p-6 text-center";
+const box = " border-2 border-beige-kem/40 bg-surface-2 p-6 text-center";
 
 export function Loading({ label = "Đang tải…" }: { label?: string }) {
   return (
@@ -52,7 +52,7 @@ export function ErrorRetry({ message, onRetry }: { message: string; onRetry: () 
       <p className="text-sm text-beige-kem">{message}</p>
       <button
         onClick={onRetry}
-        className="mt-3 rounded-xl border-2 border-beige-kem px-3 py-1.5 text-xs font-bold text-beige-kem/80"
+        className="mt-3 border-2 border-beige-kem px-3 py-1.5 text-xs font-bold text-beige-kem/80"
       >
         Thử lại
       </button>
@@ -65,7 +65,7 @@ export function Refusal({ message }: { message: string | null }) {
   if (!message) return null;
   return (
     <p
-      className="mt-2 rounded-lg border border-burgundy bg-burgundy/10 px-3 py-2 text-xs text-beige-kem"
+      className="mt-2 border border-burgundy bg-burgundy/10 px-3 py-2 text-xs text-beige-kem"
       role="alert"
     >
       {message}

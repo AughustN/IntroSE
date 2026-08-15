@@ -56,29 +56,37 @@ async function liveLayout(o: { h: Record<string, string>; userId: number }, coun
 const put = (o: { h: Record<string, string> }, layoutId: number, body: Record<string, unknown>) =>
   request(app).put(`/api/organizer/layouts/${layoutId}`).set(o.h).send(body);
 
-describe('a seat a showtime generated from cannot be dropped by a save', () => {
-  it('refuses with 409 seat_in_use and leaves the map untouched', async () => {
+describe('a seat a showtime generated from is archived by a save, never destroyed', () => {
+  it('takes the seat out of the chart while its row and its bookings survive', async () => {
     const o = await organizer();
     const { showtime, layoutId } = await liveLayout(o, 4);
     const before = (await request(app).get(`/api/organizer/layouts/${layoutId}`).set(o.h).expect(200)).body;
     expect(before.seats).toHaveLength(4);
+    const dropped = before.seats[0].id as number;
 
-    const refused = await put(o, layoutId, {
+    // This save used to be refused with 409 `seat_in_use` — which protected the booking and left an
+    // organizer who simply wanted the seat gone with nothing they could do about it (§18).
+    const saved = await put(o, layoutId, {
       version: before.version,
       sections: before.sections,
       categories: before.categories,
       seats: before.seats.slice(1), // drop one bound seat
       elements: [],
-    }).expect(409);
+    }).expect(200);
 
-    // Names the count, so the organizer knows what is blocking them rather than seeing a 500.
-    expect(refused.body.error).toBe('seat_in_use');
-    expect(refused.body.seats).toBe(1);
+    // Gone from the chart…
+    expect(saved.body.seats).toHaveLength(3);
+    expect(saved.body.seats.some((s: { id: number }) => s.id === dropped)).toBe(false);
 
-    // Nothing moved: not the layout, not the inventory.
-    const after = (await request(app).get(`/api/organizer/layouts/${layoutId}`).set(o.h).expect(200)).body;
-    expect(after.seats).toHaveLength(4);
-    expect(after.version).toBe(before.version);
+    // …and still in the database, archived, with everything a booking points at intact.
+    const row = await pool.query<{ archived_at: string | null }>(
+      `SELECT archived_at FROM seats WHERE id = $1`,
+      [dropped],
+    );
+    expect(row.rows).toHaveLength(1);
+    expect(row.rows[0].archived_at).not.toBeNull();
+
+    // The showtime is untouched: it sells from its own snapshot, which still has all four.
     const inv = await pool.query<{ n: number }>(
       `SELECT count(*)::int AS n FROM showtime_seats WHERE showtime_id = $1`,
       [showtime],
@@ -86,20 +94,24 @@ describe('a seat a showtime generated from cannot be dropped by a save', () => {
     expect(inv.rows[0].n).toBe(4);
   });
 
-  it('refuses even when the seat is merely available — binding is what matters, not the sale', async () => {
+  it('archives on BINDING, not on sale — an available generated seat counts', async () => {
     const o = await organizer();
     const { layoutId } = await liveLayout(o, 3);
     const before = (await request(app).get(`/api/organizer/layouts/${layoutId}`).set(o.h).expect(200)).body;
-    // Every generated seat starts `available`; the FK does not care about status.
+    // Every generated seat starts `available`; the FK does not care about status, and neither does this.
     await put(o, layoutId, {
       version: before.version,
       sections: before.sections,
       categories: before.categories,
       seats: [],
       elements: [],
-    })
-      .expect(409)
-      .expect((r) => expect(r.body.error).toBe('seat_in_use'));
+    }).expect(200);
+
+    const rows = await pool.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM seats WHERE layout_id = $1 AND archived_at IS NOT NULL`,
+      [layoutId],
+    );
+    expect(rows.rows[0].n).toBe(3);
   });
 
   it('still allows a save that keeps every bound seat, including moving them', async () => {

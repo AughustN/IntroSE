@@ -138,6 +138,25 @@ export interface LayoutSeat {
    * kind, which marks where a facility is rather than what a seat can do.
    */
   isAccessible?: boolean;
+  /** The `layout_rows` row this seat belongs to (0032). See `DocumentSeat.rowId` for why it is not
+   *  a substitute for `rowLabel`. */
+  rowId?: number | null;
+  /** When set, the seat has been retired from the chart but kept for the bookings that point at it
+   *  (§18). Archived seats are excluded from the projection, from validation and from generation. */
+  archivedAt?: string | null;
+}
+
+/**
+ * A row, as a first-class object (0032).
+ *
+ * Mirrors `layout_rows`. `displayOrder` is a display position only — never an identity, and never
+ * something a booking or a label is derived from (§43, §44, §45).
+ */
+export interface LayoutRow {
+  id: number;
+  sectionId: number | null;
+  label: string;
+  displayOrder: number;
 }
 
 export interface LayoutElement {
@@ -221,6 +240,8 @@ export interface Layout {
   version: number;
   sections: LayoutSection[];
   categories: LayoutCategory[];
+  /** The chart's rows (0032). Empty on a layout saved before rows existed and not yet re-saved. */
+  rows: LayoutRow[];
   seats: LayoutSeat[];
   elements: LayoutElement[];
   tables: LayoutTable[];
@@ -385,6 +406,7 @@ export type SeatMapErrorCode =
    * look for — while the actual cause, two blocks both lettered from A, was the commonest one.
    */
   | 'duplicate_seat_label'
+  | 'duplicate_row_label'
   | 'section_name_taken'
   | 'category_name_taken'
   | 'layout_limit_reached'

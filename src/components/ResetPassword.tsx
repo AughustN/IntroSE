@@ -7,7 +7,7 @@ import { FormEvent, useState } from "react";
 import { ApiClientError, authClient } from "../services/authClient";
 
 const inputClass =
-  "h-11 w-full rounded-xl border-2 border-beige-kem bg-surface-2 px-4 text-body text-beige-kem outline-none focus:border-burgundy";
+  "h-11 w-full border-2 border-beige-kem bg-surface-2 px-4 text-body text-beige-kem outline-none focus:border-burgundy";
 const labelText = "mb-1.5 block font-meta text-eyebrow text-beige-kem/70";
 
 export default function ResetPassword({ token }: { token: string }) {
@@ -37,7 +37,7 @@ export default function ResetPassword({ token }: { token: string }) {
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-xanh-pho px-4 text-beige-kem">
-      <div className="w-full max-w-md rounded-2xl border-2 border-beige-kem bg-surface-2 p-6">
+      <div className="w-full max-w-md border-2 border-beige-kem bg-surface-2 p-6">
         <h1 className="font-display text-title-m font-black">Đặt lại mật khẩu</h1>
 
         {done ? (
@@ -47,7 +47,7 @@ export default function ResetPassword({ token }: { token: string }) {
             </p>
             <a
               href="/"
-              className="mt-6 flex w-full items-center justify-center rounded-xl bg-burgundy px-5 py-3 text-body font-black text-white transition hover:brightness-95"
+              className="mt-6 flex w-full items-center justify-center bg-burgundy px-5 py-3 text-body font-black text-white transition hover:brightness-95"
             >
               Về trang chủ
             </a>
@@ -76,7 +76,7 @@ export default function ResetPassword({ token }: { token: string }) {
             </label>
 
             {error && (
-              <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-eyebrow leading-5 text-on-tint">
+              <div className="border-2 border-beige-kem bg-bubblegum p-3 text-eyebrow leading-5 text-on-tint">
                 {error}
               </div>
             )}
@@ -84,7 +84,7 @@ export default function ResetPassword({ token }: { token: string }) {
             <button
               type="submit"
               disabled={busy}
-              className="flex w-full items-center justify-center rounded-xl bg-burgundy px-5 py-3 text-body font-black text-white transition hover:brightness-95 disabled:opacity-60"
+              className="flex w-full items-center justify-center bg-burgundy px-5 py-3 text-body font-black text-white transition hover:brightness-95 disabled:opacity-60"
             >
               {busy ? "Đang xử lý…" : "Đặt lại mật khẩu"}
             </button>

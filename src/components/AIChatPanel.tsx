@@ -110,7 +110,7 @@ export default function AIChatPanel({ signedIn, onOpenEvent }: AIChatPanelProps)
         onClick={() => setOpen((wasOpen) => !wasOpen)}
         aria-expanded={open}
         aria-label={open ? "Đóng trợ lý TixHub" : "Mở trợ lý TixHub"}
-        className="fixed bottom-6 right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-burgundy text-white shadow-[0_6px_24px_rgba(138,12,36,0.35)] transition hover:bg-burgundy-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-burgundy"
+        className="fixed bottom-6 right-6 z-50 grid h-14 w-14 place-items-center bg-burgundy text-white shadow-[0_6px_24px_rgba(138,12,36,0.35)] transition hover:bg-burgundy-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-burgundy"
       >
         {open ? (
           <X aria-hidden="true" className="h-6 w-6" />
@@ -123,11 +123,11 @@ export default function AIChatPanel({ signedIn, onOpenEvent }: AIChatPanelProps)
         <div
           role="dialog"
           aria-label="Trợ lý TixHub"
-          className="fixed bottom-24 right-6 z-50 flex max-h-[min(34rem,calc(100dvh-8rem))] w-[min(24rem,calc(100vw-3rem))] flex-col overflow-hidden rounded-2xl border border-beige-kem/30 bg-surface-2 shadow-[0_18px_50px_rgba(138,12,36,0.22)]"
+          className="fixed bottom-24 right-6 z-50 flex max-h-[min(34rem,calc(100dvh-8rem))] w-[min(24rem,calc(100vw-3rem))] flex-col overflow-hidden border border-beige-kem/30 bg-surface-2 shadow-[0_18px_50px_rgba(138,12,36,0.22)]"
         >
           {/* Header: who you are talking to, as a messaging app names the other party. */}
           <div className="flex items-center gap-3 border-b border-beige-kem/20 bg-burgundy px-4 py-3 text-white">
-            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/15">
+            <span className="grid h-8 w-8 shrink-0 place-items-center bg-white/15">
               <MessageCircle aria-hidden="true" className="h-4 w-4" />
             </span>
             <div className="min-w-0">
@@ -175,7 +175,7 @@ export default function AIChatPanel({ signedIn, onOpenEvent }: AIChatPanelProps)
                           key={event.id}
                           type="button"
                           onClick={() => onOpenEvent(event.slug)}
-                          className="block w-full rounded-xl rounded-tl-sm border border-beige-kem/25 bg-xanh-pho p-3 text-left transition hover:border-burgundy"
+                          className="block w-full border border-beige-kem/25 bg-xanh-pho p-3 text-left transition hover:border-burgundy"
                         >
                           <p className="font-display text-body font-black uppercase leading-tight tracking-[0.02em] text-beige-kem">
                             {event.title}
@@ -206,7 +206,7 @@ export default function AIChatPanel({ signedIn, onOpenEvent }: AIChatPanelProps)
                     <div
                       role="status"
                       aria-label="Trợ lý đang soạn tin"
-                      className="flex items-center gap-1.5 rounded-2xl rounded-tl-sm bg-beige-kem/10 px-4 py-3 text-beige-kem"
+                      className="flex items-center gap-1.5 bg-beige-kem/10 px-4 py-3 text-beige-kem"
                     >
                       <span className="chat-dot" />
                       <span className="chat-dot" />
@@ -225,7 +225,7 @@ export default function AIChatPanel({ signedIn, onOpenEvent }: AIChatPanelProps)
                         key={opener}
                         type="button"
                         onClick={() => void ask(opener)}
-                        className="rounded-full border border-beige-kem/30 px-3 py-1.5 font-meta text-eyebrow text-ink-soft transition hover:border-burgundy hover:text-beige-kem"
+                        className="border border-beige-kem/30 px-3 py-1.5 font-meta text-eyebrow text-ink-soft transition hover:border-burgundy hover:text-beige-kem"
                       >
                         {opener}
                       </button>
@@ -247,13 +247,13 @@ export default function AIChatPanel({ signedIn, onOpenEvent }: AIChatPanelProps)
                   maxLength={600}
                   placeholder="Nhắn cho trợ lý…"
                   aria-label="Tin nhắn gửi trợ lý"
-                  className="h-10 min-w-0 flex-1 rounded-full border border-beige-kem/30 bg-xanh-pho px-4 font-meta text-meta text-beige-kem outline-none transition focus:border-burgundy"
+                  className="h-10 min-w-0 flex-1 border border-beige-kem/30 bg-xanh-pho px-4 font-meta text-meta text-beige-kem outline-none transition focus:border-burgundy"
                 />
                 <button
                   type="submit"
                   disabled={busy || !draft.trim()}
                   aria-label="Gửi"
-                  className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-burgundy text-white transition hover:bg-burgundy-ink disabled:cursor-not-allowed disabled:opacity-40"
+                  className="grid h-10 w-10 shrink-0 place-items-center bg-burgundy text-white transition hover:bg-burgundy-ink disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <span aria-hidden="true" className="text-body leading-none">
                     ↑
@@ -274,10 +274,9 @@ function Bubble({ from, children }: { from: "user" | "assistant"; children: Reac
   return (
     <div className={mine ? "flex justify-end" : "flex justify-start"}>
       <p
-        className={`max-w-[85%] px-4 py-2.5 font-meta text-meta leading-6 ${
-          mine
-            ? "rounded-2xl rounded-br-sm bg-burgundy text-white"
-            : "rounded-2xl rounded-tl-sm bg-beige-kem/10 text-beige-kem"
+        className={`max-w-[85%] px-4 py-2.5 font-meta text-meta leading-6 ${ mine
+            ? " bg-burgundy text-white"
+            : " bg-beige-kem/10 text-beige-kem"
         }`}
       >
         {children}

@@ -10,11 +10,11 @@ import ChartEditor from "./seatmap/ChartEditor";
 import ShowtimeMapPanel from "./seatmap/ShowtimeMapPanel";
 
 const input =
-  "h-10 w-full rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
+  "h-10 w-full border-2 border-beige-kem bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
 const btn =
-  "rounded-lg bg-burgundy px-3 py-2 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-50";
+  " bg-burgundy px-3 py-2 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-50";
 const ghost =
-  "rounded-lg border-2 border-beige-kem px-3 py-2 text-xs font-bold text-beige-kem/80 transition disabled:opacity-40";
+  " border-2 border-beige-kem px-3 py-2 text-xs font-bold text-beige-kem/80 transition disabled:opacity-40";
 
 /**
  * Seat maps for one event.
@@ -138,7 +138,7 @@ export default function SeatMapBuilder({
           </button>
         </div>
 
-        <div className="rounded-xl border-2 border-beige-kem/40 bg-surface-2 p-4">
+        <div className="border-2 border-beige-kem/40 bg-surface-2 p-4">
           <p className="text-sm text-beige-kem/80">Hai bước, làm theo thứ tự:</p>
           <ol className="mt-2 space-y-1 text-sm text-beige-kem/70">
             <li>
@@ -153,12 +153,12 @@ export default function SeatMapBuilder({
         </div>
 
         {notice && (
-          <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-xs text-on-tint">
+          <div className="border-2 border-beige-kem bg-la-co p-3 text-xs text-on-tint">
             {notice}
           </div>
         )}
         {err && (
-          <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-xs">{err}</div>
+          <div className="border-2 border-beige-kem bg-bubblegum p-3 text-xs">{err}</div>
         )}
 
         {loadError && <ErrorRetry message={loadError} onRetry={reload} />}
@@ -173,7 +173,7 @@ export default function SeatMapBuilder({
         {[...venues.entries()].map(([venueId, venue]) => {
           const drawn = venue.showtimes[0].sections.reduce((n, s) => n + s.seatCount, 0);
           return (
-            <div key={venueId} className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
+            <div key={venueId} className="border-2 border-beige-kem bg-surface-2 p-4">
               {/* ---- step 1: the venue's design ---- */}
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
@@ -209,14 +209,13 @@ export default function SeatMapBuilder({
               {/* ---- step 2: apply to each showtime ---- */}
               <div className="mt-4 space-y-3 border-t border-beige-kem/25 pt-4">
                 {venue.showtimes.map((st) => (
-                  <div key={st.id} className="rounded-xl border-2 border-beige-kem/50 p-3">
+                  <div key={st.id} className="border-2 border-beige-kem/50 p-3">
                     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                       <span className="text-sm font-bold">
                         {new Date(st.startsAt).toLocaleString("vi-VN")}
                       </span>
                       <span
-                        className={`rounded-lg border-2 border-beige-kem px-2 py-0.5 font-mono text-[10px] ${
-                          st.hasSeatMap ? "bg-la-co text-on-tint" : "text-beige-kem/60"
+                        className={`border-2 border-beige-kem px-2 py-0.5 font-mono text-[10px] ${ st.hasSeatMap ? "bg-la-co text-on-tint" : "text-beige-kem/60"
                         }`}
                       >
                         {st.hasSeatMap ? `${st.bookableSeats} ghế đang bán` : "Chưa áp dụng sơ đồ"}
@@ -249,7 +248,7 @@ export default function SeatMapBuilder({
                             <div key={c.id} className="flex items-center gap-3">
                               <span
                                 aria-hidden="true"
-                                className="h-4 w-4 shrink-0 rounded-sm border-2"
+                                className="h-4 w-4 shrink-0 border-2"
                                 style={{ borderColor: c.color, backgroundColor: `${c.color}59` }}
                               />
                               <span className="w-36 shrink-0 text-sm">
@@ -324,7 +323,7 @@ function QuickTools({
   const [seatCount, setSeatCount] = useState("10");
 
   return (
-    <div className="mt-3 space-y-2 rounded-xl border-2 border-dashed border-beige-kem/40 p-3">
+    <div className="mt-3 space-y-2 border-2 border-dashed border-beige-kem/40 p-3">
       <p className="font-mono text-[11px] text-beige-kem/60">
         Tạo nhanh một dãy ghế. Vị trí sẽ xếp theo lưới — tinh chỉnh bằng trình thiết kế.
       </p>

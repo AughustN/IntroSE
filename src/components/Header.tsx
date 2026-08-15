@@ -38,13 +38,13 @@ function AccountAvatar({
         alt=""
         onError={() => setBroken(true)}
         style={{ width: size, height: size }}
-        className="shrink-0 rounded-full object-cover"
+        className="shrink-0 object-cover"
       />
     );
   }
   return (
     <span
-      className="grid shrink-0 place-items-center rounded-full font-bold normal-case"
+      className="grid shrink-0 place-items-center font-bold normal-case"
       style={{
         width: size,
         height: size,
@@ -145,8 +145,7 @@ function PillCell({
       type="button"
       onClick={onClick}
       aria-label={label}
-      className={`flex h-full shrink-0 items-center gap-2 px-3.5 transition sm:px-4 ${
-        active ? "bg-bubblegum text-on-tint" : "text-beige-kem hover:bg-bubblegum/40"
+      className={`flex h-full shrink-0 items-center gap-2 px-3.5 transition sm:px-4 ${ active ? "bg-bubblegum text-on-tint" : "text-beige-kem hover:bg-bubblegum/40"
       }`}
     >
       <Icon className="h-[17px] w-[17px] shrink-0" />
@@ -571,8 +570,7 @@ export default function Header({
                         type="button"
                         onClick={run(() => onCategoryChange(cat.id))}
                         aria-current={activeCategory === cat.id ? "page" : undefined}
-                        className={`flex w-full items-center gap-3 overflow-clip py-0.5 text-left transition-colors ${
-                          activeCategory === cat.id
+                        className={`flex w-full items-center gap-3 overflow-clip py-0.5 text-left transition-colors ${ activeCategory === cat.id
                             ? "text-beige-kem"
                             : "text-ink-soft hover:text-beige-kem"
                         }`}
@@ -587,7 +585,7 @@ export default function Header({
                           {cat.label}
                         </span>
                         {activeCategory === cat.id && (
-                          <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-burgundy" />
+                          <span className="mt-1 h-1.5 w-1.5 shrink-0 bg-burgundy" />
                         )}
                       </button>
                     ))}

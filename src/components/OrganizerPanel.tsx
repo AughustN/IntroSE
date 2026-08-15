@@ -11,13 +11,13 @@ import SeatMapBuilder from "./SeatMapBuilder";
 import OrganizerNav from "./organizer/OrganizerNav";
 
 const input =
-  "h-11 w-full rounded-xl border-2 border-beige-kem bg-surface-2 px-4 text-body text-beige-kem outline-none focus:border-burgundy";
+  "h-11 w-full border-2 border-beige-kem bg-surface-2 px-4 text-body text-beige-kem outline-none focus:border-burgundy";
 const label = "mb-1.5 block font-meta text-eyebrow text-beige-kem/70";
-const card = "rounded-2xl border-2 border-beige-kem bg-surface-2 p-5";
+const card = " border-2 border-beige-kem bg-surface-2 p-5";
 const btn =
-  "rounded-xl bg-burgundy px-4 py-2.5 text-body font-black text-white transition hover:brightness-95 disabled:opacity-60";
+  " bg-burgundy px-4 py-2.5 text-body font-black text-white transition hover:brightness-95 disabled:opacity-60";
 const ghost =
-  "rounded-xl border-2 border-beige-kem px-3 py-2 text-eyebrow font-bold text-beige-kem/80 transition";
+  " border-2 border-beige-kem px-3 py-2 text-eyebrow font-bold text-beige-kem/80 transition";
 
 const badge = (m: string) => {
   const map: Record<string, string> = {
@@ -33,7 +33,7 @@ const badge = (m: string) => {
     flagged: "Bị gắn cờ",
   };
   return (
-    <span className={`rounded-lg border px-2 py-0.5 font-meta text-eyebrow ${map[m] ?? ""}`}>
+    <span className={`border px-2 py-0.5 font-meta text-eyebrow ${map[m] ?? ""}`}>
       {text[m] ?? m}
     </span>
   );
@@ -189,12 +189,12 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
       </div>
       <OrganizerNav current="/organizer" />
       {notice && (
-        <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-eyebrow text-on-tint">
+        <div className="border-2 border-beige-kem bg-la-co p-3 text-eyebrow text-on-tint">
           {notice}
         </div>
       )}
       {err && (
-        <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-eyebrow">
+        <div className="border-2 border-beige-kem bg-bubblegum p-3 text-eyebrow">
           {err}
         </div>
       )}
@@ -305,7 +305,7 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
             <p className="text-body text-beige-kem/60">Chưa có sự kiện nào.</p>
           )}
           {events.map((ev) => (
-            <div key={ev.id} className="rounded-xl border-2 border-beige-kem p-3">
+            <div key={ev.id} className="border-2 border-beige-kem p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <span className="font-bold">{ev.title}</span>

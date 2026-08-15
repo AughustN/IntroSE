@@ -11,11 +11,11 @@ import { Empty, ErrorRetry, Loading, Refusal, dong } from "./states";
 const MAX_ACTIVE_TIERS = 4;
 
 const input =
-  "h-10 w-full rounded-lg border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
+  "h-10 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
 const btn =
-  "rounded-lg bg-burgundy px-3 py-2 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-50";
+  " bg-burgundy px-3 py-2 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-50";
 const ghost =
-  "rounded-lg border-2 border-beige-kem px-3 py-1.5 text-xs font-bold text-beige-kem/80 disabled:opacity-40";
+  " border-2 border-beige-kem px-3 py-1.5 text-xs font-bold text-beige-kem/80 disabled:opacity-40";
 
 /**
  * Level 4 of the console: a showtime's ticket tiers (UC-26).
@@ -117,7 +117,7 @@ export default function TierPanel({
         <TierRow key={t.id} tier={t} seated={seated} busy={busy} run={run} />
       ))}
 
-      <div className="rounded-xl border-2 border-dashed border-beige-kem/40 p-3">
+      <div className="border-2 border-dashed border-beige-kem/40 p-3">
         <p className="mb-2 font-mono text-[11px] text-beige-kem/60">Thêm hạng vé</p>
         <div
           className={`grid gap-2 ${seated ? "sm:grid-cols-[1fr_1fr_auto]" : "sm:grid-cols-[1fr_1fr_1fr_auto]"}`}
@@ -197,7 +197,7 @@ function TierRow({
 
   return (
     <div
-      className={`rounded-xl border-2 p-3 ${tier.archived ? "border-beige-kem/25 opacity-70" : "border-beige-kem"}`}
+      className={`border-2 p-3 ${tier.archived ? "border-beige-kem/25 opacity-70" : "border-beige-kem"}`}
     >
       <div className="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
         <input

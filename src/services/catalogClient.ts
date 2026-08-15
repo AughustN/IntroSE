@@ -1,4 +1,5 @@
 // Public catalog data layer plus authed organizer/admin calls.
+import type { ChartDocument } from "@/shared/catalog/seatmap-document";
 import type {
   EventCard,
   EventDetail,
@@ -194,6 +195,9 @@ export const layoutApi = {
   // path on the server — so it inherits the refusal to delete a seat somebody has bought.
   revisions: (id: number) =>
     authed<{ revisions: LayoutRevision[] }>(`/organizer/layouts/${id}/revisions`),
+  /** One revision's document, for showing what a restore would change before it happens (§31). */
+  revisionDocument: (id: number, revisionId: number) =>
+    authed<{ document: ChartDocument }>(`/organizer/layouts/${id}/revisions/${revisionId}`),
   restoreRevision: (id: number, revisionId: number) =>
     authed<Layout>(`/organizer/layouts/${id}/revisions/${revisionId}/restore`, { method: "POST" }),
   saveAsTemplate: (id: number, name: string) =>

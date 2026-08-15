@@ -25,29 +25,29 @@ import { DEFAULT_AVATAR_FG, avatarColor } from "../../services/defaultAvatar";
  */
 
 export const inputClass =
-  "h-11 w-full rounded-xl border-2 border-beige-kem bg-surface-2 px-4 text-body text-beige-kem outline-none transition focus:border-burgundy";
+  "h-11 w-full border-2 border-beige-kem bg-surface-2 px-4 text-body text-beige-kem outline-none transition focus:border-burgundy";
 export const inputErrorClass =
-  "h-11 w-full rounded-xl border-2 border-burgundy bg-bubblegum px-4 text-body text-on-tint outline-none transition focus:border-burgundy";
+  "h-11 w-full border-2 border-burgundy bg-bubblegum px-4 text-body text-on-tint outline-none transition focus:border-burgundy";
 export const textareaClass =
-  "w-full rounded-xl border-2 border-beige-kem bg-surface-2 px-4 py-2.5 text-body leading-6 text-beige-kem outline-none transition focus:border-burgundy";
+  "w-full border-2 border-beige-kem bg-surface-2 px-4 py-2.5 text-body leading-6 text-beige-kem outline-none transition focus:border-burgundy";
 
 export const btnPrimary =
-  "inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-burgundy px-5 text-body font-black text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex h-11 items-center justify-center gap-2 bg-burgundy px-5 text-body font-black text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60";
 export const btnSecondary =
-  "inline-flex h-11 items-center justify-center gap-2 rounded-xl border-2 border-beige-kem px-5 text-body font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex h-11 items-center justify-center gap-2 border-2 border-beige-kem px-5 text-body font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:cursor-not-allowed disabled:opacity-60";
 /*
  * Danger carries its warning in the outline, not the label: tomato as *text* misses 4.5:1 on cream,
  * so the tomato border does the signalling and the fill only arrives on hover, where white text
  * clears AA against it.
  */
 export const btnDanger =
-  "inline-flex h-11 items-center justify-center gap-2 rounded-xl border-2 border-burgundy px-5 text-body font-bold text-beige-kem transition hover:bg-burgundy hover:text-white disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex h-11 items-center justify-center gap-2 border-2 border-burgundy px-5 text-body font-bold text-beige-kem transition hover:bg-burgundy hover:text-white disabled:cursor-not-allowed disabled:opacity-60";
 
 /** Card-header action. Shorter than the body buttons so it reads as secondary to the card's content. */
 export const btnHeader =
-  "inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border-2 border-beige-kem px-3.5 text-eyebrow font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex h-9 items-center justify-center gap-1.5 border-2 border-beige-kem px-3.5 text-eyebrow font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:cursor-not-allowed disabled:opacity-60";
 export const btnHeaderPrimary =
-  "inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-burgundy px-3.5 text-eyebrow font-black text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex h-9 items-center justify-center gap-1.5 bg-burgundy px-3.5 text-eyebrow font-black text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60";
 
 /** An elevated surface with a brand-tinted heading over a hairline rule. */
 export function InfoCard({
@@ -63,8 +63,7 @@ export function InfoCard({
 }) {
   return (
     <section
-      className={`rounded-2xl border-2 bg-surface-2 p-5 sm:p-6 ${
-        tone === "danger" ? "border-burgundy" : "border-beige-kem"
+      className={`border-2 bg-surface-2 p-5 sm:p-6 ${ tone === "danger" ? "border-burgundy" : "border-beige-kem"
       }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-beige-kem/25 pb-4">
@@ -175,11 +174,11 @@ export function AvatarWithBadge({
           src={url}
           alt=""
           onError={() => setBroken(true)}
-          className="h-20 w-20 rounded-full object-cover"
+          className="h-20 w-20 object-cover"
         />
       ) : (
         <div
-          className="grid h-20 w-20 place-items-center rounded-full font-display text-title-m font-black"
+          className="grid h-20 w-20 place-items-center font-display text-title-m font-black"
           style={{ backgroundColor: avatarColor(email), color: DEFAULT_AVATAR_FG }}
           aria-hidden
         >
@@ -187,10 +186,10 @@ export function AvatarWithBadge({
         </div>
       )}
       <label
-        className="absolute -bottom-1 -right-1 grid h-11 w-11 cursor-pointer place-items-center rounded-full text-beige-kem transition hover:text-ink-soft"
+        className="absolute -bottom-1 -right-1 grid h-11 w-11 cursor-pointer place-items-center text-beige-kem transition hover:text-ink-soft"
         title={busyLabel ?? "Đổi ảnh đại diện"}
       >
-        <span className="grid h-8 w-8 place-items-center rounded-full border-2 border-beige-kem bg-xanh-pho">
+        <span className="grid h-8 w-8 place-items-center border-2 border-beige-kem bg-xanh-pho">
           <Camera className="h-4 w-4" aria-hidden />
         </span>
         <input
@@ -227,7 +226,7 @@ export function Badge({
         : "border-beige-kem/25 bg-surface-2 text-beige-kem/80";
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-meta text-meta font-bold uppercase ${toneClass}`}
+      className={`inline-flex items-center gap-1.5 border px-2.5 py-1 font-meta text-meta font-bold uppercase ${toneClass}`}
     >
       {icon}
       {children}
@@ -242,8 +241,7 @@ export function RuleItem({ ok, label }: { ok: boolean; label: string }) {
       className={`flex items-center gap-2 text-eyebrow ${ok ? "text-ink-soft" : "text-beige-kem/70"}`}
     >
       <span
-        className={`grid h-4 w-4 shrink-0 place-items-center rounded-full border ${
-          ok ? "border-la-co bg-la-co" : "border-beige-kem/30"
+        className={`grid h-4 w-4 shrink-0 place-items-center border ${ ok ? "border-la-co bg-la-co" : "border-beige-kem/30"
         }`}
       >
         {ok && <Check className="h-2.5 w-2.5" aria-hidden />}

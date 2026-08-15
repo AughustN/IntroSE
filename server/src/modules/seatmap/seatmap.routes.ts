@@ -204,6 +204,15 @@ seatmapRouter.get(
   }),
 );
 
+seatmapRouter.get(
+  '/layouts/:id/revisions/:revisionId',
+  asyncH(async (req, res) => {
+    res.json({
+      document: await service.revisionDocument(req, Number(req.params.id), Number(req.params.revisionId)),
+    });
+  }),
+);
+
 seatmapRouter.post(
   '/layouts/:id/revisions/:revisionId/restore',
   asyncH(async (req, res) => {

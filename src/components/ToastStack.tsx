@@ -47,10 +47,10 @@ export default function ToastStack({ toasts, onDismiss }: ToastStackProps) {
           <div
             key={toast.id}
             role={toast.kind === "error" ? "alert" : "status"}
-            className={`pointer-events-auto flex items-start gap-3 overflow-hidden rounded-xl border ${tone.frame} p-3 pr-2`}
+            className={`pointer-events-auto flex items-start gap-3 overflow-hidden border ${tone.frame} p-3 pr-2`}
           >
             <span
-              className={`mt-0.5 h-full w-1 shrink-0 self-stretch rounded-full ${tone.accent}`}
+              className={`mt-0.5 h-full w-1 shrink-0 self-stretch ${tone.accent}`}
             />
 
             <div className="min-w-0 flex-1">
@@ -62,7 +62,7 @@ export default function ToastStack({ toasts, onDismiss }: ToastStackProps) {
 
             <button
               onClick={() => onDismiss(toast.id)}
-              className="shrink-0 rounded-lg p-1.5 text-beige-kem/40 transition hover:bg-surface-2 hover:text-beige-kem"
+              className="shrink-0 p-1.5 text-beige-kem/40 transition hover:bg-surface-2 hover:text-beige-kem"
               aria-label="Đóng thông báo"
             >
               <X className="h-4 w-4" />

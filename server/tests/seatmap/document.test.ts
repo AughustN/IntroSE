@@ -564,3 +564,84 @@ describe('seat types', () => {
     expect(docSeats.filter((s: { seatType?: string }) => s.seatType === 'double')).toHaveLength(2);
   });
 });
+
+describe('rows as first-class objects (0032)', () => {
+  const twoBlocks = () => {
+    let d = emptyDocument();
+    const sec = addSection(d, 'Khu A');
+    d = sec.doc;
+    const first = addBlock(d, 'seating-block', { x: 1000, y: 1000 }, { sectionId: sec.id });
+    d = first.doc;
+    const second = addBlock(d, 'seating-block', { x: 5000, y: 1000 }, { sectionId: sec.id });
+    return { doc: second.doc, first: first.key, second: second.key };
+  };
+
+  it('creates one row per label and points every seat at its own', async () => {
+    const o = await organizer();
+    const { layout } = await freshLayout(o);
+    const saved = (await save(o, layout.id, { version: layout.version, document: twoBlocks().doc }).expect(200)).body;
+
+    expect(saved.rows.map((r: { label: string }) => r.label).sort()).toEqual(
+      ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'],
+    );
+    const byLabel = new Map(saved.rows.map((r: { label: string; id: number }) => [r.label, r.id]));
+    expect(saved.seats.every((s: { rowLabel: string; rowId: number }) => s.rowId === byLabel.get(s.rowLabel))).toBe(true);
+  });
+
+  it('does not create a second set of rows when the same chart is saved again', async () => {
+    const o = await organizer();
+    const { layout } = await freshLayout(o);
+    const first = (await save(o, layout.id, { version: layout.version, document: twoBlocks().doc }).expect(200)).body;
+
+    // The projection MINTS a placeholder id for every row it derives, so unless those are stitched
+    // back into the stored document the second save presents them as new rows again — and
+    // `layout_rows_label_idx` refuses with a bare 23505, on the second save of every chart.
+    const again = (await save(o, layout.id, { version: first.version, document: first.document }).expect(200)).body;
+    expect(again.rows).toHaveLength(10);
+    expect(again.rows.map((r: { id: number }) => r.id).sort()).toEqual(
+      first.rows.map((r: { id: number }) => r.id).sort(),
+    );
+  });
+
+  it('renames a row without replacing it', async () => {
+    const o = await organizer();
+    const { layout } = await freshLayout(o);
+    const c = twoBlocks();
+    const saved = (await save(o, layout.id, { version: layout.version, document: c.doc }).expect(200)).body;
+    const wasF = saved.rows.find((r: { label: string }) => r.label === 'F').id as number;
+
+    // Delete A–E and pull F–J back onto A–E.
+    const packed = repackRowLabels(removeBlocks(saved.document, new Set([c.first])));
+    const after = (await save(o, layout.id, { version: saved.version, document: packed }).expect(200)).body;
+
+    // The row that was F is the row that is now A. Its id is what anything hung off a row would key
+    // on, so a renumber must move the label and nothing else (§12, §42 Rule 1).
+    expect(after.rows).toHaveLength(5);
+    expect(after.rows.find((r: { id: number }) => r.id === wasF).label).toBe('A');
+  });
+
+  it('gives a clone its OWN rows rather than the source’s', async () => {
+    const o = await organizer();
+    const { venue, layout } = await freshLayout(o);
+    // One small block, not two full ones: `cloneLayout` copies seats with one INSERT per seat, so a
+    // 100-seat chart is 100 sequential round trips to a remote database and blows the 20 s budget.
+    let d = emptyDocument();
+    const sec = addSection(d, 'Khu A');
+    d = sec.doc;
+    d = addBlock(d, 'single-row', { x: 1000, y: 1000 }, { sectionId: sec.id }).doc;
+    const saved = (await save(o, layout.id, { version: layout.version, document: d }).expect(200)).body;
+
+    const copyId = (
+      await request(app).post(`/api/organizer/layouts/${layout.id}/clone`).set(o.h)
+        .send({ targetVenueId: venue, name: 'Bản sao' }).expect(201)
+    ).body.id;
+    const copy = (await request(app).get(`/api/organizer/layouts/${copyId}`).set(o.h).expect(200)).body;
+
+    const sourceIds = new Set(saved.rows.map((r: { id: number }) => r.id));
+    expect(copy.rows).toHaveLength(1);
+    expect(copy.rows.some((r: { id: number }) => sourceIds.has(r.id))).toBe(false);
+    // And the copy's seats point at the copy's rows, not the original's.
+    const copyIds = new Set(copy.rows.map((r: { id: number }) => r.id));
+    expect(copy.seats.every((s: { rowId: number }) => copyIds.has(s.rowId))).toBe(true);
+  });
+});

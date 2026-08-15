@@ -126,7 +126,10 @@ function rowLabelsUsedIn(doc: ChartDocument, sectionId: number | null, exceptKey
 /** Would a block starting at `start` land on a row label another block in the section already uses? */
 function rowsCollide(used: Set<string>, rows: number, params: BlockParams, start: number): boolean {
   for (let r = 0; r < rows; r++) {
-    if (used.has(rowLabelFor(r, rows, params.rowLabelScheme, params.rowLabelPrefix, start))) return true;
+    const label = rowLabelFor(
+      r, rows, params.rowLabelScheme, params.rowLabelPrefix, start, params.rowLabelSuffix,
+    );
+    if (used.has(label)) return true;
   }
   return false;
 }
@@ -717,8 +720,37 @@ export function rotateBlocks(doc: ChartDocument, keys: Set<string>, degrees: num
   };
 }
 
+/**
+ * Delete blocks, and with them the rows they were the last occupant of.
+ *
+ * The row half is not tidiness. A row that loses its seats keeps its LABEL, so deleting the block
+ * holding rows A–E and renumbering the survivors onto A–E leaves the document holding two rows called
+ * "A" in one section — which `layout_rows_label_idx` refuses, turning an ordinary delete into a 409
+ * on the next save.
+ *
+ * Scoped precisely: a row goes only if it HAD seats in the removed blocks and has none left. A row
+ * that never had any is deliberate — "add a row, then fill it" is exactly what rows were made
+ * first-class for — and a row still occupied by another block stays, since two blocks may share a
+ * section.
+ */
 export function removeBlocks(doc: ChartDocument, keys: Set<string>): ChartDocument {
-  return { ...doc, blocks: doc.blocks.filter((b) => !selectedAndEditable(b, keys)) };
+  const doomed = doc.blocks.filter((b) => selectedAndEditable(b, keys));
+  const blocks = doc.blocks.filter((b) => !selectedAndEditable(b, keys));
+  if (!doc.rows?.length) return { ...doc, blocks };
+
+  const rowIdsOf = (list: DocumentBlock[]) => {
+    const ids = new Set<number>();
+    for (const b of list) for (const s of b.seats ?? []) if (s.rowId != null) ids.add(s.rowId);
+    return ids;
+  };
+  const emptied = rowIdsOf(doomed);
+  const surviving = rowIdsOf(blocks);
+
+  return {
+    ...doc,
+    blocks,
+    rows: doc.rows.filter((r) => !emptied.has(r.id) || surviving.has(r.id)),
+  };
 }
 
 /**
@@ -801,6 +833,20 @@ export function setBlockColor(
     blocks: doc.blocks.map((b) =>
       selectedAndEditable(b, keys) && colorable(b.kind) ? { ...b, color } : b,
     ),
+  };
+}
+
+/**
+ * Hide or show a selection (§5).
+ *
+ * Goes through the same direct write as `setLocked` rather than the `selectedAndEditable` guard: a
+ * locked block can still be hidden, because locking protects a block from being CHANGED and hiding
+ * does not change it. Nothing here reaches the projection — see `DocumentBlock.hidden`.
+ */
+export function setHidden(doc: ChartDocument, keys: Set<string>, hidden: boolean): ChartDocument {
+  return {
+    ...doc,
+    blocks: doc.blocks.map((b) => (keys.has(b.key) ? { ...b, hidden } : b)),
   };
 }
 
@@ -971,8 +1017,8 @@ export function relabelRows(block: DocumentBlock, newStart: number): DocumentBlo
   const rename = new Map<string, string>();
   for (let r = 0; r < rows; r += 1) {
     rename.set(
-      rowLabelFor(r, rows, p.rowLabelScheme, p.rowLabelPrefix ?? "", oldStart),
-      rowLabelFor(r, rows, p.rowLabelScheme, p.rowLabelPrefix ?? "", newStart),
+      rowLabelFor(r, rows, p.rowLabelScheme, p.rowLabelPrefix ?? "", oldStart, p.rowLabelSuffix ?? ""),
+      rowLabelFor(r, rows, p.rowLabelScheme, p.rowLabelPrefix ?? "", newStart, p.rowLabelSuffix ?? ""),
     );
   }
 
@@ -982,6 +1028,41 @@ export function relabelRows(block: DocumentBlock, newStart: number): DocumentBlo
     seats: block.seats?.map((s) => {
       const next = rename.get(s.rowLabel);
       return next === undefined ? s : { ...s, rowLabel: next };
+    }),
+  };
+}
+
+/**
+ * Bring `doc.rows` back into step with the labels its seats now carry.
+ *
+ * A renumber moves a LABEL. The row it belongs to must come with it — that is the whole reason rows
+ * have ids (§12, §42 Rule 1). Without this the row that was "F" keeps saying "F" while its seats say
+ * "A", so the projection finds no row for (section, "A"), mints a fresh one, and the chart grows a
+ * duplicate row on every renumber while the original is left holding nothing.
+ *
+ * Only ever UPDATES: rows are never added or removed here. A row with no seats keeps the label it was
+ * given — an empty row is a real row and is exactly what "add a row, then fill it" produces — and a
+ * label with no row yet is minted by the projection, as it is for every chart written before 0032.
+ */
+function syncRowLabels(doc: ChartDocument): ChartDocument {
+  if (!doc.rows?.length) return doc;
+
+  const seen = new Map<number, { label: string; sectionId: number | null }>();
+  for (const b of doc.blocks) {
+    for (const seat of b.seats ?? []) {
+      if (seat.rowId == null || seen.has(seat.rowId)) continue;
+      seen.set(seat.rowId, {
+        label: seat.rowLabel,
+        sectionId: seat.sectionId ?? b.sectionId,
+      });
+    }
+  }
+
+  return {
+    ...doc,
+    rows: doc.rows.map((r) => {
+      const now = seen.get(r.id);
+      return now ? { ...r, label: now.label, sectionId: now.sectionId } : r;
     }),
   };
 }
@@ -1035,7 +1116,8 @@ export function repackRowLabels(doc: ChartDocument): ChartDocument {
     const next = relabelRows(original, start);
     work = { ...work, blocks: work.blocks.map((b) => (b.key === key ? next : b)) };
   }
-  return work;
+  // The rows themselves have not moved — only what they are called.
+  return syncRowLabels(work);
 }
 
 /**
@@ -1070,4 +1152,370 @@ export function setSeatType(
 ): ChartDocument {
   if (!EDITABLE_SEAT_TYPES.includes(seatType)) return doc;
   return updateSeats(doc, targets, { seatType });
+}
+
+/** Which way an operation runs across a selection. */
+export type Axis = "horizontal" | "vertical";
+
+/**
+ * Even out the gaps in a selection (§26).
+ *
+ * The two outermost blocks define the span and do not move — distributing is about what is BETWEEN
+ * them, and moving the ends would change the extent the organizer just set by placing them.
+ *
+ * Fewer than three blocks is a no-op rather than an error: two blocks have no gap to even out, and
+ * with one there is nothing to distribute against.
+ */
+export function distributeBlocks(doc: ChartDocument, keys: Set<string>, axis: Axis): ChartDocument {
+  const movable = doc.blocks.filter((b) => selectedAndEditable(b, keys));
+  if (movable.length < 3) return doc;
+
+  const along = (b: DocumentBlock) => (axis === "horizontal" ? b.x : b.y);
+  const ordered = [...movable].sort((a, b) => along(a) - along(b));
+  const first = along(ordered[0]);
+  const last = along(ordered[ordered.length - 1]);
+  const gap = (last - first) / (ordered.length - 1);
+
+  const target = new Map(ordered.map((b, i) => [b.key, clampCoord(Math.round(first + gap * i))]));
+  return {
+    ...doc,
+    blocks: doc.blocks.map((b) => {
+      const to = target.get(b.key);
+      if (to === undefined) return b;
+      // `translated`, so a drawn outline travels with the block it belongs to.
+      return axis === "horizontal" ? translated(b, to, b.y) : translated(b, b.x, to);
+    }),
+  };
+}
+
+/**
+ * Mirror a block about its own centre (§7).
+ *
+ * Seats keep their ids AND their labels: a flip is a change of geometry, not of numbering, so the
+ * seat that was A1 is still A1 — it is simply now on the other side of the block. Renumbering to
+ * match is the separate, explicit operation, which is what §42 Rule 5 asks for.
+ *
+ * The mirror is about the seats' own extent rather than the block's advisory `width`/`height`, so a
+ * block whose seats do not fill its box does not drift sideways when flipped.
+ */
+export function flipBlocks(doc: ChartDocument, keys: Set<string>, axis: Axis): ChartDocument {
+  return {
+    ...doc,
+    blocks: doc.blocks.map((b) => {
+      if (!selectedAndEditable(b, keys)) return b;
+
+      const seats = b.seats;
+      const flipped =
+        seats && seats.length > 0
+          ? (() => {
+              const values = seats.map((s) => (axis === "horizontal" ? s.dx : s.dy));
+              const span = Math.min(...values) + Math.max(...values);
+              return seats.map((s) =>
+                axis === "horizontal" ? { ...s, dx: span - s.dx } : { ...s, dy: span - s.dy },
+              );
+            })()
+          : seats;
+
+      // A drawn outline is in ABSOLUTE coordinates, so it mirrors about its own extent too.
+      const points = b.points?.length
+        ? (() => {
+            const values = b.points.map((p) => (axis === "horizontal" ? p.x : p.y));
+            const span = Math.min(...values) + Math.max(...values);
+            return b.points.map((p) =>
+              axis === "horizontal"
+                ? { x: clampCoord(span - p.x), y: p.y }
+                : { x: p.x, y: clampCoord(span - p.y) },
+            );
+          })()
+        : b.points;
+
+      return { ...b, seats: flipped, points };
+    }),
+  };
+}
+
+/**
+ * Take a copy of a selection for the clipboard (§27).
+ *
+ * A plain snapshot of the blocks, ids and all — nothing is minted here. What makes a paste a NEW
+ * object is `pasteBlocks`, and doing it there rather than here is what lets one copy be pasted
+ * repeatedly, each time producing a different set of ids.
+ *
+ * Tables are excluded by `selectedAndEditable`: their rows live in `layout_tables` and are written
+ * only by the table endpoints, so a pasted table would be seats with no table behind them.
+ */
+export function copyBlocks(doc: ChartDocument, keys: Set<string>): DocumentBlock[] {
+  return doc.blocks.filter((b) => selectedAndEditable(b, keys));
+}
+
+/**
+ * Paste a clipboard at an offset, as new objects (§42 Rule 4).
+ *
+ * Every identity is fresh: a new block key, a new seat id for each seat, and NO row id — a pasted row
+ * is a row this chart has not seen, and letting it carry the source's would make the save update the
+ * row the copy was taken from.
+ *
+ * Row LABELS are deliberately kept. A paste normally goes into a different section, where the labels
+ * are free; where it does not, the publish gate reports the collision, which is the honest place to
+ * catch it and the same rule `duplicateBlocks` already follows.
+ */
+export function pasteBlocks(
+  doc: ChartDocument,
+  clip: DocumentBlock[],
+  offset: { x: number; y: number },
+): { doc: ChartDocument; keys: Set<string> } {
+  if (clip.length === 0) return { doc, keys: new Set() };
+
+  const made: DocumentBlock[] = [];
+  const keys = new Set<string>();
+  let next = doc;
+
+  for (const b of clip) {
+    const key = nextBlockKey({ ...next, blocks: [...next.blocks, ...made] });
+    keys.add(key);
+    made.push({
+      ...translated(b, clampCoord(b.x + offset.x), clampCoord(b.y + offset.y)),
+      key,
+      locked: false,
+      hidden: false,
+      // A table's identity belongs to `layout_tables`; a copy must not claim it.
+      tableId: null,
+      seats: b.seats?.map((s) => ({ ...s, seatId: mintId(), rowId: undefined })),
+    });
+    next = { ...next, blocks: [...doc.blocks, ...made] };
+  }
+
+  return { doc: { ...doc, blocks: [...doc.blocks, ...made] }, keys };
+}
+
+/** A line the canvas draws while a drag is snapped to it. */
+export interface SnapGuide {
+  axis: "x" | "y";
+  at: number;
+}
+
+/**
+ * Pull a dragged position onto a nearby block's centre line (§25).
+ *
+ * The grid alone does not solve alignment. A 50-unit cell means two blocks 4,000 units apart can both
+ * be "on the grid" and still be a cell out of line with each other, and at the zoom needed to see the
+ * whole chart that gap is a pixel — invisible while drawing, obvious once the seats are drawn.
+ *
+ * Centre lines only, not edges. A block's `width`/`height` is advisory — for a drawn shape it can be
+ * far from the real extent — so snapping edges would line up boxes the organizer cannot see. The
+ * centre is the one point that is always exactly where it claims to be.
+ *
+ * Each axis resolves on its own, so a drag can lock horizontally while staying free vertically, which
+ * is what makes it feel like guidance rather than a magnet.
+ */
+export function snapToObjects(
+  doc: ChartDocument,
+  moving: Set<string>,
+  at: { x: number; y: number },
+  threshold: number,
+): { x: number; y: number; guides: SnapGuide[] } {
+  if (threshold <= 0) return { ...at, guides: [] };
+
+  const anchors = doc.blocks.filter((b) => !moving.has(b.key) && !b.hidden && !b.locked);
+  if (anchors.length === 0) return { ...at, guides: [] };
+
+  const nearest = (value: number, candidates: number[]): number | null => {
+    let best: number | null = null;
+    let bestGap = threshold;
+    for (const c of candidates) {
+      const gap = Math.abs(c - value);
+      // `<=` so that of two equally near candidates the LATER one wins, which is stable rather than
+      // dependent on the order blocks happen to sit in the document.
+      if (gap <= bestGap) {
+        best = c;
+        bestGap = gap;
+      }
+    }
+    return best;
+  };
+
+  const x = nearest(at.x, anchors.map((b) => b.x));
+  const y = nearest(at.y, anchors.map((b) => b.y));
+
+  const guides: SnapGuide[] = [];
+  if (x !== null) guides.push({ axis: "x", at: x });
+  if (y !== null) guides.push({ axis: "y", at: y });
+
+  return { x: x ?? at.x, y: y ?? at.y, guides };
+}
+
+/**
+ * Bind a selection into a group (§6).
+ *
+ * The id is minted from the blocks themselves rather than from a counter or a clock, so grouping the
+ * same blocks twice is the same document — which keeps the operation idempotent and keeps a document
+ * comparable with itself after a round trip.
+ *
+ * Fewer than two is a no-op: a group of one is a block, and creating one would only add a field for
+ * the next reader to wonder about.
+ */
+export function groupBlocks(doc: ChartDocument, keys: Set<string>): ChartDocument {
+  const members = doc.blocks.filter((b) => selectedAndEditable(b, keys));
+  if (members.length < 2) return doc;
+
+  const groupId = `g${members.map((b) => b.key).sort().join("-")}`.slice(0, 24);
+  return {
+    ...doc,
+    blocks: doc.blocks.map((b) => (members.some((m) => m.key === b.key) ? { ...b, groupId } : b)),
+  };
+}
+
+/**
+ * Break the groups a selection touches.
+ *
+ * Whole groups, not just the selected members: ungrouping half a group would leave the rest bound to
+ * an id nothing else carries, which reads as a group but behaves as one block.
+ */
+export function ungroupBlocks(doc: ChartDocument, keys: Set<string>): ChartDocument {
+  const groups = new Set(
+    doc.blocks.filter((b) => keys.has(b.key) && b.groupId).map((b) => b.groupId as string),
+  );
+  if (groups.size === 0) return doc;
+  return {
+    ...doc,
+    blocks: doc.blocks.map((b) => (b.groupId && groups.has(b.groupId) ? { ...b, groupId: undefined } : b)),
+  };
+}
+
+/**
+ * Expand a selection to the whole of any group it touches.
+ *
+ * This is what makes a group feel like one object rather than a label: every operation that takes a
+ * selection goes through here first, so clicking one member drags, deletes and aligns all of it.
+ */
+export function withGroups(doc: ChartDocument, keys: Set<string>): Set<string> {
+  const groups = new Set(
+    doc.blocks.filter((b) => keys.has(b.key) && b.groupId).map((b) => b.groupId as string),
+  );
+  if (groups.size === 0) return keys;
+
+  const out = new Set(keys);
+  for (const b of doc.blocks) if (b.groupId && groups.has(b.groupId)) out.add(b.key);
+  return out;
+}
+
+/** Which handle is being dragged, compass-style. */
+export type ResizeHandle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
+
+/** The smallest a block may be made by dragging, in layout units — half a seat. */
+const MIN_EXTENT = 50;
+
+/**
+ * Where a box lands when one of its handles is dragged (§6).
+ *
+ * A block is stored as a CENTRE and a size, while a handle drag is about an EDGE — so growing the
+ * right edge by 200 is "width + 200, centre + 100". Getting that wrong is the classic resize bug
+ * where the block creeps away from the pointer as it grows.
+ *
+ * Two things it refuses to do. It will not invert a box through zero — a negative width renders as
+ * nothing and fails the column's CHECK — and it will not let the anchored edge drift when the drag
+ * runs past the minimum: the edge you are NOT holding stays exactly where it was, which is the whole
+ * contract of a resize handle.
+ */
+export function resizedBox(
+  box: { x: number; y: number; width: number; height: number },
+  handle: ResizeHandle,
+  dx: number,
+  dy: number,
+): { x: number; y: number; width: number; height: number } {
+  const grows = (edge: "n" | "s" | "e" | "w") => handle.includes(edge);
+
+  const axis = (
+    centre: number,
+    size: number,
+    delta: number,
+    low: boolean,
+    high: boolean,
+  ): { centre: number; size: number } => {
+    if (!low && !high) return { centre, size };
+    // The edge that is NOT being dragged, in absolute terms. Everything is derived from it, so it
+    // cannot move however far the pointer goes.
+    const anchor = low ? centre + size / 2 : centre - size / 2;
+    // The dragged EDGE is clamped, not the centre. Clamping the centre leaves the far edge free to
+    // run past the boundary — a block dragged wide at the right-hand wall ends up half outside the
+    // map, and the projection then clamps its seats into a shape that is not what was drawn.
+    const moved = clampCoord(low ? centre - size / 2 + delta : centre + size / 2 + delta);
+    const size2 = Math.max(MIN_EXTENT, Math.abs(anchor - moved));
+    const centre2 = low ? anchor - size2 / 2 : anchor + size2 / 2;
+    return { centre: clampCoord(centre2), size: size2 };
+  };
+
+  const h = axis(box.x, box.width, dx, grows("w"), grows("e"));
+  const v = axis(box.y, box.height, dy, grows("n"), grows("s"));
+  return { x: h.centre, y: v.centre, width: Math.round(h.size), height: Math.round(v.size) };
+}
+
+/**
+ * Does this document still hold ids the server has not issued yet?
+ *
+ * The precondition for saving WITHOUT taking the server's copy back (§29). A negative id is one the
+ * editor minted this session; on save the server replaces it with a real one and hands the document
+ * back, and the editor must adopt that copy or the next save will present the same placeholder again
+ * and insert a duplicate.
+ *
+ * Adopting it costs the undo stack — `useLayoutHistory.reset` clears history, deliberately, because
+ * past entries would hold ids that no longer exist. So an autosave is only safe when there is nothing
+ * to adopt: every id already real, the round trip a no-op, and history untouched.
+ */
+export function hasPlaceholderIds(doc: ChartDocument): boolean {
+  if (doc.sections.some((s) => s.id <= 0)) return true;
+  if (doc.categories.some((c) => c.id <= 0)) return true;
+  if (doc.rows?.some((r) => r.id <= 0)) return true;
+  for (const b of doc.blocks) {
+    for (const s of b.seats ?? []) {
+      if (s.seatId <= 0) return true;
+      if (s.rowId != null && s.rowId <= 0) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The angle from a block's centre to the pointer, in the editor's own terms.
+ *
+ * Zero is straight UP, not to the right where `atan2` puts it, because the rotation handle sits above
+ * the block: a block whose handle is where you found it must read as unrotated. Clockwise-positive,
+ * matching SVG's `rotate()` and therefore matching what is drawn.
+ *
+ * Always 0–359. `seats.rotation` carries a `CHECK (rotation >= 0 AND rotation <= 359)`, so an angle
+ * that came back negative would not be a cosmetic problem but a refused save.
+ *
+ * @param step snap to this many degrees — 15 while Shift is held, for a deliberate right angle.
+ */
+export function angleFromPointer(
+  centre: { x: number; y: number },
+  pointer: { x: number; y: number },
+  step = 0,
+): number {
+  const dx = pointer.x - centre.x;
+  const dy = pointer.y - centre.y;
+  // On the centre there is no direction to read; holding still beats spinning to an arbitrary angle.
+  if (dx === 0 && dy === 0) return 0;
+
+  // +90 turns atan2's east-is-zero into north-is-zero.
+  const degrees = (Math.atan2(dy, dx) * 180) / Math.PI + 90;
+  const snapped = step > 0 ? Math.round(degrees / step) * step : Math.round(degrees);
+  return ((snapped % 360) + 360) % 360;
+}
+
+/**
+ * Set a selection's rotation outright, rather than adding to it.
+ *
+ * `rotateBlocks` is relative — what a "rotate 90°" button needs. A drag needs this: the pointer says
+ * what the angle IS, and accumulating deltas from a gesture that reports absolute positions would
+ * drift with every frame.
+ */
+export function setRotation(doc: ChartDocument, keys: Set<string>, degrees: number): ChartDocument {
+  const normalised = ((Math.round(degrees) % 360) + 360) % 360;
+  return {
+    ...doc,
+    blocks: doc.blocks.map((b) =>
+      selectedAndEditable(b, keys) ? { ...b, rotation: normalised } : b,
+    ),
+  };
 }

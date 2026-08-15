@@ -17,6 +17,7 @@ import {
   projectDocument,
   regenerateBlock,
   rowLabelFor,
+  seatDisplay,
   seatNumberFor,
   stitchSeatIds,
 } from './seatmap-project.js';
@@ -251,6 +252,7 @@ describe('adopting a layout that has no document', () => {
     isTemplate: false,
     version: 3,
     sections: [{ id: 1, name: 'Khu A', seatShape: 'circle', seatSizeMultiplier: 1 }],
+    rows: [],
     categories: [{ id: 1, name: 'VIP', color: '#B3453C' }],
     seats: [
       { id: 11, sectionId: 1, categoryId: 1, rowLabel: 'A', seatNumber: 1, seatType: 'single', x: 2000, y: 3000, rotation: 0 },
@@ -493,5 +495,119 @@ describe('continuing an adopted block\u2019s numbering', () => {
   it('letterIndex inverts letterAt', () => {
     for (const i of [0, 1, 25, 26, 27, 51, 52]) expect(letterIndex(letterAt(i))).toBe(i);
     expect(letterIndex('A1')).toBeNull();
+  });
+});
+
+// Rows became first-class in 0032. Until then a row "existed" only because several seats happened to
+// share a `rowLabel` — enough to draw and to sell, not enough to operate on.
+describe('rows as first-class objects', () => {
+  const seated = (over: Partial<DocumentBlock> = {}) =>
+    doc([regenerateBlock(block(over), mint)]);
+
+  it('projects one row per distinct label in a section', () => {
+    const p = projectDocument(seated());
+    expect(p.rows.map((r) => r.label)).toEqual(['A', 'B', 'C']);
+    expect(p.rows.every((r) => r.sectionId === 1)).toBe(true);
+  });
+
+  it('points every seat at the row it belongs to', () => {
+    const p = projectDocument(seated());
+    const byLabel = new Map(p.rows.map((r) => [r.label, r.id]));
+    for (const s of p.seats) expect(s.rowId).toBe(byLabel.get(s.rowLabel));
+  });
+
+  it('keeps two sections’ identically-named rows apart', () => {
+    // "Khu A · row A" and "Khu B · row A" are different rows. Keying on the label alone would merge
+    // them, and every seat in both would then claim the same row.
+    const d = doc([
+      regenerateBlock(block({ key: 'b1', sectionId: 1 }), mint),
+      regenerateBlock(block({ key: 'b2', sectionId: 2 }), mint),
+    ]);
+    d.sections = [
+      { id: 1, name: 'Khu A' },
+      { id: 2, name: 'Khu B' },
+    ];
+    const p = projectDocument(d);
+    const rowA = p.rows.filter((r) => r.label === 'A');
+    expect(rowA).toHaveLength(2);
+    expect(new Set(rowA.map((r) => r.id)).size).toBe(2);
+  });
+
+  it('keeps a row’s stored id rather than minting a new one', () => {
+    const d = seated();
+    d.rows = [{ id: 77, label: 'A', sectionId: 1, displayOrder: 0 }];
+    const p = projectDocument(d);
+    expect(p.rows.find((r) => r.label === 'A')!.id).toBe(77);
+    expect(p.seats.filter((s) => s.rowLabel === 'A').every((s) => s.rowId === 77)).toBe(true);
+  });
+
+  it('keeps a row that has no seats in it — an empty row is a real row', () => {
+    // The reason rows exist at all: "add a row, then fill it" was not expressible while a row was
+    // only an emergent property of the seats already in it.
+    const d = seated();
+    d.rows = [{ id: 90, label: 'Z', sectionId: 1, displayOrder: 9 }];
+    expect(projectDocument(d).rows.map((r) => r.label)).toContain('Z');
+  });
+
+  it('survives a RENAME with its identity intact — the whole point of the column', () => {
+    const d = seated();
+    d.rows = [{ id: 55, label: 'A', sectionId: 1, displayOrder: 0 }];
+    // The organizer renumbers: row A becomes row K, on the row and on its seats.
+    const renamed: ChartDocument = {
+      ...d,
+      rows: [{ id: 55, label: 'K', sectionId: 1, displayOrder: 0 }],
+      blocks: d.blocks.map((b) => ({
+        ...b,
+        seats: b.seats?.map((s) => (s.rowLabel === 'A' ? { ...s, rowLabel: 'K' } : s)),
+      })),
+    };
+    const p = projectDocument(renamed);
+    expect(p.rows.find((r) => r.id === 55)!.label).toBe('K');
+    expect(p.seats.filter((s) => s.rowLabel === 'K').every((s) => s.rowId === 55)).toBe(true);
+  });
+
+  it('gives a document with no rows declared exactly the rows its seats imply', () => {
+    // Every chart saved before 0032 is this case, and it must project without any migration of the blob.
+    const d = seated();
+    delete d.rows;
+    expect(projectDocument(d).rows.map((r) => r.label)).toEqual(['A', 'B', 'C']);
+  });
+});
+
+// §13 and §14 of the specification: numbering options the editor did not have.
+describe('numbering options', () => {
+  it('steps seat numbers, so a row can be 1 3 5 7 9', () => {
+    const nums = [0, 1, 2, 3, 4].map((c) => seatNumberFor(c, 5, 'num-asc', 1, 2));
+    expect(nums).toEqual([1, 3, 5, 7, 9]);
+  });
+
+  it('steps downward too', () => {
+    expect([0, 1, 2].map((c) => seatNumberFor(c, 3, 'num-desc', 1, 2))).toEqual([5, 3, 1]);
+  });
+
+  it('leaves a step of 1 exactly as it was', () => {
+    // Every stored chart has no step at all, so the default must be indistinguishable from before.
+    expect([0, 1, 2].map((c) => seatNumberFor(c, 3))).toEqual([1, 2, 3]);
+    expect([0, 1, 2].map((c) => seatNumberFor(c, 3, 'num-asc', 1, 1))).toEqual([1, 2, 3]);
+  });
+
+  it('suffixes a row label — "A-L", "B-L" for a left-hand block', () => {
+    expect(rowLabelFor(0, 3, 'alpha-asc', '', 0, '-L')).toBe('A-L');
+    expect(rowLabelFor(1, 3, 'alpha-asc', '', 0, '-L')).toBe('B-L');
+  });
+
+  it('combines a prefix and a suffix, still inside the 8-character column', () => {
+    // `seats.row_label` is capped at 8 by the route schema, so this truncates rather than being
+    // refused after the organizer has drawn the block.
+    expect(rowLabelFor(0, 1, 'alpha-asc', 'Row-', 0, '-Left').length).toBeLessThanOrEqual(8);
+  });
+
+  it('pads a seat number for display without touching the stored integer', () => {
+    // `seats.seat_number` is INT, so padding cannot live in the column — it is a rendering concern.
+    expect(seatDisplay(1, 2)).toBe('01');
+    expect(seatDisplay(12, 2)).toBe('12');
+    expect(seatDisplay(7, 3)).toBe('007');
+    expect(seatDisplay(7, 0)).toBe('7');
+    expect(seatDisplay(123, 2)).toBe('123');
   });
 });

@@ -21,7 +21,7 @@ import { layoutApi } from "../../services/catalogClient";
  */
 
 const btn =
-  "rounded-lg border-2 border-beige-kem px-2.5 py-1.5 text-eyebrow font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
+  " border-2 border-beige-kem px-2.5 py-1.5 text-eyebrow font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
 
 export default function ReferenceChartPanel({
   layoutId,
@@ -59,7 +59,7 @@ export default function ReferenceChartPanel({
     );
 
   return (
-    <div className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
+    <div className="border-2 border-beige-kem bg-surface-2 p-4">
       <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-beige-kem/70">
         Bản vẽ tham chiếu
       </h3>
@@ -70,7 +70,7 @@ export default function ReferenceChartPanel({
 
       <input
         type="file"
-        accept="image/jpeg,image/png,image/webp"
+        accept="image/jpeg,image/png,image/webp,image/svg+xml,.svg"
         disabled={busy}
         onChange={(e) => {
           const file = e.target.files?.[0];

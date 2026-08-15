@@ -180,8 +180,7 @@ export default function DatePicker({ label, value, available, onChange }: DatePi
         <CalendarDays className="h-3.5 w-3.5 shrink-0 text-ink-soft" />
         <span className={`truncate ${value ? "" : "text-ink-soft"}`}>{triggerText}</span>
         <ChevronDown
-          className={`ml-auto h-3.5 w-3.5 shrink-0 text-ink-soft transition-transform duration-300 ${
-            open ? "rotate-180" : ""
+          className={`ml-auto h-3.5 w-3.5 shrink-0 text-ink-soft transition-transform duration-300 ${ open ? "rotate-180" : ""
           }`}
         />
       </button>
@@ -200,7 +199,7 @@ export default function DatePicker({ label, value, available, onChange }: DatePi
              */}
             <div className="flex h-5 items-center justify-around bg-burgundy px-4">
               {Array.from({ length: 6 }, (_, i) => (
-                <span key={i} className="h-1.5 w-1.5 rounded-full bg-surface-2" />
+                <span key={i} className="h-1.5 w-1.5 bg-surface-2" />
               ))}
             </div>
 
@@ -284,8 +283,7 @@ export default function DatePicker({ label, value, available, onChange }: DatePi
                     aria-pressed={inBand}
                     onClick={() => clickDay(iso)}
                     onMouseEnter={() => setHovered(iso)}
-                    className={`relative grid h-9 place-items-center font-meta text-body transition ${
-                      isEnd
+                    className={`relative grid h-9 place-items-center font-meta text-body transition ${ isEnd
                         ? "bg-burgundy font-bold text-white"
                         : inBand
                           ? "bg-bubblegum/60 text-on-tint"
@@ -301,7 +299,7 @@ export default function DatePicker({ label, value, available, onChange }: DatePi
                      * events actually are.
                      */}
                     {hasEvents && !isEnd && (
-                      <span className="absolute bottom-1 h-1 w-1 rounded-full bg-burgundy" />
+                      <span className="absolute bottom-1 h-1 w-1 bg-burgundy" />
                     )}
                   </button>
                 );

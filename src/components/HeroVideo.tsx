@@ -338,8 +338,7 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
     >
       <div
         ref={shellRef}
-        className={`flex w-full items-center justify-center overflow-hidden ${
-          plain ? "h-full" : "sticky top-0 h-[100dvh]"
+        className={`flex w-full items-center justify-center overflow-hidden ${ plain ? "h-full" : "sticky top-0 h-[100dvh]"
         }`}
       >
         {/*
@@ -471,7 +470,7 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
                       pointerEvents:
                         "var(--tv-events, auto)" as React.CSSProperties["pointerEvents"],
                     }}
-                    className="grid shrink-0 place-items-center rounded-full text-white/60 transition hover:text-white active:translate-y-px"
+                    className="grid shrink-0 place-items-center text-white/60 transition hover:text-white active:translate-y-px"
                   >
                     {paused ? (
                       <Play
@@ -500,7 +499,7 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
                       0 calc(2px * var(--tv-k, 1)) calc(4px * var(--tv-k, 1)) rgba(0,0,0,0.65)
                     `,
                     }}
-                    className="relative shrink-0 rounded-full"
+                    className="relative shrink-0"
                   >
                     {/* The pointer notch — what makes the disc read as something that turns. */}
                     <div
@@ -510,7 +509,7 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
                         top: "12%",
                         background: "rgba(240,236,226,0.75)",
                       }}
-                      className="absolute left-1/2 -translate-x-1/2 rounded-full"
+                      className="absolute left-1/2 -translate-x-1/2"
                     />
                   </div>
 
@@ -521,7 +520,7 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
                       background: "#ff6a3d",
                       boxShadow: `0 0 calc(7px * var(--tv-k, 1)) rgba(255,106,61,0.9)`,
                     }}
-                    className="shrink-0 rounded-full"
+                    className="shrink-0"
                   />
                 </div>
               </div>
@@ -571,8 +570,7 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
             src={movie.imageUrl}
             alt={movie.title}
             referrerPolicy="no-referrer"
-            className={`absolute inset-0 z-[2] h-full w-full object-cover transition-opacity duration-700 ${
-              showPoster ? "opacity-100" : "opacity-0"
+            className={`absolute inset-0 z-[2] h-full w-full object-cover transition-opacity duration-700 ${ showPoster ? "opacity-100" : "opacity-0"
             }`}
           />
 
@@ -675,8 +673,7 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
         */}
         <div
           ref={typeRef}
-          className={`pointer-events-none absolute inset-0 z-10 flex px-5 sm:px-10 lg:px-[8%] ${
-            plain ? "items-end pb-10" : "items-center pt-24"
+          className={`pointer-events-none absolute inset-0 z-10 flex px-5 sm:px-10 lg:px-[8%] ${ plain ? "items-end pb-10" : "items-center pt-24"
           }`}
         >
           <div
@@ -712,8 +709,7 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
                 className="block max-w-full text-left transition hover:text-cam-dat"
               >
                 <h1
-                  className={`line-clamp-3 font-display font-black uppercase leading-[0.9] tracking-normal ${titleSize(
-                    movie.title,
+                  className={`line-clamp-3 font-display font-black uppercase leading-[0.9] tracking-normal ${titleSize( movie.title,
                   )}`}
                 >
                   {movie.title}

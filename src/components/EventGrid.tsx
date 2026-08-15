@@ -169,8 +169,7 @@ function RuledCard({
   return (
     <article
       onClick={() => onBookNow(evt)}
-      className={`group flex cursor-pointer flex-col border-b border-r border-beige-kem/45 transition-colors ${
-        isActiveHero ? "bg-bubblegum/25" : "bg-surface-2 hover:bg-bubblegum/20"
+      className={`group flex cursor-pointer flex-col border-b border-r border-beige-kem/45 transition-colors ${ isActiveHero ? "bg-bubblegum/25" : "bg-surface-2 hover:bg-bubblegum/20"
       }`}
     >
       {/*
@@ -232,8 +231,7 @@ function RuledCard({
 
           <button
             onClick={stop(() => onToggleWishlist(evt.id))}
-            className={`absolute right-3 top-3 z-20 grid h-9 w-9 place-items-center transition ${
-              isWishlisted
+            className={`absolute right-3 top-3 z-20 grid h-9 w-9 place-items-center transition ${ isWishlisted
                 ? "bg-burgundy text-white"
                 : "bg-black/45 text-white backdrop-blur-sm hover:bg-black/70"
             }`}
@@ -382,8 +380,7 @@ function PlainCard({ evt, isWishlisted, onSelectEvent, onBookNow, onToggleWishli
         */}
         <button
           onClick={stop(() => onToggleWishlist(evt.id))}
-          className={`absolute right-3 top-3 z-20 grid h-9 w-9 place-items-center transition ${
-            isWishlisted
+          className={`absolute right-3 top-3 z-20 grid h-9 w-9 place-items-center transition ${ isWishlisted
               ? "bg-burgundy text-white"
               : "bg-black/45 text-white opacity-0 backdrop-blur-sm hover:bg-black/70 focus-visible:opacity-100 group-hover:opacity-100"
           }`}
@@ -543,8 +540,7 @@ export default function EventGrid({
             {featuredEvents.map((evt, index) => (
               <article
                 key={evt.id}
-                className={`group relative min-h-[300px] overflow-hidden border-b border-r border-beige-kem/25 bg-xanh-pho ${
-                  index === 0 ? "lg:col-span-4" : "lg:col-span-2"
+                className={`group relative min-h-[300px] overflow-hidden border-b border-r border-beige-kem/25 bg-xanh-pho ${ index === 0 ? "lg:col-span-4" : "lg:col-span-2"
                 }`}
               >
                 <img
@@ -628,8 +624,7 @@ export default function EventGrid({
              * rows would otherwise read as one column of text.
              */
             <div
-              className={`grid grid-flow-dense grid-cols-1 gap-x-10 gap-y-14 sm:grid-cols-2 ${
-                sidebar ? "lg:grid-cols-3" : "lg:grid-cols-4"
+              className={`grid grid-flow-dense grid-cols-1 gap-x-10 gap-y-14 sm:grid-cols-2 ${ sidebar ? "lg:grid-cols-3" : "lg:grid-cols-4"
               }`}
             >
               {visible.map((evt) => (
@@ -713,8 +708,7 @@ export default function EventGrid({
                       type="button"
                       onClick={() => goToPage(n)}
                       aria-current={n === current ? "page" : undefined}
-                      className={`min-w-8 px-2 py-1 font-meta text-meta tabular-nums transition ${
-                        n === current
+                      className={`min-w-8 px-2 py-1 font-meta text-meta tabular-nums transition ${ n === current
                           ? "border-b-2 border-burgundy font-bold text-beige-kem"
                           : "text-ink-soft hover:text-beige-kem"
                       }`}

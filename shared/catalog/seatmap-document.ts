@@ -137,6 +137,33 @@ export interface DocumentSeat {
   sectionId?: number | null;
   isAccessible?: boolean;
   seatType?: SeatType;
+  /**
+   * Which `layout_rows` row this seat belongs to (0032). Absent on a seat drawn before rows existed,
+   * or on one the editor has minted this session and not yet saved.
+   *
+   * NOT the seat's identity and never a substitute for `rowLabel`: the label is what the row is
+   * CALLED and what `showtime_seats` snapshots, this is what the row IS. A rename changes the first
+   * and not the second, which is the whole reason it exists.
+   */
+  rowId?: number | null;
+}
+
+/**
+ * A row of seats, as a thing rather than as a string repeated on each of its seats.
+ *
+ * Rows were emergent until 0032 — a row "existed" because several seats shared a `rowLabel`. That is
+ * enough to draw and to sell, and not enough to operate on: inserting a row above B, reversing row C
+ * or renaming row D all had to be search-and-replace across seats, and an empty row could not be
+ * represented at all.
+ *
+ * `id` is negative when minted in the editor and not yet saved, exactly like `DocumentSeat.seatId`.
+ */
+export interface DocumentRow {
+  id: number;
+  label: string;
+  sectionId: number | null;
+  /** Position within its section. Only ever a DISPLAY position — never an identity (§43, §44, §45). */
+  displayOrder: number;
 }
 
 /**
@@ -159,6 +186,16 @@ export interface BlockParams {
   /** Where lettering/numbering starts, so a second block can continue the first. */
   startRowIndex?: number;
   startSeatNumber?: number;
+  /** Appended after a row's letter or number: "A-L", "B-L" for a left-hand block (§14). */
+  rowLabelSuffix?: string;
+  /** How far apart consecutive seat numbers run — 2 gives 1, 3, 5, 7, 9 (§13). Default 1. */
+  seatNumberStep?: number;
+  /**
+   * Zero-padding for the DISPLAYED seat number: 2 shows seat 1 as "01" (§13).
+   *
+   * Presentation only. `seats.seat_number` is an integer and stays one — see `seatDisplay`.
+   */
+  seatNumberPadding?: number;
 }
 
 export interface DocumentBlock {
@@ -211,6 +248,22 @@ export interface DocumentBlock {
    * permission — the projection ignores it entirely, so a locked block sells exactly like any other.
    */
   locked?: boolean;
+  /**
+   * Hidden from the canvas while drawing (§5, §23). Authoring-only, exactly like `locked`.
+   *
+   * The projection never reads it, and must never start to: hiding is how an organizer gets a
+   * finished block out of the way while working behind it, and if it removed seats then tidying the
+   * screen would quietly take a row off sale.
+   */
+  hidden?: boolean;
+  /**
+   * Blocks that move as one (§6). Authoring-only, like `locked` and `hidden`.
+   *
+   * A stage and the surround drawn around it are one thing to the person who drew them and two rows
+   * to the database; this is the difference. The projection ignores it — grouping changes what a
+   * DRAG does, never what is for sale.
+   */
+  groupId?: string;
 }
 
 /**
@@ -230,11 +283,24 @@ export interface ChartDocument {
   sections: DocumentSection[];
   categories: DocumentCategory[];
   blocks: DocumentBlock[];
+  /**
+   * The chart's rows (0032). Optional so every document written before rows existed still parses —
+   * `adoptLayout` and the projection both derive rows from seat labels when this is absent, which is
+   * exactly what they did before.
+   */
+  rows?: DocumentRow[];
 }
 
 /** An empty document, for a layout that has just been created. */
 export function emptyDocument(gridSize = 50): ChartDocument {
-  return { schemaVersion: CHART_DOCUMENT_SCHEMA, gridSize, sections: [], categories: [], blocks: [] };
+  return {
+    schemaVersion: CHART_DOCUMENT_SCHEMA,
+    gridSize,
+    sections: [],
+    categories: [],
+    blocks: [],
+    rows: [],
+  };
 }
 
 /**
@@ -274,6 +340,14 @@ export function upgradeDocument(input: unknown): ChartDocument | null {
     sections: raw.sections,
     categories: raw.categories,
     blocks: raw.blocks,
+    // Named explicitly, like everything above it: this function rebuilds the document field by field
+    // rather than spreading, so a field it does not mention is silently dropped on every read. That is
+    // deliberate — it is what stops an unknown key surviving a schema change — but it means a new
+    // field has to be added HERE as well as to the type, or it round-trips to nothing.
+    //
+    // `?? []` rather than left undefined: a document written before rows existed reads back as a
+    // chart with no rows declared, which is exactly what it is, and the projection derives them.
+    rows: Array.isArray(raw.rows) ? raw.rows : [],
   };
 }
 
@@ -299,12 +373,22 @@ export function stripIds(doc: ChartDocument, mint: () => number): ChartDocument 
 
   const sections = doc.sections.map((s) => ({ ...s, id: remap(sectionMap, s.id) as number }));
   const categories = doc.categories.map((c) => ({ ...c, id: remap(categoryMap, c.id) as number }));
+  // Rows carry real ids too (0032), and a template that kept them would have the same failure mode as
+  // one that kept seat ids: the importing layout's first save would UPDATE rows belonging to another
+  // chart and then delete its own.
+  const rowMap = new Map<number, number>();
+  const rows = doc.rows?.map((r) => ({
+    ...r,
+    id: remap(rowMap, r.id) as number,
+    sectionId: remap(sectionMap, r.sectionId),
+  }));
 
   return {
     ...doc,
     schemaVersion: CHART_DOCUMENT_SCHEMA,
     sections,
     categories,
+    rows,
     blocks: doc.blocks.map((b) => ({
       ...b,
       sectionId: remap(sectionMap, b.sectionId),
@@ -315,6 +399,7 @@ export function stripIds(doc: ChartDocument, mint: () => number): ChartDocument 
         seatId: mint(),
         sectionId: s.sectionId === null || s.sectionId === undefined ? s.sectionId : remap(sectionMap, s.sectionId),
         categoryId: s.categoryId === null || s.categoryId === undefined ? s.categoryId : remap(categoryMap, s.categoryId),
+        rowId: s.rowId === null || s.rowId === undefined ? s.rowId : remap(rowMap, s.rowId),
       })),
     })),
   };
@@ -326,6 +411,8 @@ export interface IdRemap {
   categories: Map<number, number>;
   seats: Map<number, number>;
   tables: Map<number, number>;
+  /** Rows (0032). Optional: on the save path `stitchRows` has already made them real. */
+  rows?: Map<number, number>;
 }
 
 /**
@@ -345,6 +432,20 @@ export function remapDocument(doc: ChartDocument, ids: IdRemap, mint: () => numb
     schemaVersion: CHART_DOCUMENT_SCHEMA,
     sections: doc.sections.map((s) => ({ ...s, id: ids.sections.get(s.id) ?? mint() })),
     categories: doc.categories.map((c) => ({ ...c, id: ids.categories.get(c.id) ?? mint() })),
+    /*
+     * Rows carry a section id too, and it has to be remapped for exactly the reason the blocks' is.
+     *
+     * Missing this was subtle rather than loud: a row drawn into a section created in the same save
+     * kept the section's PLACEHOLDER id, while the seats in it got the real one. Nothing failed — the
+     * document stored and read back fine — but the projection keys rows on `(sectionId, label)`, so
+     * on the NEXT save no stored row matched any seat's row and a second, complete set of rows was
+     * minted. The chart silently doubled its rows on every save.
+     */
+    rows: doc.rows?.map((r) => ({
+      ...r,
+      id: ids.rows?.get(r.id) ?? r.id,
+      sectionId: via(ids.sections, r.sectionId),
+    })),
     blocks: doc.blocks.map((b) => ({
       ...b,
       sectionId: via(ids.sections, b.sectionId),
@@ -531,6 +632,10 @@ export function adoptLayout(layout: Layout, gridSize = 50): ChartDocument {
         rotation: s.rotation,
         isAccessible: s.isAccessible,
         seatType: s.seatType,
+        // Kept for the same reason the colour and geometry of an element are: re-adoption happens
+        // whenever geometry changes outside the document, and handing back seats with no row would
+        // make the next save mint a second set of rows for labels that already have them.
+        rowId: s.rowId,
       })),
     });
   }
@@ -563,5 +668,14 @@ export function adoptLayout(layout: Layout, gridSize = 50): ChartDocument {
     });
   }
 
-  return { schemaVersion: CHART_DOCUMENT_SCHEMA, gridSize, sections, categories, blocks };
+  // The layout's own rows, verbatim. A chart adopted before 0032 simply has none, and the projection
+  // derives them from the seat labels exactly as it did then.
+  const rows: DocumentRow[] = layout.rows.map((r) => ({
+    id: r.id,
+    label: r.label,
+    sectionId: r.sectionId,
+    displayOrder: r.displayOrder,
+  }));
+
+  return { schemaVersion: CHART_DOCUMENT_SCHEMA, gridSize, sections, categories, rows, blocks };
 }

@@ -20,7 +20,7 @@ import type { LayoutSeat, LayoutSection } from "@/shared/catalog/seatmap";
  */
 
 const btn =
-  "rounded-lg border-2 border-beige-kem px-2 py-1 text-xs font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
+  " border-2 border-beige-kem px-2 py-1 text-xs font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
 
 export default function SectionPanel({
   sections,
@@ -60,7 +60,7 @@ export default function SectionPanel({
   };
 
   return (
-    <div className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
+    <div className="border-2 border-beige-kem bg-surface-2 p-4">
       <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">
         Khu vực
       </h3>
@@ -75,7 +75,7 @@ export default function SectionPanel({
           onKeyDown={(e) => e.key === "Enter" && add()}
           maxLength={60}
           placeholder="Tên khu (VD Khu A)"
-          className="h-9 w-full rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-xs text-beige-kem outline-none focus:border-burgundy"
+          className="h-9 w-full border-2 border-beige-kem bg-surface-2 px-3 text-xs text-beige-kem outline-none focus:border-burgundy"
         />
         <button onClick={add} disabled={!name.trim()} className={btn}>
           Thêm
@@ -90,14 +90,13 @@ export default function SectionPanel({
           return (
             <li
               key={id}
-              className={`rounded-lg border-2 p-2 transition ${
-                active ? "border-burgundy bg-burgundy/10" : "border-beige-kem/30"
+              className={`border-2 p-2 transition ${ active ? "border-burgundy bg-burgundy/10" : "border-beige-kem/30"
               }`}
             >
               <div className="flex items-center gap-2">
                 <span
                   aria-hidden="true"
-                  className="h-4 w-4 shrink-0 rounded-sm border-2"
+                  className="h-4 w-4 shrink-0 border-2"
                   style={{ borderColor: color, backgroundColor: `${color}59` }}
                 />
                 {editing === id ? (
@@ -114,7 +113,7 @@ export default function SectionPanel({
                       if (e.key === "Escape") setEditing(null);
                     }}
                     maxLength={60}
-                    className="h-7 min-w-0 flex-1 rounded-md border-2 border-burgundy bg-surface-2 px-2 text-xs text-beige-kem outline-none"
+                    className="h-7 min-w-0 flex-1 border-2 border-burgundy bg-surface-2 px-2 text-xs text-beige-kem outline-none"
                   />
                 ) : (
                   <button
@@ -163,7 +162,7 @@ export default function SectionPanel({
       )}
 
       {orphans > 0 && (
-        <div className="mt-3 rounded-lg border-2 border-bubblegum/60 p-2">
+        <div className="mt-3 border-2 border-bubblegum/60 p-2">
           <p className="font-mono text-[11px] text-beige-kem/70">{orphans} ghế chưa thuộc khu nào.</p>
           <button
             className={`${btn} mt-1.5`}

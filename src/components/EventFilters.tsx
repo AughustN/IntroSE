@@ -95,8 +95,7 @@ function Chip({ label, active, onClick }: { label: string; active: boolean; onCl
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`px-3.5 py-2 font-meta text-body uppercase tracking-[0.1em] transition ${
-        active
+      className={`px-3.5 py-2 font-meta text-body uppercase tracking-[0.1em] transition ${ active
           ? "bg-beige-kem text-xanh-pho"
           : "text-ink-soft hover:bg-bubblegum/40 hover:text-beige-kem"
       }`}
@@ -133,8 +132,7 @@ function OptionRow({
       role="checkbox"
       aria-checked={active}
       onClick={onClick}
-      className={`flex w-full items-center justify-between gap-3 py-1.5 text-left font-meta text-body transition ${
-        active ? "text-beige-kem" : "text-ink-soft hover:text-beige-kem"
+      className={`flex w-full items-center justify-between gap-3 py-1.5 text-left font-meta text-body transition ${ active ? "text-beige-kem" : "text-ink-soft hover:text-beige-kem"
       }`}
     >
       <span className="truncate">{label}</span>
@@ -144,8 +142,7 @@ function OptionRow({
       */}
       <Check
         aria-hidden="true"
-        className={`h-3.5 w-3.5 shrink-0 text-burgundy-ink transition-opacity ${
-          active ? "opacity-100" : "opacity-0"
+        className={`h-3.5 w-3.5 shrink-0 text-burgundy-ink transition-opacity ${ active ? "opacity-100" : "opacity-0"
         }`}
       />
     </button>

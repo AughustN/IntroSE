@@ -29,7 +29,7 @@ const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undef
 type Mode = "login" | "register";
 
 const inputClass =
-  "h-11 w-full rounded-xl border-2 border-beige-kem bg-surface-2 px-4 text-body text-beige-kem outline-none focus:border-burgundy";
+  "h-11 w-full border-2 border-beige-kem bg-surface-2 px-4 text-body text-beige-kem outline-none focus:border-burgundy";
 const labelText = "mb-1.5 block font-meta text-eyebrow text-beige-kem/70";
 
 export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
@@ -139,7 +139,7 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 px-4">
-      <div className="w-full max-w-md rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 text-beige-kem">
+      <div className="w-full max-w-md border-2 border-beige-kem bg-xanh-pho p-6 text-beige-kem">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="font-display text-title-m font-black">
@@ -153,7 +153,7 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
           </div>
           <button
             onClick={onClose}
-            className="grid h-10 place-items-center rounded-xl border-2 border-beige-kem px-3 font-meta text-meta font-bold uppercase text-beige-kem/70 transition hover:text-beige-kem"
+            className="grid h-10 place-items-center border-2 border-beige-kem px-3 font-meta text-meta font-bold uppercase text-beige-kem/70 transition hover:text-beige-kem"
             title="Đóng"
           >
             Đóng
@@ -231,12 +231,12 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
           )}
 
           {error && (
-            <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-eyebrow leading-5 text-on-tint">
+            <div className="border-2 border-beige-kem bg-bubblegum p-3 text-eyebrow leading-5 text-on-tint">
               {error}
             </div>
           )}
           {notice && (
-            <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-eyebrow leading-5 text-on-tint">
+            <div className="border-2 border-beige-kem bg-la-co p-3 text-eyebrow leading-5 text-on-tint">
               {notice}
             </div>
           )}
@@ -244,7 +244,7 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
           <button
             type="submit"
             disabled={busy}
-            className="flex w-full items-center justify-center rounded-xl bg-burgundy px-5 py-3 text-body font-black text-white transition hover:brightness-95 disabled:opacity-60"
+            className="flex w-full items-center justify-center bg-burgundy px-5 py-3 text-body font-black text-white transition hover:brightness-95 disabled:opacity-60"
           >
             {busy ? "Đang xử lý…" : mode === "login" ? "Đăng nhập" : "Tạo tài khoản"}
           </button>
@@ -269,7 +269,7 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
         {GOOGLE_CLIENT_ID ? (
           <div ref={googleBtnRef} className="flex justify-center" />
         ) : (
-          <div className="rounded-xl border-2 border-beige-kem bg-surface-2 p-3 text-center text-eyebrow text-beige-kem/50">
+          <div className="border-2 border-beige-kem bg-surface-2 p-3 text-center text-eyebrow text-beige-kem/50">
             Đăng nhập Google chưa được cấu hình.
           </div>
         )}

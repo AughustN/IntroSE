@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { LAYOUT_SPACE, POLYGON_MAX_POINTS, ZONE_MAX_CAPACITY } from '../../config.js';
+import { LAYOUT_MAX_SEATS, LAYOUT_SPACE, POLYGON_MAX_POINTS, ZONE_MAX_CAPACITY } from '../../config.js';
 
 // Boundary validation for the authoring document (shared/catalog/seatmap-document.ts).
 //
@@ -27,6 +27,8 @@ const documentSeat = z.object({
   sectionId: z.number().int().nullable().optional(),
   isAccessible: z.boolean().optional(),
   seatType: z.enum(['single', 'double', 'standing']).optional(),
+  /** Which `layout_rows` row this seat is in (0032). Optional: absent on every seat drawn before rows. */
+  rowId: z.number().int().nullable().optional(),
 });
 
 const blockParams = z.object({
@@ -42,6 +44,9 @@ const blockParams = z.object({
   seatLabelPrefix: z.string().max(8).optional(),
   startRowIndex: z.number().int().min(0).max(999).optional(),
   startSeatNumber: z.number().int().min(1).max(9999).optional(),
+  rowLabelSuffix: z.string().max(8).optional(),
+  seatNumberStep: z.number().int().min(1).max(100).optional(),
+  seatNumberPadding: z.number().int().min(0).max(6).optional(),
 });
 
 const documentBlock = z.object({
@@ -88,6 +93,8 @@ const documentBlock = z.object({
   seats: z.array(documentSeat).optional(),
   // Authoring-only: the projection never reads it, so a locked block sells like any other.
   locked: z.boolean().optional(),
+  hidden: z.boolean().optional(),
+  groupId: z.string().trim().min(1).max(24).optional(),
   // A drawn outline's fill. Same strict hex as a category: the value ends up in an SVG `fill`, so
   // anything looser would let `url(...)` name a paint server of the caller's choosing.
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
@@ -107,6 +114,25 @@ export const documentSchema = z.object({
       }),
     )
     .max(200),
+  /*
+   * Rows (0032). Optional, because every document stored before rows existed has none and must still
+   * parse — the projection derives them from seat labels in that case.
+   *
+   * Capped well above the seat ceiling's worst case: LAYOUT_MAX_SEATS seats could in principle be
+   * LAYOUT_MAX_SEATS rows of one, so the bound is there to stop an unbounded array rather than to
+   * express a product rule.
+   */
+  rows: z
+    .array(
+      z.object({
+        id: z.number().int(),
+        label: z.string().trim().min(1).max(8),
+        sectionId: z.number().int().nullable(),
+        displayOrder: z.number().int().min(0).max(100_000),
+      }),
+    )
+    .max(LAYOUT_MAX_SEATS)
+    .optional(),
   categories: z
     .array(
       z.object({

@@ -62,8 +62,7 @@ export default function Disclosure({
         )}
         <span
           aria-hidden="true"
-          className={`shrink-0 font-meta text-body leading-none text-ink-soft ${
-            summary ? "" : "ml-auto"
+          className={`shrink-0 font-meta text-body leading-none text-ink-soft ${ summary ? "" : "ml-auto"
           }`}
         >
           {open ? "−" : "+"}

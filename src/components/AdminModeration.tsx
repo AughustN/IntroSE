@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { QueueItem, adminApi } from "../services/catalogClient";
 
 const ghost =
-  "rounded-xl border-2 border-beige-kem px-3 py-2 text-eyebrow font-bold text-beige-kem/80 transition";
+  " border-2 border-beige-kem px-3 py-2 text-eyebrow font-bold text-beige-kem/80 transition";
 
 export default function AdminModeration({ onBack }: { onBack: () => void }) {
   const [queue, setQueue] = useState<QueueItem[]>([]);
@@ -51,12 +51,12 @@ export default function AdminModeration({ onBack }: { onBack: () => void }) {
         </button>
       </div>
       {notice && (
-        <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-eyebrow text-on-tint">
+        <div className="border-2 border-beige-kem bg-la-co p-3 text-eyebrow text-on-tint">
           {notice}
         </div>
       )}
       {err && (
-        <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-eyebrow">
+        <div className="border-2 border-beige-kem bg-bubblegum p-3 text-eyebrow">
           {err}
         </div>
       )}
@@ -70,7 +70,7 @@ export default function AdminModeration({ onBack }: { onBack: () => void }) {
           <p className="text-body text-beige-kem/60">Không có sự kiện nào chờ duyệt.</p>
         )}
         {queue.map((e) => (
-          <div key={e.id} className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
+          <div key={e.id} className="border-2 border-beige-kem bg-surface-2 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="font-display text-title-s font-bold">{e.title}</div>
@@ -81,7 +81,7 @@ export default function AdminModeration({ onBack }: { onBack: () => void }) {
               <div className="flex gap-2">
                 <button
                   onClick={() => act(() => adminApi.approve(e.id).then(() => {}), "Đã duyệt.")}
-                  className="rounded-xl bg-la-co px-4 py-2 text-body font-black text-on-tint transition hover:brightness-95"
+                  className="bg-la-co px-4 py-2 text-body font-black text-on-tint transition hover:brightness-95"
                 >
                   Duyệt
                 </button>
@@ -91,7 +91,7 @@ export default function AdminModeration({ onBack }: { onBack: () => void }) {
                     if (reason)
                       act(() => adminApi.reject(e.id, reason).then(() => {}), "Đã từ chối.");
                   }}
-                  className="rounded-xl bg-bubblegum px-4 py-2 text-body font-black text-on-tint transition hover:brightness-95"
+                  className="bg-bubblegum px-4 py-2 text-body font-black text-on-tint transition hover:brightness-95"
                 >
                   Từ chối
                 </button>

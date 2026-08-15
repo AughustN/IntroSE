@@ -26,9 +26,9 @@ import { seatsInRect } from "./layoutOps";
  */
 
 const btn =
-  "rounded-lg border-2 border-beige-kem px-2.5 py-1.5 text-xs font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
+  " border-2 border-beige-kem px-2.5 py-1.5 text-xs font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
 const primary =
-  "rounded-lg bg-burgundy px-3 py-1.5 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-40";
+  " bg-burgundy px-3 py-1.5 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-40";
 
 const KIND_LABEL: Record<string, string> = {
   add: "Thêm",
@@ -176,7 +176,7 @@ export default function ShowtimeMapPanel({
     });
 
   return (
-    <div className="space-y-3 rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
+    <div className="space-y-3 border-2 border-beige-kem bg-surface-2 p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">
           Sơ đồ của suất chiếu
@@ -187,19 +187,19 @@ export default function ShowtimeMapPanel({
       </div>
 
       {error && (
-        <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-xs text-on-tint">
+        <div className="border-2 border-beige-kem bg-bubblegum p-3 text-xs text-on-tint">
           {error}
         </div>
       )}
       {notice && (
-        <div className="rounded-xl border-2 border-beige-kem bg-la-co p-3 text-xs text-on-tint">
+        <div className="border-2 border-beige-kem bg-la-co p-3 text-xs text-on-tint">
           {notice}
         </div>
       )}
 
       {map && seats.length > 0 && (
         <>
-          <div className="rounded-xl border-2 border-beige-kem/40 p-2">
+          <div className="border-2 border-beige-kem/40 p-2">
             <SeatCanvas<ShowtimeMapSeat>
               ref={canvas}
               seats={seats}
@@ -269,7 +269,7 @@ export default function ShowtimeMapPanel({
                 key={String(b.id)}
                 type="button"
                 onClick={() => zoomToBlock(b.id)}
-                className="flex items-center gap-2 rounded-md px-1 py-0.5 transition hover:text-beige-kem"
+                className="flex items-center gap-2 px-1 py-0.5 transition hover:text-beige-kem"
               >
                 <span
                   aria-hidden="true"
@@ -337,7 +337,7 @@ export default function ShowtimeMapPanel({
         <select
           value={tierId}
           onChange={(e) => setTierId(Number(e.target.value) || "")}
-          className="h-9 rounded-lg border-2 border-beige-kem bg-surface-2 px-2 text-xs text-beige-kem outline-none"
+          className="h-9 border-2 border-beige-kem bg-surface-2 px-2 text-xs text-beige-kem outline-none"
         >
           <option value="" className="bg-xanh-pho">
             Hạng vé
@@ -390,7 +390,7 @@ export default function ShowtimeMapPanel({
       </div>
 
       {preview && (
-        <div className="rounded-xl border-2 border-beige-kem/40 p-3">
+        <div className="border-2 border-beige-kem/40 p-3">
           <p className="font-mono text-[11px] text-beige-kem/60">
             {preview.changes.length} thay đổi · {preview.refusals.length} bị từ chối
           </p>
@@ -402,7 +402,7 @@ export default function ShowtimeMapPanel({
             ))}
             {preview.refusals.map((r, i) => (
               <li key={`r${i}`} className="text-on-tint">
-                ✕ {r.message}
+                — {r.message}
               </li>
             ))}
           </ul>

@@ -125,3 +125,26 @@ describe('the seat map library', () => {
     await request(app).post(`/api/organizer/layouts/${layoutId}/archive`).set(other.h).expect(403);
   });
 });
+
+describe('starting a chart from a template (§33)', () => {
+  it('gives a copy that is NOT itself a template', async () => {
+    const o = await organizer();
+    const { venue, layoutId } = await venueWithChart(o, 'Nhà hát A', 'Sơ đồ gốc');
+    await request(app).post(`/api/organizer/layouts/${layoutId}/save-as-template`).set(o.h)
+      .send({ name: 'Nhà hát chuẩn' }).expect(201);
+
+    const templates = (await request(app).get('/api/organizer/layouts').set(o.h).expect(200)).body.layouts
+      .filter((l: { isTemplate: boolean }) => l.isTemplate);
+    expect(templates.length).toBeGreaterThan(0);
+
+    // "Dùng mẫu" is a clone. If the copy inherited `is_template`, every chart ever started from a
+    // template would show up in the template tab — so the flag must not travel.
+    const copy = (
+      await request(app).post(`/api/organizer/layouts/${templates[0].id}/clone`).set(o.h)
+        .send({ targetVenueId: venue, name: 'Từ mẫu' }).expect(201)
+    ).body;
+    const read = (await request(app).get(`/api/organizer/layouts/${copy.id}`).set(o.h).expect(200)).body;
+    expect(read.isTemplate).toBe(false);
+    expect(read.status).toBe('draft');
+  });
+});

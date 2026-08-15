@@ -1,36 +1,49 @@
 import { describe, expect, it } from "vitest";
 import { CHART_DOCUMENT_SCHEMA, emptyDocument } from "@/shared/catalog/seatmap-document";
-import { projectDocument } from "@/shared/catalog/seatmap-project";
+import { letterIndex, projectDocument } from "@/shared/catalog/seatmap-project";
 import { LAYOUT_MAX_SEATS, LAYOUT_SPACE, validateLayout } from "@/shared/catalog/seatmap-validate";
 import {
   addBlock,
   addCategory,
   addSection,
   alignBlocks,
+  angleFromPointer,
   assignCategory,
   assignSection,
+  distributeBlocks,
   duplicateBlocks,
+  flipBlocks,
   EDITABLE_SEAT_TYPES,
   formatBlockDrag,
   geometryPoints,
+  groupBlocks,
+  hasPlaceholderIds,
   parseBlockDrag,
   moveBlocks,
   nextBlockContext,
+  copyBlocks,
+  pasteBlocks,
   remainingBudget,
   removeBlocks,
   removeCategory,
   repackRowLabels,
   removeSection,
+  resizedBox,
   rotateBlocks,
   seatCount,
   selectionAfterPress,
   selectionBounds,
   setBlockColor,
+  setRotation,
   setSeatType,
   setBlockParams,
+  setHidden,
+  snapToObjects,
   setLocked,
   updateBlock,
+  ungroupBlocks,
   updateSeats,
+  withGroups,
 } from "./documentOps";
 
 // Block-level editing. The property these circle is the one the whole feature rests on: re-shaping a
@@ -1319,5 +1332,651 @@ describe("seat types", () => {
     const before = c.doc.blocks.find((b) => b.key === c.key)!.seats![0];
     const after = setSeatType(c.doc, [c.refs[0]], "double").blocks.find((b) => b.key === c.key)!.seats![0];
     expect({ ...after, seatType: undefined }).toEqual({ ...before, seatType: undefined });
+  });
+});
+
+// Rows have ids now (0032), so a renumber has to move the LABEL and leave the row itself alone —
+// otherwise the row that was F is abandoned and a brand-new row A appears in its place.
+describe("re-lettering keeps a row's identity", () => {
+  const chart = () => {
+    let d = emptyDocument();
+    const sec = addSection(d, "Khu A");
+    d = sec.doc;
+    const first = addBlock(d, "seating-block", { x: 1000, y: 1000 }, { sectionId: sec.id });
+    d = first.doc;
+    const second = addBlock(d, "seating-block", { x: 5000, y: 1000 }, { sectionId: sec.id });
+    // Give the second block's rows real ids, as a save would have.
+    const doc: ReturnType<typeof emptyDocument> = {
+      ...second.doc,
+      rows: ["F", "G", "H", "I", "J"].map((label, i) => ({
+        id: 100 + i,
+        label,
+        sectionId: sec.id,
+        displayOrder: 5 + i,
+      })),
+      blocks: second.doc.blocks.map((b) =>
+        b.key === second.key
+          ? { ...b, seats: b.seats?.map((s) => ({ ...s, rowId: 100 + (letterIndex(s.rowLabel) ?? 5) - 5 })) }
+          : b,
+      ),
+    };
+    return { doc, sec: sec.id, first: first.key, second: second.key };
+  };
+
+  it("renames the row rather than abandoning it", () => {
+    const c = chart();
+    const after = repackRowLabels(removeBlocks(c.doc, new Set([c.first])));
+    // Row 100 was F and is now A — same row, new label.
+    expect(after.rows?.find((r) => r.id === 100)?.label).toBe("A");
+    expect(after.rows?.map((r) => r.label)).toEqual(["A", "B", "C", "D", "E"]);
+  });
+
+  it("leaves every row id in place", () => {
+    const c = chart();
+    const after = repackRowLabels(removeBlocks(c.doc, new Set([c.first])));
+    expect(after.rows?.map((r) => r.id).sort((a, b) => a - b)).toEqual([100, 101, 102, 103, 104]);
+  });
+
+  it("keeps each seat pointing at the row it was already in", () => {
+    const c = chart();
+    const after = repackRowLabels(removeBlocks(c.doc, new Set([c.first])));
+    const seats = after.blocks.find((b) => b.key === c.second)!.seats!;
+    // Every seat now in row A must carry row 100 — the row that used to be F.
+    expect(seats.filter((s) => s.rowLabel === "A").every((s) => s.rowId === 100)).toBe(true);
+  });
+
+  it("projects without minting a second row for the new label", () => {
+    // The failure this guards: the stored row stays "F" with no seats, a new row "A" is minted, and
+    // the chart quietly grows a duplicate row on every renumber.
+    const c = chart();
+    const after = repackRowLabels(removeBlocks(c.doc, new Set([c.first])));
+    const p = projectDocument(after);
+    expect(p.rows).toHaveLength(5);
+    expect(p.rows.every((r) => r.id > 0)).toBe(true);
+  });
+});
+
+describe("deleting a block takes its rows with it", () => {
+  const chart = () => {
+    let d = emptyDocument();
+    const sec = addSection(d, "Khu A");
+    d = sec.doc;
+    const first = addBlock(d, "seating-block", { x: 1000, y: 1000 }, { sectionId: sec.id });
+    d = first.doc;
+    const second = addBlock(d, "seating-block", { x: 5000, y: 1000 }, { sectionId: sec.id });
+    const rows = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"].map((label, i) => ({
+      id: 100 + i,
+      label,
+      sectionId: sec.id,
+      displayOrder: i,
+    }));
+    const withRows = {
+      ...second.doc,
+      rows,
+      blocks: second.doc.blocks.map((b) => ({
+        ...b,
+        seats: b.seats?.map((s) => ({ ...s, rowId: 100 + (letterIndex(s.rowLabel) ?? 0) })),
+      })),
+    };
+    return { doc: withRows, first: first.key, second: second.key };
+  };
+
+  it("drops the rows the deleted block emptied", () => {
+    const after = removeBlocks(chart().doc, new Set([chart().first]));
+    expect(after.rows?.map((r) => r.label)).toEqual(["F", "G", "H", "I", "J"]);
+  });
+
+  it("keeps a row that still has seats in another block", () => {
+    // Two blocks can legitimately share a section; only rows left with nothing go.
+    const c = chart();
+    const shared = {
+      ...c.doc,
+      blocks: c.doc.blocks.map((b) =>
+        b.key === c.second ? { ...b, seats: b.seats?.map((s) => ({ ...s, rowId: 100 })) } : b,
+      ),
+    };
+    expect(removeBlocks(shared, new Set([c.first])).rows?.some((r) => r.id === 100)).toBe(true);
+  });
+
+  it("keeps a row that never had seats — an empty row is deliberate", () => {
+    const c = chart();
+    const withEmpty = { ...c.doc, rows: [...(c.doc.rows ?? []), { id: 900, label: "Z", sectionId: 1, displayOrder: 99 }] };
+    expect(removeBlocks(withEmpty, new Set([c.first])).rows?.some((r) => r.id === 900)).toBe(true);
+  });
+
+  it("leaves no two rows sharing a label after a delete and repack", () => {
+    // The failure this guards: the deleted block's rows stayed behind still called A–E while the
+    // survivors were renumbered onto A–E, so the save presented two rows called "A" in one section
+    // and `layout_rows_label_idx` refused it.
+    const c = chart();
+    const after = repackRowLabels(removeBlocks(c.doc, new Set([c.first])));
+    const keys = (after.rows ?? []).map((r) => `${r.sectionId}|${r.label}`);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
+// §26 distribute and §7 flip: the two selection operations the align toolbar was missing.
+describe("distributing blocks", () => {
+  const three = () => {
+    let d = emptyDocument();
+    const a = addBlock(d, "stage", { x: 1000, y: 1000 });
+    d = a.doc;
+    const b = addBlock(d, "stage", { x: 1200, y: 1000 });
+    d = b.doc;
+    const c = addBlock(d, "stage", { x: 5000, y: 1000 });
+    return { doc: c.doc, keys: new Set([a.key, b.key, c.key]), a: a.key, b: b.key, c: c.key };
+  };
+  const xOf = (d: ReturnType<typeof emptyDocument>, key: string) => d.blocks.find((x) => x.key === key)!.x;
+
+  it("spaces them evenly between the two ends", () => {
+    const t = three();
+    const after = distributeBlocks(t.doc, t.keys, "horizontal");
+    expect(xOf(after, t.a)).toBe(1000);
+    expect(xOf(after, t.c)).toBe(5000);
+    expect(xOf(after, t.b)).toBe(3000);
+  });
+
+  it("leaves the outermost two where they are — they define the span", () => {
+    const t = three();
+    const after = distributeBlocks(t.doc, t.keys, "horizontal");
+    expect(xOf(after, t.a)).toBe(xOf(t.doc, t.a));
+    expect(xOf(after, t.c)).toBe(xOf(t.doc, t.c));
+  });
+
+  it("does nothing to fewer than three — there is no gap to even out", () => {
+    const t = three();
+    expect(distributeBlocks(t.doc, new Set([t.a, t.b]), "horizontal")).toBe(t.doc);
+  });
+
+  it("distributes vertically on the other axis", () => {
+    let d = emptyDocument();
+    const a = addBlock(d, "stage", { x: 1000, y: 1000 });
+    d = a.doc;
+    const b = addBlock(d, "stage", { x: 1000, y: 1100 });
+    d = b.doc;
+    const c = addBlock(d, "stage", { x: 1000, y: 3000 });
+    const after = distributeBlocks(c.doc, new Set([a.key, b.key, c.key]), "vertical");
+    expect(after.blocks.find((x) => x.key === b.key)!.y).toBe(2000);
+  });
+});
+
+describe("flipping a selection", () => {
+  const seated = () => {
+    const made = addBlock(emptyDocument(), "seating-block", { x: 3000, y: 3000 });
+    return { doc: made.doc, key: made.key };
+  };
+  const seats = (d: ReturnType<typeof emptyDocument>, key: string) =>
+    d.blocks.find((b) => b.key === key)!.seats!;
+
+  it("mirrors the seats horizontally", () => {
+    const c = seated();
+    const before = seats(c.doc, c.key).map((s) => s.dx);
+    const after = seats(flipBlocks(c.doc, new Set([c.key]), "horizontal"), c.key).map((s) => s.dx);
+    const span = Math.min(...before) + Math.max(...before);
+    expect(after).toEqual(before.map((dx) => span - dx));
+  });
+
+  it("keeps every seat id and label — a flip moves seats, it does not rename them", () => {
+    const c = seated();
+    const before = seats(c.doc, c.key);
+    const after = seats(flipBlocks(c.doc, new Set([c.key]), "horizontal"), c.key);
+    expect(after.map((s) => s.seatId)).toEqual(before.map((s) => s.seatId));
+    expect(after.map((s) => `${s.rowLabel}${s.seatNumber}`)).toEqual(
+      before.map((s) => `${s.rowLabel}${s.seatNumber}`),
+    );
+  });
+
+  it("is its own inverse", () => {
+    const c = seated();
+    const twice = flipBlocks(flipBlocks(c.doc, new Set([c.key]), "horizontal"), new Set([c.key]), "horizontal");
+    expect(seats(twice, c.key).map((s) => s.dx)).toEqual(seats(c.doc, c.key).map((s) => s.dx));
+  });
+
+  it("mirrors vertically on the other axis", () => {
+    const c = seated();
+    const before = seats(c.doc, c.key).map((s) => s.dy);
+    const after = seats(flipBlocks(c.doc, new Set([c.key]), "vertical"), c.key).map((s) => s.dy);
+    const span = Math.min(...before) + Math.max(...before);
+    expect(after).toEqual(before.map((dy) => span - dy));
+  });
+
+  it("leaves a locked block alone", () => {
+    const c = seated();
+    const locked = setLocked(c.doc, new Set([c.key]), true);
+    expect(seats(flipBlocks(locked, new Set([c.key]), "horizontal"), c.key)).toEqual(seats(locked, c.key));
+  });
+
+  it("mirrors a drawn shape's outline too", () => {
+    const made = addBlock(emptyDocument(), "shape", { x: 3000, y: 3000 }, { geometry: "triangle" });
+    const before = made.doc.blocks[0].points!.map((p) => p.x);
+    const after = flipBlocks(made.doc, new Set([made.key]), "horizontal").blocks[0].points!.map((p) => p.x);
+    const span = Math.min(...before) + Math.max(...before);
+    expect(after).toEqual(before.map((x) => span - x));
+  });
+});
+
+// §5 and §23: an object can be hidden while it is being worked around. Hiding is a VIEW state.
+describe("hiding blocks", () => {
+  const chart = () => {
+    const made = addBlock(emptyDocument(), "seating-block", { x: 2000, y: 2000 });
+    return { doc: made.doc, key: made.key };
+  };
+
+  it("marks the block hidden", () => {
+    const c = chart();
+    expect(setHidden(c.doc, new Set([c.key]), true).blocks[0].hidden).toBe(true);
+  });
+
+  it("shows it again", () => {
+    const c = chart();
+    const hidden = setHidden(c.doc, new Set([c.key]), true);
+    expect(setHidden(hidden, new Set([c.key]), false).blocks[0].hidden).toBe(false);
+  });
+
+  it("does NOT change what is for sale — a hidden block still projects every seat", () => {
+    // The property that makes hiding safe. It is a view state for the person drawing, and the
+    // projection is what sells; if hiding removed seats, an organizer tidying their screen would
+    // silently take a row off sale.
+    const c = chart();
+    const before = projectDocument(c.doc);
+    const after = projectDocument(setHidden(c.doc, new Set([c.key]), true));
+    expect(after.seats).toHaveLength(before.seats.length);
+    expect(after.seats.map((s) => s.rowLabel)).toEqual(before.seats.map((s) => s.rowLabel));
+  });
+
+  it("hides a LOCKED block too — locking protects from edits, not from the eye", () => {
+    const c = chart();
+    const locked = setLocked(c.doc, new Set([c.key]), true);
+    expect(setHidden(locked, new Set([c.key]), true).blocks[0].hidden).toBe(true);
+  });
+});
+
+// §27 copy/paste. Ctrl+D duplicates in place; this is the pair that crosses a gap in time — copy now,
+// paste after panning somewhere else, or paste twice.
+describe("copying and pasting blocks", () => {
+  const chart = () => {
+    let d = emptyDocument();
+    const sec = addSection(d, "Khu A");
+    d = sec.doc;
+    const a = addBlock(d, "seating-block", { x: 2000, y: 2000 }, { sectionId: sec.id });
+    d = a.doc;
+    const b = addBlock(d, "stage", { x: 5000, y: 500 });
+    return { doc: b.doc, sec: sec.id, a: a.key, b: b.key };
+  };
+
+  it("copies exactly what was selected", () => {
+    const c = chart();
+    expect(copyBlocks(c.doc, new Set([c.a])).map((x) => x.key)).toEqual([c.a]);
+    expect(copyBlocks(c.doc, new Set([c.a, c.b]))).toHaveLength(2);
+  });
+
+  it("pastes with FRESH keys and FRESH seat ids (§42 Rule 4)", () => {
+    const c = chart();
+    const clip = copyBlocks(c.doc, new Set([c.a]));
+    const after = pasteBlocks(c.doc, clip, { x: 400, y: 400 });
+    expect(after.doc.blocks).toHaveLength(3);
+
+    const pasted = after.doc.blocks.find((x) => after.keys.has(x.key))!;
+    const originalSeatIds = new Set(c.doc.blocks.find((x) => x.key === c.a)!.seats!.map((s) => s.seatId));
+    expect(pasted.key).not.toBe(c.a);
+    expect(pasted.seats!.every((s) => !originalSeatIds.has(s.seatId))).toBe(true);
+  });
+
+  it("lands the copy where it was asked for, not on top of the original", () => {
+    const c = chart();
+    const clip = copyBlocks(c.doc, new Set([c.a]));
+    const after = pasteBlocks(c.doc, clip, { x: 400, y: 400 });
+    const pasted = after.doc.blocks.find((x) => after.keys.has(x.key))!;
+    expect(pasted.x).toBe(2400);
+    expect(pasted.y).toBe(2400);
+  });
+
+  it("can be pasted twice without the two copies colliding", () => {
+    const c = chart();
+    const clip = copyBlocks(c.doc, new Set([c.a]));
+    const once = pasteBlocks(c.doc, clip, { x: 400, y: 0 });
+    const twice = pasteBlocks(once.doc, clip, { x: 800, y: 0 });
+    const keys = twice.doc.blocks.map((b) => b.key);
+    expect(new Set(keys).size).toBe(keys.length);
+    const ids = twice.doc.blocks.flatMap((b) => (b.seats ?? []).map((s) => s.seatId));
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("gives the paste no row ids — a pasted row is a new row", () => {
+    const c = chart();
+    const clip = copyBlocks(c.doc, new Set([c.a]));
+    const after = pasteBlocks(c.doc, clip, { x: 400, y: 400 });
+    const pasted = after.doc.blocks.find((x) => after.keys.has(x.key))!;
+    expect(pasted.seats!.every((s) => s.rowId == null)).toBe(true);
+  });
+
+  it("carries a drawn shape's outline to where it was pasted", () => {
+    const made = addBlock(emptyDocument(), "shape", { x: 3000, y: 3000 }, { geometry: "square" });
+    const clip = copyBlocks(made.doc, new Set([made.key]));
+    const after = pasteBlocks(made.doc, clip, { x: 1000, y: 0 });
+    const pasted = after.doc.blocks.find((x) => after.keys.has(x.key))!;
+    const before = made.doc.blocks[0].points!.map((p) => p.x);
+    expect(pasted.points!.map((p) => p.x)).toEqual(before.map((x) => x + 1000));
+  });
+
+  it("pastes nothing from an empty clipboard", () => {
+    const c = chart();
+    expect(pasteBlocks(c.doc, [], { x: 100, y: 100 }).doc).toBe(c.doc);
+  });
+});
+
+// §25: snap to object, not only to the grid. Aligning two blocks by eye at 4,000 units across is
+// guesswork; the grid does not help, because a 50-unit cell means "near enough" is still 50 out.
+describe("snapping a drag to nearby blocks", () => {
+  const chart = () => {
+    let d = emptyDocument();
+    const anchor = addBlock(d, "stage", { x: 3000, y: 2000 });
+    d = anchor.doc;
+    const moving = addBlock(d, "stage", { x: 6000, y: 5000 });
+    return { doc: moving.doc, anchor: anchor.key, moving: moving.key };
+  };
+
+  it("pulls a near-miss onto the other block's centre line", () => {
+    const c = chart();
+    // 40 units off in x: inside the threshold, so it should land exactly on 3000.
+    const snapped = snapToObjects(c.doc, new Set([c.moving]), { x: 3040, y: 5000 }, 120);
+    expect(snapped.x).toBe(3000);
+    expect(snapped.guides.some((g) => g.axis === "x" && g.at === 3000)).toBe(true);
+  });
+
+  it("leaves a position that is not near anything alone", () => {
+    const c = chart();
+    const snapped = snapToObjects(c.doc, new Set([c.moving]), { x: 7000, y: 5000 }, 120);
+    expect(snapped.x).toBe(7000);
+    expect(snapped.y).toBe(5000);
+    expect(snapped.guides).toEqual([]);
+  });
+
+  it("snaps both axes independently", () => {
+    const c = chart();
+    const snapped = snapToObjects(c.doc, new Set([c.moving]), { x: 3030, y: 2030 }, 120);
+    expect(snapped.x).toBe(3000);
+    expect(snapped.y).toBe(2000);
+    expect(snapped.guides).toHaveLength(2);
+  });
+
+  it("never snaps to a block that is itself being dragged", () => {
+    // Otherwise a multi-block drag locks onto its own members and cannot be moved at all.
+    const c = chart();
+    const both = new Set([c.moving, c.anchor]);
+    const snapped = snapToObjects(c.doc, both, { x: 3040, y: 5000 }, 120);
+    expect(snapped.x).toBe(3040);
+  });
+
+  it("takes the NEAREST candidate when two are in range", () => {
+    let d = emptyDocument();
+    const a = addBlock(d, "stage", { x: 3000, y: 1000 });
+    d = a.doc;
+    // `addBlock` snaps to the 50-unit grid, so this block lands on 3100, not 3080.
+    const b = addBlock(d, "stage", { x: 3080, y: 1500 });
+    d = b.doc;
+    const m = addBlock(d, "stage", { x: 6000, y: 5000 });
+    expect(b.doc.blocks.find((x) => x.key === b.key)!.x).toBe(3100);
+
+    // 3060 is 60 from 3000 and 40 from 3100: both inside the threshold, and the nearer one wins.
+    const snapped = snapToObjects(m.doc, new Set([m.key]), { x: 3060, y: 5000 }, 120);
+    expect(snapped.x).toBe(3100);
+  });
+
+  it("ignores hidden and locked blocks as anchors", () => {
+    // A hidden block is not on screen to align against, and a locked one is usually scenery.
+    const c = chart();
+    const hidden = setHidden(c.doc, new Set([c.anchor]), true);
+    expect(snapToObjects(hidden, new Set([c.moving]), { x: 3040, y: 5000 }, 120).x).toBe(3040);
+  });
+
+  it("does nothing when the threshold is zero", () => {
+    const c = chart();
+    const snapped = snapToObjects(c.doc, new Set([c.moving]), { x: 3040, y: 5000 }, 0);
+    expect(snapped.x).toBe(3040);
+    expect(snapped.guides).toEqual([]);
+  });
+});
+
+// §6: group and ungroup. Selecting one member selects the group, so a stage and its surround move as
+// the one thing the organizer thinks of them as.
+describe("grouping blocks", () => {
+  const three = () => {
+    let d = emptyDocument();
+    const a = addBlock(d, "stage", { x: 1000, y: 1000 });
+    d = a.doc;
+    const b = addBlock(d, "aisle", { x: 2000, y: 1000 });
+    d = b.doc;
+    const c = addBlock(d, "bar", { x: 8000, y: 8000 });
+    return { doc: c.doc, a: a.key, b: b.key, c: c.key };
+  };
+  const groupOf = (d: ReturnType<typeof emptyDocument>, key: string) =>
+    d.blocks.find((x) => x.key === key)!.groupId;
+
+  it("gives every member the same group id", () => {
+    const t = three();
+    const after = groupBlocks(t.doc, new Set([t.a, t.b]));
+    expect(groupOf(after, t.a)).toBeTruthy();
+    expect(groupOf(after, t.a)).toBe(groupOf(after, t.b));
+    expect(groupOf(after, t.c)).toBeUndefined();
+  });
+
+  it("refuses to group fewer than two — a group of one is just a block", () => {
+    const t = three();
+    expect(groupBlocks(t.doc, new Set([t.a]))).toBe(t.doc);
+  });
+
+  it("gives a second group a different id", () => {
+    const t = three();
+    const one = groupBlocks(t.doc, new Set([t.a, t.b]));
+    const d = addBlock(one, "door", { x: 5000, y: 5000 });
+    const two = groupBlocks(d.doc, new Set([t.c, d.key]));
+    expect(groupOf(two, t.c)).not.toBe(groupOf(two, t.a));
+  });
+
+  it("ungroups every member, not only the one clicked", () => {
+    const t = three();
+    const grouped = groupBlocks(t.doc, new Set([t.a, t.b]));
+    const after = ungroupBlocks(grouped, new Set([t.a]));
+    expect(groupOf(after, t.a)).toBeUndefined();
+    expect(groupOf(after, t.b)).toBeUndefined();
+  });
+
+  it("expands a selection to whole groups", () => {
+    // What makes a group feel like one object: clicking any member selects all of it.
+    const t = three();
+    const grouped = groupBlocks(t.doc, new Set([t.a, t.b]));
+    expect(withGroups(grouped, new Set([t.a]))).toEqual(new Set([t.a, t.b]));
+  });
+
+  it("leaves an ungrouped selection exactly as it was", () => {
+    const t = three();
+    expect(withGroups(t.doc, new Set([t.c]))).toEqual(new Set([t.c]));
+  });
+
+  it("moves a group as one when any member is dragged", () => {
+    const t = three();
+    const grouped = groupBlocks(t.doc, new Set([t.a, t.b]));
+    const moved = moveBlocks(grouped, withGroups(grouped, new Set([t.a])), 500, 0, false);
+    expect(moved.blocks.find((x) => x.key === t.a)!.x).toBe(1500);
+    expect(moved.blocks.find((x) => x.key === t.b)!.x).toBe(2500);
+  });
+});
+
+// §6: resize handles. Dragging a corner is how every visual editor sizes an object; the inspector's
+// number fields are the precise route, not the only one.
+describe("resizing by a handle", () => {
+  const box = { x: 5000, y: 5000, width: 1000, height: 600 };
+
+  it("drags the right edge without moving the left one", () => {
+    const after = resizedBox(box, "e", 200, 0);
+    expect(after.width).toBe(1200);
+    expect(after.height).toBe(600);
+    // The centre shifts by half the growth, which is what keeps the left edge still.
+    expect(after.x).toBe(5100);
+    expect(after.y).toBe(5000);
+  });
+
+  it("drags the left edge without moving the right one", () => {
+    const after = resizedBox(box, "w", -200, 0);
+    expect(after.width).toBe(1200);
+    expect(after.x).toBe(4900);
+  });
+
+  it("drags a corner on both axes at once", () => {
+    const after = resizedBox(box, "se", 200, 100);
+    expect(after.width).toBe(1200);
+    expect(after.height).toBe(700);
+    expect(after.x).toBe(5100);
+    expect(after.y).toBe(5050);
+  });
+
+  it("never inverts a block through zero", () => {
+    // Dragging the right edge past the left would otherwise give a negative width, which renders as
+    // nothing and saves as a CHECK violation.
+    const after = resizedBox(box, "e", -5000, 0);
+    expect(after.width).toBeGreaterThan(0);
+  });
+
+  it("keeps the far edge still even when it hits the minimum", () => {
+    const after = resizedBox(box, "w", 5000, 0);
+    expect(after.width).toBeGreaterThan(0);
+    // Right edge was 5500 before and stays there.
+    expect(after.x + after.width / 2).toBe(5500);
+  });
+
+  it("stays inside the map", () => {
+    const edge = { x: 9800, y: 5000, width: 400, height: 400 };
+    const after = resizedBox(edge, "e", 2000, 0);
+    expect(after.x + after.width / 2).toBeLessThanOrEqual(LAYOUT_SPACE);
+  });
+
+  it("does nothing on a zero drag", () => {
+    expect(resizedBox(box, "se", 0, 0)).toEqual(box);
+  });
+});
+
+// The precondition for a safe autosave (§29): a document whose every id is already real.
+describe("telling a saved document from one holding placeholders", () => {
+  it("sees the placeholders in a freshly drawn chart", () => {
+    let d = emptyDocument();
+    const sec = addSection(d, "Khu A");
+    d = sec.doc;
+    d = addBlock(d, "seating-block", { x: 2000, y: 2000 }, { sectionId: sec.id }).doc;
+    expect(hasPlaceholderIds(d)).toBe(true);
+  });
+
+  it("sees none once every id is real", () => {
+    // What a document looks like after a save: the server has stitched its own ids in.
+    let d = emptyDocument();
+    const sec = addSection(d, "Khu A");
+    d = sec.doc;
+    d = addBlock(d, "seating-block", { x: 2000, y: 2000 }, { sectionId: sec.id }).doc;
+    const saved: ReturnType<typeof emptyDocument> = {
+      ...d,
+      sections: d.sections.map((s, i) => ({ ...s, id: 100 + i })),
+      categories: d.categories.map((c, i) => ({ ...c, id: 200 + i })),
+      rows: (d.rows ?? []).map((r, i) => ({ ...r, id: 300 + i, sectionId: 100 })),
+      blocks: d.blocks.map((b) => ({
+        ...b,
+        sectionId: b.sectionId === null ? null : 100,
+        categoryId: b.categoryId === null ? null : 200,
+        seats: b.seats?.map((s, i) => ({ ...s, seatId: 1000 + i, rowId: 300 })),
+      })),
+    };
+    expect(hasPlaceholderIds(saved)).toBe(false);
+  });
+
+  it("catches a single new block added to an otherwise saved chart", () => {
+    // The case that matters: one new block is enough to make a quiet save unsafe, because the server
+    // will hand back ids the editor must take.
+    let d = emptyDocument();
+    d = { ...d, sections: [{ id: 100, name: "Khu A" }] };
+    const made = addBlock(d, "stage", { x: 2000, y: 2000 }, { sectionId: 100 });
+    expect(hasPlaceholderIds(made.doc)).toBe(false); // a stage has no seats to mint
+
+    const seated = addBlock(made.doc, "single-row", { x: 4000, y: 2000 }, { sectionId: 100 });
+    expect(hasPlaceholderIds(seated.doc)).toBe(true);
+  });
+
+  it("treats an empty chart as having nothing to stitch", () => {
+    expect(hasPlaceholderIds(emptyDocument())).toBe(false);
+  });
+});
+
+// Dragging a handle to rotate: the angle from the block's centre to the pointer.
+describe("rotating by dragging a handle", () => {
+  const centre = { x: 5000, y: 5000 };
+
+  it("reads 0° when the pointer is straight above the centre", () => {
+    // The handle starts above the block, so "no rotation" must be straight up — not to the right,
+    // which is where atan2's zero actually is.
+    expect(angleFromPointer(centre, { x: 5000, y: 3000 })).toBe(0);
+  });
+
+  it("reads 90° to the right, 180° below, 270° to the left", () => {
+    expect(angleFromPointer(centre, { x: 7000, y: 5000 })).toBe(90);
+    expect(angleFromPointer(centre, { x: 5000, y: 7000 })).toBe(180);
+    expect(angleFromPointer(centre, { x: 3000, y: 5000 })).toBe(270);
+  });
+
+  it("reads the diagonals", () => {
+    expect(angleFromPointer(centre, { x: 6000, y: 4000 })).toBe(45);
+    expect(angleFromPointer(centre, { x: 4000, y: 6000 })).toBe(225);
+  });
+
+  it("stays in 0–359, never negative", () => {
+    // `seats.rotation` has a CHECK of 0..359, so a negative angle is a refused save.
+    for (const p of [
+      { x: 4999, y: 3000 },
+      { x: 3000, y: 4999 },
+      { x: 4000, y: 4000 },
+    ]) {
+      const a = angleFromPointer(centre, p);
+      expect(a).toBeGreaterThanOrEqual(0);
+      expect(a).toBeLessThanOrEqual(359);
+    }
+  });
+
+  it("snaps to 15° steps when asked, for a deliberate right angle", () => {
+    expect(angleFromPointer(centre, { x: 6000, y: 3900 }, 15)).toBe(45);
+    expect(angleFromPointer(centre, { x: 7000, y: 4900 }, 15)).toBe(90);
+  });
+
+  it("holds still when the pointer is on the centre — no angle to read", () => {
+    expect(angleFromPointer(centre, centre)).toBe(0);
+  });
+});
+
+describe("setting a rotation outright", () => {
+  const chart = () => {
+    const made = addBlock(emptyDocument(), "stage", { x: 3000, y: 3000 });
+    return { doc: made.doc, key: made.key };
+  };
+
+  it("sets the angle rather than adding to it", () => {
+    const c = chart();
+    const once = setRotation(c.doc, new Set([c.key]), 40);
+    expect(setRotation(once, new Set([c.key]), 40).blocks[0].rotation).toBe(40);
+  });
+
+  it("normalises anything out of range", () => {
+    const c = chart();
+    expect(setRotation(c.doc, new Set([c.key]), 370).blocks[0].rotation).toBe(10);
+    expect(setRotation(c.doc, new Set([c.key]), -30).blocks[0].rotation).toBe(330);
+  });
+
+  it("leaves a locked block alone", () => {
+    const c = chart();
+    const locked = setLocked(c.doc, new Set([c.key]), true);
+    expect(setRotation(locked, new Set([c.key]), 90).blocks[0].rotation).toBe(0);
+  });
+
+  it("moves no seat — a rotation is the block's angle, not new offsets", () => {
+    const made = addBlock(emptyDocument(), "seating-block", { x: 3000, y: 3000 });
+    const after = setRotation(made.doc, new Set([made.key]), 37);
+    expect(after.blocks[0].seats!.map((s) => `${s.dx},${s.dy}`)).toEqual(
+      made.doc.blocks[0].seats!.map((s) => `${s.dx},${s.dy}`),
+    );
   });
 });

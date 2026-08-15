@@ -104,24 +104,19 @@ export async function saveLayout(req: Request, layoutId: number, body: SaveLayou
   if (elements.length > LAYOUT_MAX_ELEMENTS) {
     throw err.conflict('element_limit_reached', `Một sơ đồ chỉ chứa tối đa ${LAYOUT_MAX_ELEMENTS} chi tiết.`);
   }
-  // Refuse BEFORE the write, so the organizer is told which seats are sold rather than shown a 500.
-  // `showtime_seats.seat_id` has no ON DELETE clause, so dropping a bound seat is a 23503 — see the
-  // note on the DELETE in layouts.repo.ts.
-  const bound = await repo.boundSeatsMissingFrom(
-    layoutId,
-    seats.map((s) => s.id).filter((id): id is number => id !== undefined),
-  );
-  if (bound.length > 0) {
-    throw err.refused(
-      409,
-      'seat_in_use',
-      `Không thể xoá ${bound.length} ghế đã có suất diễn tạo vé từ đó (${bound
-        .slice(0, 5)
-        .map((b) => b.label)
-        .join(', ')}). Hãy huỷ hoặc sửa suất diễn đó trước.`,
-      { seats: bound.length },
-    );
-  }
+  /*
+   * A seat a showtime has generated from is no longer refused here — it is ARCHIVED by the save
+   * itself (§18, §42 Rule 7; see the UPDATE beside the seats DELETE in layouts.repo.ts).
+   *
+   * The refusal that used to live here protected the booking and nothing else: the organizer was told
+   * "cancel or edit that showtime first", which for a show already selling is not something they can
+   * reasonably do. Archiving keeps every guarantee that mattered — the seat's id, its bookings and its
+   * history survive, and the showtime carries on selling from its own snapshot — while letting the
+   * chart move on.
+   *
+   * `boundSeatsMissingFrom` stays in the repo: it is what the UI asks to WARN before the click, and it
+   * is still the honest source for "how many of these are sold".
+   */
 
   const saved = await repo.saveLayout(layoutId, body).catch((e) => {
     const code = (e as { code?: string }).code;
@@ -143,7 +138,16 @@ export async function saveLayout(req: Request, layoutId: number, body: SaveLayou
         throw err.conflict('section_name_taken', 'Sơ đồ này đã có một khu vực trùng tên.');
       }
       if (constraint === 'layout_categories_layout_name_key') {
-        throw err.conflict('category_name_taken', 'Sơ đồ này đã có một hạng giá trùng tên.');
+        throw err.conflict('category_name_taken', 'Sơ đồ này đã có một hạng ghế trùng tên.');
+      }
+      // Two rows in one section sharing a label (0032). Reported as its own thing rather than as a
+      // name clash on the CHART, which is what the fallback below would have said — the same class of
+      // wrong sentence that `duplicate_seat_label` exists to replace.
+      if (constraint === 'layout_rows_label_idx') {
+        throw err.conflict(
+          'duplicate_row_label',
+          'Hai hàng trong cùng một khu có cùng tên. Hãy đổi tên hàng hoặc đánh lại số cho khu này.',
+        );
       }
       throw err.conflict('layout_name_taken', 'Tên bị trùng trong sơ đồ này.');
     }
@@ -350,6 +354,18 @@ export async function publish(req: Request, layoutId: number) {
 export async function revisions(req: Request, layoutId: number): Promise<LayoutRevision[]> {
   await assertLayoutOwner(req, layoutId, 'read');
   return repo.listRevisions(layoutId);
+}
+
+/** One revision's document, so the editor can show what a restore would actually change (§31). */
+export async function revisionDocument(
+  req: Request,
+  layoutId: number,
+  revisionId: number,
+): Promise<ChartDocument> {
+  await assertLayoutOwner(req, layoutId, 'read');
+  const doc = await repo.revisionDocument(layoutId, revisionId);
+  if (!doc) throw err.notFound('revision_not_found', 'Không tìm thấy phiên bản này.');
+  return doc;
 }
 
 /**

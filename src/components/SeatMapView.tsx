@@ -53,7 +53,7 @@ export default function SeatMapView({ showtimeId }: { showtimeId: number }) {
 
   if (err) {
     return (
-      <div className="rounded-xl border-2 border-beige-kem bg-bubblegum p-3 text-xs text-on-tint">
+      <div className="border-2 border-beige-kem bg-bubblegum p-3 text-xs text-on-tint">
         {err}
       </div>
     );
@@ -67,7 +67,7 @@ export default function SeatMapView({ showtimeId }: { showtimeId: number }) {
     `${s.section ? `${s.section}, ` : ""}hàng ${s.row}, ghế ${s.number} — ${s.tier} · ${s.price.toLocaleString("vi-VN")}đ · ${statusText[s.status] ?? s.status}`;
 
   return (
-    <div className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-5">
+    <div className="border-2 border-beige-kem bg-surface-2 p-5">
       <SeatCanvas
         seats={seats}
         elements={map.elements}

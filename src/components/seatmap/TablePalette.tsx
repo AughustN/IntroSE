@@ -17,9 +17,9 @@ import type { LayoutElement, LayoutSection, LayoutTable, ShapePoint } from "@/sh
  */
 
 const btn =
-  "rounded-lg border-2 border-beige-kem px-2.5 py-1.5 text-xs font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
+  " border-2 border-beige-kem px-2.5 py-1.5 text-xs font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
 const input =
-  "h-9 w-full rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-xs text-beige-kem outline-none focus:border-burgundy";
+  "h-9 w-full border-2 border-beige-kem bg-surface-2 px-3 text-xs text-beige-kem outline-none focus:border-burgundy";
 
 export interface TableDraft {
   sectionId: number | null;
@@ -142,7 +142,7 @@ export default function TablePalette({
     });
 
   return (
-    <div className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
+    <div className="border-2 border-beige-kem bg-surface-2 p-4">
       <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">Bàn tiệc</h3>
       <p className="mt-1 text-[11px] leading-4 text-beige-kem/50">
         Đặt một bàn và ghế được xếp sẵn quanh bàn. Kéo bàn thì ghế đi theo.

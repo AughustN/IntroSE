@@ -9,11 +9,11 @@ import TierPanel from "./TierPanel";
 import { Empty, ErrorRetry, Loading, Refusal } from "./states";
 
 const input =
-  "h-10 w-full rounded-lg border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
+  "h-10 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
 const btn =
-  "rounded-lg bg-burgundy px-3 py-2 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-50";
+  " bg-burgundy px-3 py-2 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-50";
 const ghost =
-  "rounded-lg border-2 border-beige-kem px-3 py-1.5 text-xs font-bold text-beige-kem/80 disabled:opacity-40";
+  " border-2 border-beige-kem px-3 py-1.5 text-xs font-bold text-beige-kem/80 disabled:opacity-40";
 
 const toLocalInput = (iso: string) => {
   const d = new Date(iso);
@@ -113,7 +113,7 @@ export default function ShowtimeList({
   };
 
   const addForm = (
-    <div className="rounded-xl border-2 border-dashed border-beige-kem/40 p-3">
+    <div className="border-2 border-dashed border-beige-kem/40 p-3">
       {!adding ? (
         <button onClick={() => setAdding(true)} className={btn}>
           + Thêm suất chiếu
@@ -221,7 +221,7 @@ export default function ShowtimeList({
         const committed = st.tiers.reduce((n, t) => n + t.sold + t.held, 0);
         const locked = committed > 0;
         return (
-          <div key={st.id} className="rounded-xl border-2 border-beige-kem p-3">
+          <div key={st.id} className="border-2 border-beige-kem p-3">
             <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
               <input
                 type="datetime-local"

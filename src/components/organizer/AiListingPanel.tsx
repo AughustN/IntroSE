@@ -9,11 +9,11 @@ import { aiApi } from "../../services/catalogClient";
 import { dong } from "./states";
 
 const input =
-  "h-10 w-full rounded-lg border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
+  "h-10 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
 const btn =
-  "rounded-lg bg-burgundy px-3 py-2 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-50";
+  " bg-burgundy px-3 py-2 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-50";
 const ghost =
-  "rounded-lg border-2 border-beige-kem px-3 py-1.5 text-xs font-bold text-beige-kem/80";
+  " border-2 border-beige-kem px-3 py-1.5 text-xs font-bold text-beige-kem/80";
 
 /**
  * UC-22, bound by constitution Principle III: assistive, never autonomous.
@@ -72,7 +72,7 @@ export default function AiListingPanel({
   };
 
   return (
-    <div className="rounded-xl border-2 border-dashed border-beige-kem/50 p-4">
+    <div className="border-2 border-dashed border-beige-kem/50 p-4">
       <div className="flex items-center justify-between">
         <h4 className="font-display text-sm font-bold">Trợ lý viết nội dung (tuỳ chọn)</h4>
         <span className="font-mono text-[10px] text-beige-kem/45">

@@ -7,12 +7,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BlockKind, BlockParams, ChartDocument, DocumentBlock } from "@/shared/catalog/seatmap-document";
 import { emptyDocument, nextBlockKey } from "@/shared/catalog/seatmap-document";
 import { projectDocument } from "@/shared/catalog/seatmap-project";
-import { clampCoord, type ValidationIssue, validateLayout } from "@/shared/catalog/seatmap-validate";
+import { LAYOUT_SPACE, clampCoord, type ValidationIssue, validateLayout } from "@/shared/catalog/seatmap-validate";
 import type { Layout } from "@/shared/catalog/seatmap";
 import ConfirmDialog, { type ConfirmRequest } from "../ConfirmDialog";
 import { layoutApi } from "../../services/catalogClient";
 import BlockInspector from "./BlockInspector";
 import BlockPalette from "./BlockPalette";
+import LayersPanel from "./LayersPanel";
+import PreviewOverlay from "./PreviewOverlay";
+import { renumberSection, renumberSelection } from "./numbering";
+import RowInspector from "./RowInspector";
+import { deleteRow, duplicateRow, renameRow, reverseRow } from "./rowOps";
 import CategoryPanel from "./CategoryPanel";
 import FloorPlanPanel from "./FloorPlanPanel";
 import ReferenceChartPanel from "./ReferenceChartPanel";
@@ -29,16 +34,23 @@ import {
   type BlockGeometry,
   type BlockTarget,
   alignBlocks,
+  angleFromPointer,
   alignedPosition,
   allowedDelta,
   colorable,
+  copyBlocks,
+  distributeBlocks,
   duplicateBlocks,
+  flipBlocks,
   EDITABLE_SEAT_TYPES,
   type EditableSeatType,
   geometryPoints,
+  groupBlocks,
+  hasPlaceholderIds,
   moveBlocks,
   movedPosition,
   nextBlockContext,
+  pasteBlocks,
   nextShapeName,
   parseBlockDrag,
   NUDGE,
@@ -47,18 +59,26 @@ import {
   removeCategory,
   repackRowLabels,
   removeSection,
+  type ResizeHandle,
+  resizedBox,
   rotateBlocks,
   type SeatRef,
   seatCount,
   selectionAfterPress,
   selectionBounds,
   setBlockColor,
+  setHidden,
+  type SnapGuide,
+  snapToObjects,
+  setRotation,
   setSeatType,
   setBlockParams,
   setLocked,
   updateBlock,
   updateCategory,
+  ungroupBlocks,
   updateSeats,
+  withGroups,
 } from "./documentOps";
 import SectionPanel from "./SectionPanel";
 import { useLayoutHistory } from "./useLayoutHistory";
@@ -80,9 +100,9 @@ import { CATEGORY_COLORS, snap } from "./layoutOps";
  */
 
 const btn =
-  "rounded-lg border-2 border-beige-kem px-2.5 py-1.5 text-xs font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
+  " border-2 border-beige-kem px-2.5 py-1.5 text-xs font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
 const primary =
-  "rounded-lg bg-burgundy px-3 py-1.5 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-40";
+  " bg-burgundy px-3 py-1.5 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-40";
 
 /**
  * Where an unsaved draft is parked.
@@ -132,6 +152,40 @@ const RECOVERY_DEBOUNCE_MS = 800;
 const SHAPE_DEFAULT_COLOR = "#BFC0F2";
 
 /**
+ * How near a neighbour's centre line a drag has to come before it locks on, in layout units.
+ *
+ * 150 is one seat pitch — near enough that a deliberate placement a seat away is never stolen, far
+ * enough that a drag aimed at alignment finds it. In LAYOUT units rather than pixels on purpose: a
+ * threshold in pixels would grab from further away the more the organizer zoomed out, which is
+ * exactly when they are placing blocks roughly and do not want to be corrected.
+ */
+const SNAP_DISTANCE = 150;
+
+/**
+ * How long the organizer must be still before an autosave fires.
+ *
+ * Well past the recovery debounce, so the local copy is always parked first — if the save fails, the
+ * net is already under it. Long enough that a pause for thought is not a save, short enough that a
+ * closed laptop loses at most a few seconds of work.
+ */
+const AUTOSAVE_IDLE_MS = 12_000;
+
+/**
+ * "vừa xong" / "30 giây trước" / "4 phút trước".
+ *
+ * Coarse on purpose: the question a save-state answers is "did my work land", not "exactly when", and
+ * a second-by-second counter draws the eye to a number that does not matter.
+ */
+function agoLabel(at: number, now: number): string {
+  const seconds = Math.max(0, Math.round((now - at) / 1000));
+  if (seconds < 10) return "vừa xong";
+  if (seconds < 60) return `${Math.round(seconds / 10) * 10} giây trước`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} phút trước`;
+  return `${Math.round(minutes / 60)} giờ trước`;
+}
+
+/**
  * One collapsible group in the right rail.
  *
  * The rail carried eight panels in a single scrolling column, none of them foldable, with the
@@ -148,7 +202,7 @@ function RailGroup({
   children: React.ReactNode;
 }) {
   return (
-    <details open={defaultOpen} className="rounded-2xl border-2 border-beige-kem/40 bg-surface-2/40">
+    <details open={defaultOpen} className="border-2 border-beige-kem/40 bg-surface-2/40">
       <summary className="cursor-pointer select-none px-3 py-2 font-mono text-[11px] font-bold uppercase tracking-widest text-beige-kem/70 marker:text-beige-kem/50">
         {title}
       </summary>
@@ -212,8 +266,103 @@ export default function ChartEditor({
   /** The colour the next block takes, remembered like the section and class above it: drawing five
    *  zones in one colour should be five clicks, not five clicks and five trips to a swatch. */
   const [shapeColor, setShapeColor] = useState<string | null>(null);
+  /**
+   * The row the organizer has clicked, as `section|label` — the same key `rowMarkers` draws with.
+   *
+   * A THIRD selection level beside blocks and seats (§19: section mode and seat mode), so a row can be
+   * renamed or reversed without first working out which block it belongs to. Held as the label rather
+   * than a row id because a row drawn this session has no id until the chart is saved.
+   */
+  const [rowSel, setRowSel] = useState<string | null>(null);
+  /**
+   * The clipboard (§27, §48).
+   *
+   * In editor state rather than the system clipboard: what is copied is a run of document blocks with
+   * their parameters and seats, which has no sensible text form, and reading the system clipboard
+   * needs a permission prompt for something that never leaves this screen.
+   */
+  const [clipboard, setClipboard] = useState<DocumentBlock[]>([]);
+  /** Preview mode (§34) — the same chart, drawn as a buyer meets it. */
+  const [previewing, setPreviewing] = useState(false);
+  /** When the last successful server save landed, for the save-state readout (§29). */
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  /** When the recovery copy was last parked locally — the safety net's own state. */
+  const [parkedAt, setParkedAt] = useState<number | null>(null);
+  /**
+   * Connectivity, for §29's offline case.
+   *
+   * `navigator.onLine` is only ever trustworthy when it says FALSE — a machine can be "online" and
+   * still unable to reach this server. So it drives the reassuring half of the message only, and a
+   * failed save is what actually tells the organizer something is wrong.
+   */
+  const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
+  /**
+   * The clock the save-state reads, ticked rather than sampled.
+   *
+   * Held in state instead of calling `Date.now()` while rendering: reading the clock during render is
+   * impure — two renders in the same frame can disagree — and it is what the React Compiler refuses
+   * to memoise around. Coarse by design; the label it feeds is coarse too.
+   */
+  const [now, setNow] = useState(() => Date.now());
+  /** Zoom and pointer position, pushed up by the canvas for the status bar (§3). */
+  const [viewReport, setViewReport] = useState<{ zoom: number; x: number | null; y: number | null }>({
+    zoom: 1,
+    x: null,
+    y: null,
+  });
+  /**
+   * Whether deleting or shrinking closes the gap in a section's row lettering.
+   *
+   * The specification (§9, §16, §42 Rules 2 and 5) says numbering must be explicit and that deleting
+   * must never renumber. Automatic is nevertheless the default here, deliberately: it is the behaviour
+   * that was asked for and it is what most organizers want while drawing. This toggle is what makes
+   * that a choice rather than an omission — turned off, nothing re-letters a chart except the explicit
+   * "Đánh lại số" command, which is exactly the specification's model.
+   *
+   * A PREFERENCE, not chart data: it lives in localStorage rather than in the document, because it
+   * describes how this person likes to work and not how this venue is laid out.
+   */
+  const [autoRenumber, setAutoRenumber] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem("tixhub.autoRenumber") !== "off";
+    } catch {
+      return true; // private mode, or storage disabled — the default stands
+    }
+  });
+  const repack = useCallback(
+    (d: ChartDocument) => (autoRenumber ? repackRowLabels(d) : d),
+    [autoRenumber],
+  );
   const [confirm, setConfirm] = useState<(ConfirmRequest & { onConfirm: () => void }) | null>(null);
   const [dragDelta, setDragDelta] = useState<{ dx: number; dy: number } | null>(null);
+  /** The lines a snapped drag is currently locked to, drawn while the pointer is down (§25). */
+  const [guides, setGuides] = useState<SnapGuide[]>([]);
+  /**
+   * The size a block is being dragged to, while the handle is held.
+   *
+   * A preview, exactly like `dragDelta`: committing on every pointer move would push a hundred
+   * intermediate sizes onto the undo stack, and §28 is explicit that a resize is ONE history entry.
+   */
+  const [resizing, setResizing] = useState<{
+    key: string;
+    box: { x: number; y: number; width: number; height: number };
+  } | null>(null);
+  /** The angle a block is being dragged to, while the rotation handle is held. */
+  const [rotatePreview, setRotatePreview] = useState<{ key: string; angle: number } | null>(null);
+  /** Snap to other blocks while dragging (§25). Sits beside the grid toggle it complements. */
+  const [snapObjects, setSnapObjects] = useState(true);
+  /**
+   * The active tool (§4).
+   *
+   * `null` is the Select tool — the state the editor has always been in, where a click on empty space
+   * clears the selection. With a tool held, the next click on empty space PLACES that kind of block
+   * where the pointer is.
+   *
+   * One-shot rather than sticky: placing returns to Select. A sticky tool is how an organizer ends up
+   * with four stages they did not mean to draw, and the palette is already there for placing several
+   * of the same thing.
+   */
+  const [tool, setTool] = useState<BlockKind | null>(null);
 
   const { draft, commit, reset, undo, redo, canUndo, canRedo } = useLayoutHistory<ChartDocument>(
     emptyDocument(),
@@ -264,12 +413,31 @@ export default function ChartEditor({
           draftKey(layout.id),
           JSON.stringify({ baseVersion: layout.version, savedAt: Date.now(), document: draft }),
         );
+        setParkedAt(() => Date.now());
       } catch {
         /* best-effort: a full or disabled store must not break editing */
       }
     }, RECOVERY_DEBOUNCE_MS);
     return () => window.clearTimeout(t);
   }, [draft, dirty, layout]);
+
+  useEffect(() => {
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    return () => {
+      window.removeEventListener("online", up);
+      window.removeEventListener("offline", down);
+    };
+  }, []);
+
+  useEffect(() => {
+    // Only while there is something whose age is being shown; an idle editor should not tick.
+    if (savedAt === null && parkedAt === null) return;
+    const id = window.setInterval(() => setNow(Date.now()), 15_000);
+    return () => window.clearInterval(id);
+  }, [savedAt, parkedAt]);
 
   /** The browser's own "leave site?" prompt. The only guard that survives a tab close. */
   useEffect(() => {
@@ -424,6 +592,12 @@ export default function ChartEditor({
    * Seats for the canvas, with a live drag applied HERE rather than committed — so dragging a block of
    * 200 seats is one undo step at the end, not one per animation frame.
    */
+  /** Keys the organizer has hidden. A VIEW filter — `projected` is untouched, so nothing stops selling. */
+  const hiddenKeys = useMemo(
+    () => new Set(draft.blocks.filter((b) => b.hidden).map((b) => b.key)),
+    [draft.blocks],
+  );
+
   const canvasSeats = useMemo<CanvasSeat[]>(() => {
     const moving = dragDelta;
     return projected.seats.map((s, i) => {
@@ -443,15 +617,68 @@ export default function ChartEditor({
     });
   }, [projected.seats, dragDelta, selected, blockOfSeat, sectionName]);
 
+  /**
+   * The live rotation preview, applied to the SEATS of the block being turned.
+   *
+   * The projection places a seat at `block + (dx,dy) rotated by block.rotation`, and it runs off the
+   * committed document — so without this a seating block's outline would swing round while its seats
+   * stayed where they were, which is the one thing a rotation preview exists to show.
+   */
+  const previewedSeats = useMemo(() => {
+    if (!rotatePreview) return canvasSeats;
+    const block = draft.blocks.find((b) => b.key === rotatePreview.key);
+    if (!block?.seats?.length) return canvasSeats;
+
+    const rad = (rotatePreview.angle * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    return canvasSeats.map((s) => {
+      const origin = originOfSeat.get(s.id);
+      if (!origin || origin.blockKey !== rotatePreview.key) return s;
+      const seat = block.seats?.[origin.index];
+      if (!seat) return s;
+      return {
+        ...s,
+        x: block.x + seat.dx * cos - seat.dy * sin,
+        y: block.y + seat.dx * sin + seat.dy * cos,
+        rotation: (((seat.rotation + rotatePreview.angle) % 360) + 360) % 360,
+      };
+    });
+  }, [canvasSeats, rotatePreview, draft.blocks, originOfSeat]);
+
+  /** What the canvas actually draws: everything except the blocks the organizer has hidden. */
+  const visibleSeats = useMemo(
+    () =>
+      hiddenKeys.size === 0
+        ? previewedSeats
+        : previewedSeats.filter((s) => !hiddenKeys.has(blockOfSeat.get(s.id) ?? "")),
+    [previewedSeats, hiddenKeys, blockOfSeat],
+  );
+
   /** Decoration, with the dragged block offset live — same one-commit-at-the-end rule as seats. */
   const canvasElements = useMemo(
     () =>
-      projected.elements.map((el, i) =>
-        dragDelta && selected.has(blockOfElement[i] ?? "")
-          ? { ...el, x: el.x + dragDelta.dx, y: el.y + dragDelta.dy }
-          : el,
-      ),
-    [projected.elements, dragDelta, selected, blockOfElement],
+      projected.elements
+        .map((el, i) =>
+          dragDelta && selected.has(blockOfElement[i] ?? "")
+            ? { ...el, x: el.x + dragDelta.dx, y: el.y + dragDelta.dy }
+            : el,
+        )
+        // Hidden is a VIEW state (§5): it leaves the canvas and never the projection, so `projected`
+        // above — which is what the save writes — still holds every element.
+        // The live resize preview, applied to the one element being dragged by a handle.
+        .map((el, i) =>
+          resizing && blockOfElement[i] === resizing.key
+            ? { ...el, x: resizing.box.x, y: resizing.box.y, width: resizing.box.width, height: resizing.box.height }
+            : el,
+        )
+        .map((el, i) =>
+          rotatePreview && blockOfElement[i] === rotatePreview.key
+            ? { ...el, rotation: rotatePreview.angle }
+            : el,
+        )
+        .filter((_, i) => !hiddenKeys.has(blockOfElement[i] ?? "")),
+    [projected.elements, dragDelta, selected, blockOfElement, hiddenKeys, resizing, rotatePreview],
   );
 
   const selectedBlock = useMemo(
@@ -460,6 +687,41 @@ export default function ChartEditor({
   );
 
   const budget = remainingBudget(draft);
+
+  /**
+   * The selected row, resolved against the draft: which block holds it, and what is in it.
+   *
+   * Derived on each render rather than memoised: it walks the blocks once, the editor re-renders on
+   * every draft change regardless, and the loop's early exits are a shape the React Compiler declines
+   * to memoise — so a `useMemo` here bought nothing and cost a compilation.
+   */
+  const selectedRow = ((): {
+    label: string;
+    blockKey: string;
+    sectionName: string | null;
+    seatCount: number;
+    rowId: number | null;
+    canEdit: boolean;
+  } | null => {
+    if (!rowSel) return null;
+    const [section, label] = rowSel.split("|");
+    const sectionName = section || null;
+    for (const b of draft.blocks) {
+      const seats = (b.seats ?? []).filter((seat) => seat.rowLabel === label);
+      if (seats.length === 0) continue;
+      const name = draft.sections.find((x) => x.id === (seats[0].sectionId ?? b.sectionId))?.name ?? null;
+      if (name !== sectionName) continue;
+      return {
+        label,
+        blockKey: b.key,
+        sectionName: name,
+        seatCount: seats.length,
+        rowId: seats.find((seat) => seat.rowId != null)?.rowId ?? null,
+        canEdit: b.locked !== true && b.kind !== "table",
+      };
+    }
+    return null;
+  })();
 
   /**
    * What a swatch in the palette would do right now.
@@ -487,7 +749,14 @@ export default function ChartEditor({
    * Takes the document to send rather than reading `draft`, so a caller that has just computed a new
    * one can save THAT instead of the state value React has not committed yet.
    */
-  const persist = async (doc: ChartDocument): Promise<boolean> => {
+  /**
+   * @param quiet an AUTOSAVE — keep the selection and the undo history.
+   *
+   * Only ever passed when `hasPlaceholderIds(doc)` is false, which is what makes it safe: with every
+   * id already real the server's stitched copy is what we sent, so declining to adopt it changes
+   * nothing except that `reset` is not called and the undo stack survives.
+   */
+  const persist = async (doc: ChartDocument, quiet = false): Promise<boolean> => {
     if (!layout) return false;
     setBusy(true);
     setError(null);
@@ -502,9 +771,17 @@ export default function ChartEditor({
       setServerJson(JSON.stringify(back));
       // The work is on the server now, so the recovery copy is not just redundant, it is misleading.
       forgetStoredDraft(layout.id);
-      reset(back);
-      setSelected(new Set());
-      setStatus("Đã lưu bản nháp.");
+      // Read inside the updater rather than here: `persist` lives in the component body, so the
+      // compiler treats a bare `Date.now()` in it as a clock read during render — which it refuses,
+      // rightly, since two renders in a frame would disagree. An updater runs at update time.
+      setSavedAt(() => Date.now());
+      setNow(() => Date.now());
+      setParkedAt(null);
+      if (!quiet) {
+        reset(back);
+        setSelected(new Set());
+        setStatus("Đã lưu bản nháp.");
+      }
       return true;
     } catch (e) {
       setError((e as Error).message);
@@ -515,6 +792,32 @@ export default function ChartEditor({
   };
 
   const save = () => void persist(draft);
+
+  /**
+   * Autosave (§29).
+   *
+   * Four conditions, and each one is there because breaking it is a real failure:
+   *
+   *   dirty && online     nothing to save, or nowhere to save it
+   *   !busy               a save is already in flight; two would race on the version
+   *   no placeholders     the server's copy would have to be adopted, which clears the undo stack
+   *   nothing in hand     saving mid-drag or mid-drawing yanks the chart out from under the pointer
+   *
+   * The recovery copy in localStorage above stays regardless. It is the safety net; this is the
+   * convenience, and the net has to hold in the cases the convenience declines to act.
+   */
+  useEffect(() => {
+    if (!layout || !dirty || !online || busy) return;
+    if (drawing || dragDelta || resizing) return;
+    if (hasPlaceholderIds(draft)) return;
+
+    const t = window.setTimeout(() => void persist(draft, true), AUTOSAVE_IDLE_MS);
+    return () => window.clearTimeout(t);
+    // `persist` is re-created every render and would restart the timer forever; the values it closes
+    // over are all in this list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft, dirty, online, busy, drawing, dragDelta, resizing, layout]);
+
 
   /**
    * Publish — but only ever the chart that was actually judged.
@@ -747,7 +1050,9 @@ export default function ChartEditor({
           " Các hàng còn lại trong khu sẽ được đánh lại chữ cho liền mạch (khoá khối để giữ nguyên chữ)." +
           (tablesLost > 0
             ? " Ghế đã bán hoặc đang được giữ sẽ khiến thao tác bị từ chối."
-            : " Ghế đã bán ở suất chiếu đang bán sẽ khiến thao tác bị từ chối khi lưu."),
+            : // Since 0032 a bound seat is ARCHIVED rather than refused, so promising a refusal here
+              // would be telling the organizer the save will fail when it will succeed.
+              " Ghế mà suất diễn đã tạo vé sẽ được lưu trữ thay vì xoá — vé đã bán không bị ảnh hưởng."),
         confirmLabel: "Xoá",
         cancelLabel: "Huỷ",
         tone: "danger",
@@ -760,7 +1065,7 @@ export default function ChartEditor({
     const { tables, others } = partition(selected);
     // Re-lettered in the SAME commit as the delete, so one Ctrl+Z puts both the blocks and their old
     // labels back. Two commits would leave an undo that restored the rows under the wrong letters.
-    const next = others.size > 0 ? repackRowLabels(removeBlocks(draft, others)) : draft;
+    const next = others.size > 0 ? repack(removeBlocks(draft, others)) : draft;
     if (others.size > 0) op(() => next);
     if (tables.length === 0) {
       if (others.size > 0) setSelected(new Set());
@@ -845,7 +1150,7 @@ export default function ChartEditor({
     setLastUsed((cur) => ({ ...cur, sectionId: id }));
     assignTo({ sectionId: id });
     // Moving a block OUT of a section leaves the same hole in its lettering that deleting it would.
-    op((d) => repackRowLabels(d));
+    op((d) => repack(d));
   };
 
   const assignCategoryTo = (id: number | null) => {
@@ -856,6 +1161,38 @@ export default function ChartEditor({
   /** Mark or unmark the selected seats as accessible — a per-seat property by nature. */
   const setSeatsAccessible = (accessible: boolean) =>
     op((d) => updateSeats(d, selectedSeatRefs, { isAccessible: accessible }));
+
+  /**
+   * Begin a rotation drag from the handle.
+   *
+   * A named function rather than a closure built in the JSX: inside the overlay it read `canvas.current`
+   * while rendering, which the React Compiler refuses — and rightly, since a ref read during render is
+   * not something a re-render can be trusted to have seen.
+   */
+  const beginRotate = (block: DocumentBlock, e: React.PointerEvent<SVGCircleElement>) => {
+    e.stopPropagation();
+    (e.target as Element).setPointerCapture(e.pointerId);
+
+    const to = (ev: PointerEvent, phase: "move" | "end") => {
+      const at = canvas.current?.toLayout(ev.clientX, ev.clientY);
+      if (!at) return;
+      // Shift snaps to 15°, so a deliberate right angle does not need a steady hand.
+      const angle = angleFromPointer(block, at, ev.shiftKey ? 15 : 0);
+      if (phase === "move") setRotatePreview({ key: block.key, angle });
+      else {
+        setRotatePreview(null);
+        op((d) => setRotation(d, new Set([block.key]), angle));
+      }
+    };
+    const move = (ev: PointerEvent) => to(ev, "move");
+    const up = (ev: PointerEvent) => {
+      to(ev, "end");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
 
   /** Ordinary seat or love seat. Per seat, like the column and like accessibility above. */
   const setSeatsType = (seatType: EditableSeatType) =>
@@ -877,7 +1214,9 @@ export default function ChartEditor({
   /** Shared by seats and decoration, so the two cannot drift apart. The rule itself is pure and lives
    *  in `documentOps`, where it can be tested — this canvas has no harness. */
   const selectOnPress = (key: string, additive: boolean) =>
-    setSelected((cur) => selectionAfterPress(cur, key, additive));
+    // Expanded to whole groups HERE, at the single point every press passes through, so grouping is
+    // one rule rather than a condition repeated in drag, delete, align and the rest.
+    setSelected((cur) => withGroups(draft, selectionAfterPress(cur, key, additive)));
 
   const onSeatPointerDown = (seat: CanvasSeat, additive: boolean, alt?: boolean) => {
     if (alt) {
@@ -895,29 +1234,53 @@ export default function ChartEditor({
     selectOnPress(key, additive);
   };
 
+  /**
+   * The delta a drag should actually apply: clamped to the map, then pulled onto a neighbour (§25).
+   *
+   * Snapping is computed from the anchor block's landing position and applied as a CORRECTION to the
+   * delta, so every block in a multi-block drag shifts by the same amount — snapping each one to its
+   * own nearest neighbour would tear the selection apart.
+   */
+  const dragWithSnap = (dx: number, dy: number): { dx: number; dy: number } => {
+    const limit = allowedDelta(draft, selected, dx, dy);
+    const anchor = draft.blocks.find((b) => selected.has(b.key));
+    if (!anchor || !snapObjects) {
+      setGuides([]);
+      return limit;
+    }
+    const landed = { x: anchor.x + limit.dx, y: anchor.y + limit.dy };
+    const snapped = snapToObjects(draft, selected, landed, SNAP_DISTANCE);
+    setGuides(snapped.guides);
+    return { dx: limit.dx + (snapped.x - landed.x), dy: limit.dy + (snapped.y - landed.y) };
+  };
+
   const onSeatDrag = (dx: number, dy: number, phase: "move" | "end") => {
     if (!dragging.current || selected.size === 0) return;
     if (phase === "move") {
       // Previewed through the SAME limit the commit applies, or the block appears to slide past the
       // edge of the map and then jumps back when the pointer is released.
-      setDragDelta(allowedDelta(draft, selected, dx, dy));
+      setDragDelta(dragWithSnap(dx, dy));
       return;
     }
+    const final = dragWithSnap(dx, dy);
     setDragDelta(null);
+    setGuides([]);
     dragging.current = false;
-    applyMove(dx, dy);
+    applyMove(final.dx, final.dy);
   };
 
   /** Dragging decoration moves its block, exactly as dragging a seat moves the block it belongs to. */
   const onElementDrag = (dx: number, dy: number, phase: "move" | "end") => {
     if (!draggingElement.current || selected.size === 0) return;
     if (phase === "move") {
-      setDragDelta(allowedDelta(draft, selected, dx, dy));
+      setDragDelta(dragWithSnap(dx, dy));
       return;
     }
+    const final = dragWithSnap(dx, dy);
     setDragDelta(null);
+    setGuides([]);
     draggingElement.current = false;
-    applyMove(dx, dy);
+    applyMove(final.dx, final.dy);
   };
 
   /** A marquee selects every block with a seat inside the rectangle. */
@@ -961,6 +1324,15 @@ export default function ChartEditor({
       (dropAt
         ? canvas.current?.toLayout(dropAt.clientX, dropAt.clientY)
         : canvas.current?.toLayout(window.innerWidth / 2, window.innerHeight / 2)) ?? { x: 5000, y: 5000 };
+    addAtPoint(kind, at, geometry);
+  };
+
+  /** The half of `addAt` that already knows WHERE, for the tool row, which is handed layout coords. */
+  const addAtPoint = (
+    kind: BlockKind,
+    at: { x: number; y: number },
+    geometry?: Exclude<BlockGeometry, "free">,
+  ) => {
     commit((d) => {
       // Inherit from what is selected, else from the last block placed — see `nextBlockContext`.
       const ctx = nextBlockContext(d, selected, lastUsed);
@@ -985,6 +1357,20 @@ export default function ChartEditor({
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (e.key === "Escape" && tool) {
+        e.preventDefault();
+        setTool(null);
+        return;
+      }
+      if (previewing) {
+        // The overlay owns the keyboard while it is up: nudging or deleting behind a preview would be
+        // editing a chart the organizer cannot see.
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setPreviewing(false);
+        }
+        return;
+      }
       const mod = e.ctrlKey || e.metaKey;
 
       if (mod && e.key.toLowerCase() === "z") {
@@ -1001,6 +1387,25 @@ export default function ChartEditor({
       if (mod && e.key.toLowerCase() === "a") {
         e.preventDefault();
         setSelected(new Set(draft.blocks.map((b) => b.key)));
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "c") {
+        // Copy is not a document change, so it takes no history entry — undo must not step back
+        // through it and leave the organizer wondering what it undid.
+        if (selected.size === 0) return;
+        e.preventDefault();
+        setClipboard(copyBlocks(draft, selected));
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "v") {
+        if (clipboard.length === 0) return;
+        e.preventDefault();
+        commit((d) => {
+          const pasted = pasteBlocks(d, clipboard, { x: 300, y: 300 });
+          setSelected(pasted.keys);
+          setRowSel(null);
+          return pasted.doc;
+        });
         return;
       }
       if (mod && e.key.toLowerCase() === "d") {
@@ -1057,7 +1462,10 @@ export default function ChartEditor({
     // version and be refused. The appliers themselves are deliberately absent: they are rebuilt every
     // render, so listing them would re-bind the listener on every render to no purpose, and everything
     // they actually read (`draft.blocks`, `selected`, `grid`, `layout`) is already here.
-  }, [draft.blocks, selected, grid, layout, drawing, op, commit, undo, redo]);
+    // `clipboard` and `draft` are real dependencies, not lint noise: the handler closes over both, and
+    // without them a paste after a copy would use the clipboard as it was when the listener was bound
+    // — which is to say empty.
+  }, [draft, draft.blocks, selected, clipboard, grid, layout, drawing, op, commit, undo, redo]);
 
 
   if (error && !layout) return <p className="p-6 text-sm text-on-tint">{error}</p>;
@@ -1067,35 +1475,75 @@ export default function ChartEditor({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-xanh-pho text-beige-kem">
-      <header className="flex h-14 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b-2 border-beige-kem px-4">
+      {/*
+        `min-h-14`, never `h-14`.
+
+        This row WRAPS, and a fixed height on a wrapping flex container is a contradiction: the second
+        line still lays out, the box stays 3.5rem tall, and the overflow paints straight over the
+        canvas below — which is what "Lưới" and "Tự đánh số" were doing sitting on top of the map. It
+        only appeared once the row grew past one line, so every button added here made it likelier.
+
+        `shrink-0` stays: the header must keep its content's height, and the canvas takes what is left.
+      */}
+      <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b-2 border-beige-kem px-4 py-1">
         <h2 className="font-display text-lg font-black">{layout.name}</h2>
         <span className="font-mono text-[11px] text-beige-kem/50">
           {seats} ghế · {draft.blocks.length} khối · {draft.sections.length} khu ·{" "}
           {draft.categories.length} hạng ghế
         </span>
         {layout.status === "ready" ? (
-          <span className="rounded-lg border border-la-co px-2 py-0.5 font-mono text-[10px] text-la-co">
+          <span className="border border-la-co px-2 py-0.5 font-mono text-[10px] text-la-co">
             Đã phát hành
           </span>
         ) : (
-          <span className="rounded-lg border border-beige-kem/40 px-2 py-0.5 font-mono text-[10px] text-beige-kem/60">
+          <span className="border border-beige-kem/40 px-2 py-0.5 font-mono text-[10px] text-beige-kem/60">
             Bản nháp
           </span>
         )}
-        {dirty && (
-          <span
-            className="rounded-lg border border-cam-dat px-2 py-0.5 font-mono text-[10px] text-cam-dat"
-            title="Thay đổi chưa lưu — bản nháp được giữ trên máy này"
-          >
-            Chưa lưu
-          </span>
-        )}
+        {/*
+          The save state (§29), as one badge that always says the true thing.
+          
+          Four states, in the order they outrank each other: saving now, offline, unsaved, saved. The
+          offline case matters most and is the one a "Chưa lưu" badge alone got wrong — it looked like
+          the organizer had forgotten to press save, when in fact pressing it would have failed.
+        */}
+        <span
+          className={`border px-2 py-0.5 font-mono text-[10px] ${ busy
+              ? "border-beige-kem/50 text-beige-kem/70"
+              : !online
+                ? "border-cam-dat text-cam-dat"
+                : dirty
+                  ? "border-cam-dat text-cam-dat"
+                  : "border-la-co text-la-co"
+          }`}
+          title={
+            !online
+              ? "Mất kết nối. Bản nháp vẫn được giữ trên máy này và sẽ lưu được khi có mạng trở lại."
+              : dirty
+                ? "Thay đổi chưa lưu — bản nháp được giữ trên máy này"
+                : "Đã lưu lên máy chủ"
+          }
+        >
+          {busy
+            ? "Đang lưu…"
+            : !online
+              ? parkedAt
+                ? "Ngoại tuyến · đã giữ trên máy"
+                : "Ngoại tuyến"
+              : dirty
+                ? parkedAt
+                  ? "Chưa lưu · đã giữ trên máy"
+                  : "Chưa lưu"
+                : savedAt
+                  ? `Đã lưu ${agoLabel(savedAt, now)}`
+                  : "Đã lưu"}
+        </span>
         {issues.length > 0 ? (
-          <span className="rounded-lg border border-bubblegum px-2 py-0.5 font-mono text-[10px] text-bubblegum">
+          <span className="border border-bubblegum px-2 py-0.5 font-mono text-[10px] text-bubblegum">
             {issues.length} vấn đề
           </span>
         ) : (
-          <span className="rounded-lg border border-la-co px-2 py-0.5 font-mono text-[10px] text-la-co">
+          <span className="border border-la-co px-2 py-0.5 font-mono text-[10px] text-la-co">
             Hợp lệ
           </span>
         )}
@@ -1108,14 +1556,28 @@ export default function ChartEditor({
             ↷
           </button>
           <button
-            onClick={() => setGrid((g) => !g)}
+            onClick={() =>
+              op((d) =>
+                selected.size > 0
+                  ? renumberSelection(d, selected)
+                  : renumberSection(d, nextBlockContext(d, selected, lastUsed).sectionId),
+              )
+            }
             className={btn}
-            title="Bám lưới khi kéo — chỉ hỗ trợ nhập, không ảnh hưởng dữ liệu đã lưu"
+            title="Dồn lại chữ hàng cho khu đang chọn — thao tác rõ ràng, hoàn tác được"
           >
-            {grid ? "Lưới ✓" : "Lưới"}
+            Đánh lại số
           </button>
           <button onClick={() => canvas.current?.zoomToVenue()} className={btn}>
             Vừa khung
+          </button>
+          <button
+            onClick={() => setPreviewing(true)}
+            disabled={draft.blocks.length === 0}
+            className={btn}
+            title="Xem sơ đồ đúng như khách hàng sẽ thấy"
+          >
+            Xem trước
           </button>
           <button onClick={() => void save()} disabled={busy} className={btn}>
             Lưu
@@ -1173,12 +1635,12 @@ export default function ChartEditor({
       {(status || error) && (
         <div className="flex shrink-0 flex-wrap gap-2 border-b border-beige-kem/25 px-4 py-2">
           {status && (
-            <div className="rounded-lg border-2 border-beige-kem bg-la-co px-3 py-1.5 text-xs text-on-tint">
+            <div className="border-2 border-beige-kem bg-la-co px-3 py-1.5 text-xs text-on-tint">
               {status}
             </div>
           )}
           {error && (
-            <div className="rounded-lg border-2 border-beige-kem bg-bubblegum px-3 py-1.5 text-xs text-on-tint">
+            <div className="border-2 border-beige-kem bg-bubblegum px-3 py-1.5 text-xs text-on-tint">
               {error}
             </div>
           )}
@@ -1214,7 +1676,7 @@ export default function ChartEditor({
                       return v === "mixed" ? "mixed" : v === null ? "" : String(v);
                     })()}
                     onChange={(e) => assignSectionTo(e.target.value === "" ? null : Number(e.target.value))}
-                    className="rounded-lg border-2 border-beige-kem/50 bg-transparent px-1.5 py-0.5 text-beige-kem"
+                    className="border-2 border-beige-kem/50 bg-transparent px-1.5 py-0.5 text-beige-kem"
                   >
                     {sharedValue((s) => s.sectionId ?? null) === "mixed" && (
                       <option value="mixed">— nhiều khu —</option>
@@ -1236,7 +1698,7 @@ export default function ChartEditor({
                       return v === "mixed" ? "mixed" : v === null ? "" : String(v);
                     })()}
                     onChange={(e) => assignCategoryTo(e.target.value === "" ? null : Number(e.target.value))}
-                    className="rounded-lg border-2 border-beige-kem/50 bg-transparent px-1.5 py-0.5 text-beige-kem"
+                    className="border-2 border-beige-kem/50 bg-transparent px-1.5 py-0.5 text-beige-kem"
                   >
                     {sharedValue((s) => s.categoryId ?? null) === "mixed" && (
                       <option value="mixed">— nhiều hạng ghế —</option>
@@ -1259,7 +1721,7 @@ export default function ChartEditor({
                         return types.size === 1 ? [...types][0] : "mixed";
                       })()}
                       onChange={(e) => setSeatsType(e.target.value as EditableSeatType)}
-                      className="rounded-lg border-2 border-beige-kem/50 bg-transparent px-1.5 py-0.5 text-beige-kem"
+                      className="border-2 border-beige-kem/50 bg-transparent px-1.5 py-0.5 text-beige-kem"
                     >
                       {new Set(subjectSeats.map((s) => s.seatType ?? "single")).size > 1 && (
                         <option value="mixed">— nhiều loại —</option>
@@ -1279,7 +1741,7 @@ export default function ChartEditor({
                     className={btn}
                     title="Đánh dấu ghế dành cho xe lăn"
                   >
-                    ♿ {subjectSeats.every((s) => s.isAccessible) ? "✓" : ""}
+                    Xe lăn{subjectSeats.every((s) => s.isAccessible) ? " · bật" : ""}
                   </button>
                 )}
 
@@ -1292,7 +1754,7 @@ export default function ChartEditor({
                   disabled={selected.size === 0}
                   title="Khoá khối đã chọn để không kéo nhầm"
                 >
-                  {draft.blocks.some((b) => selected.has(b.key) && b.locked !== true) ? "🔓" : "🔒"}
+                  {draft.blocks.some((b) => selected.has(b.key) && b.locked !== true) ? "Khoá" : "Mở khoá"}
                 </button>
 
                 <button
@@ -1316,16 +1778,139 @@ export default function ChartEditor({
                   disabled={selected.size === 0}
                   title="Xoá (Delete)"
                 >
-                  ✕
+                  Xoá
                 </button>
 
                 {selected.size > 1 &&
                   (["left", "centerX", "right", "top", "centerY", "bottom"] as const).map((edge) => (
-                    <button key={edge} className={btn} onClick={() => applyAlign(edge)}>
+                    <button
+                      key={edge}
+                      className={btn}
+                      onClick={() => applyAlign(edge)}
+                      title={
+                        {
+                          left: "Canh trái",
+                          centerX: "Canh giữa ngang",
+                          right: "Canh phải",
+                          top: "Canh trên",
+                          centerY: "Canh giữa dọc",
+                          bottom: "Canh dưới",
+                        }[edge]
+                      }
+                    >
                       {{ left: "⇤", centerX: "↔", right: "⇥", top: "⇧", centerY: "↕", bottom: "⇩" }[edge]}
                     </button>
                   ))}
+
+                {/* Distribute (§26). Needs three: two blocks have no gap between them to even out. */}
+                {selected.size > 2 &&
+                  (["horizontal", "vertical"] as const).map((axis) => (
+                    <button
+                      key={axis}
+                      className={btn}
+                      onClick={() => op((d) => distributeBlocks(d, selected, axis))}
+                      title={axis === "horizontal" ? "Dàn đều theo chiều ngang" : "Dàn đều theo chiều dọc"}
+                    >
+                      {axis === "horizontal" ? "⇹" : "⇳"}
+                    </button>
+                  ))}
+
+                {selected.size > 1 && (
+                  <button
+                    className={btn}
+                    onClick={() => op((d) => groupBlocks(d, selected))}
+                    title="Nhóm các khối đang chọn — chọn một khối sẽ chọn cả nhóm"
+                  >
+                    Nhóm
+                  </button>
+                )}
+                {[...selected].some((k) => draft.blocks.find((b) => b.key === k)?.groupId) && (
+                  <button
+                    className={btn}
+                    onClick={() => op((d) => ungroupBlocks(d, selected))}
+                    title="Bỏ nhóm"
+                  >
+                    Bỏ nhóm
+                  </button>
+                )}
+
+                {/* Flip (§7). A mirror of the geometry — labels are untouched, by design. */}
+                {selected.size > 0 &&
+                  (["horizontal", "vertical"] as const).map((axis) => (
+                    <button
+                      key={`flip-${axis}`}
+                      className={btn}
+                      onClick={() => op((d) => flipBlocks(d, selected, axis))}
+                      title={
+                        axis === "horizontal"
+                          ? "Lật ngang — ghế đổi chỗ, nhãn giữ nguyên"
+                          : "Lật dọc — ghế đổi chỗ, nhãn giữ nguyên"
+                      }
+                    >
+                      {axis === "horizontal" ? "⇋" : "⇅"}
+                    </button>
+                  ))}
               </>
+            )}
+          </div>
+
+          {/*
+            The tool row (§4). Select first, then the kinds an organizer reaches for by name, then the
+            two drawing modes. Deliberately NOT every block kind — the palette holds all nineteen, and
+            a toolbar that lists them is a palette in the wrong place.
+          */}
+          <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-beige-kem/25 px-3 py-1">
+            <button
+              onClick={() => {
+                setTool(null);
+                setDrawing(null);
+              }}
+              aria-pressed={tool === null && !drawing}
+              className={tool === null && !drawing ? primary : btn}
+              title="Chọn và di chuyển (Esc)"
+            >
+              ⌖ Chọn
+            </button>
+            {(
+              [
+                ["seating-block", "▦", "Khối ghế"],
+                ["single-row", "▭", "Hàng ghế"],
+                ["ga-zone", "▩", "Khu đứng"],
+                ["stage", "▬", "Sân khấu"],
+                ["text", "T", "Ghi chú"],
+                ["shape", "⬡", "Hình khối"],
+              ] as const
+            ).map(([kind, glyph, label]) => (
+              <button
+                key={kind}
+                onClick={() => {
+                  setTool(kind);
+                  setDrawing(null);
+                }}
+                aria-pressed={tool === kind}
+                className={tool === kind ? primary : btn}
+                title={`${label} — bấm lên sơ đồ để đặt`}
+              >
+                {glyph} {label}
+              </button>
+            ))}
+            <button
+              onClick={() => {
+                setTool(null);
+                setDrawing((cur) => (cur ? null : []));
+                setSelected(new Set());
+                setSeatSel(new Set());
+              }}
+              aria-pressed={drawing !== null}
+              className={drawing ? primary : btn}
+              title="Vẽ hình tự do: bấm từng điểm, bấm lại điểm đầu để khép hình"
+            >
+              Vẽ tự do
+            </button>
+            {tool && (
+              <span className="ml-2 font-mono text-[10px] text-beige-kem/55">
+                Bấm lên sơ đồ để đặt · Esc để huỷ
+              </span>
             )}
           </div>
 
@@ -1336,7 +1921,7 @@ export default function ChartEditor({
             channel, so nothing existing has to change to make room for this.
           */}
           <div
-            className={`min-h-0 flex-1 ${dropping ? "ring-2 ring-inset ring-burgundy" : ""}`}
+            className={`relative min-h-0 flex-1 `}
             onDragOver={(e) => {
               if (!e.dataTransfer.types.includes(BLOCK_DRAG_TYPE)) return;
               e.preventDefault(); // without this the browser refuses the drop
@@ -1359,16 +1944,68 @@ export default function ChartEditor({
               });
             }}
           >
+            {draft.blocks.length === 0 && (
+              // §40. A blank canvas with no guidance is the state an organizer opening their first
+              // chart lands in, and it says nothing about what to do next.
+              <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-6">
+                <div className="pointer-events-auto max-w-sm border-2 border-dashed border-beige-kem/40 bg-surface-2/90 p-5 text-center">
+                  <p className="font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">
+                    Sơ đồ trống
+                  </p>
+                  <p className="mt-2 text-[11px] leading-5 text-beige-kem/60">
+                    Tạo khối ghế đầu tiên, hoặc bắt đầu từ một mẫu có sẵn trong thư viện sơ đồ.
+                  </p>
+                  <div className="mt-3 flex justify-center gap-2">
+                    <button onClick={() => addAt("seating-block")} className={primary}>
+                      Tạo khối ghế
+                    </button>
+                    <button onClick={closeGuarded} className={btn}>
+                      Xem mẫu
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <SeatCanvas<CanvasSeat>
               ref={canvas}
               // Authoring wants a CONSTANT ratio: with the viewBox tracking the content, adding a stage
               // near an edge rescaled the whole chart, and a gap judged by eye changed size between edits.
               fitContent={false}
+              // Drawn under the seats: a guide is a hint about where a block is going, and it must
+              // never sit over the thing it is guiding.
+              underlay={
+                guides.length > 0 ? (
+                  <g pointerEvents="none">
+                    {guides.map((g) => (
+                      <line
+                        key={`${g.axis}-${g.at}`}
+                        x1={g.axis === "x" ? g.at : 0}
+                        y1={g.axis === "x" ? 0 : g.at}
+                        x2={g.axis === "x" ? g.at : LAYOUT_SPACE}
+                        y2={g.axis === "x" ? LAYOUT_SPACE : g.at}
+                        className="stroke-burgundy"
+                        strokeWidth={6}
+                        strokeDasharray="60 40"
+                      />
+                    ))}
+                  </g>
+                ) : undefined
+              }
+              selectedRowKey={rowSel}
+              onViewReport={setViewReport}
+              onRowSelect={(section, label) => {
+                // A row selection replaces the others: three levels of selection at once would make
+                // "what does Delete delete?" unanswerable.
+                setRowSel(`${section ?? ""}|${label}`);
+                setSelected(new Set());
+                setSeatSel(new Set());
+              }}
               className="h-full"
               heightClass="h-full"
               editable
               interactive
-              seats={canvasSeats}
+              seats={visibleSeats}
               elements={canvasElements}
               selectedElementIndex={
                 selectedBlock ? blockOfElement.findIndex((k) => k === selectedBlock.key) : null
@@ -1384,6 +2021,20 @@ export default function ChartEditor({
               // no polygon in this editor could be reshaped. Moving a point also clears `geometry`: the
               // outline is no longer the circle the generator would produce, and saying otherwise would
               // mean the next "make it a circle" silently discarded the organizer's edits.
+              onResize={(index, handle, dx, dy, phase) => {
+                const key = blockOfElement[index];
+                const block = key ? draft.blocks.find((b) => b.key === key) : undefined;
+                if (!block || block.locked) return;
+                // Previewed live, committed once: `commit` on every pointer move would fill the undo
+                // stack with a hundred intermediate sizes (§28).
+                const box = resizedBox(block, handle as ResizeHandle, dx, dy);
+                const apply = (d: ChartDocument) => updateBlock(d, block.key, box);
+                if (phase === "move") setResizing({ key: block.key, box });
+                else {
+                  setResizing(null);
+                  commit(apply);
+                }
+              }}
               onVertexDrag={(elementIndex, vertex, x, y) => {
                 const key = blockOfElement[elementIndex];
                 if (!key) return;
@@ -1437,15 +2088,65 @@ export default function ChartEditor({
                   addDrawingPoint(p);
                   return;
                 }
+                if (tool) {
+                  // Placed at the POINTER, not at the centre of the view — the whole reason to hold a
+                  // tool rather than click the palette is to say where the thing goes.
+                  addAtPoint(tool, p);
+                  setTool(null);
+                  return;
+                }
                 if (!additive) {
                   setSelected(new Set());
                   setSeatSel(new Set());
+                  setRowSel(null);
                 }
               }}
               // While drawing, the drag rectangle would be a marquee nobody asked for.
               marqueeStyle={drawing ? "none" : "rect"}
               overlay={
-                drawing && drawing.length > 0 ? (
+                selectedBlock && !drawing ? (
+                  /*
+                    The rotation handle (§6), drawn for whatever single block is selected.
+                    
+                    In the editor's overlay rather than on the canvas's elements, because a SEAT block
+                    projects to seats and has no element to hang a handle on — and a seating block is
+                    the thing an organizer most wants to swing round to face the stage. One handle for
+                    every kind beats two implementations that disagree about which blocks can rotate.
+                    
+                    Positioned by the block's own angle, so the grip stays where the block's "up" now
+                    is and a second drag continues the first instead of snapping back to vertical.
+                  */
+                  (() => {
+                    const reach = selectedBlock.height / 2 + 400;
+                    const a = ((selectedBlock.rotation - 90) * Math.PI) / 180;
+                    const hx = selectedBlock.x + Math.cos(a) * reach;
+                    const hy = selectedBlock.y + Math.sin(a) * reach;
+                    return (
+                      <g>
+                        <line
+                          x1={selectedBlock.x}
+                          y1={selectedBlock.y}
+                          x2={hx}
+                          y2={hy}
+                          className="stroke-burgundy"
+                          strokeWidth={8}
+                          pointerEvents="none"
+                        />
+                        <circle
+                          cx={hx}
+                          cy={hy}
+                          r={110}
+                          className="fill-burgundy stroke-beige-kem"
+                          strokeWidth={8}
+                          style={{ cursor: "grab" }}
+                          role="button"
+                          aria-label={`Xoay ${selectedBlock.title}`}
+                          onPointerDown={(e) => beginRotate(selectedBlock, e)}
+                        />
+                      </g>
+                    );
+                  })()
+                ) : drawing && drawing.length > 0 ? (
                   <g pointerEvents="none">
                     <polyline
                       points={drawing.map((p) => `${p.x},${p.y}`).join(" ")}
@@ -1471,6 +2172,71 @@ export default function ChartEditor({
             />
           </div>
 
+          {/* §3's bottom bar: what the view is doing, and what is selected. Reads left-to-right from
+              the map's own state to the organizer's — zoom and pointer first, then the selection. */}
+          <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-beige-kem/20 px-3 py-1 font-mono text-[10px] text-beige-kem/55">
+            <span title="Mức phóng to">{Math.round(viewReport.zoom * 100)}%</span>
+            <span className="tabular-nums" title="Toạ độ con trỏ trên sơ đồ">
+              {viewReport.x === null ? "—, —" : `${viewReport.x}, ${viewReport.y}`}
+            </span>
+            {/*
+              The view toggles live HERE, not in the header (§3).
+
+              They are state the map is IN, not actions performed on it — and keeping them in the
+              header was what pushed that wrapping row onto a second line and over the canvas. Each
+              one reads as its state and toggles on click, so the bar says what is true and is also
+              where it is changed.
+            */}
+            <button
+              onClick={() => setGrid((g) => !g)}
+              aria-pressed={grid}
+              className={`transition hover:text-beige-kem ${grid ? "text-beige-kem" : ""}`}
+              title="Bám lưới khi kéo — chỉ hỗ trợ nhập, không ảnh hưởng dữ liệu đã lưu"
+            >
+              Lưới {grid ? "bật" : "tắt"}
+            </button>
+            <button
+              onClick={() => setSnapObjects((v) => !v)}
+              aria-pressed={snapObjects}
+              className={`transition hover:text-beige-kem ${snapObjects ? "text-beige-kem" : ""}`}
+              title="Bám theo tâm của khối khác khi kéo — canh thẳng hàng mà không cần phóng to"
+            >
+              Bám khối {snapObjects ? "bật" : "tắt"}
+            </button>
+            <button
+              onClick={() =>
+                setAutoRenumber((cur) => {
+                  const next = !cur;
+                  try {
+                    window.localStorage.setItem("tixhub.autoRenumber", next ? "on" : "off");
+                  } catch {
+                    // Storage refused; the choice still applies for this session.
+                  }
+                  return next;
+                })
+              }
+              aria-pressed={autoRenumber}
+              className={`transition hover:text-beige-kem ${autoRenumber ? "text-beige-kem" : ""}`}
+              title={
+                autoRenumber
+                  ? "Xoá hoặc thu nhỏ khối sẽ đánh lại chữ hàng cho liền mạch. Tắt để giữ nguyên nhãn."
+                  : "Nhãn hàng giữ nguyên khi xoá. Dùng nút “Đánh lại số” khi muốn dồn lại."
+              }
+            >
+              Tự đánh số {autoRenumber ? "bật" : "tắt"}
+            </button>
+            <span className="ml-auto">
+              {seatSel.size > 0
+                ? `${seatSel.size} ghế`
+                : rowSel
+                  ? `hàng ${rowSel.split("|")[1]}`
+                  : selected.size > 0
+                    ? `${selected.size} khối`
+                    : "chưa chọn gì"}
+            </span>
+            <span title="Tổng số ghế của sơ đồ">{seatCount(draft)} ghế</span>
+          </div>
+
           <p className="shrink-0 px-3 pb-2 font-mono text-[11px] leading-4 text-beige-kem/45">
             {drawing
               ? `Đang vẽ: bấm để đặt điểm (${drawing.length}) · bấm lại điểm đầu hoặc Enter để khép hình · Backspace lùi một điểm · Esc huỷ`
@@ -1485,6 +2251,83 @@ export default function ChartEditor({
           {/* Ordered by how often it is reached for, not by the order the features were built. The
               inspector leads whenever something is selected, because that is the moment the organizer
               is asking "what is this and how do I change it". */}
+          <RailGroup title="Cấu trúc & tìm kiếm" defaultOpen={!selectedBlock && !selectedRow}>
+            <LayersPanel
+              doc={draft}
+              selected={selected}
+              selectedRowKey={rowSel}
+              onSelectBlock={(key, additive) => {
+                setSelected((cur) => selectionAfterPress(cur, key, additive));
+                setRowSel(null);
+                setSeatSel(new Set());
+                canvas.current?.zoomToBlock(key);
+              }}
+              onSelectRow={(sectionName, label) => {
+                setRowSel(`${sectionName ?? ""}|${label}`);
+                setSelected(new Set());
+                setSeatSel(new Set());
+              }}
+              onToggleLock={(key, locked) => op((d) => setLocked(d, new Set([key]), locked))}
+              onToggleHidden={(key, hidden) => op((d) => setHidden(d, new Set([key]), hidden))}
+            />
+          </RailGroup>
+
+          {selectedRow && (
+            <RailGroup title="Thuộc tính hàng" defaultOpen>
+              <RowInspector
+                key={`${selectedRow.blockKey}|${selectedRow.label}`}
+                label={selectedRow.label}
+                sectionName={selectedRow.sectionName}
+                seatCount={selectedRow.seatCount}
+                canEdit={selectedRow.canEdit}
+                onRename={(label) => {
+                  // By row id when the row has one; by label when it is a row drawn this session and
+                  // not yet saved, which has no id to address it by.
+                  const ref = { blockKey: selectedRow.blockKey, label: selectedRow.label };
+                  op((d) =>
+                    selectedRow.rowId != null
+                      ? renameRow(d, selectedRow.rowId, label)
+                      : {
+                          ...d,
+                          blocks: d.blocks.map((b) =>
+                            b.key === ref.blockKey
+                              ? {
+                                  ...b,
+                                  seats: b.seats?.map((seat) =>
+                                    seat.rowLabel === ref.label ? { ...seat, rowLabel: label } : seat,
+                                  ),
+                                }
+                              : b,
+                          ),
+                        },
+                  );
+                  setRowSel(`${selectedRow.sectionName ?? ""}|${label}`);
+                }}
+                onReverse={() =>
+                  op((d) => reverseRow(d, { blockKey: selectedRow.blockKey, label: selectedRow.label }))
+                }
+                onDuplicate={() =>
+                  op((d) => duplicateRow(d, { blockKey: selectedRow.blockKey, label: selectedRow.label }))
+                }
+                onDelete={() =>
+                  ask(
+                    {
+                      title: `Xoá hàng ${selectedRow.label}?`,
+                      message: `${selectedRow.seatCount} ghế sẽ bị xoá. Các hàng còn lại giữ nguyên nhãn — dùng “Đánh lại số” nếu muốn dồn lại. Ghế mà suất diễn đã tạo vé sẽ được lưu trữ thay vì xoá.`,
+                      confirmLabel: "Xoá hàng",
+                      cancelLabel: "Huỷ",
+                      tone: "danger",
+                    },
+                    () => {
+                      op((d) => deleteRow(d, { blockKey: selectedRow.blockKey, label: selectedRow.label }));
+                      setRowSel(null);
+                    },
+                  )
+                }
+              />
+            </RailGroup>
+          )}
+
           {selectedBlock && (
             <RailGroup title="Thuộc tính khối" defaultOpen>
           <BlockInspector
@@ -1499,7 +2342,7 @@ export default function ChartEditor({
               selectedBlock &&
               // Shrinking frees row labels exactly as deleting a block does, so the same close-the-gap
               // rule applies — otherwise 8 rows cut to 4 would leave the block after it starting at I.
-              op((d) => repackRowLabels(setBlockParams(d, selectedBlock.key, patch)))
+              op((d) => repack(setBlockParams(d, selectedBlock.key, patch)))
             }
             onRotate={(deg) => applyRotate(deg)}
             onGeometry={(geometry) =>
@@ -1661,6 +2504,9 @@ export default function ChartEditor({
             issues={issues}
             labelOfSeat={(id) => seatLabels.get(id) ?? null}
             onFocusSeat={focusSeat}
+            // One undoable commit, through the same explicit command the toolbar offers — so the
+            // automatic path and this one can never produce different lettering.
+            onRenumberSection={(sectionId) => op((d) => renumberSection(d, sectionId))}
           />
 
           {/* Set up once per venue, then never touched again — folded by default. */}
@@ -1679,6 +2525,16 @@ export default function ChartEditor({
           </RailGroup>
         </aside>
       </div>
+      {previewing && (
+        <PreviewOverlay
+          seats={visibleSeats}
+          elements={canvasElements}
+          blocks={blocks}
+          colorOfSeat={colorOfSeat}
+          onClose={() => setPreviewing(false)}
+        />
+      )}
+
       {confirm && (
         <ConfirmDialog
           {...confirm}

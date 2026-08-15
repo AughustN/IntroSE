@@ -91,11 +91,11 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
       {loading && <p className="font-meta text-body text-ink-soft">Đang tải ví...</p>}
 
       {error && !loading && (
-        <div className="space-y-3 rounded-2xl border-2 border-beige-kem bg-bubblegum p-5 text-on-tint">
+        <div className="space-y-3 border-2 border-beige-kem bg-bubblegum p-5 text-on-tint">
           <p className="text-body">{error}</p>
           <button
             onClick={() => void load()}
-            className="rounded-xl border-2 border-beige-kem px-4 py-2 text-eyebrow font-bold uppercase"
+            className="border-2 border-beige-kem px-4 py-2 text-eyebrow font-bold uppercase"
           >
             Thử lại
           </button>
@@ -104,7 +104,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
 
       {statement && limits && !loading && (
         <>
-          <section className="space-y-4 rounded-2xl border-2 border-beige-kem bg-xanh-pho p-6 sm:p-8">
+          <section className="space-y-4 border-2 border-beige-kem bg-xanh-pho p-6 sm:p-8">
             <p className="font-meta text-eyebrow uppercase text-ink-soft">Số dư khả dụng</p>
             <p className="font-display text-title-l font-black text-burgundy-ink">
               {formatVnd(statement.balanceAmount)}
@@ -117,7 +117,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
             {!showTopUp && (
               <button
                 onClick={() => setShowTopUp(true)}
-                className="rounded-xl bg-burgundy px-6 py-3 text-body font-black text-white transition hover:brightness-95"
+                className="bg-burgundy px-6 py-3 text-body font-black text-white transition hover:brightness-95"
               >
                 Nạp tiền
               </button>
@@ -133,7 +133,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
           )}
 
           {statement.pending.length > 0 && (
-            <section className="space-y-3 rounded-2xl border-2 border-beige-kem bg-cam-dat p-5 text-on-tint">
+            <section className="space-y-3 border-2 border-beige-kem bg-cam-dat p-5 text-on-tint">
               <h3 className="font-display text-title-s font-black">Đang chờ xác nhận</h3>
               <p className="font-meta text-meta leading-5">
                 VNPay chưa báo về. Tiền chưa vào ví và cũng chưa mất — hệ thống tự đối soát lại sau
@@ -156,7 +156,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
             </h3>
 
             {statement.entries.length === 0 ? (
-              <div className="rounded-2xl border-2 border-dashed border-beige-kem/50 p-8 text-center">
+              <div className="border-2 border-dashed border-beige-kem/50 p-8 text-center">
                 <p className="font-display text-title-s font-black text-beige-kem">
                   Ví chưa có giao dịch
                 </p>
@@ -166,7 +166,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
                 </p>
               </div>
             ) : (
-              <div className="overflow-x-auto rounded-2xl border-2 border-beige-kem">
+              <div className="overflow-x-auto border-2 border-beige-kem">
                 <table className="w-full min-w-[34rem] border-collapse text-left">
                   <thead className="bg-surface-2 font-meta text-meta uppercase text-ink-soft">
                     <tr>
@@ -191,8 +191,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
                           )}
                         </td>
                         <td
-                          className={`px-4 py-3 text-right font-bold whitespace-nowrap ${
-                            entry.amount < 0 ? "text-ink-soft" : "text-cam-dat"
+                          className={`px-4 py-3 text-right font-bold whitespace-nowrap ${ entry.amount < 0 ? "text-ink-soft" : "text-cam-dat"
                           }`}
                         >
                           {entry.amount > 0 ? "+" : "−"}
@@ -212,7 +211,7 @@ export default function WalletPanel({ onBack }: { onBack: () => void }) {
               <button
                 onClick={() => void loadMore()}
                 disabled={loadingMore}
-                className="rounded-xl border-2 border-beige-kem px-5 py-2.5 font-meta text-eyebrow font-bold text-beige-kem transition hover:bg-surface-2 disabled:opacity-50"
+                className="border-2 border-beige-kem px-5 py-2.5 font-meta text-eyebrow font-bold text-beige-kem transition hover:bg-surface-2 disabled:opacity-50"
               >
                 {loadingMore ? "Đang tải..." : "Xem thêm"}
               </button>

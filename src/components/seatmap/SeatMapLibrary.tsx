@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { LayoutLibraryEntry, LayoutRevision } from "@/shared/catalog/seatmap";
 import { layoutApi } from "../../services/catalogClient";
+import { CHANGE_LABEL, compareDocuments, type DocumentDiff } from "./compare";
 import ConfirmDialog, { type ConfirmRequest } from "../ConfirmDialog";
 import OrganizerNav from "../organizer/OrganizerNav";
 
@@ -23,11 +24,11 @@ import OrganizerNav from "../organizer/OrganizerNav";
  * guessing and being corrected by a 409.
  */
 
-const card = "rounded-2xl border-2 border-beige-kem bg-surface-2 p-5";
+const card = " border-2 border-beige-kem bg-surface-2 p-5";
 const ghost =
-  "rounded-xl border-2 border-beige-kem px-3 py-1.5 text-eyebrow font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
+  " border-2 border-beige-kem px-3 py-1.5 text-eyebrow font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
 const primary =
-  "rounded-xl bg-burgundy px-4 py-2 text-eyebrow font-black text-white transition hover:brightness-95 disabled:opacity-60";
+  " bg-burgundy px-4 py-2 text-eyebrow font-black text-white transition hover:brightness-95 disabled:opacity-60";
 
 /** Status, in the platform's own chip vocabulary rather than the raw database word. */
 function StatusPill({ status }: { status: LayoutLibraryEntry["status"] }) {
@@ -39,7 +40,7 @@ function StatusPill({ status }: { status: LayoutLibraryEntry["status"] }) {
         : "border-cam-dat text-cam-dat";
   const label = status === "ready" ? "Đã phát hành" : status === "archived" ? "Lưu trữ" : "Bản nháp";
   return (
-    <span className={`rounded-lg border px-2 py-0.5 font-meta text-[10px] ${style}`}>{label}</span>
+    <span className={`border px-2 py-0.5 font-meta text-[10px] ${style}`}>{label}</span>
   );
 }
 
@@ -60,6 +61,14 @@ export default function SeatMapLibrary({
   const [confirm, setConfirm] = useState<(ConfirmRequest & { onConfirm: () => void }) | null>(null);
   /** Which chart's history is open, and what it holds. Loaded on demand — most charts never need it. */
   const [history, setHistory] = useState<{ layoutId: number; rows: LayoutRevision[] } | null>(null);
+  /**
+   * What a revision differs from the CURRENT chart by (§31), loaded on demand per revision.
+   *
+   * Against the live chart rather than against the neighbouring revision, because that is the
+   * comparison the decision needs: "what will I get back if I restore this" — not "what changed at
+   * the time", which is history rather than a choice.
+   */
+  const [diff, setDiff] = useState<{ revisionId: number; result: DocumentDiff } | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -152,6 +161,29 @@ export default function SeatMapLibrary({
       layoutApi.clone(l.id, { targetVenueId: l.venueId, name: `${l.name} (bản sao)` }),
     );
 
+  /**
+   * Start a real chart from a template (§32, §33).
+   *
+   * A clone, then straight into the editor — because "use a template" is the beginning of drawing,
+   * and stopping to admire a new row in a list is not what the organizer asked for.
+   *
+   * The copy is not itself a template, and nothing here has to make it so: `cloneLayout`'s INSERT
+   * names its columns and `is_template` is not among them, so the copy takes the column default. Were
+   * that to change, every chart started from a template would appear in the template tab and the tab
+   * would fill with one-off venues within a week — which is what the test below pins.
+   */
+  // Named `startFromTemplate`, not `useTemplate`: anything beginning with `use` is a React Hook by
+  // convention and by lint rule, and calling one from an onClick is an error rather than a style note.
+  const startFromTemplate = (l: LayoutLibraryEntry) =>
+    void run(async () => {
+      const made = await layoutApi.clone(l.id, {
+        targetVenueId: l.venueId,
+        name: `${l.name} (từ mẫu)`,
+      });
+      onOpen(made.id);
+      return made;
+    });
+
   return (
     // A section of the console, laid out like every other page — not a `fixed inset-0` takeover. The
     // overlay was inherited from the modal this replaced and was the last thing making the seat map
@@ -190,7 +222,7 @@ export default function SeatMapLibrary({
         </div>
 
         {error && (
-          <p className="rounded-xl border-2 border-bubblegum bg-surface-2 px-4 py-2 text-eyebrow text-on-tint">
+          <p className="border-2 border-bubblegum bg-surface-2 px-4 py-2 text-eyebrow text-on-tint">
             {error}
           </p>
         )}
@@ -218,13 +250,13 @@ export default function SeatMapLibrary({
                 <h3 className="font-display text-lg font-bold">{l.name}</h3>
                 <StatusPill status={l.status} />
                 {l.isTemplate && (
-                  <span className="rounded-lg border border-bubblegum px-2 py-0.5 font-meta text-[10px] text-bubblegum">
+                  <span className="border border-bubblegum px-2 py-0.5 font-meta text-[10px] text-bubblegum">
                     Mẫu
                   </span>
                 )}
                 {l.usageCount > 0 && (
                   <span
-                    className="rounded-lg border border-la-co px-2 py-0.5 font-meta text-[10px] text-la-co"
+                    className="border border-la-co px-2 py-0.5 font-meta text-[10px] text-la-co"
                     title="Số suất chiếu đang dùng sơ đồ này"
                   >
                     {l.usageCount} suất đang dùng
@@ -244,9 +276,31 @@ export default function SeatMapLibrary({
               </p>
 
               <div className="mt-3 flex flex-wrap gap-2">
-                <button onClick={() => onOpen(l.id)} className={primary}>
-                  Mở
-                </button>
+                {/*
+                  On a template, STARTING A CHART is the primary action and opening it is not (§33).
+                  Opening a template edits the template — which is occasionally what you want and
+                  almost never what you came for, so it stays available and stops being the button
+                  the eye lands on first.
+                */}
+                {l.isTemplate ? (
+                  <>
+                    <button
+                      onClick={() => startFromTemplate(l)}
+                      disabled={busy}
+                      className={primary}
+                      title="Tạo một sơ đồ mới từ mẫu này và mở ra để sửa"
+                    >
+                      Dùng mẫu
+                    </button>
+                    <button onClick={() => onOpen(l.id)} disabled={busy} className={ghost}>
+                      Sửa mẫu
+                    </button>
+                  </>
+                ) : (
+                  <button onClick={() => onOpen(l.id)} className={primary}>
+                    Mở
+                  </button>
+                )}
                 <button onClick={() => rename(l)} disabled={busy} className={ghost}>
                   Đổi tên
                 </button>
@@ -342,6 +396,34 @@ export default function SeatMapLibrary({
                           <button
                             className={ghost}
                             disabled={busy}
+                            title="Xem phiên bản này khác gì so với sơ đồ hiện tại"
+                            onClick={async () => {
+                              if (diff?.revisionId === r.id) {
+                                setDiff(null);
+                                return;
+                              }
+                              setBusy(true);
+                              setError(null);
+                              try {
+                                const [old_, now] = await Promise.all([
+                                  layoutApi.revisionDocument(l.id, r.id),
+                                  layoutApi.get(l.id),
+                                ]);
+                                if (now.document) {
+                                  setDiff({ revisionId: r.id, result: compareDocuments(old_.document, now.document) });
+                                }
+                              } catch (e) {
+                                setError((e as Error).message);
+                              } finally {
+                                setBusy(false);
+                              }
+                            }}
+                          >
+                            {diff?.revisionId === r.id ? "Ẩn so sánh" : "So sánh"}
+                          </button>
+                          <button
+                            className={ghost}
+                            disabled={busy}
                             onClick={() =>
                               setConfirm({
                                 title: "Khôi phục phiên bản này?",
@@ -361,6 +443,54 @@ export default function SeatMapLibrary({
                           >
                             Khôi phục
                           </button>
+
+                          {diff?.revisionId === r.id && (
+                            <div className="w-full border border-beige-kem/30 p-2">
+                              {diff.result.identical ? (
+                                <p className="font-meta text-meta text-beige-kem/60">
+                                  Không khác gì sơ đồ hiện tại — khôi phục sẽ không thay đổi gì.
+                                </p>
+                              ) : (
+                                <ul className="space-y-0.5 font-meta text-meta text-beige-kem/70">
+                                  {diff.result.seatDelta !== 0 && (
+                                    <li>
+                                      Ghế:{" "}
+                                      <b className={diff.result.seatDelta < 0 ? "text-bubblegum" : "text-la-co"}>
+                                        {diff.result.seatDelta > 0 ? "+" : ""}
+                                        {diff.result.seatDelta}
+                                      </b>{" "}
+                                      nếu khôi phục
+                                    </li>
+                                  )}
+                                  {/* "Added" from the CURRENT chart's point of view is what a restore
+                                      would REMOVE, so it is worded as the consequence, not the diff. */}
+                                  {diff.result.added.length > 0 && (
+                                    <li>
+                                      Sẽ mất {diff.result.added.length} khối:{" "}
+                                      {diff.result.added.map((b) => b.title).join(", ")}
+                                    </li>
+                                  )}
+                                  {diff.result.removed.length > 0 && (
+                                    <li>
+                                      Sẽ lấy lại {diff.result.removed.length} khối:{" "}
+                                      {diff.result.removed.map((b) => b.title).join(", ")}
+                                    </li>
+                                  )}
+                                  {diff.result.changed.map((b) => (
+                                    <li key={b.key}>
+                                      {b.title}: {b.changes.map((c) => CHANGE_LABEL[c]).join(", ")}
+                                    </li>
+                                  ))}
+                                  {diff.result.sectionsRemoved.length > 0 && (
+                                    <li>Khu sẽ lấy lại: {diff.result.sectionsRemoved.join(", ")}</li>
+                                  )}
+                                  {diff.result.sectionsAdded.length > 0 && (
+                                    <li>Khu sẽ mất: {diff.result.sectionsAdded.join(", ")}</li>
+                                  )}
+                                </ul>
+                              )}
+                            </div>
+                          )}
                         </li>
                       ))}
                     </ul>

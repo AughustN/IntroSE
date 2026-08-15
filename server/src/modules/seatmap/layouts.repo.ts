@@ -10,8 +10,9 @@ import type {
   ShowtimeMap,
 } from '@shared/catalog/seatmap.js';
 import type { SeatMapElement, SeatMapTable } from '@shared/catalog/types.js';
+import type { ChartDocument } from '@shared/catalog/seatmap-document.js';
 import { adoptLayout, remapDocument, upgradeDocument } from '@shared/catalog/seatmap-document.js';
-import { projectDocument, stitchSeatIds } from '@shared/catalog/seatmap-project.js';
+import { projectDocument, stitchRows, stitchSeatIds } from '@shared/catalog/seatmap-project.js';
 import { clampCoord, normaliseRotation } from '@shared/catalog/seatmap-validate.js';
 import { buildTierLegend } from '@shared/catalog/tier-palette.js';
 import { LAYOUT_SPACE, SEAT_DIAMETER } from '../../config.js';
@@ -143,7 +144,7 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
   const l = head.rows[0];
   if (!l) return null;
 
-  const [sections, categories, seats, elements, tables] = await Promise.all([
+  const [sections, categories, rows, seats, elements, tables] = await Promise.all([
     db.query<{
       id: number;
       name: string;
@@ -160,6 +161,13 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
       `SELECT id, name, color FROM layout_categories WHERE layout_id = $1 ORDER BY name`,
       [layoutId],
     ),
+    // Rows (0032). Ordered by the display position the organizer set, then by label so an unordered
+    // chart still reads alphabetically rather than by insertion accident.
+    db.query<{ id: number; section_id: number | null; label: string; display_order: number }>(
+      `SELECT id, section_id, label, display_order
+         FROM layout_rows WHERE layout_id = $1 ORDER BY display_order, label`,
+      [layoutId],
+    ),
     db.query<{
       id: number;
       section_id: number | null;
@@ -172,10 +180,15 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
       rotation: number;
       table_id: number | null;
       is_accessible: boolean;
+      row_id: number | null;
     }>(
+      // `archived_at IS NULL`: an archived seat has left the chart and must not come back as one the
+      // editor can move or the validator can complain about. Its row stays in the table for the
+      // bookings that point at it (§18).
       `SELECT id, section_id, category_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation,
-              table_id, is_accessible
-         FROM seats WHERE layout_id = $1 ORDER BY section_id, row_label, seat_number`,
+              table_id, is_accessible, row_id
+         FROM seats WHERE layout_id = $1 AND archived_at IS NULL
+        ORDER BY section_id, row_label, seat_number`,
       [layoutId],
     ),
     db.query<{
@@ -236,6 +249,12 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
       seatSizeMultiplier: Number(s.seat_size_multiplier),
     })),
     categories: categories.rows.map((c) => ({ id: c.id, name: c.name, color: c.color })),
+    rows: rows.rows.map((r) => ({
+      id: r.id,
+      sectionId: r.section_id,
+      label: r.label,
+      displayOrder: r.display_order,
+    })),
     tables: tables.rows.map((t) => ({
       id: t.id,
       sectionId: t.section_id,
@@ -263,6 +282,7 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
       rotation: s.rotation,
       tableId: s.table_id,
       isAccessible: s.is_accessible,
+      rowId: s.row_id,
     })),
     elements: elements.rows.map((e) => ({
       id: e.id,
@@ -329,6 +349,26 @@ export async function recordRevision(
      ON CONFLICT (layout_id, version) DO NOTHING`,
     [layoutId, input.version, JSON.stringify(input.document), input.seatCount, input.actorUserId],
   );
+}
+
+/**
+ * One revision's stored document, for comparing two versions (§31).
+ *
+ * Scoped by `layout_id` as well as by `id`: a revision id from another chart must read as "not found"
+ * rather than handing back a document from a layout the caller may not own. The route checks
+ * ownership of the LAYOUT, so this is what makes that check sufficient.
+ */
+export async function revisionDocument(
+  layoutId: number,
+  revisionId: number,
+  db: Db = pool,
+): Promise<ChartDocument | null> {
+  const { rows } = await db.query<{ document: unknown }>(
+    `SELECT document FROM layout_revisions WHERE id = $1 AND layout_id = $2`,
+    [revisionId, layoutId],
+  );
+  if (rows.length === 0) return null;
+  return upgradeDocument(rows[0].document);
 }
 
 export async function listRevisions(layoutId: number, db: Db = pool): Promise<LayoutRevision[]> {
@@ -434,6 +474,8 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
     const inCategories = projected ? projected.categories : (body.categories ?? []);
     const inSeats = projected ? projected.seats : (body.seats ?? []);
     const inElements = projected ? projected.elements : (body.elements ?? []);
+    // Rows only ever come from a projection: the deprecated array form of the request predates them.
+    const inRows = projected ? projected.rows : [];
 
     if (body.name !== undefined || body.isTemplate !== undefined) {
       await client.query(
@@ -533,6 +575,57 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
     ]);
 
     /*
+     * --- rows (0032): upsert by id, delete the rest.
+     *
+     * The same placeholder protocol as sections and categories above — a negative id is one the editor
+     * minted this session and `rowIdMap` resolves it to the real one for the seats that name it.
+     *
+     * A row's LABEL is updated in place, which is the whole reason the table is here: renumbering must
+     * change what a row is called without changing which row it is, so that a per-row note, a display
+     * order or anything else later hung off `layout_rows.id` survives a renumber (§12, §42 Rule 1).
+     *
+     * `section_id` is remapped through `sectionIdMap` for the same reason a seat's is: a row drawn into
+     * a section created in this very save names that section by a placeholder.
+     */
+    /*
+     * The DROP comes first here for the same reason it does for seats below.
+     *
+     * Pulling rows F–J back onto A–E while the old A–E are being deleted means, part-way through the
+     * upsert, two rows in one section both called "A" — and `layout_rows_label_idx` rejects that even
+     * though the finished state is fine. Deleting first frees the labels before anything is renamed
+     * onto them, and the keep-list does not depend on the loop: a row is kept iff the projection names
+     * its id.
+     */
+    const keptRows: number[] = inRows.filter((r) => r.id > 0).map((r) => r.id);
+    // Deleting a row does NOT delete its seats: `seats.row_id` is ON DELETE SET NULL, so a seat whose
+    // row is gone stays sellable and simply stops naming one. The seat's own delete rule is unchanged.
+    await client.query(`DELETE FROM layout_rows WHERE layout_id = $1 AND NOT (id = ANY($2::bigint[]))`, [
+      layoutId,
+      keptRows,
+    ]);
+
+    const rowIdMap = new Map<number, number>();
+    for (const r of inRows) {
+      const sectionId = resolveRef(r.sectionId, sectionIdMap, keptSections);
+      if (r.id && r.id > 0) {
+        await client.query(
+          `UPDATE layout_rows SET label = $2, section_id = $3, display_order = $4, updated_at = now()
+             WHERE id = $1 AND layout_id = $5`,
+          [r.id, r.label, sectionId, r.displayOrder, layoutId],
+        );
+        rowIdMap.set(r.id, r.id);
+      } else {
+        const { rows } = await client.query<{ id: number }>(
+          `INSERT INTO layout_rows (layout_id, section_id, label, display_order)
+           VALUES ($1, $2, $3, $4) RETURNING id`,
+          [layoutId, sectionId, r.label, r.displayOrder],
+        );
+        keptRows.push(rows[0].id);
+        if (r.id) rowIdMap.set(r.id, rows[0].id);
+      }
+    }
+
+    /*
      * --- seats
      *
      * The DROP comes first, and the order is load-bearing.
@@ -556,20 +649,36 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
      */
     const keptSeats: number[] = inSeats.filter((s) => s.id).map((s) => s.id as number);
 
-    // A seat a showtime has generated from CANNOT be deleted here. `showtime_seats.seat_id` is a
-    // plain `REFERENCES seats(id)` with no ON DELETE clause (0002_catalog.sql:129), so this statement
-    // raises 23503 for such a seat.
-    //
-    // The service refuses that save up front with `seat_in_use` so the organizer is told which seats
-    // are sold rather than shown a 500. This catch is the belt-and-braces behind it, because the
-    // pre-check and this DELETE are two statements and only the transaction makes them one.
-    //
-    // The 23503 is mapped to that refusal by the SERVICE, which is where PG codes are already turned
-    // into refusals (it does the same for 23505) — this layer stays free of HTTP.
-    //
-    // NOTE for future readers: `ON DELETE CASCADE` here would "fix" the error by deleting paid
-    // inventory. It is never the right answer.
-    await client.query(`DELETE FROM seats WHERE layout_id = $1 AND NOT (id = ANY($2::bigint[]))`, [layoutId, keptSeats]);
+    /*
+     * A seat a showtime has generated from is ARCHIVED rather than deleted (§18, §42 Rule 7).
+     *
+     * `showtime_seats.seat_id` is a plain `REFERENCES seats(id)` with no ON DELETE clause, so removing
+     * such a seat is a 23503 — which is why this used to be refused outright with `seat_in_use`. That
+     * protected the booking, which is the important half, and left an organizer who simply wanted the
+     * row gone with no way to proceed at all.
+     *
+     * Archiving is the third answer: the seat leaves the chart and keeps everything a booking needs —
+     * its id, its bookings, its history. Reads filter `archived_at IS NULL`, so it stops being drawn,
+     * validated and generated from, while the showtime that already bound it carries on selling from
+     * its own snapshot.
+     *
+     * The two statements are ordered and both are needed. Archive first, then delete what is left:
+     * the DELETE's `archived_at IS NULL` is what stops it reaching a seat that was just archived, and
+     * a seat nothing has bound is still deleted outright rather than accumulating forever.
+     *
+     * NOTE for future readers: `ON DELETE CASCADE` on that FK would "fix" the 23503 by deleting paid
+     * inventory. It is never the right answer.
+     */
+    await client.query(
+      `UPDATE seats SET archived_at = now()
+         WHERE layout_id = $1 AND archived_at IS NULL AND NOT (id = ANY($2::bigint[]))
+           AND EXISTS (SELECT 1 FROM showtime_seats ss WHERE ss.seat_id = seats.id)`,
+      [layoutId, keptSeats],
+    );
+    await client.query(
+      `DELETE FROM seats WHERE layout_id = $1 AND NOT (id = ANY($2::bigint[])) AND archived_at IS NULL`,
+      [layoutId, keptSeats],
+    );
 
     for (const seat of inSeats) {
       const x = clampCoord(seat.x);
@@ -577,22 +686,23 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
       const rot = normaliseRotation(seat.rotation);
       const sectionId = resolveRef(seat.sectionId, sectionIdMap, keptSections);
       const categoryId = resolveRef(seat.categoryId ?? null, categoryIdMap, keptCategories);
+      const rowId = resolveRef(seat.rowId ?? null, rowIdMap, keptRows);
       if (seat.id) {
         await client.query(
           `UPDATE seats SET section_id = $2, row_label = $3, seat_number = $4, seat_type = $5,
                             pos_x = $6, pos_y = $7, rotation = $8, category_id = $10,
-                            is_accessible = $11
+                            is_accessible = $11, row_id = $12
              WHERE id = $1 AND layout_id = $9`,
           [seat.id, sectionId, seat.rowLabel, seat.seatNumber, seat.seatType, x, y, rot, layoutId, categoryId,
-           seat.isAccessible ?? false],
+           seat.isAccessible ?? false, rowId],
         );
       } else {
         const { rows } = await client.query<{ id: number }>(
           `INSERT INTO seats (layout_id, section_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation,
-                              category_id, is_accessible)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+                              category_id, is_accessible, row_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
           [layoutId, sectionId, seat.rowLabel, seat.seatNumber, seat.seatType, x, y, rot, categoryId,
-           seat.isAccessible ?? false],
+           seat.isAccessible ?? false, rowId],
         );
         keptSeats.push(rows[0].id);
       }
@@ -643,7 +753,14 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
       // inserted a second section with the same name, and tripped `UNIQUE (layout_id, name)`.
       let temp = 0;
       const stitched = remapDocument(
-        stitchSeatIds(body.document, projected.seatOrigin, keptSeats),
+        // Rows first: `stitchRows` writes the projection's derived rows onto the document with their
+        // real ids. Without it the stored document keeps the placeholders and the NEXT save tries to
+        // insert the same rows again, which `layout_rows_label_idx` refuses.
+        stitchRows(
+          stitchSeatIds(body.document, projected.seatOrigin, keptSeats),
+          projected,
+          (id) => rowIdMap.get(id) ?? id,
+        ),
         {
           sections: sectionIdMap,
           categories: categoryIdMap,
@@ -895,6 +1012,32 @@ export async function cloneLayout(sourceId: number, targetVenueId: number, name:
       tableMap.set(t.id, rows[0].id);
     }
 
+    /*
+     * Rows are copied before the seats, so each cloned seat can be pointed at the CLONE's own row.
+     *
+     * Copying `row_id` verbatim would leave the copy's seats naming the SOURCE's rows — so renaming a
+     * row in the original would rename it in every clone, and deleting the original would null them
+     * all. Same failure the category remap above exists to prevent.
+     */
+    const { rows: srcRows } = await client.query<{
+      id: number;
+      section_id: number | null;
+      label: string;
+      display_order: number;
+    }>(
+      `SELECT id, section_id, label, display_order FROM layout_rows WHERE layout_id = $1 ORDER BY id`,
+      [sourceId],
+    );
+    const rowMap = new Map<number, number>();
+    for (const r of srcRows) {
+      const { rows } = await client.query<{ id: number }>(
+        `INSERT INTO layout_rows (layout_id, section_id, label, display_order)
+         VALUES ($1, $2, $3, $4) RETURNING id`,
+        [newId, r.section_id === null ? null : (map.get(r.section_id) ?? null), r.label, r.display_order],
+      );
+      rowMap.set(r.id, rows[0].id);
+    }
+
     const { rows: seats } = await client.query<{
       id: number;
       section_id: number | null;
@@ -906,9 +1049,10 @@ export async function cloneLayout(sourceId: number, targetVenueId: number, name:
       rotation: number;
       table_id: number | null;
       category_id: number | null;
+      row_id: number | null;
     }>(
-      `SELECT id, section_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation, table_id, category_id
-         FROM seats WHERE layout_id = $1 ORDER BY id`,
+      `SELECT id, section_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation, table_id, category_id, row_id
+         FROM seats WHERE layout_id = $1 AND archived_at IS NULL ORDER BY id`,
       [sourceId],
     );
     // `RETURNING id` so the caller gets an old→new seat map. Without it a document copied alongside the
@@ -918,8 +1062,8 @@ export async function cloneLayout(sourceId: number, targetVenueId: number, name:
     for (const s of seats) {
       const inserted = await client.query<{ id: number }>(
         `INSERT INTO seats (layout_id, section_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation,
-                            table_id, category_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+                            table_id, category_id, row_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
         [
           newId,
           s.section_id === null ? null : (map.get(s.section_id) ?? null),
@@ -931,6 +1075,7 @@ export async function cloneLayout(sourceId: number, targetVenueId: number, name:
           s.rotation,
           s.table_id === null ? null : (tableMap.get(s.table_id) ?? null),
           s.category_id === null ? null : (catMap.get(s.category_id) ?? null),
+          s.row_id === null ? null : (rowMap.get(s.row_id) ?? null),
         ],
       );
       seatMap.set(s.id, inserted.rows[0].id);

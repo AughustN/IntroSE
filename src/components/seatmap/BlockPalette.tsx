@@ -53,13 +53,13 @@ const GROUPS: { title: string; items: { kind: BlockKind; glyph: string; label: s
     // or retiring that palette would quietly remove seven kinds the database still supports.
     title: "Tiện ích",
     items: [
-      { kind: "exit", glyph: "⇥", label: "Thoát hiểm", hint: "Lối thoát hiểm" },
-      { kind: "restroom", glyph: "⛨", label: "Vệ sinh", hint: "Nhà vệ sinh" },
-      { kind: "food_drink", glyph: "☕", label: "Ăn uống", hint: "Đồ ăn và nước uống" },
-      { kind: "smoking", glyph: "◍", label: "Hút thuốc", hint: "Khu vực hút thuốc" },
-      { kind: "first_aid", glyph: "✚", label: "Sơ cứu", hint: "Điểm sơ cứu" },
-      { kind: "lift_stairs", glyph: "⇕", label: "Thang", hint: "Thang máy hoặc cầu thang" },
-      { kind: "wheelchair", glyph: "♿", label: "Xe lăn", hint: "Lối dành cho xe lăn" },
+      { kind: "exit", glyph: "EX", label: "Thoát hiểm", hint: "Lối thoát hiểm" },
+      { kind: "restroom", glyph: "WC", label: "Vệ sinh", hint: "Nhà vệ sinh" },
+      { kind: "food_drink", glyph: "F&B", label: "Ăn uống", hint: "Đồ ăn và nước uống" },
+      { kind: "smoking", glyph: "HT", label: "Hút thuốc", hint: "Khu vực hút thuốc" },
+      { kind: "first_aid", glyph: "SC", label: "Sơ cứu", hint: "Điểm sơ cứu" },
+      { kind: "lift_stairs", glyph: "TH", label: "Thang", hint: "Thang máy hoặc cầu thang" },
+      { kind: "wheelchair", glyph: "XL", label: "Xe lăn", hint: "Lối dành cho xe lăn" },
     ],
   },
 ];
@@ -78,7 +78,7 @@ const SHAPES: { geometry: Exclude<BlockGeometry, "free">; glyph: string; label: 
 const COLORS = ["#D93025", "#F7A97C", "#BFC0F2", "#FBD0DC", "#4C9A6B", "#8A0C24"] as const;
 
 const item =
-  "flex items-center gap-2 rounded-lg border-2 border-beige-kem/40 px-2 py-1.5 text-left text-xs text-beige-kem/80 transition hover:border-beige-kem hover:text-beige-kem disabled:opacity-40";
+  "flex items-center gap-2 border-2 border-beige-kem/40 px-2 py-1.5 text-left text-xs text-beige-kem/80 transition hover:border-beige-kem hover:text-beige-kem disabled:opacity-40";
 
 export default function BlockPalette({
   onAdd,
@@ -125,7 +125,7 @@ export default function BlockPalette({
   const parse = (v: string) => (v === "auto" ? undefined : v === "none" ? null : Number(v));
 
   return (
-    <div className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
+    <div className="border-2 border-beige-kem bg-surface-2 p-4">
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">
           Thêm vào sơ đồ
@@ -139,14 +139,14 @@ export default function BlockPalette({
       {/* Where the next block lands. A CONTROL rather than a readout: a block does not have to belong
           to a section — the schema has allowed a section-less seat since 0024 and publish reports it —
           but with this resolved automatically there was no way to ask for one. */}
-      <div className="mt-2 grid gap-1 rounded-lg border border-beige-kem/30 p-2">
+      <div className="mt-2 grid gap-1 border border-beige-kem/30 p-2">
         <label className="grid gap-0.5 font-mono text-[10px] text-beige-kem/60">
           Khối mới vào khu
           <select
             value={valueOf(pinned.sectionId)}
             onChange={(e) => onPin({ sectionId: parse(e.target.value) })}
             disabled={disabled}
-            className="rounded-md border border-beige-kem/40 bg-surface-2 px-1.5 py-1 text-[11px] text-beige-kem disabled:opacity-40"
+            className="border border-beige-kem/40 bg-surface-2 px-1.5 py-1 text-[11px] text-beige-kem disabled:opacity-40"
           >
             <option value="auto">Tự động ({nameOf(sections, resolved.sectionId, "không thuộc khu nào")})</option>
             <option value="none">Không thuộc khu nào</option>
@@ -163,7 +163,7 @@ export default function BlockPalette({
             value={valueOf(pinned.categoryId)}
             onChange={(e) => onPin({ categoryId: parse(e.target.value) })}
             disabled={disabled}
-            className="rounded-md border border-beige-kem/40 bg-surface-2 px-1.5 py-1 text-[11px] text-beige-kem disabled:opacity-40"
+            className="border border-beige-kem/40 bg-surface-2 px-1.5 py-1 text-[11px] text-beige-kem disabled:opacity-40"
           >
             <option value="auto">Tự động ({nameOf(categories, resolved.categoryId, "chưa xếp hạng")})</option>
             <option value="none">Chưa xếp hạng ghế</option>
@@ -225,7 +225,7 @@ export default function BlockPalette({
                 e.dataTransfer.effectAllowed = "copy";
               }}
               onClick={() => onAdd("shape", s.geometry)}
-              className="flex flex-col items-center gap-0.5 rounded-lg border-2 border-beige-kem/40 px-1 py-1.5 text-[10px] text-beige-kem/80 transition hover:border-beige-kem hover:text-beige-kem disabled:opacity-40"
+              className="flex flex-col items-center gap-0.5 border-2 border-beige-kem/40 px-1 py-1.5 text-[10px] text-beige-kem/80 transition hover:border-beige-kem hover:text-beige-kem disabled:opacity-40"
             >
               <span aria-hidden="true" className="text-base leading-none">
                 {s.glyph}
@@ -241,9 +241,6 @@ export default function BlockPalette({
           title="Đặt từng điểm trên sơ đồ, bấm lại điểm đầu để khép hình"
           className={`mt-1 w-full ${item} ${drawing ? "border-burgundy bg-burgundy/20 text-beige-kem" : ""}`}
         >
-          <span aria-hidden="true" className="text-base leading-none">
-            ✎
-          </span>
           <span className="min-w-0 truncate">{drawing ? "Đang vẽ — Esc để dừng" : "Vẽ tự do"}</span>
         </button>
       </div>
@@ -264,8 +261,7 @@ export default function BlockPalette({
               aria-pressed={(color ?? "").toLowerCase() === c.toLowerCase()}
               onClick={() => onColor(c)}
               style={{ backgroundColor: c }}
-              className={`h-7 w-7 rounded-lg border-2 transition disabled:opacity-40 ${
-                (color ?? "").toLowerCase() === c.toLowerCase()
+              className={`h-7 w-7 border-2 transition disabled:opacity-40 ${ (color ?? "").toLowerCase() === c.toLowerCase()
                   ? "border-beige-kem"
                   : "border-transparent hover:border-beige-kem/50"
               }`}
@@ -276,8 +272,7 @@ export default function BlockPalette({
             onClick={() => onColor(null)}
             aria-pressed={!color}
             title="Dùng màu mặc định của giao diện"
-            className={`h-7 rounded-lg border-2 px-2 font-mono text-[10px] transition disabled:opacity-40 ${
-              color ? "border-transparent text-beige-kem/50" : "border-beige-kem text-beige-kem"
+            className={`h-7 border-2 px-2 font-mono text-[10px] transition disabled:opacity-40 ${ color ? "border-transparent text-beige-kem/50" : "border-beige-kem text-beige-kem"
             }`}
           >
             Mặc định

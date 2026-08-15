@@ -22,16 +22,26 @@ export default function ValidationPanel({
   issues,
   labelOfSeat,
   onFocusSeat,
+  onRenumberSection,
 }: {
   issues: ValidationIssue[];
   /** Seat id → "Khu A · B12". Falls back to the id when a seat is not in the current projection. */
   labelOfSeat?: (seatId: number) => string | null;
   /** Select the seat's block and zoom the canvas to it. */
   onFocusSeat?: (seatId: number) => void;
+  /**
+   * Renumber one section, for the issues a renumber actually fixes (§41 "Fix Automatically").
+   *
+   * Offered only on `duplicate_label`, which is the numbering conflict: two seats in one section
+   * sharing a row and number. Overlapping seats, a missing class or an empty zone are not numbering
+   * problems and no renumber would touch them — a "fix" button on those would be a button that does
+   * nothing.
+   */
+  onRenumberSection?: (sectionId: number) => void;
 }) {
   if (issues.length === 0) {
     return (
-      <div className="rounded-2xl border-2 border-la-co bg-surface-2 p-4">
+      <div className="border-2 border-la-co bg-surface-2 p-4">
         <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-la-co">
           Hợp lệ
         </h3>
@@ -41,7 +51,7 @@ export default function ValidationPanel({
   }
 
   return (
-    <div className="rounded-2xl border-2 border-bubblegum bg-surface-2 p-4">
+    <div className="border-2 border-bubblegum bg-surface-2 p-4">
       <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-bubblegum">
         {issues.length} vấn đề — chưa thể phát hành
       </h3>
@@ -62,7 +72,7 @@ export default function ValidationPanel({
                     onClick={() => onFocusSeat?.(id)}
                     disabled={!onFocusSeat}
                     title="Xem ghế này trên sơ đồ"
-                    className="rounded-md border border-bubblegum/60 px-1.5 py-0.5 font-meta text-[10px] text-beige-kem/80 transition hover:border-bubblegum hover:text-beige-kem disabled:cursor-default disabled:opacity-60"
+                    className="border border-bubblegum/60 px-1.5 py-0.5 font-meta text-[10px] text-beige-kem/80 transition hover:border-bubblegum hover:text-beige-kem disabled:cursor-default disabled:opacity-60"
                   >
                     {labelOfSeat?.(id) ?? `#${id}`}
                   </button>
@@ -73,6 +83,17 @@ export default function ValidationPanel({
                   </span>
                 )}
               </span>
+            )}
+
+            {issue.code === "duplicate_label" && onRenumberSection && issue.sectionIds?.length === 1 && (
+              <button
+                type="button"
+                onClick={() => onRenumberSection(issue.sectionIds![0])}
+                title="Đánh lại số cho khu này để hết trùng nhãn"
+                className="ml-1 border border-la-co px-1.5 py-0.5 font-meta text-[10px] text-la-co transition hover:bg-la-co/10"
+              >
+                Sửa tự động
+              </button>
             )}
 
             {issue.sectionIds && issue.sectionIds.length > 0 && (

@@ -36,10 +36,10 @@ import { type BlockGeometry, BLOCK_LABEL } from "./documentOps";
  */
 
 const input =
-  "h-8 w-full rounded-lg border-2 border-beige-kem bg-surface-2 px-2 text-xs text-beige-kem outline-none focus:border-burgundy";
+  "h-8 w-full border-2 border-beige-kem bg-surface-2 px-2 text-xs text-beige-kem outline-none focus:border-burgundy";
 const label = "block font-mono text-[11px] text-beige-kem/60";
 const btn =
-  "rounded-lg border-2 border-beige-kem px-2 py-1 text-xs font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
+  " border-2 border-beige-kem px-2 py-1 text-xs font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
 
 const ROW_SCHEMES: { value: RowLabelScheme; label: string }[] = [
   { value: "alpha-asc", label: "A, B, C… (từ đầu)" },
@@ -157,7 +157,7 @@ export default function BlockInspector({
 }) {
   if (!block) {
     return (
-      <div className="rounded-2xl border-2 border-beige-kem/40 bg-surface-2 p-4">
+      <div className="border-2 border-beige-kem/40 bg-surface-2 p-4">
         <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">
           Thuộc tính
         </h3>
@@ -177,7 +177,7 @@ export default function BlockInspector({
   const wouldClip = parametric && rows * perRow > seats + seatBudget;
 
   return (
-    <div className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
+    <div className="border-2 border-beige-kem bg-surface-2 p-4">
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">
           {BLOCK_LABEL[block.kind]}
@@ -388,7 +388,7 @@ export default function BlockInspector({
           {block.categoryId === null && (
             // The zone is drawn but unsellable until it names a seat class, and the publish gate will
             // say so. Saying it here means the organizer finds out while looking at the zone.
-            <p className="mt-2 rounded-lg border border-bubblegum px-2 py-1 text-[10px] leading-4 text-bubblegum">
+            <p className="mt-2 border border-bubblegum px-2 py-1 text-[10px] leading-4 text-bubblegum">
               Chưa có hạng ghế — chọn một hạng ở bảng “Hạng ghế” để bán được khu này.
             </p>
           )}
@@ -416,8 +416,7 @@ export default function BlockInspector({
                 title={name}
                 aria-pressed={block.geometry === geometry}
                 onClick={() => onGeometry?.(geometry)}
-                className={`rounded-lg border-2 px-2 py-1.5 text-sm transition ${
-                  block.geometry === geometry
+                className={`border-2 px-2 py-1.5 text-sm transition ${ block.geometry === geometry
                     ? "border-beige-kem bg-beige-kem/10 text-beige-kem"
                     : "border-beige-kem/40 text-beige-kem/70 hover:border-beige-kem"
                 }`}
