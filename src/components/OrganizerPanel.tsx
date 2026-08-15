@@ -121,10 +121,15 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
   const doCheckIn = () => {
     const code = scanCode.trim();
     if (!code) return;
+    const eventId = scanResult?.eventId;
+    if (!eventId || scanResult?.code !== code) {
+      setScanErr("Hãy tra cứu mã vé trước khi check-in để xác nhận đúng sự kiện.");
+      return;
+    }
     setScanBusy(true);
     setScanErr(null);
     organizerApi
-      .checkIn(code)
+      .checkIn(code, eventId)
       .then(({ ticket, already }) => {
         setScanResult(ticket);
         setScanAlready(already);

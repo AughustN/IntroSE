@@ -6,7 +6,6 @@
  * Safari and Firefox).
  */
 
-// @ts-ignore
 import jsQR from "jsqr";
 import { useEffect, useRef, useState } from "react";
 
@@ -66,6 +65,10 @@ export default function QrCameraScan({ onDetect, onError, onClose }: Props) {
         });
         if (result) {
           runningRef.current = false;
+          frameRef.current = null;
+          streamRef.current?.getTracks().forEach((track) => track.stop());
+          streamRef.current = null;
+          video.srcObject = null;
           onDetect(result.data);
           return;
         }

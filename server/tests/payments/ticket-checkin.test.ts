@@ -16,12 +16,18 @@ async function boughtTicket() {
   const o = await registerUser();
   const orgId = await makeApprovedOrganizer(o.userId);
   const venue = await seed.seedVenue(o.userId);
-  const ev = await seed.seedEvent({ organizerId: orgId, eventType: "general_admission", title: "Check-in Gig" });
+  const ev = await seed.seedEvent({
+    organizerId: orgId,
+    eventType: "general_admission",
+    title: "Check-in Gig",
+  });
   const showtimeId = await seed.seedShowtime(ev.id, venue);
   const tierId = await seed.seedTier(showtimeId, { total: 5, price: 100_000 });
 
   const buyer = await registerUser();
-  await pool.query(`UPDATE wallets SET balance_amount = 200_000 WHERE user_id = $1`, [buyer.userId]);
+  await pool.query(`UPDATE wallets SET balance_amount = 200_000 WHERE user_id = $1`, [
+    buyer.userId,
+  ]);
   const reservation = await request(app)
     .post("/api/reservations")
     .set(bearer(buyer.token))
@@ -33,7 +39,7 @@ async function boughtTicket() {
     .send({ reservationId: reservation.body.id })
     .expect(201);
 
-  return { organizer: o, ticketCode: order.body.tickets[0].ticketCode as string };
+  return { organizer: o, eventId: ev.id, ticketCode: order.body.tickets[0].ticketCode as string };
 }
 
 describe("organizer ticket check-in (US6)", () => {
@@ -63,12 +69,12 @@ describe("organizer ticket check-in (US6)", () => {
   });
 
   it("checks a ticket in once, and reports already on a rescan", async () => {
-    const { organizer, ticketCode } = await boughtTicket();
+    const { organizer, eventId, ticketCode } = await boughtTicket();
 
     const first = await request(app)
       .post("/api/organizer/tickets/check-in")
       .set(bearer(organizer.token))
-      .send({ code: ticketCode })
+      .send({ code: ticketCode, eventId })
       .expect(200);
     expect(first.body.already).toBe(false);
     expect(first.body.ticket.status).toBe("checked_in");
@@ -76,9 +82,32 @@ describe("organizer ticket check-in (US6)", () => {
     const again = await request(app)
       .post("/api/organizer/tickets/check-in")
       .set(bearer(organizer.token))
-      .send({ code: ticketCode })
+      .send({ code: ticketCode, eventId })
       .expect(200);
     expect(again.body.already).toBe(true);
     expect(again.body.ticket.status).toBe("checked_in");
+  });
+
+  it("does not check a ticket in for a different event id", async () => {
+    const { organizer, eventId, ticketCode } = await boughtTicket();
+
+    await request(app)
+      .post("/api/organizer/tickets/check-in")
+      .set(bearer(organizer.token))
+      .send({ code: ticketCode, eventId: eventId + 1 })
+      .expect(404);
+  });
+
+  it("rejects a void ticket", async () => {
+    const { organizer, eventId, ticketCode } = await boughtTicket();
+    await pool.query("UPDATE tickets SET qr_status = 'void' WHERE barcode_value = $1", [
+      ticketCode,
+    ]);
+
+    await request(app)
+      .post("/api/organizer/tickets/check-in")
+      .set(bearer(organizer.token))
+      .send({ code: ticketCode, eventId })
+      .expect(409);
   });
 });

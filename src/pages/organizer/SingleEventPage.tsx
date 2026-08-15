@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   getOrganizerEventDetail,
@@ -7,7 +7,7 @@ import {
   deleteOrArchiveTier,
   saveTicketTier,
   cancelEvent,
-  completeEvent
+  completeEvent,
 } from "../../services/organizerClient";
 import { organizerApi, ScanTicket } from "../../services/catalogClient";
 import { OrganizerEvent, TicketTier } from "../../types";
@@ -17,23 +17,32 @@ import { EditEventForm } from "../../components/organizer/EditEventForm";
 import { CancelEventModal } from "../../components/organizer/CancelEventModal";
 import QrCameraScan from "../../components/QrCameraScan";
 
+function errorText(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 export const SingleEventPage: React.FC = () => {
   const params = useParams<{ id?: string; organizerEventId?: string }>();
   const navigate = useNavigate();
 
   const pathParts = window.location.pathname.split("/").filter(Boolean);
-  const eventId = params.id || params.organizerEventId || (pathParts.length >= 2 ? pathParts[1] : undefined);
+  const pathEventId =
+    pathParts[0] === "organizer" && pathParts[1] === "events" ? pathParts[2] : pathParts[1];
+  const eventId = params.id || params.organizerEventId || pathEventId;
 
   const [eventData, setEventData] = useState<OrganizerEvent | null>(null);
   const [metrics, setMetrics] = useState({
     totalCapacity: 0,
     soldTickets: 0,
     remainingTickets: 0,
-    totalRevenueVnd: 0
+    totalRevenueVnd: 0,
   });
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
-  const [toastMsg, setToastMsg] = useState<{ type: "success" | "error" | "warning"; text: string } | null>(null);
+  const [toastMsg, setToastMsg] = useState<{
+    type: "success" | "error" | "warning";
+    text: string;
+  } | null>(null);
 
   const [showEditModal, setShowEditModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -63,7 +72,7 @@ export const SingleEventPage: React.FC = () => {
     setScanErr(null);
     setScanAlready(false);
     try {
-      const { ticket, already } = await organizerApi.checkIn(code);
+      const { ticket, already } = await organizerApi.checkIn(code, Number(eventId));
       setScanResult(ticket);
       setScanAlready(already);
       if (already) {
@@ -72,15 +81,15 @@ export const SingleEventPage: React.FC = () => {
         showToast("success", `Check-in thành công cho khán giả ${ticket.customerName}!`);
         loadEvent(); // refresh attendance metrics
       }
-    } catch (e: any) {
+    } catch (error) {
       setScanResult(null);
-      setScanErr(e.message || "Không thể thực hiện check-in cho vé này.");
+      setScanErr(errorText(error, "Không thể thực hiện check-in cho vé này."));
     } finally {
       setScanBusy(false);
     }
   };
 
-  const loadEvent = async () => {
+  const loadEvent = useCallback(async () => {
     if (!eventId) return;
     setLoading(true);
     setErrorMsg("");
@@ -88,17 +97,17 @@ export const SingleEventPage: React.FC = () => {
       const res = await getOrganizerEventDetail(eventId);
       setEventData(res.data);
       setMetrics(res.data.metrics);
-    } catch (err: any) {
-      setErrorMsg(err.message || "Không thể tải thông tin sự kiện.");
+    } catch (error) {
+      setErrorMsg(errorText(error, "Không thể tải thông tin sự kiện."));
     } finally {
       setLoading(false);
     }
-  };
+  }, [eventId]);
 
   useEffect(() => {
     window.scrollTo(0, 0);
     loadEvent();
-  }, [eventId]);
+  }, [eventId, loadEvent]);
 
   const showToast = (type: "success" | "error" | "warning", text: string) => {
     setToastMsg({ type, text });
@@ -112,8 +121,8 @@ export const SingleEventPage: React.FC = () => {
       setEventData({ ...updated, computedStatus: updated.status });
       showToast("success", "Yêu cầu xuất bản đã được gửi tới Quản trị viên để kiểm duyệt.");
       loadEvent();
-    } catch (err: any) {
-      showToast("error", err.message || "Gửi yêu cầu xuất bản thất bại.");
+    } catch (error) {
+      showToast("error", errorText(error, "Gửi yêu cầu xuất bản thất bại."));
     }
   };
 
@@ -125,14 +134,14 @@ export const SingleEventPage: React.FC = () => {
       if (res.statusRevertedToPending) {
         showToast(
           "warning",
-          "Đã cập nhật thông tin! Sự kiện đã chuyển về trạng thái 'Chờ Duyệt' (UC-24 A6)."
+          "Đã cập nhật thông tin! Sự kiện đã chuyển về trạng thái 'Chờ Duyệt' (UC-24 A6).",
         );
       } else {
         showToast("success", "Cập nhật thông tin sự kiện thành công!");
       }
       loadEvent();
-    } catch (err: any) {
-      showToast("error", err.message || "Cập nhật sự kiện thất bại.");
+    } catch (error) {
+      showToast("error", errorText(error, "Cập nhật sự kiện thất bại."));
     }
   };
 
@@ -146,8 +155,8 @@ export const SingleEventPage: React.FC = () => {
         showToast("success", "Đã xóa hạng vé thành công.");
       }
       loadEvent();
-    } catch (err: any) {
-      showToast("error", err.message || "Thao tác hạng vé thất bại.");
+    } catch (error) {
+      showToast("error", errorText(error, "Thao tác hạng vé thất bại."));
     }
   };
 
@@ -169,7 +178,8 @@ export const SingleEventPage: React.FC = () => {
     setShowTierModal(true);
   };
 
-  const isFreeTierModal = tierLabel.trim().toLowerCase() === "miễn phí" || tierLabel.trim().toLowerCase() === "free";
+  const isFreeTierModal =
+    tierLabel.trim().toLowerCase() === "miễn phí" || tierLabel.trim().toLowerCase() === "free";
 
   const handleSaveTierForm = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -181,13 +191,16 @@ export const SingleEventPage: React.FC = () => {
         label: tierLabel,
         price: isFreeTierModal ? 0 : Number(tierPrice),
         capacity: Number(tierCapacity),
-        description: tierDesc
+        description: tierDesc,
       });
       setShowTierModal(false);
-      showToast("success", editingTier ? "Cập nhật hạng vé thành công!" : "Thêm hạng vé mới thành công!");
+      showToast(
+        "success",
+        editingTier ? "Cập nhật hạng vé thành công!" : "Thêm hạng vé mới thành công!",
+      );
       loadEvent();
-    } catch (err: any) {
-      showToast("error", err.message || "Lưu hạng vé thất bại.");
+    } catch (error) {
+      showToast("error", errorText(error, "Lưu hạng vé thất bại."));
     }
   };
 
@@ -198,11 +211,11 @@ export const SingleEventPage: React.FC = () => {
       setShowCancelModal(false);
       showToast(
         "success",
-        `Sự kiện đã bị hủy. Đã phát lệnh hoàn tiền cho ${res.auditRecord.ticketsAffectedCount} vé.`
+        `Sự kiện đã bị hủy. Đã phát lệnh hoàn tiền cho ${res.auditRecord.ticketsAffectedCount} vé.`,
       );
       loadEvent();
-    } catch (err: any) {
-      showToast("error", err.message || "Hủy sự kiện thất bại.");
+    } catch (error) {
+      showToast("error", errorText(error, "Hủy sự kiện thất bại."));
     }
   };
 
@@ -212,10 +225,10 @@ export const SingleEventPage: React.FC = () => {
     try {
       await completeEvent(eventId);
       setShowCompleteModal(false);
-      showToast('success', 'Sự kiện đã được đánh dấu Hoàn Tất. Bán vé và chỉnh sửa đã bị khóa.');
+      showToast("success", "Sự kiện đã được đánh dấu Hoàn Tất. Bán vé và chỉnh sửa đã bị khóa.");
       loadEvent();
-    } catch (err: any) {
-      showToast('error', err.message || 'Hoàn tất sự kiện thất bại.');
+    } catch (error) {
+      showToast("error", errorText(error, "Hoàn tất sự kiện thất bại."));
     } finally {
       setCompleteBusy(false);
     }
@@ -230,7 +243,9 @@ export const SingleEventPage: React.FC = () => {
               <p className="font-bold">● Sự kiện đang được đăng bán công khai</p>
               <p className="opacity-90">Người mua có thể tìm kiếm và đặt vé trên TixHub.</p>
             </div>
-            <span className="px-3 py-1 bg-la-co text-on-tint rounded-full font-bold text-[10px]">ĐÃ DUYỆT</span>
+            <span className="px-3 py-1 bg-la-co text-on-tint rounded-full font-bold text-[10px]">
+              ĐÃ DUYỆT
+            </span>
           </div>
         );
       case "pending_review":
@@ -240,7 +255,9 @@ export const SingleEventPage: React.FC = () => {
               <p className="font-bold">▲ Sự kiện đang chờ Ban Quản Trị phê duyệt</p>
               <p className="opacity-90">Sự kiện tạm ẩn khỏi danh mục cho đến khi được duyệt.</p>
             </div>
-            <span className="px-3 py-1 bg-cam-dat text-on-tint rounded-full font-bold text-[10px]">CHỜ DUYỆT</span>
+            <span className="px-3 py-1 bg-cam-dat text-on-tint rounded-full font-bold text-[10px]">
+              CHỜ DUYỆT
+            </span>
           </div>
         );
       case "draft":
@@ -250,7 +267,9 @@ export const SingleEventPage: React.FC = () => {
               <p className="font-bold">○ Sự kiện ở trạng thái Bản Nháp</p>
               <p className="text-ink-soft">Hoàn thiện thông tin và bấm Gửi Yêu Cầu Duyệt.</p>
             </div>
-            <span className="px-3 py-1 bg-beige-kem/20 text-beige-kem rounded-full font-bold text-[10px]">BẢN NHÁP</span>
+            <span className="px-3 py-1 bg-beige-kem/20 text-beige-kem rounded-full font-bold text-[10px]">
+              BẢN NHÁP
+            </span>
           </div>
         );
       case "canceled":
@@ -258,7 +277,9 @@ export const SingleEventPage: React.FC = () => {
           <div className="bg-burgundy/20 border border-burgundy/50 rounded-xl p-4 text-xs text-burgundy-ink space-y-1">
             <div className="flex items-center justify-between">
               <p className="font-bold">✕ Sự kiện đã bị hủy</p>
-              <span className="px-3 py-1 bg-burgundy text-white rounded-full font-bold text-[10px]">ĐÃ HỦY</span>
+              <span className="px-3 py-1 bg-burgundy text-white rounded-full font-bold text-[10px]">
+                ĐÃ HỦY
+              </span>
             </div>
             {cancellationReason && (
               <p className="opacity-90 font-meta text-[11px]">
@@ -274,7 +295,9 @@ export const SingleEventPage: React.FC = () => {
               <p className="font-bold">✓ Sự kiện đã kết thúc thành công</p>
               <p className="text-ink-soft">Đã qua thời gian kết thúc sự kiện.</p>
             </div>
-            <span className="px-3 py-1 bg-beige-kem/20 text-beige-kem rounded-full font-bold text-[10px]">ĐÃ KẾT THÚC</span>
+            <span className="px-3 py-1 bg-beige-kem/20 text-beige-kem rounded-full font-bold text-[10px]">
+              ĐÃ KẾT THÚC
+            </span>
           </div>
         );
       default:
@@ -295,7 +318,9 @@ export const SingleEventPage: React.FC = () => {
       <div className="min-h-screen bg-xanh-pho text-beige-kem p-8 max-w-xl mx-auto flex flex-col items-center justify-center space-y-4">
         <div className="text-4xl">⚠️</div>
         <h2 className="font-display text-xl font-bold">Không thể tải không gian quản lý sự kiện</h2>
-        <p className="text-xs text-ink-soft text-center">{errorMsg || "Sự kiện không tồn tại hoặc bạn không có quyền truy cập."}</p>
+        <p className="text-xs text-ink-soft text-center">
+          {errorMsg || "Sự kiện không tồn tại hoặc bạn không có quyền truy cập."}
+        </p>
         <button
           onClick={() => navigate("/organizer")}
           className="px-4 py-2 bg-burgundy text-white rounded-xl text-xs font-semibold hover:brightness-110 transition-colors"
@@ -306,15 +331,17 @@ export const SingleEventPage: React.FC = () => {
     );
   }
 
-  const isCanceledOrCompleted = eventData.computedStatus === "canceled" || eventData.computedStatus === "completed";
+  const isCanceledOrCompleted =
+    eventData.computedStatus === "canceled" || eventData.computedStatus === "completed";
   const statusStr = String(eventData.computedStatus || eventData.status || "");
   const isPublished = statusStr === "published" || statusStr === "on_sale";
 
   // Show the Complete button when the event is published AND end time has passed.
   // This lets the organizer manually trigger the 'finished' DB write rather than
   // relying on a computed-only client-side flip that never persists.
-  const endDatePassed =
-    eventData.endDatetime ? new Date() > new Date(eventData.endDatetime) : false;
+  const endDatePassed = eventData.endDatetime
+    ? new Date() > new Date(eventData.endDatetime)
+    : false;
   const canManuallyComplete = isPublished && endDatePassed;
 
   return (
@@ -325,11 +352,13 @@ export const SingleEventPage: React.FC = () => {
             toastMsg.type === "success"
               ? "bg-la-co text-on-tint border-beige-kem"
               : toastMsg.type === "warning"
-              ? "bg-cam-dat text-on-tint border-beige-kem"
-              : "bg-burgundy text-white border-beige-kem"
+                ? "bg-cam-dat text-on-tint border-beige-kem"
+                : "bg-burgundy text-white border-beige-kem"
           }`}
         >
-          <span>{toastMsg.type === "success" ? "✓" : toastMsg.type === "warning" ? "⚠️" : "✕"}</span>
+          <span>
+            {toastMsg.type === "success" ? "✓" : toastMsg.type === "warning" ? "⚠️" : "✕"}
+          </span>
           <span>{toastMsg.text}</span>
         </div>
       )}
@@ -342,9 +371,12 @@ export const SingleEventPage: React.FC = () => {
           >
             ← Danh Mục Sự Kiện Ban Tổ Chức
           </button>
-          <h1 className="font-display text-2xl sm:text-3xl font-black text-burgundy-ink tracking-tight">{eventData.title}</h1>
+          <h1 className="font-display text-2xl sm:text-3xl font-black text-burgundy-ink tracking-tight">
+            {eventData.title}
+          </h1>
           <p className="font-meta text-xs text-ink-soft mt-1">
-            📍 {eventData.venueName}, {eventData.venueAddress} • 📅 {eventData.startDatetime.slice(0, 10)}
+            📍 {eventData.venueName}, {eventData.venueAddress} • 📅{" "}
+            {eventData.startDatetime.slice(0, 10)}
           </p>
         </div>
 
@@ -418,7 +450,9 @@ export const SingleEventPage: React.FC = () => {
       />
 
       <div className="bg-surface-2 border border-beige-kem/25 rounded-2xl p-6 space-y-4 shadow-md">
-        <h2 className="font-display text-lg font-bold text-beige-kem">Mô Tả & Thông Tin Chi Tiết</h2>
+        <h2 className="font-display text-lg font-bold text-beige-kem">
+          Mô Tả & Thông Tin Chi Tiết
+        </h2>
         <div className="font-meta text-xs text-beige-kem leading-relaxed whitespace-pre-line bg-xanh-pho p-4 rounded-xl border border-beige-kem/20">
           {eventData.description}
         </div>
@@ -460,7 +494,9 @@ export const SingleEventPage: React.FC = () => {
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-surface-2 border border-beige-kem/30 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-beige-kem/20 pb-3">
-              <h3 className="font-display text-lg font-bold text-beige-kem">Xác Nhận Hoàn Tất Sự Kiện</h3>
+              <h3 className="font-display text-lg font-bold text-beige-kem">
+                Xác Nhận Hoàn Tất Sự Kiện
+              </h3>
               <button
                 onClick={() => setShowCompleteModal(false)}
                 className="text-ink-soft hover:text-beige-kem text-lg"
@@ -472,19 +508,23 @@ export const SingleEventPage: React.FC = () => {
 
             <div className="space-y-3 text-xs text-beige-kem/80">
               <p>
-                Bạn sắp đánh dấu sự kiện{' '}
-                <strong className="text-beige-kem">{eventData?.title}</strong>{' '}
-                là <strong className="text-beige-kem">Đã Hoàn Tất</strong>.
+                Bạn sắp đánh dấu sự kiện{" "}
+                <strong className="text-beige-kem">{eventData?.title}</strong> là{" "}
+                <strong className="text-beige-kem">Đã Hoàn Tất</strong>.
               </p>
               <div className="bg-xanh-pho border border-beige-kem/20 rounded-xl p-3 space-y-1.5">
                 <p className="font-bold text-beige-kem">Điều này sẽ:</p>
                 <ul className="space-y-1 list-disc list-inside text-beige-kem/70">
                   <li>Khóa tất cả bán vé và đặt chỗ mới</li>
                   <li>Vô hiệu hóa chỉnh sửa thông tin sự kiện</li>
-                  <li>Cập nhật trạng thái thành <strong>Đã Kết Thúc</strong></li>
+                  <li>
+                    Cập nhật trạng thái thành <strong>Đã Kết Thúc</strong>
+                  </li>
                 </ul>
               </div>
-              <p className="text-beige-kem/50 italic">Hành động này không thể hoàn tác và không ảnh hưởng đến vé đã bán.</p>
+              <p className="text-beige-kem/50 italic">
+                Hành động này không thể hoàn tác và không ảnh hưởng đến vé đã bán.
+              </p>
             </div>
 
             <div className="flex items-center justify-end space-x-2 pt-3 border-t border-beige-kem/20">
@@ -502,7 +542,7 @@ export const SingleEventPage: React.FC = () => {
                 disabled={completeBusy}
                 className="px-4 py-2 rounded-xl bg-beige-kem/20 hover:bg-beige-kem/30 text-beige-kem font-bold border border-beige-kem/40 text-xs transition-colors disabled:opacity-50"
               >
-                {completeBusy ? 'Đang xử lý...' : '✓ Xác Nhận Hoàn Tất'}
+                {completeBusy ? "Đang xử lý..." : "✓ Xác Nhận Hoàn Tất"}
               </button>
             </div>
           </div>
@@ -516,19 +556,24 @@ export const SingleEventPage: React.FC = () => {
               <h3 className="font-display text-lg font-bold text-beige-kem">
                 {editingTier ? "Chỉnh Sửa Hạng Vé" : "Thêm Hạng Vé Mới"}
               </h3>
-              <button onClick={() => setShowTierModal(false)} className="text-ink-soft hover:text-beige-kem">
+              <button
+                onClick={() => setShowTierModal(false)}
+                className="text-ink-soft hover:text-beige-kem"
+              >
                 ✕
               </button>
             </div>
 
             <form onSubmit={handleSaveTierForm} className="space-y-3 text-xs">
               <div>
-                <label className="block text-ink-soft mb-1.5 font-semibold">Tên Hạng Vé * (Chọn mẫu nhanh hoặc nhập tùy chỉnh)</label>
+                <label className="block text-ink-soft mb-1.5 font-semibold">
+                  Tên Hạng Vé * (Chọn mẫu nhanh hoặc nhập tùy chỉnh)
+                </label>
                 <div className="flex flex-wrap gap-1.5 mb-2">
                   {[
                     { label: "Vé Tiêu Chuẩn", defaultPrice: 200000 },
                     { label: "Miễn Phí", defaultPrice: 0 },
-                    { label: "VIP", defaultPrice: 500000 }
+                    { label: "VIP", defaultPrice: 500000 },
                   ].map((preset) => (
                     <button
                       key={preset.label}
@@ -559,7 +604,10 @@ export const SingleEventPage: React.FC = () => {
 
               <div>
                 <label className="block text-ink-soft mb-1 font-semibold">
-                  Giá Vé (VND) * {isFreeTierModal && <span className="text-la-co font-bold">(Cố định 0đ cho Vé Miễn Phí)</span>}
+                  Giá Vé (VND) *{" "}
+                  {isFreeTierModal && (
+                    <span className="text-la-co font-bold">(Cố định 0đ cho Vé Miễn Phí)</span>
+                  )}
                 </label>
                 <input
                   type="number"
@@ -577,7 +625,9 @@ export const SingleEventPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-ink-soft mb-1 font-semibold">Sức Chứa (Capacity) *</label>
+                <label className="block text-ink-soft mb-1 font-semibold">
+                  Sức Chứa (Capacity) *
+                </label>
                 <input
                   type="number"
                   value={tierCapacity}
@@ -628,7 +678,9 @@ export const SingleEventPage: React.FC = () => {
               <div className="flex items-center gap-2">
                 <span className="text-xl">📷</span>
                 <div>
-                  <h3 className="font-display text-lg font-bold text-beige-kem">Quét Vé & Check-in</h3>
+                  <h3 className="font-display text-lg font-bold text-beige-kem">
+                    Quét Vé & Check-in
+                  </h3>
                   <p className="text-xs text-beige-kem/60">{eventData.title}</p>
                 </div>
               </div>
@@ -648,7 +700,9 @@ export const SingleEventPage: React.FC = () => {
 
             {/* Manual Input / Action Bar */}
             <div className="space-y-2">
-              <label className="block text-xs font-bold text-beige-kem/70">Mã QR vé / Barcode</label>
+              <label className="block text-xs font-bold text-beige-kem/70">
+                Mã QR vé / Barcode
+              </label>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -675,7 +729,9 @@ export const SingleEventPage: React.FC = () => {
                   type="button"
                   onClick={() => setCameraOn((on) => !on)}
                   className={`rounded-xl border border-beige-kem/30 px-3 py-2 text-xs font-bold transition cursor-pointer ${
-                    cameraOn ? "bg-burgundy text-white" : "bg-beige-kem/10 text-beige-kem hover:bg-beige-kem/20"
+                    cameraOn
+                      ? "bg-burgundy text-white"
+                      : "bg-beige-kem/10 text-beige-kem hover:bg-beige-kem/20"
                   }`}
                 >
                   {cameraOn ? "Tắt Camera" : "Mở Camera"}
@@ -688,8 +744,9 @@ export const SingleEventPage: React.FC = () => {
               <div className="overflow-hidden rounded-xl border border-beige-kem/30">
                 <QrCameraScan
                   onDetect={(code) => {
+                    setCameraOn(false);
                     setScanCode(code);
-                    doCheckIn(code);
+                    void doCheckIn(code);
                   }}
                   onError={(msg) => setScanErr(msg)}
                   onClose={() => setCameraOn(false)}
@@ -716,16 +773,20 @@ export const SingleEventPage: React.FC = () => {
               <div className="rounded-xl border border-beige-kem/30 bg-xanh-pho p-4 space-y-3">
                 <div className="flex items-center justify-between border-b border-beige-kem/10 pb-2">
                   <div>
-                    <span className="font-mono text-xs font-bold text-burgundy-ink">{scanResult.code}</span>
-                    <h4 className="font-display text-sm font-bold text-beige-kem">{scanResult.eventTitle}</h4>
+                    <span className="font-mono text-xs font-bold text-burgundy-ink">
+                      {scanResult.code}
+                    </span>
+                    <h4 className="font-display text-sm font-bold text-beige-kem">
+                      {scanResult.eventTitle}
+                    </h4>
                   </div>
                   <span
                     className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
                       scanResult.status === "checked_in"
                         ? "bg-la-co/20 text-la-co border border-la-co/40"
                         : scanResult.status === "void"
-                        ? "bg-burgundy/20 text-burgundy border border-burgundy/40"
-                        : "bg-cam-dat/20 text-cam-dat border border-cam-dat/40"
+                          ? "bg-burgundy/20 text-burgundy border border-burgundy/40"
+                          : "bg-cam-dat/20 text-cam-dat border border-cam-dat/40"
                     }`}
                   >
                     {scanResult.status === "checked_in"
@@ -733,27 +794,37 @@ export const SingleEventPage: React.FC = () => {
                         ? "Đã soát vé (quét lại)"
                         : "Đã check-in thành công"
                       : scanResult.status === "void"
-                      ? "Vé đã bị hủy"
-                      : "Chưa check-in"}
+                        ? "Vé đã bị hủy"
+                        : "Chưa check-in"}
                   </span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div>
-                    <span className="text-beige-kem/50 block text-[10px] uppercase font-bold">Khán giả</span>
+                    <span className="text-beige-kem/50 block text-[10px] uppercase font-bold">
+                      Khán giả
+                    </span>
                     <span className="font-semibold text-beige-kem">{scanResult.customerName}</span>
                   </div>
                   <div>
-                    <span className="text-beige-kem/50 block text-[10px] uppercase font-bold">Hạng vé</span>
+                    <span className="text-beige-kem/50 block text-[10px] uppercase font-bold">
+                      Hạng vé
+                    </span>
                     <span className="font-semibold text-beige-kem">{scanResult.tierLabel}</span>
                   </div>
                   <div>
-                    <span className="text-beige-kem/50 block text-[10px] uppercase font-bold">Email</span>
+                    <span className="text-beige-kem/50 block text-[10px] uppercase font-bold">
+                      Email
+                    </span>
                     <span className="font-semibold text-beige-kem">{scanResult.customerEmail}</span>
                   </div>
                   <div>
-                    <span className="text-beige-kem/50 block text-[10px] uppercase font-bold">Chỗ ngồi</span>
-                    <span className="font-semibold text-beige-kem">{scanResult.seatLabel || "Vé thường"}</span>
+                    <span className="text-beige-kem/50 block text-[10px] uppercase font-bold">
+                      Chỗ ngồi
+                    </span>
+                    <span className="font-semibold text-beige-kem">
+                      {scanResult.seatLabel || "Vé thường"}
+                    </span>
                   </div>
                 </div>
 

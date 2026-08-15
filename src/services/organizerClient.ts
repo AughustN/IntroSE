@@ -598,6 +598,92 @@ export async function createOrganizerEvent(input: CreateEventInput): Promise<Org
     throw new Error("VALIDATION_ERROR: Vui lòng nhập địa điểm và địa chỉ sự kiện.");
   }
 
+  if (!input.description || input.description.trim().length < 1) {
+    throw new Error("VALIDATION_ERROR: Vui lòng nhập mô tả sự kiện.");
+  }
+  if (!input.ticketTiers || input.ticketTiers.length === 0) {
+    throw new Error("VALIDATION_ERROR: Sự kiện phải có ít nhất 1 hạng vé.");
+  }
+  try {
+    new URL(input.bannerUrl.trim());
+  } catch {
+    throw new Error("VALIDATION_ERROR: Hình ảnh sự kiện phải là một URL hợp lệ.");
+  }
+
+  // The organizer dashboard is backed by the catalog API. Keep the old local path only for
+  // non-browser service tests; allowing it in the browser would create an ID that disappears on
+  // the next API refresh and leaves the detail page with a misleading NOT_FOUND error.
+  const isBrowserRuntime =
+    typeof globalThis !== "undefined" &&
+    (globalThis as typeof globalThis & { window?: unknown }).window !== undefined;
+  if (isBrowserRuntime) {
+    const startsAt = new Date(input.startDatetime);
+    if (Number.isNaN(startsAt.getTime())) {
+      throw new Error("VALIDATION_ERROR: Thời gian bắt đầu không hợp lệ.");
+    }
+
+    const created = await organizerApi.createEvent({
+      title: input.title.trim(),
+      categoryCode: input.category || "music",
+      description: input.description.trim(),
+      eventType: "general_admission",
+      imageUrl: input.bannerUrl.trim(),
+    });
+    const venue = await organizerApi.createVenue({
+      name: input.venueName.trim(),
+      city: input.city || "TP.HCM",
+      rawAddress: input.venueAddress.trim(),
+    });
+    await organizerApi.addShowtime(created.id, {
+      venueId: venue.id,
+      startsAt: startsAt.toISOString(),
+      tiers: (input.ticketTiers || []).map((tier) => ({
+        label: tier.label.trim(),
+        price: Number(tier.price) || 0,
+        totalQuantity: Math.max(1, Number(tier.capacity) || 1),
+      })),
+    });
+
+    const now = new Date().toISOString();
+    const newEvent: OrganizerEvent = {
+      eventId: String(created.id),
+      organizerId,
+      title: input.title.trim(),
+      description: input.description.trim(),
+      category: input.category || "music",
+      categoryLabel: input.categoryLabel || "Âm nhạc",
+      bannerUrl: input.bannerUrl.trim(),
+      videoUrl: input.videoUrl?.trim() || undefined,
+      venueName: input.venueName.trim(),
+      venueAddress: input.venueAddress.trim(),
+      city: input.city || "TP.HCM",
+      startDatetime: startsAt.toISOString(),
+      endDatetime: input.endDatetime,
+      salesStartDatetime: input.salesStartDatetime || now,
+      salesEndDatetime: input.salesEndDatetime || input.startDatetime,
+      status: "draft",
+      computedStatus: "draft",
+      rejectionReason: null,
+      cancellationReason: null,
+      createdAt: now,
+      updatedAt: now,
+      times: [startsAt.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })],
+      dates: [startsAt.toISOString().slice(0, 10)],
+      ticketTiers: (input.ticketTiers || []).map((tier, idx) => ({
+        id: `tier-${created.id}-${idx}`,
+        label: tier.label.trim(),
+        price: Number(tier.price) || 0,
+        capacity: Math.max(1, Number(tier.capacity) || 1),
+        soldCount: 0,
+        remaining: Math.max(1, Number(tier.capacity) || 1),
+        description: tier.description || "",
+        isArchived: false,
+      })),
+    };
+    eventsStore = [newEvent, ...eventsStore.filter((event) => event.eventId !== newEvent.eventId)];
+    return newEvent;
+  }
+
   const newEvent: OrganizerEvent = {
     eventId: `evt-${Date.now()}`,
     organizerId,

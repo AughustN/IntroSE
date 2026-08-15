@@ -188,18 +188,21 @@ organizerRouter.post(
 );
 
 organizerRouter.post(
-  '/events/:id/complete',
+  "/events/:id/complete",
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
     await assertEventOwner(req, id);
     await finishEvent(id);
-    res.json({ ok: true, message: 'Sự kiện đã được đánh dấu hoàn tất.' });
+    res.json({ ok: true, message: "Sự kiện đã được đánh dấu hoàn tất." });
   }),
 );
 
 // ---- check-in (US6) ----
 
-const checkInSchema = z.object({ code: z.string().trim().min(1).max(200) });
+const checkInSchema = z.object({
+  code: z.string().trim().min(1).max(200),
+  eventId: z.number().int().positive(),
+});
 
 organizerRouter.get(
   "/tickets/lookup",
@@ -214,8 +217,8 @@ organizerRouter.post(
   "/tickets/check-in",
   validate(checkInSchema),
   asyncH(async (req, res) => {
-    const { code } = req.body as z.infer<typeof checkInSchema>;
-    const { ticket, already } = await checkInTicket(code, req.auth!.userId);
+    const { code, eventId } = req.body as z.infer<typeof checkInSchema>;
+    const { ticket, already } = await checkInTicket(code, req.auth!.userId, eventId);
     res.json({ ticket, already });
   }),
 );

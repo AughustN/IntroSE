@@ -163,7 +163,10 @@ async function readScannableTicket(
   code: string,
   organizerUserId: number,
   db: Db = pool,
+  eventId?: number,
 ): Promise<ScanTicket | null> {
+  const eventFilter = eventId === undefined ? "" : " AND e.id = $3";
+  const params = eventId === undefined ? [code, organizerUserId] : [code, organizerUserId, eventId];
   const { rows } = await db.query(
     `SELECT t.id, t.barcode_value AS code, t.qr_status AS status, tt.label AS "tierLabel",
             CASE WHEN ss.id IS NULL THEN NULL ELSE se.row_label || se.seat_number::text END AS "seatLabel",
@@ -181,8 +184,8 @@ async function readScannableTicket(
        JOIN ticket_tiers tt ON tt.id = ri.ticket_tier_id
        LEFT JOIN showtime_seats ss ON ss.id = ri.showtime_seat_id
        LEFT JOIN seats se ON se.id = ss.seat_id
-      WHERE t.barcode_value = $1 AND org.user_id = $2`,
-    [code, organizerUserId],
+      WHERE t.barcode_value = $1 AND org.user_id = $2${eventFilter}`,
+    params,
   );
   const row = rows[0];
   if (!row) return null;
@@ -212,9 +215,10 @@ export async function lookupTicket(
 export async function checkInTicket(
   code: string,
   organizerUserId: number,
+  eventId: number,
   db: Db = pool,
 ): Promise<{ ticket: ScanTicket; already: boolean }> {
-  const existing = await readScannableTicket(code, organizerUserId, db);
+  const existing = await readScannableTicket(code, organizerUserId, db, eventId);
   if (!existing) throw err.notFound("ticket_not_found", "Không tìm thấy vé trong sự kiện của bạn.");
   if (existing.status === "void")
     throw err.conflict("ticket_void", "Vé này đã bị hủy/hoàn tiền, không thể soát.");
@@ -227,8 +231,17 @@ export async function checkInTicket(
     [existing.id, organizerUserId],
   );
   if (!rows.length) {
-    // Lost the race — the other scanner flipped it first. Re-read and treat as a benign rescan.
-    return { ticket: await readScannableTicket(code, organizerUserId, db) ?? existing, already: true };
+    // A concurrent refund can also make this UPDATE miss. Only a checked-in reread is a benign rescan.
+    const latest = await readScannableTicket(code, organizerUserId, db, eventId);
+    if (!latest) throw err.notFound("ticket_not_found", "Không tìm thấy vé trong sự kiện của bạn.");
+    if (latest.status === "void")
+      throw err.conflict("ticket_void", "Vé này đã bị hủy/hoàn tiền, không thể soát.");
+    if (latest.status !== "checked_in")
+      throw err.conflict(
+        "ticket_checkin_conflict",
+        "Không thể cập nhật trạng thái vé, vui lòng quét lại.",
+      );
+    return { ticket: latest, already: true };
   }
   return {
     ticket: { ...existing, status: "checked_in" },
