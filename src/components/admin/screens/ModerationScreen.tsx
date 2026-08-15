@@ -64,14 +64,18 @@ export default function ModerationScreen() {
     if (!pending) return;
     const { id, decision } = pending;
     const text = reason.trim();
-    if (decision === "reject" && !text) {
-      setFailure("Từ chối phải kèm lý do — ban tổ chức sẽ đọc dòng này.");
+    if ((decision === "reject" || decision === "remove") && !text) {
+      setFailure(
+        decision === "remove"
+          ? "Gỡ vì vi phạm phải kèm lý do — thao tác này sẽ huỷ suất tương lai, void vé và hoàn tiền vào ví người mua."
+          : "Từ chối phải kèm lý do — ban tổ chức sẽ đọc dòng này.",
+      );
       return;
     }
     const call = {
       reject: () => adminClient.rejectEvent(id, text),
       flag: () => adminClient.flagEvent(id, text || undefined),
-      remove: () => adminClient.removeEvent(id, text || undefined),
+      remove: () => adminClient.removeEvent(id, text),
     }[decision];
     void run(call, `Đã ${DECISION_LABEL[decision].toLowerCase()} sự kiện #${id}.`);
   };
@@ -102,7 +106,9 @@ export default function ModerationScreen() {
           <p className="font-meta text-body text-ink-soft">
             {pending.decision === "reject"
               ? "Lý do bắt buộc. Ban tổ chức nhận đúng dòng này và sửa theo nó."
-              : "Lý do không bắt buộc, nhưng nếu có thì được lưu vào nhật ký thao tác."}
+              : pending.decision === "remove"
+                ? "Lý do bắt buộc. Thao tác này sẽ huỷ suất tương lai, void vé và hoàn tiền vào ví người mua."
+                : "Lý do không bắt buộc, nhưng nếu có thì được lưu vào nhật ký thao tác."}
           </p>
           <div className="flex flex-wrap gap-2">
             <input

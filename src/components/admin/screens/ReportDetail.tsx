@@ -31,7 +31,8 @@ const DECISION_LABEL: Record<Decision, string> = {
 
 const DECISION_EFFECT: Record<Decision, string> = {
   flag: "Sự kiện bị ẩn khỏi trang công khai để xem xét thêm. Vé ngừng bán ngay. Có thể duyệt lại sau.",
-  remove: "Sự kiện bị gỡ khỏi trang công khai. Đây là quyết định cuối, không có đường quay lại.",
+  remove:
+    "Gỡ vì vi phạm là quyết định cuối: huỷ các suất tương lai, void vé chưa sử dụng và hoàn tiền vào ví người mua.",
   dismiss: "Nội dung giữ nguyên. Tố cáo đóng lại và không hiện trong hàng chờ nữa.",
 };
 

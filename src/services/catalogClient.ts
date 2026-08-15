@@ -240,8 +240,11 @@ export const adminApi = {
   reject: (id: number, reason: string) =>
     authed<{ ok: true }>(`/admin/events/${id}/reject`, { method: "POST", body: { reason } }),
   flag: (id: number) => authed<{ ok: true }>(`/admin/events/${id}/flag`, { method: "POST" }),
-  remove: (id: number) =>
-    authed<{ ok: true }>(`/admin/events/${id}/remove`, { method: "POST", body: {} }),
+  remove: (id: number, reason: string) =>
+    authed<{ ok: true }>(`/admin/events/${id}/remove`, {
+      method: "POST",
+      body: { reason },
+    }),
 };
 
 /**

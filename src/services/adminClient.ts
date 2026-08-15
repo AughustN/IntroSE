@@ -66,8 +66,7 @@ export const adminClient = {
   rejectEvent: (id: number, reason: string) => post(`/events/${id}/reject`, { reason }),
   flagEvent: (id: number, reason?: string) =>
     post(`/events/${id}/flag`, reason ? { reason } : undefined),
-  removeEvent: (id: number, reason?: string) =>
-    post(`/events/${id}/remove`, reason ? { reason } : undefined),
+  removeEvent: (id: number, reason: string) => post(`/events/${id}/remove`, { reason }),
   dismissReport: (id: number, reason?: string) =>
     post(`/reports/${id}/dismiss`, reason ? { reason } : undefined),
   categories: () => request<AdminCategory[]>("/categories"),

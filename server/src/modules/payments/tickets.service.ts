@@ -99,44 +99,48 @@ export async function cancelTicket(userId: number, ticketId: number): Promise<vo
   kickNotificationWorker();
 }
 
+export async function settleEventCancellation(
+  db: Db,
+  eventId: number,
+  body = "Sự kiện đã bị hủy. Vé chưa sử dụng của bạn đã được hoàn lại vào ví TixHub.",
+): Promise<{ refundedTickets: number; refundedAmount: number }> {
+  const event = await db.query<{ id: number; status: string }>(
+    `SELECT id, status FROM events WHERE id = $1 FOR UPDATE`,
+    [eventId],
+  );
+  if (!event.rowCount) throw err.notFound("not_found");
+  if (event.rows[0].status === "cancelled") return { refundedTickets: 0, refundedAmount: 0 };
+
+  await db.query(`UPDATE events SET status = 'cancelled', updated_at = now() WHERE id = $1`, [
+    eventId,
+  ]);
+  await db.query(
+    `UPDATE showtimes SET status = 'cancelled' WHERE event_id = $1 AND starts_at > now()`,
+    [eventId],
+  );
+  const tickets = await db.query<RefundRow>(
+    `SELECT t.id AS ticket_id, t.order_id, o.user_id, s.id AS showtime_id, ri.ticket_tier_id,
+            ri.showtime_seat_id, t.refundable_amount, s.starts_at
+       FROM tickets t
+       JOIN orders o ON o.id = t.order_id
+       JOIN reservation_items ri ON ri.id = t.reservation_item_id
+       JOIN reservations r ON r.id = o.reservation_id
+       JOIN showtimes s ON s.id = r.showtime_id
+      WHERE s.event_id = $1 AND s.starts_at > now() AND t.qr_status = 'unused'
+      ORDER BY o.user_id, t.id FOR UPDATE OF t, o`,
+    [eventId],
+  );
+  for (const ticket of tickets.rows) await refundTicket(db, ticket);
+  await updateOrderRefundStatus(db, [...new Set(tickets.rows.map((ticket) => ticket.order_id))]);
+  await queueEventNotification(db, eventId, "event_cancelled", body, "cancellation");
+  return {
+    refundedTickets: tickets.rowCount ?? 0,
+    refundedAmount: tickets.rows.reduce((sum, ticket) => sum + ticket.refundable_amount, 0),
+  };
+}
+
 export async function cancelEvent(eventId: number): Promise<{ refundedTickets: number }> {
-  const result = await withTransaction(async (db) => {
-    const event = await db.query<{ id: number; status: string }>(
-      `SELECT id, status FROM events WHERE id = $1 FOR UPDATE`,
-      [eventId],
-    );
-    if (!event.rowCount) throw err.notFound("not_found");
-    if (event.rows[0].status === "cancelled") return { refundedTickets: 0 };
-    await db.query(`UPDATE events SET status = 'cancelled', updated_at = now() WHERE id = $1`, [
-      eventId,
-    ]);
-    await db.query(
-      `UPDATE showtimes SET status = 'cancelled' WHERE event_id = $1 AND starts_at > now()`,
-      [eventId],
-    );
-    const tickets = await db.query<RefundRow>(
-      `SELECT t.id AS ticket_id, t.order_id, o.user_id, s.id AS showtime_id, ri.ticket_tier_id,
-              ri.showtime_seat_id, t.refundable_amount, s.starts_at
-         FROM tickets t
-         JOIN orders o ON o.id = t.order_id
-         JOIN reservation_items ri ON ri.id = t.reservation_item_id
-         JOIN reservations r ON r.id = o.reservation_id
-         JOIN showtimes s ON s.id = r.showtime_id
-        WHERE s.event_id = $1 AND s.starts_at > now() AND t.qr_status = 'unused'
-        ORDER BY o.user_id, t.id FOR UPDATE OF t, o`,
-      [eventId],
-    );
-    for (const ticket of tickets.rows) await refundTicket(db, ticket);
-    await updateOrderRefundStatus(db, [...new Set(tickets.rows.map((ticket) => ticket.order_id))]);
-    await queueEventNotification(
-      db,
-      eventId,
-      "event_cancelled",
-      "Sự kiện đã bị hủy. Vé chưa sử dụng của bạn đã được hoàn lại vào ví TixHub.",
-      new Date().toISOString(),
-    );
-    return { refundedTickets: tickets.rowCount ?? 0 };
-  });
+  const result = await withTransaction(async (db) => settleEventCancellation(db, eventId));
   kickNotificationWorker();
-  return result;
+  return { refundedTickets: result.refundedTickets };
 }
