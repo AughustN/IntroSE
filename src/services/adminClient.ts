@@ -7,7 +7,6 @@ import type {
   AdminWalletTxRow,
   AttendeeList,
   AuditLog,
-  CheckinResult,
   FeaturedEvent,
   FeaturedEventInput,
   ContentReportDetail,
@@ -116,11 +115,6 @@ export const adminClient = {
     request<AdminWalletTxRow[]>(`/wallet-transactions${qs(params)}`),
 
   // ── The door ──
-  checkIn: (barcode: string) =>
-    request<CheckinResult>("/tickets/check-in", {
-      method: "POST",
-      body: JSON.stringify({ barcode }),
-    }),
   attendees: (eventId: number, showtimeId?: number) =>
     request<AttendeeList>(`/events/${eventId}/attendees${qs({ showtimeId })}`),
   /**
