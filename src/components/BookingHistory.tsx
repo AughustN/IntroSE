@@ -13,6 +13,8 @@ interface BookingHistoryProps {
   bookings: Booking[];
   onBack: () => void;
   onSelectBooking: (booking: Booking) => void;
+  /** Cancels one ticket and refunds it to the wallet (UC-42), behind a confirmation dialog. */
+  onCancelTicket: (ticketId: number, ticketLabel: string, eventTitle: string) => Promise<void>;
 }
 
 /**
@@ -61,7 +63,7 @@ function statusOf(booking: Booking, today: string): { label: string; className: 
   return { label: "Còn hiệu lực", className: quiet };
 }
 
-export default function BookingHistory({ bookings, onBack, onSelectBooking }: BookingHistoryProps) {
+export default function BookingHistory({ bookings, onBack, onSelectBooking, onCancelTicket }: BookingHistoryProps) {
   const today = todayISO();
   const [pile, setPile] = useState<Pile | "all">("all");
 
@@ -161,6 +163,19 @@ export default function BookingHistory({ bookings, onBack, onSelectBooking }: Bo
               {visible.map((booking) => {
                 const status = statusOf(booking, today);
                 const spent = booking.finalPrice || booking.totalPrice;
+                /*
+                  Self-cancellation lives on the stub itself, and nowhere else: it is a wallet
+                  refund (no cash back) and it closes 24 hours before the show, so it appears on
+                  paid, not-yet-checked-in tickets only — a ticket past that line has nothing the
+                  button could do, and showing it dead would read as a bug. Per ticket, because a
+                  mixed order keeps its checked-in seat next to a refundable one.
+                */
+                const refundable =
+                  booking.status === "paid"
+                    ? booking.tickets?.filter((t) => t.status === "valid") ?? []
+                    : [];
+                const cutoff = new Date(`${booking.selectedDate}T${booking.selectedTime}:00`);
+                const canCancel = !Number.isNaN(cutoff.getTime()) && cutoff.getTime() - Date.now() > 24 * 60 * 60 * 1000;
 
                 return (
                   <li key={booking.id}>
@@ -243,6 +258,35 @@ export default function BookingHistory({ bookings, onBack, onSelectBooking }: Bo
                             </dd>
                           </div>
                         </dl>
+
+                        {/*
+                          A quiet ghost line, not a loud red button: the row is one big control that
+                          opens the ticket, and the last thing a misclick should hit is something
+                          that destroys it. `stopPropagation` keeps the press off the row itself;
+                          the confirmation dialog behind it is what actually guards the action.
+                        */}
+                        {refundable.length > 0 && canCancel && (
+                          <div className="mt-3 border-t border-beige-kem/25 pt-3">
+                            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                              {refundable.map((ticket) => (
+                                <button
+                                  key={ticket.id}
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void onCancelTicket(ticket.id, ticket.label, booking.movie.title);
+                                  }}
+                                  className="font-meta text-body text-ink-soft underline underline-offset-4 transition hover:text-burgundy-ink"
+                                >
+                                  Hủy vé · {ticket.label}
+                                </button>
+                              ))}
+                              <span className="font-meta text-meta text-ink-soft">
+                                Hoàn tiền vào ví TixHub
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </button>
                   </li>

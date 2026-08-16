@@ -10,6 +10,7 @@ import AttendeesScreen from "./screens/AttendeesScreen";
 import AuditScreen from "./screens/AuditScreen";
 import CategoriesScreen from "./screens/CategoriesScreen";
 import CheckinScreen from "./screens/CheckinScreen";
+import EventListScreen from "./screens/EventListScreen";
 import FeaturedScreen from "./screens/FeaturedScreen";
 import ModerationScreen from "./screens/ModerationScreen";
 import OrdersScreen from "./screens/OrdersScreen";
@@ -41,6 +42,7 @@ type ScreenId =
   | "overview"
   | "analytics"
   | "moderation"
+  | "event-list"
   | "organizers"
   | "reports"
   | "review-reports"
@@ -76,6 +78,7 @@ const NAV: NavGroup[] = [
     label: "Kiểm duyệt",
     items: [
       { id: "moderation", label: "Hàng chờ sự kiện" },
+      { id: "event-list", label: "Danh sách sự kiện" },
       { id: "organizers", label: "Ban tổ chức" },
       { id: "reports", label: "Tố cáo nội dung" },
       { id: "review-reports", label: "Kiểm duyệt bình luận" },
@@ -166,6 +169,7 @@ export default function AdminConsole({ onBack }: { onBack: () => void }) {
             {screen === "overview" && <OverviewScreen onOpen={(next) => setScreen(next)} />}
             {screen === "analytics" && <AnalyticsScreen />}
             {screen === "moderation" && <ModerationScreen />}
+            {screen === "event-list" && <EventListScreen />}
             {screen === "organizers" && <OrganizersScreen />}
             {screen === "reports" && <ReportsScreen />}
             {screen === "review-reports" && <ReviewReportsScreen />}

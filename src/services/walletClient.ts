@@ -145,6 +145,14 @@ export const walletClient = {
   /** Every order this account owns, newest first. The tickets page's real source. */
   orders: (): Promise<OrderListItem[]> => call("/orders"),
 
+  /**
+   * Self-cancels one ticket and refunds it to the wallet (UC-42). The server holds the rules:
+   * only the owner, only an unused ticket, only until 24h before the show — a refusal comes back
+   * as a WalletError carrying the server's own Vietnamese message.
+   */
+  cancelTicket: (ticketId: number): Promise<{ ok: true }> =>
+    call(`/tickets/${ticketId}/cancel`, { method: "POST" }),
+
   checkout: (reservationId: number): Promise<CheckoutOrder> =>
     call("/checkout", { method: "POST", body: { reservationId } }),
   resendTicket: (orderId: number): Promise<{ ok: true }> =>

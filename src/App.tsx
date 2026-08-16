@@ -256,6 +256,11 @@ function bookingFromOrder(order: OrderListItem, known?: MovieEvent): Booking {
     qrStatus: order.tickets.some((t) => t.status === "used") ? "checked_in" : "unused",
     bookingTime: startsAt.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" }),
     qrPayload: order.tickets[0]?.ticketCode ?? "",
+    tickets: order.tickets.map((ticket) => ({
+      id: ticket.id,
+      label: ticket.seatLabel ?? ticket.tierLabel,
+      status: ticket.status,
+    })),
   };
 }
 
@@ -494,13 +499,10 @@ export default function App() {
    * A failure is left alone deliberately. Whatever the cache holds is better than an empty page,
    * and a network blip should not read as "your tickets are gone".
    */
-  useEffect(() => {
-    if (!isSignedIn) return;
-    let cancelled = false;
+  const reloadTickets = useCallback(() => {
     void walletClient
       .orders()
       .then((orders) => {
-        if (cancelled) return;
         const catalog = new Map(eventsRef.current.map((event) => [event.id, event]));
         const rebuilt = orders.map((order) =>
           bookingFromOrder(order, catalog.get(order.eventSlug)),
@@ -513,10 +515,12 @@ export default function App() {
         }
       })
       .catch((err) => console.error("Failed to load tickets from the server:", err));
-    return () => {
-      cancelled = true;
-    };
-  }, [isSignedIn]);
+  }, []);
+
+  useEffect(() => {
+    if (!isSignedIn) return;
+    reloadTickets();
+  }, [isSignedIn, reloadTickets]);
 
   const dismissToast = useCallback((id: number) => {
     setToasts((current) => current.filter((toast) => toast.id !== id));
@@ -553,6 +557,40 @@ export default function App() {
     pendingConfirmRef.current = null;
     setConfirmRequest(null);
   }, []);
+
+  /**
+   * Self-cancels one ticket from the "Vé của tôi" page (UC-42).
+   *
+   * Behind a confirmation dialog: the button sits inside a row whose whole surface opens the
+   * ticket, so a misclick must land on a question, not on a cancellation. The refund goes to the
+   * wallet — never back to cash — the popup says so, and the server's own message is what is
+   * toasted when it refuses (the 24-hour cutoff, an already-checked ticket).
+   */
+  const handleCancelTicket = useCallback(
+    async (ticketId: number, ticketLabel: string, eventTitle: string) => {
+      const sure = await askConfirm({
+        title: "Hủy vé?",
+        message:
+          `Vé ${ticketLabel} của “${eventTitle}” sẽ bị hủy và tiền được hoàn vào ví TixHub ` +
+          "(hoàn vào ví, không hoàn tiền mặt).\nVé chỉ hủy được trước giờ diễn ít nhất 24 giờ.",
+        confirmLabel: "Hủy vé",
+        cancelLabel: "Giữ lại vé",
+        tone: "danger",
+      });
+      if (!sure) return;
+      try {
+        await walletClient.cancelTicket(ticketId);
+        reloadTickets();
+        pushToast("success", "Đã hủy vé — tiền đã được hoàn vào ví TixHub của bạn.");
+      } catch (cause) {
+        pushToast(
+          "error",
+          cause instanceof WalletError ? cause.message : "Không hủy được vé. Vui lòng thử lại.",
+        );
+      }
+    },
+    [askConfirm, pushToast, reloadTickets],
+  );
 
   const bookingSeats = hold?.seats ?? [];
   const bookingTotalPrice = holdTotalPrice(bookingSeats);
@@ -1969,6 +2007,7 @@ export default function App() {
               setFinalBooking(normalizeBooking(booking));
               goTo("ticket", { bookingId: booking.id });
             }}
+            onCancelTicket={handleCancelTicket}
           />
         )}
 

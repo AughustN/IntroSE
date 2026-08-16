@@ -146,6 +146,12 @@ export interface Booking {
   qrStatus: "unused" | "checked_in";
   bookingTime: string;
   qrPayload: string;
+  /**
+   * The server's ticket rows behind this booking, when it came from the server. Optional because
+   * a local checkout draft never has them; self-cancellation (refund to ví) only exists where they
+   * do.
+   */
+  tickets?: Array<{ id: number; label: string; status: "valid" | "used" | "refunded" }>;
 }
 
 export interface CheckoutPayload {
