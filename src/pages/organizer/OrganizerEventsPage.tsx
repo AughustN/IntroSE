@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Calendar, BarChart3, Armchair } from "lucide-react";
+import { Calendar, BarChart3, Armchair, Megaphone } from "lucide-react";
+import AdPackagesPanel from "../../components/organizer/AdPackagesPanel";
 import { EventCard } from "../../components/organizer/EventCard";
 import { PortfolioSummaryHeader } from "../../components/organizer/PortfolioSummaryHeader";
 import { getOrganizerEvents, createOrganizerEvent, CreateEventInput } from "../../services/organizerClient";
@@ -11,26 +12,27 @@ import { OrganizerBusinessAnalytics } from "../../components/account/OrganizerBu
 export const OrganizerEventsPage: React.FC = () => {
   const navigate = useNavigate();
 
-  // Top-Level Workspace Section: "events" (Quản lý sự kiện) or "analytics" (Thống kê kinh doanh)
-  const [activeSection, setActiveSection] = useState<"events" | "analytics">(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      // Default to "analytics" when no section param is present; "events" is still reachable via ?section=events.
-      return params.get("section") === "events" ? "events" : "analytics";
-    }
-    return "analytics";
-  });
+  // Top-Level Workspace Section: "analytics" (Thống kê kinh doanh), "events" (Quản lý sự kiện) or
+  // "ads" (Gói quảng cáo).
+  type Section = "events" | "analytics" | "ads";
+
+  // Read once, here, so the initial render and a Back press cannot disagree about which section the
+  // URL names. Anything unrecognised falls back to "analytics", which is the section with no param.
+  const sectionFromUrl = (): Section => {
+    if (typeof window === "undefined") return "analytics";
+    const value = new URLSearchParams(window.location.search).get("section");
+    return value === "events" || value === "ads" ? value : "analytics";
+  };
+
+  const [activeSection, setActiveSection] = useState<Section>(sectionFromUrl);
 
   useEffect(() => {
-    const handlePopState = () => {
-      const params = new URLSearchParams(window.location.search);
-      setActiveSection(params.get("section") === "events" ? "events" : "analytics");
-    };
+    const handlePopState = () => setActiveSection(sectionFromUrl());
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  const handleSectionSwitch = (section: "events" | "analytics") => {
+  const handleSectionSwitch = (section: Section) => {
     setActiveSection(section);
     const url = new URL(window.location.href);
     url.searchParams.set("section", section);
@@ -351,11 +353,26 @@ export const OrganizerEventsPage: React.FC = () => {
             <Calendar className="w-4 h-4" />
             <span>Quản lý sự kiện</span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => handleSectionSwitch("ads")}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all ${
+              activeSection === "ads"
+                ? "bg-burgundy text-white shadow-md shadow-burgundy/30"
+                : "text-ink-soft hover:text-beige-kem hover:bg-surface-2"
+            }`}
+          >
+            <Megaphone className="w-4 h-4" />
+            <span>Gói quảng cáo</span>
+          </button>
         </div>
       </div>
 
       {activeSection === "analytics" ? (
         <OrganizerBusinessAnalytics />
+      ) : activeSection === "ads" ? (
+        <AdPackagesPanel />
       ) : (
         <div className="space-y-6">
           {/* 2-Part Section Selector Tabs for Event Management */}

@@ -1,6 +1,7 @@
 import { afterAll, beforeEach } from "vitest";
 import { pool } from "../../src/db/pool.js";
 import { assertNotDemoBranch } from "../../src/db/guards.js";
+import { activityTest } from "../../src/modules/admin/activity.js";
 import { settingServiceTest } from "../../src/modules/admin/settings.service.js";
 import { resetAuthThrottle } from "../../src/modules/auth/throttle.js";
 import { resetHoldRateLimit } from "../../src/modules/holds/holds.throttle.js";
@@ -38,6 +39,9 @@ beforeEach(async () => {
   // Same for the auth throttle: every case registers users from the same loopback IP, so the
   // per-IP register window would otherwise be shared across a whole file (→ spurious 429s).
   resetAuthThrottle();
+  // And the DAU dedupe (0035): it is a per-process set of who has already been written today, so a
+  // TRUNCATE without this leaves the middleware believing rows exist that the suite just deleted.
+  activityTest.reset();
   // Same for the settings cache: tests that update system settings or truncate the table must not
   // see stale cached values in the next case.
   settingServiceTest.resetCache();

@@ -20,7 +20,16 @@ import {
 } from "../adminUi";
 import { useAsync } from "../useAsync";
 
-const KIND_LABEL = { topup: "Nạp ví", purchase: "Mua vé", refund: "Hoàn tiền" } as const;
+const KIND_LABEL = {
+  topup: "Nạp ví",
+  purchase: "Mua vé",
+  refund: "Hoàn tiền",
+  ad_purchase: "Mua quảng cáo",
+  ad_refund: "Hoàn quảng cáo",
+} as const;
+
+/** The kinds that put money back into a wallet — the ones worth flagging on sight. */
+const CREDIT_BACK: ReadonlySet<string> = new Set(["refund", "ad_refund"]);
 
 /**
  * The wallet ledger, whole.
@@ -60,11 +69,11 @@ export default function WalletScreen() {
         <Kpi label="Tiền nạp vào" value={formatVnd(sum("topup"))} />
         <Kpi label="Chi mua vé" value={formatVnd(sum("purchase"))} />
         <Kpi label="Đã hoàn" value={formatVnd(sum("refund"))} />
-        <Kpi label="Số dòng" value={`${rows.length}`} />
+        <Kpi label="Chi quảng cáo" value={formatVnd(sum("ad_purchase"))} />
       </KpiStrip>
 
       <div className="flex flex-wrap gap-2">
-        {(["", "topup", "purchase", "refund"] as const).map((value) => (
+        {(["", "topup", "purchase", "refund", "ad_purchase", "ad_refund"] as const).map((value) => (
           <button
             key={value || "all"}
             onClick={() => setKind(value)}
@@ -100,7 +109,7 @@ export default function WalletScreen() {
                   <Td nowrap>{row.createdAt.slice(0, 16).replace("T", " ")}</Td>
                   <Td>{row.userEmail}</Td>
                   <Td nowrap>
-                    <Pill tone={row.kind === "refund" ? "warn" : "neutral"}>
+                    <Pill tone={CREDIT_BACK.has(row.kind) ? "warn" : "neutral"}>
                       {KIND_LABEL[row.kind]}
                     </Pill>
                   </Td>
@@ -119,12 +128,13 @@ export default function WalletScreen() {
                   </Td>
                   <Td>
                     {row.orderCode && <span className="font-meta">{row.orderCode}</span>}
+                    {row.adEventTitle && <span className="font-meta">{row.adEventTitle}</span>}
                     {row.providerRef && (
                       <span className="block font-meta text-meta text-ink-soft">
                         VNPay {row.providerRef} · {row.providerStatus}
                       </span>
                     )}
-                    {!row.orderCode && !row.providerRef && "—"}
+                    {!row.orderCode && !row.adEventTitle && !row.providerRef && "—"}
                   </Td>
                 </tr>
               ))}

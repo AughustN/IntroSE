@@ -18,6 +18,8 @@ const KIND_LABEL: Record<WalletEntry["kind"], string> = {
   topup: "Nạp tiền",
   purchase: "Mua vé",
   refund: "Hoàn vé",
+  ad_purchase: "Mua gói quảng cáo",
+  ad_refund: "Hoàn gói quảng cáo",
 };
 
 const formatMoment = (iso: string): string =>

@@ -131,17 +131,25 @@ export interface CategorySlice {
   tickets: number;
 }
 
-/** One thing waiting on an admin, and how long it has waited. */
-export interface AttentionItem {
-  kind: "event" | "organizer" | "report";
-  id: number;
-  title: string;
-  waitingHours: number;
+/**
+ * One day's audience: the people active that day, and the rolling month ending on it.
+ *
+ * `mau` is a 30-day trailing window per point rather than one figure for the whole chart, so the
+ * two lines can be read against each other — the gap between them is churn, and the ratio is how
+ * often a returning user actually returns.
+ */
+export interface ActivityPoint {
+  day: string;
+  dau: number;
+  mau: number;
 }
 
 export interface AdminOverview {
+  /** Ticket commission **plus** advertising sales — everything the platform earned. */
   revenue30d: number;
   revenuePrev30d: number;
+  /** The advertising half of `revenue30d`, so the overview can say how much of it was ads. */
+  adRevenue30d: number;
   ticketsSold30d: number;
   ticketsSoldPrev30d: number;
   pendingEvents: number;
@@ -152,7 +160,8 @@ export interface AdminOverview {
   liveEvents: number;
   revenueByDay: DayPoint[];
   ticketsByCategory: CategorySlice[];
-  attention: AttentionItem[];
+  /** Active users per day for the last 30 days (0035). */
+  activityByDay: ActivityPoint[];
 }
 
 export interface AnalyticsRow {
@@ -197,12 +206,15 @@ export interface AdminOrderPage {
 export interface AdminWalletTxRow {
   id: number;
   createdAt: string;
-  kind: "topup" | "purchase" | "refund";
+  /** `ad_purchase`/`ad_refund` are an organizer's promotion packages (0033), on the same ledger. */
+  kind: "topup" | "purchase" | "refund" | "ad_purchase" | "ad_refund";
   /** Signed: top-up and refund positive, purchase negative. */
   amount: number;
   balanceAfter: number;
   userEmail: string;
   orderCode: string | null;
+  /** The promoted event, on the ad rows — what the reference column shows instead of an order. */
+  adEventTitle: string | null;
   /** The gateway leg, when the row has one (top-ups do). */
   providerRef: string | null;
   providerStatus: string | null;

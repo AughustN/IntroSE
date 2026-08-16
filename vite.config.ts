@@ -8,9 +8,23 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
-    alias: {
-      '@': path.resolve(__dirname, '.'),
-    },
+    // An array, not an object, because these are ordered and `@shared` must win before the bare
+    // `@` prefix gets a look at the same specifier.
+    alias: [
+      /*
+       * `@shared/*` → the shared/ folder, mirroring tsconfig.web.json's paths (and the identical
+       * rule in vitest.web.config.ts).
+       *
+       * Absent until now only because every earlier `@shared` import in src/ was `import type`, which
+       * esbuild erases before Vite ever resolves it. The first VALUE imported across that boundary —
+       * `AD_PLACEMENT_LABELS` — is what made the missing alias visible.
+       *
+       * The `.js` in the specifier is rewritten to `.ts` here rather than left to Vite's TS-output
+       * guessing: shared/ ships only sources, so there is never a real `.js` to find.
+       */
+      { find: /^@shared\/(.*)\.js$/, replacement: path.resolve(__dirname, 'shared/$1.ts') },
+      { find: /^@\//, replacement: `${path.resolve(__dirname)}/` },
+    ],
   },
   server: {
     port: 3000,

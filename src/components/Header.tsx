@@ -687,8 +687,13 @@ export default function Header({
                   Signed in, the identity line is the way to your own page — the face and the name
                   are what a reader already reads as "me", so making them the control removes a step
                   and a duplicate label. Signed out there is nobody to open, so "Khách" stays inert.
+
+                  Centred in that state, too: signed in the row is an avatar plus a name that can run
+                  the width of the stub, so it has to start at the left edge like a line of text.
+                  "Khách" is one short word, and left-aligned it sits off in a corner of a 15rem
+                  column with nothing to balance it.
                 */}
-                <div className="flex items-center gap-2">
+                <div className={`flex items-center gap-2 ${userName ? "" : "justify-center"}`}>
                   {userName ? (
                     <button
                       type="button"

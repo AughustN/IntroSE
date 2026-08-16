@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 import Section from "../Section";
+import AdsScreen from "./screens/AdsScreen";
 import AnalyticsScreen from "./screens/AnalyticsScreen";
 import AttendeesScreen from "./screens/AttendeesScreen";
 import AuditScreen from "./screens/AuditScreen";
@@ -40,6 +41,7 @@ import WalletScreen from "./screens/WalletScreen";
 type ScreenId =
   | "overview"
   | "analytics"
+  | "ads"
   | "moderation"
   | "event-list"
   | "organizers"
@@ -69,7 +71,8 @@ const NAV: NavGroup[] = [
     label: "Tổng quan",
     items: [
       { id: "overview", label: "Bảng tổng quan" },
-      { id: "analytics", label: "Doanh thu" },
+      { id: "analytics", label: "Hoa hồng" },
+      { id: "ads", label: "Quảng cáo" },
     ],
   },
   {
@@ -111,7 +114,12 @@ export default function AdminConsole({ onBack }: { onBack: () => void }) {
 
   return (
     <Section divided={false}>
-      <div className="space-y-6">
+      {/*
+        The app shell paints every page `text-white`, which on the console's cream ground renders
+        type you cannot read. Claim the theme's red for type here (`burgundy-ink` is the palette's
+        text-tuned red; fills keep `burgundy`). Anything with its own `text-*` class still wins.
+      */}
+      <div className="space-y-6 text-burgundy-ink">
         {/*
           The top bar: where you are, and the way out. The way out is a quiet text control, like
           every other "back" on the site.
@@ -165,6 +173,7 @@ export default function AdminConsole({ onBack }: { onBack: () => void }) {
           <section className="min-w-0 space-y-5">
             {screen === "overview" && <OverviewScreen onOpen={(next) => setScreen(next)} />}
             {screen === "analytics" && <AnalyticsScreen />}
+            {screen === "ads" && <AdsScreen />}
             {screen === "moderation" && <ModerationScreen />}
             {screen === "event-list" && <EventListScreen />}
             {screen === "organizers" && <OrganizersScreen />}

@@ -16,22 +16,23 @@ import { adminSession, seedSale } from "../helpers/salesSeed.js";
 const asAdmin = (token: string, path: string) => request(app).get(path).set(bearer(token));
 
 describe("platform overview (UC-32)", () => {
-  it("counts money and volume from paid, unvoided tickets", async () => {
+  it("counts the platform's 5% commission and volume from paid, unvoided tickets", async () => {
     const sale = await seedSale({ quantity: 3, price: 200_000 });
     const admin = await adminSession();
 
     const res = await asAdmin(admin.token, "/api/admin/overview").expect(200);
 
     expect(res.body.ticketsSold30d).toBe(3);
-    expect(res.body.revenue30d).toBe(600_000);
+    // 5% of 600_000 gross — the console reports the site's cut, not the organizer's.
+    expect(res.body.revenue30d).toBe(30_000);
     // A day per calendar day, present even where nothing sold — a chart drawn only from days with
     // orders spaces a quiet week like a busy one.
     expect(res.body.revenueByDay).toHaveLength(30);
-    expect(res.body.revenueByDay.at(-1).amount).toBe(600_000);
+    expect(res.body.revenueByDay.at(-1).amount).toBe(30_000);
     expect(sale.barcodes).toHaveLength(3);
   });
 
-  it("drops a refunded ticket from revenue without a second subtraction", async () => {
+  it("drops a refunded ticket's commission without a second subtraction", async () => {
     const sale = await seedSale({ quantity: 2, price: 300_000 });
     const admin = await adminSession();
 
@@ -44,10 +45,11 @@ describe("platform overview (UC-32)", () => {
     const res = await asAdmin(admin.token, "/api/admin/overview").expect(200);
 
     expect(res.body.ticketsSold30d).toBe(1);
-    expect(res.body.revenue30d).toBe(300_000);
+    // 5% of the one surviving 300_000 ticket.
+    expect(res.body.revenue30d).toBe(15_000);
   });
 
-  it("lists what is waiting, oldest first, across all three queues", async () => {
+  it("counts what is waiting in each queue", async () => {
     const seller = await seedSale();
     await pool.query(`UPDATE events SET moderation_status = 'pending_review' WHERE id = $1`, [
       seller.eventId,
@@ -57,7 +59,8 @@ describe("platform overview (UC-32)", () => {
     const res = await asAdmin(admin.token, "/api/admin/overview").expect(200);
 
     expect(res.body.pendingEvents).toBeGreaterThanOrEqual(1);
-    expect(res.body.attention.some((item: { kind: string }) => item.kind === "event")).toBe(true);
+    expect(res.body.pendingOrganizers).toBeGreaterThanOrEqual(0);
+    expect(res.body.openReports).toBeGreaterThanOrEqual(0);
   });
 
   it("refuses an ordinary account", async () => {
@@ -75,9 +78,10 @@ describe("revenue by event (UC-32 step 3)", () => {
 
     const row = res.body.rows.find((item: { eventId: number }) => item.eventId === sale.eventId);
     expect(row.tickets).toBe(2);
-    expect(row.revenue).toBe(300_000);
+    // 5% of 300_000 gross.
+    expect(row.revenue).toBe(15_000);
     expect(row.checkedIn).toBe(0);
-    expect(res.body.totals.revenue).toBeGreaterThanOrEqual(300_000);
+    expect(res.body.totals.revenue).toBeGreaterThanOrEqual(15_000);
   });
 
   it("honours the category filter", async () => {

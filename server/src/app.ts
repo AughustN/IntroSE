@@ -8,12 +8,14 @@ import { catalogPublicRouter } from "./modules/catalog/catalog.public.routes.js"
 import { organizerRouter } from "./modules/catalog/organizer.routes.js";
 import { studioRouter } from "./modules/studio/studio.routes.js";
 import { adminRouter } from "./modules/admin/admin.routes.js";
+import { recordActivity } from "./modules/admin/activity.js";
 import { reservationsRouter } from "./modules/holds/reservations.routes.js";
 import { seatmapRouter } from "./modules/seatmap/seatmap.routes.js";
 import { walletRouter } from "./modules/payments/wallet.routes.js";
 import { notificationRouter } from "./modules/notifications/notifications.routes.js";
 import { aiRouter } from "./modules/ai/ai.routes.js";
 import { reviewsRouter } from "./modules/reviews/reviews.routes.js";
+import { adsOrganizerRouter, adsPublicRouter } from "./modules/ads/ads.routes.js";
 
 /** Build the Express app (no listen) so tests can drive it with supertest. */
 export function createApp(): Express {
@@ -40,6 +42,10 @@ export function createApp(): Express {
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
 
+  // Who is using the site, counted before any router can answer or refuse (0035). Signature-only
+  // and fire-and-forget — see `activity.ts` for why it is not `optionalAuth`.
+  app.use(recordActivity);
+
   // Uploaded avatars, served as static files, never executed (ADR 0004).
   app.use(
     "/uploads",
@@ -50,6 +56,10 @@ export function createApp(): Express {
 
   app.use("/api", authRouter);
   app.use("/api", catalogPublicRouter);
+  // Public, and mounted up here for the same reason the review listing is: everything below with a
+  // router-level `requireAuth` would answer 401 for these paths before their own handler ran, and
+  // the landing page reads its ad placements before anybody signs in.
+  app.use("/api", adsPublicRouter);
   /*
    * Reviews go here, immediately after the catalogue and before anything with a router-level guard.
    *
@@ -70,6 +80,7 @@ export function createApp(): Express {
   // transactional with re-moderation, so it must be mounted AHEAD of the catalog organizer router
   // that used to serve that path (feature 006).
   app.use("/api/organizer", studioRouter);
+  app.use("/api/organizer", adsOrganizerRouter);
   app.use("/api/organizer", organizerRouter);
   // One router owns /api/admin.  supersedes the old catalog moderation router: it
   // serves every route that one did and adds organizers, reports and audit logs. Mounting both

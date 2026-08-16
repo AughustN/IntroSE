@@ -12,7 +12,6 @@ import {
   FIELD,
   Kpi,
   KpiStrip,
-  MiniBars,
   Notice,
   PANEL,
   ScreenHead,
@@ -20,6 +19,7 @@ import {
   Td,
   Th,
 } from "../adminUi";
+import { RevenueAreaChart } from "../AdminCharts";
 import DatePicker from "../../DatePicker";
 import Select from "../../Select";
 import { useAsync } from "../useAsync";
@@ -60,7 +60,7 @@ export default function AnalyticsScreen() {
   return (
     <>
       <ScreenHead
-        title="Doanh thu"
+        title="Hoa hồng (5%)"
         meta={`${applied.from} → ${applied.to}${applied.category ? ` · ${applied.category}` : ""}`}
       />
 
@@ -105,7 +105,7 @@ export default function AnalyticsScreen() {
       {data && (
         <>
           <KpiStrip>
-            <Kpi label="Doanh thu" value={formatVnd(data.totals.revenue)} />
+            <Kpi label="Hoa hồng (5%)" value={formatVnd(data.totals.revenue)} />
             <Kpi label="Vé đã bán" value={data.totals.tickets.toLocaleString("vi-VN")} />
             <Kpi
               label="Đã check-in"
@@ -121,11 +121,11 @@ export default function AnalyticsScreen() {
 
           <div className={`${PANEL} space-y-3`}>
             <p className="label-eyebrow text-ink-soft">Theo ngày</p>
-            <MiniBars points={data.byDay} format={formatVnd} />
+            <RevenueAreaChart points={data.byDay} label="Hoa hồng (5%)" />
           </div>
 
           <div className={`${PANEL} space-y-3`}>
-            <p className="label-eyebrow text-ink-soft">Theo sự kiện · doanh thu cao nhất trước</p>
+            <p className="label-eyebrow text-ink-soft">Theo sự kiện · hoa hồng cao nhất trước</p>
             {data.rows.length === 0 ? (
               <EmptyState text="Không có vé nào bán ra trong khoảng này." />
             ) : (
@@ -138,7 +138,7 @@ export default function AnalyticsScreen() {
                       <Th>Danh mục</Th>
                       <Th>Vé</Th>
                       <Th>Đã vào</Th>
-                      <Th>Doanh thu</Th>
+                      <Th>Hoa hồng</Th>
                     </tr>
                   </thead>
                   <tbody>

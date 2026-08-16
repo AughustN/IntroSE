@@ -48,7 +48,8 @@ export interface WalletSummary {
 
 export interface WalletEntry {
   id: number;
-  kind: "topup" | "purchase" | "refund";
+  /** `ad_purchase`/`ad_refund` are an organizer's promotion packages — same balance, same ledger. */
+  kind: "topup" | "purchase" | "refund" | "ad_purchase" | "ad_refund";
   /** Signed: credits positive, purchases negative. */
   amount: number;
   balanceAfter: number;

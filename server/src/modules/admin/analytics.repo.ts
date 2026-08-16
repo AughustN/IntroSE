@@ -1,16 +1,17 @@
 import type {
+  ActivityPoint,
   AdminAnalytics,
   AdminOrderPage,
   AdminOverview,
   AdminWalletTxRow,
   AnalyticsRow,
-  AttentionItem,
   CategorySlice,
   DayPoint,
   ReviewReportPage,
   ReviewReportRow,
 } from "@shared/admin/types.js";
 import { pool } from "../../db/pool.js";
+import { adRevenueBetween } from "../ads/ads.repo.js";
 
 /*
  * What the console counts, and why it counts it that way.
@@ -27,6 +28,17 @@ import { pool } from "../../db/pool.js";
  * **Money comes from the ticket, not the tier.** `tickets.price_cents` is the price snapshotted at
  * purchase; reading `ticket_tiers.price_amount` instead would restate history every time an
  * organizer edits a price, and would ignore discounts entirely.
+ *
+ * **The console reports the platform's cut, not the organizer's.** Ticket money here is the 5%
+ * commission the site keeps per ticket (`COMMISSION`), rounded per ticket before summing — the
+ * gross belongs to the organizer's own dashboard, and a console that calls the organizer's money
+ * the platform's revenue overstates the business by a factor of twenty.
+ *
+ * **Advertising counts in full, and counts here.** A package (0033_ads.sql) is sold BY the site
+ * rather than through it, so the platform keeps all of it, not 5% of it. It is added to the same
+ * revenue figures the commission feeds: the console's headline is what the platform earned, and a
+ * headline that quietly omitted a whole income stream would understate the business the same way
+ * reporting gross overstates it. `AdsScreen` breaks the ad half out on its own.
  */
 
 /** The join every money query needs: ticket → order → showtime → event. */
@@ -39,22 +51,33 @@ const TICKET_CHAIN = `
 
 const SOLD = `o.payment_status IN ('paid', 'partially_refunded') AND t.qr_status <> 'void'`;
 
+/**
+ * The platform's commission: 5% of each ticket's snapshot price, rounded per ticket so a refunded
+ * ticket removes exactly the commission it contributed — the same self-cancelling property the
+ * gross sum has.
+ */
+const COMMISSION = `ROUND(t.price_cents * 0.05)`;
+
 export async function overview(): Promise<AdminOverview> {
-  const [window, previous, pending, checkin, live, byDay, byCategory, attention] =
+  const [window, previous, ads, adsPrevious, pending, checkin, live, byDay, byCategory, activity] =
     await Promise.all([
       soldBetween("now() - interval '30 days'", "now()"),
       soldBetween("now() - interval '60 days'", "now() - interval '30 days'"),
+      adRevenueBetween("now() - interval '30 days'", "now()"),
+      adRevenueBetween("now() - interval '60 days'", "now() - interval '30 days'"),
       pendingCounts(),
       checkinRate(),
       liveEventCount(),
       revenueByDay(30),
       ticketsByCategory(),
-      attentionQueue(),
+      activityByDay(30),
     ]);
 
   return {
-    revenue30d: window.revenue,
-    revenuePrev30d: previous.revenue,
+    // Commission plus advertising — the two things the platform actually earns.
+    revenue30d: window.revenue + ads.revenue,
+    revenuePrev30d: previous.revenue + adsPrevious.revenue,
+    adRevenue30d: ads.revenue,
     ticketsSold30d: window.tickets,
     ticketsSoldPrev30d: previous.tickets,
     pendingEvents: pending.events,
@@ -64,7 +87,7 @@ export async function overview(): Promise<AdminOverview> {
     liveEvents: live,
     revenueByDay: byDay,
     ticketsByCategory: byCategory,
-    attention,
+    activityByDay: activity,
   };
 }
 
@@ -79,7 +102,7 @@ async function soldBetween(
   to: string,
 ): Promise<{ revenue: number; tickets: number }> {
   const { rows } = await pool.query<{ revenue: string; tickets: number }>(
-    `SELECT COALESCE(SUM(t.price_cents), 0)::text AS revenue, COUNT(*)::int AS tickets
+    `SELECT COALESCE(SUM(${COMMISSION}), 0)::text AS revenue, COUNT(*)::int AS tickets
      ${TICKET_CHAIN}
       WHERE ${SOLD} AND o.created_at >= ${from} AND o.created_at < ${to}`,
   );
@@ -130,6 +153,10 @@ async function liveEventCount(): Promise<number> {
  *
  * `generate_series` rather than whatever the data happens to contain: a chart drawn only from days
  * with orders spaces a quiet week the same as a busy one and turns a slump into a straight line.
+ *
+ * Both income streams land on the same day column, so the line matches the headline figure above
+ * it. `tickets` deliberately counts only tickets — an ad sale is revenue, not volume, and adding it
+ * to a ticket count would make the two figures on the tooltip disagree about what a "sale" is.
  */
 async function revenueByDay(days: number): Promise<DayPoint[]> {
   const { rows } = await pool.query<{ day: string; amount: string; tickets: number }>(
@@ -141,19 +168,59 @@ async function revenueByDay(days: number): Promise<DayPoint[]> {
      ),
      sold AS (
        SELECT date_trunc('day', o.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh') AS day,
-              SUM(t.price_cents) AS amount, COUNT(*) AS tickets
+              SUM(${COMMISSION}) AS amount, COUNT(*) AS tickets
        ${TICKET_CHAIN}
         WHERE ${SOLD} AND o.created_at >= now() - ($1::int * interval '1 day')
         GROUP BY 1
+     ),
+     ads AS (
+       SELECT date_trunc('day', p.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh') AS day,
+              SUM(p.price_amount) AS amount
+         FROM ad_purchases p
+        WHERE p.status <> 'cancelled' AND p.created_at >= now() - ($1::int * interval '1 day')
+        GROUP BY 1
      )
      SELECT to_char(d.day, 'YYYY-MM-DD') AS day,
-            COALESCE(s.amount, 0)::text AS amount,
+            (COALESCE(s.amount, 0) + COALESCE(a.amount, 0))::text AS amount,
             COALESCE(s.tickets, 0)::int AS tickets
-       FROM days d LEFT JOIN sold s ON s.day = d.day
+       FROM days d
+       LEFT JOIN sold s ON s.day = d.day
+       LEFT JOIN ads a ON a.day = d.day
       ORDER BY d.day`,
     [days],
   );
   return rows.map((row) => ({ day: row.day, amount: Number(row.amount), tickets: row.tickets }));
+}
+
+/**
+ * Active users per day, with the rolling month that ends on each one (0035).
+ *
+ * One pass, not sixty: the calendar is joined to every activity row inside its own trailing 30-day
+ * window, so `count(DISTINCT …)` over the whole group is MAU and the same count filtered to the
+ * exact day is DAU. Two correlated subqueries per point would read the table 60 times to say it.
+ *
+ * `generate_series` again, for the same reason the revenue chart uses it — a quiet day is a data
+ * point, and a series drawn only from days with traffic flatters a slump into a straight line.
+ */
+async function activityByDay(days: number): Promise<ActivityPoint[]> {
+  const { rows } = await pool.query<{ day: string; dau: number; mau: number }>(
+    `WITH calendar AS (
+       SELECT generate_series(
+         (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - ($1::int - 1),
+         (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,
+         interval '1 day')::date AS day
+     )
+     SELECT to_char(c.day, 'YYYY-MM-DD') AS day,
+            count(DISTINCT a.user_id) FILTER (WHERE a.day = c.day)::int AS dau,
+            count(DISTINCT a.user_id)::int AS mau
+       FROM calendar c
+       LEFT JOIN user_activity_days a
+         ON a.day <= c.day AND a.day > c.day - 30
+      GROUP BY c.day
+      ORDER BY c.day`,
+    [days],
+  );
+  return rows;
 }
 
 async function ticketsByCategory(): Promise<CategorySlice[]> {
@@ -166,41 +233,6 @@ async function ticketsByCategory(): Promise<CategorySlice[]> {
       ORDER BY tickets DESC`,
   );
   return rows;
-}
-
-/**
- * Everything waiting on a decision, oldest first, in one list.
- *
- * Three queues used to live on three screens, so "what is overdue" was a question you answered by
- * visiting all three and remembering. Merged and sorted by age, it is a glance.
- */
-async function attentionQueue(): Promise<AttentionItem[]> {
-  const { rows } = await pool.query<{
-    kind: AttentionItem["kind"];
-    id: number;
-    title: string;
-    hours: string;
-  }>(
-    `SELECT 'event' AS kind, e.id, e.title,
-            EXTRACT(EPOCH FROM (now() - e.created_at)) / 3600 AS hours
-       FROM events e WHERE e.moderation_status = 'pending_review'
-     UNION ALL
-     SELECT 'organizer', o.id, o.display_name,
-            EXTRACT(EPOCH FROM (now() - o.created_at)) / 3600
-       FROM organizers o WHERE o.status = 'pending'
-     UNION ALL
-     SELECT 'report', c.id, 'Tố cáo ' || c.target_type || ' #' || c.target_id,
-            EXTRACT(EPOCH FROM (now() - c.created_at)) / 3600
-       FROM content_reports c WHERE c.status = 'open'
-     ORDER BY hours DESC
-     LIMIT 12`,
-  );
-  return rows.map((row) => ({
-    kind: row.kind,
-    id: row.id,
-    title: row.title,
-    waitingHours: Math.round(Number(row.hours)),
-  }));
 }
 
 export interface AnalyticsFilter {
@@ -237,21 +269,21 @@ export async function analytics(filter: AnalyticsFilter): Promise<AdminAnalytics
   }>(
     `SELECT e.id AS event_id, e.title AS event_title, e.organizer_id, org.display_name AS organizer,
             c.label_vi AS category, COUNT(*)::int AS tickets,
-            SUM(t.price_cents)::text AS revenue,
+            SUM(${COMMISSION})::text AS revenue,
             COUNT(*) FILTER (WHERE t.qr_status = 'checked_in')::int AS checked_in
      ${TICKET_CHAIN}
       JOIN event_categories c ON c.id = e.category_id
       JOIN organizers org ON org.id = e.organizer_id
       WHERE ${where}
       GROUP BY e.id, e.title, e.organizer_id, org.display_name, c.label_vi
-      ORDER BY SUM(t.price_cents) DESC
+      ORDER BY SUM(${COMMISSION}) DESC
       LIMIT 200`,
     params,
   );
 
   const dayQuery = pool.query<{ day: string; amount: string; tickets: number }>(
     `SELECT to_char(date_trunc('day', o.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh'), 'YYYY-MM-DD') AS day,
-            SUM(t.price_cents)::text AS amount, COUNT(*)::int AS tickets
+            SUM(${COMMISSION})::text AS amount, COUNT(*)::int AS tickets
      ${TICKET_CHAIN}
       JOIN event_categories c ON c.id = e.category_id
       WHERE ${where}
@@ -481,16 +513,20 @@ export async function walletTransactions(
     balance_after: string;
     user_email: string;
     order_code: string | null;
+    ad_event_title: string | null;
     provider_ref: string | null;
     provider_status: string | null;
   }>(
     `SELECT wt.id, wt.created_at, wt.kind, wt.amount::text, wt.balance_after::text,
-            u.email AS user_email, o.order_code, pt.provider_txn_ref AS provider_ref,
-            pt.status AS provider_status
+            u.email AS user_email, o.order_code, ae.title AS ad_event_title,
+            pt.provider_txn_ref AS provider_ref, pt.status AS provider_status
        FROM wallet_transactions wt
        JOIN wallets w ON w.id = wt.wallet_id
        JOIN users u ON u.id = w.user_id
        LEFT JOIN orders o ON o.id = wt.order_id
+       -- An ad row carries no order, so its reference is the event it promoted (0033).
+       LEFT JOIN ad_purchases ap ON ap.id = wt.ad_purchase_id
+       LEFT JOIN events ae ON ae.id = ap.event_id
        LEFT JOIN payment_transactions pt ON pt.id = wt.payment_transaction_id
       WHERE ($2::text IS NULL OR wt.kind = $2)
       ORDER BY wt.created_at DESC, wt.id DESC
@@ -505,6 +541,7 @@ export async function walletTransactions(
     balanceAfter: Number(row.balance_after),
     userEmail: row.user_email,
     orderCode: row.order_code,
+    adEventTitle: row.ad_event_title,
     providerRef: row.provider_ref,
     providerStatus: row.provider_status,
   }));

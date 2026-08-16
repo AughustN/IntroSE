@@ -40,6 +40,41 @@ export type Screen =
   | "website-terms"
   | "refund-policy";
 
+/** What an account has to be before a screen may paint at all. */
+export type ScreenAccess = "signedIn" | "organizer" | "admin";
+
+/**
+ * Which screens are not for everybody.
+ *
+ * The client half of the rule; the server enforces the same thing on every endpoint behind these
+ * screens, and it is the server's answer that actually protects the data (Principle II, SEC-04).
+ * What this table is for is the other failure: the console **staying on screen** after the identity
+ * that opened it goes away. Signing out used to leave an admin sitting in the admin console with a
+ * dead token, reading whatever the last render had already fetched, and a reload of `/admin` by a
+ * signed-out visitor painted the whole shell before the first request came back 401.
+ *
+ * A screen absent from this table is open to anyone, which is the default on purpose: forgetting to
+ * list a public page costs nothing, and the ones that matter are all here.
+ */
+export const SCREEN_ACCESS: Partial<Record<Screen, ScreenAccess>> = {
+  history: "signedIn",
+  /*
+   * `wallet`, `saved` and `notifications` are deliberately NOT here.
+   *
+   * They are just as private, but they already answer a signed-out visitor properly — each one
+   * offers to sign them in, which is a better door than a silent bounce to the landing page. Listing
+   * them would replace that invitation with a redirect and lose the feature. `history` is here
+   * because it has no such branch: it renders the list it holds, which for a guest is an empty page
+   * that reads as "you have never bought anything".
+   */
+  organizer: "organizer",
+  "organizer-events": "organizer",
+  "organizer-event-detail": "organizer",
+  seatmaps: "organizer",
+  admin: "admin",
+  moderation: "admin",
+};
+
 export interface Route {
   screen: Screen;
   /** From `/events/:eventSlug…`. The same string `MovieEvent.id` carries — the catalog slug. */

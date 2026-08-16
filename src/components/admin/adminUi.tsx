@@ -121,15 +121,43 @@ export function KpiStrip({ children }: { children: ReactNode }) {
   );
 }
 
-export function Kpi({ label, value, note }: { label: string; value: string; note?: string }) {
-  return (
-    <div className="bg-surface-2 p-5">
+/**
+ * One headline figure.
+ *
+ * `onClick` turns the tile into a button rather than adding a link beside it: a KPI that counts work
+ * waiting is a thing the reader wants to open, and the whole tile is the target they aim at.
+ */
+export function Kpi({
+  label,
+  value,
+  note,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  note?: string;
+  onClick?: () => void;
+}) {
+  const body = (
+    <>
       <p className="label-eyebrow text-ink-soft">{label}</p>
       <p className="mt-2 font-display text-title-m font-black tabular-nums text-beige-kem">
         {value}
       </p>
       {note && <p className="mt-1 font-meta text-body text-ink-soft">{note}</p>}
-    </div>
+    </>
+  );
+
+  if (!onClick) return <div className="bg-surface-2 p-5">{body}</div>;
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="bg-surface-2 p-5 text-left transition hover:bg-bubblegum/20"
+    >
+      {body}
+    </button>
   );
 }
 
@@ -141,68 +169,6 @@ export function Kpi({ label, value, note }: { label: string; value: string; note
  */
 export function TableScroll({ children }: { children: ReactNode }) {
   return <div className="overflow-x-auto">{children}</div>;
-}
-
-/**
- * A run of daily figures, drawn as columns.
- *
- * Deliberately not a charting library: the console plots one series over thirty points, and a
- * dependency that ships its own typography, tooltips and colour scale would undo the one thing this
- * redesign is for — that the admin screens look like the rest of the site. Heights are percentages
- * of the largest bar, and the largest bar is the accent so the peak is findable without a legend.
- */
-export function MiniBars({
-  points,
-  format,
-}: {
-  points: Array<{ day: string; amount: number }>;
-  format: (value: number) => string;
-}) {
-  const peak = points.reduce((max, point) => Math.max(max, point.amount), 0);
-  if (!points.length) return <EmptyState text="Chưa có dữ liệu trong khoảng này." />;
-  return (
-    <div className="flex h-32 items-end gap-[3px]" role="img" aria-label="Doanh thu theo ngày">
-      {points.map((point) => {
-        const share = peak === 0 ? 0 : point.amount / peak;
-        return (
-          <div
-            key={point.day}
-            title={`${point.day} · ${format(point.amount)}`}
-            className={`min-h-[2px] flex-1 ${share === 1 && peak > 0 ? "bg-burgundy" : "bg-la-co"}`}
-            style={{ height: `${Math.max(share * 100, point.amount > 0 ? 4 : 1)}%` }}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-/** A share of a whole, as a ruled row rather than a pie — easier to read, easier to label. */
-export function ShareRow({
-  label,
-  value,
-  total,
-  format,
-}: {
-  label: string;
-  value: number;
-  total: number;
-  format: (value: number) => string;
-}) {
-  const share = total === 0 ? 0 : Math.round((value / total) * 100);
-  return (
-    <div className="space-y-1">
-      <div className="flex items-baseline justify-between gap-4 font-meta text-meta">
-        <span className="text-beige-kem">{label}</span>
-        <span className="tabular-nums text-ink-soft">
-          {format(value)} · {share}%
-        </span>
-      </div>
-      <div className="h-2 bg-beige-kem/15">
-        <div className="h-full bg-la-co" style={{ width: `${share}%` }} />
-      </div>
-    </div>
-  );
 }
 
 export function Th({ children }: { children: ReactNode }) {

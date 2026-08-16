@@ -28,6 +28,7 @@ import {
   reviewReports,
   walletTransactions,
 } from "./analytics.repo.js";
+import { analytics as adAnalytics } from "../ads/ads.repo.js";
 import { eventReports, reportDetail } from "./reports.repo.js";
 import { attendees, checkIn, toCsv } from "../checkin/checkin.service.js";
 import { getSettings, updateSettings } from "./settings.service.js";
@@ -270,7 +271,7 @@ const ordersQuery = z.object({
   offset: z.coerce.number().int().nonnegative().optional(),
 });
 const walletQuery = z.object({
-  kind: z.enum(["topup", "purchase", "refund"]).optional(),
+  kind: z.enum(["topup", "purchase", "refund", "ad_purchase", "ad_refund"]).optional(),
   limit: positiveInt(500).optional(),
 });
 const barcodeBody = z.object({ barcode: z.string().trim().min(4).max(120) }).strict();
@@ -296,6 +297,13 @@ adminRouter.get(
   "/overview",
   asyncH(async (_req, res) => {
     res.json(await overview());
+  }),
+);
+/** Advertising sales — the platform's other income, reported apart from the ticket commission. */
+adminRouter.get(
+  "/ads",
+  asyncH(async (_req, res) => {
+    res.json(await adAnalytics());
   }),
 );
 adminRouter.get(

@@ -21,6 +21,8 @@ import { authClient } from "./services/authClient";
 import { catalogClient } from "./services/catalogClient";
 import { aiClient } from "./services/aiClient";
 import { cardToMovie, detailToMovie } from "./services/catalogAdapter";
+import { adsClient } from "./services/adsClient";
+import type { ActiveAdPlacement, AdPlacement } from "@shared/ads/types.js";
 import { applyEventSeo, clearEventSeo } from "./services/seo";
 import { matchesDateFilter, type DateFilter } from "./services/dateFilter";
 import { matchesQuery, searchEvents } from "./services/eventSearch";
@@ -31,6 +33,7 @@ import {
   isOverlayPath,
   pathToRoute,
   RESET_PASSWORD_PATH,
+  SCREEN_ACCESS,
   screenToPath,
   VNPAY_RETURN_PATH,
   type Screen,
@@ -851,6 +854,49 @@ export default function App() {
       .finally(() => setAuthReady(true));
   }, [applyIdentity]);
 
+  /**
+   * Whether the account currently in hand may be on a given screen (`SCREEN_ACCESS`).
+   *
+   * Roles arrive with the identity, so signing out drops all three flags in the same render as the
+   * name in the header — there is no window where `isAdmin` outlives the session that granted it.
+   */
+  const screenAllowed = useCallback(
+    (screen: Screen) => {
+      const need = SCREEN_ACCESS[screen];
+      if (!need) return true;
+      if (need === "admin") return isAdmin;
+      if (need === "organizer") return isOrganizer;
+      return isSignedIn;
+    },
+    [isAdmin, isOrganizer, isSignedIn],
+  );
+
+  /**
+   * The screen the render may actually paint.
+   *
+   * A guarded screen paints only once the session is KNOWN and permits it. Before `authReady` it
+   * paints nothing rather than falling back to "not allowed", because a reload of `/admin` by a
+   * genuine admin would otherwise flash the redirect before `restore()` had answered.
+   *
+   * This is the half that closes the reported hole on its own: the moment `isAdmin` goes false the
+   * console stops rendering, in the same commit, without waiting for a navigation to land.
+   */
+  const visibleScreen: Screen | null =
+    SCREEN_ACCESS[activeScreen] && !(authReady && screenAllowed(activeScreen)) ? null : activeScreen;
+
+  /**
+   * ...and the half that gets the address bar out of there.
+   *
+   * Only `navigate` is called: the existing `location.pathname` effect owns `activeScreen`, so
+   * pushing the URL is enough and there is no second place deciding which screen is open.
+   * `replace`, so Back does not walk straight back into the screen we just took away.
+   */
+  useEffect(() => {
+    if (!authReady) return;
+    if (screenAllowed(activeScreen)) return;
+    navigate("/", { replace: true });
+  }, [authReady, activeScreen, screenAllowed, navigate]);
+
   // Load the real catalog (replaces the mock browse source). Maps API cards → MovieEvent.
   useEffect(() => {
     /*
@@ -928,6 +974,95 @@ export default function App() {
         if (import.meta.env.DEV) setTrendingEvents(SAMPLE_MOVIES.slice(0, TRENDING_COUNT));
       });
   }, []);
+
+  /*
+   * Paid promotion (`ad_purchases`, 0033) — the two landing-page slots an organizer can buy.
+   *
+   * Its own request, and a silent failure: advertising is additive to this page, so a placement
+   * feed that does not answer must leave the editorial curation exactly as it was rather than
+   * blanking a band. There is no dev fallback for the same reason — an empty feed is the honest
+   * answer when nobody has bought anything, and inventing sample campaigns would make the landing
+   * page look sold when it is not.
+   */
+  const [adPlacements, setAdPlacements] = useState<ActiveAdPlacement[]>([]);
+
+  useEffect(() => {
+    adsClient
+      .placements()
+      .then(setAdPlacements)
+      .catch((err) => console.error("Failed to load ad placements:", err));
+  }, []);
+
+  /** The numeric ids entitled to one slot, as a set the render can test membership against. */
+  const paidFor = useCallback(
+    (slot: AdPlacement) =>
+      new Set(
+        adPlacements.filter((row) => row.placements.includes(slot)).map((row) => row.eventId),
+      ),
+    [adPlacements],
+  );
+
+  /**
+   * Which event has bought the hero slot, if any. Derived, not fetched — it is a fact about two
+   * lists already in hand.
+   */
+  const promotedHeroSlug = useMemo(() => {
+    const ids = paidFor("hero_trailer");
+    return events.find((movie) => movie.eventId !== null && ids.has(movie.eventId))?.id ?? null;
+  }, [events, paidFor]);
+
+  /*
+   * The promoted event's full detail.
+   *
+   * Fetched through `getEvent` rather than reused from `events`, because a card carries no trailer
+   * (`cardToMovie` sets `trailerUrl: ''`) and a trailer is precisely what this placement sells.
+   *
+   * Held with the slug it belongs to so a stale result can never be shown as the current hero: the
+   * render below compares the two, which also means a campaign ending needs no state to be cleared
+   * and this effect never writes state synchronously.
+   */
+  const [promotedHero, setPromotedHero] = useState<MovieEvent | null>(null);
+
+  useEffect(() => {
+    if (!promotedHeroSlug) return;
+    let cancelled = false;
+    catalogClient
+      .getEvent(promotedHeroSlug)
+      .then((detail) => {
+        if (!cancelled) setPromotedHero(detailToMovie(detail, []));
+      })
+      .catch((err) => console.error("Failed to load the promoted hero event:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [promotedHeroSlug]);
+
+  /**
+   * What the hero actually shows: the bought slot if one is running and its detail has arrived,
+   * otherwise the catalogue's lead. The slug comparison is what makes the fallback automatic.
+   */
+  const landingHero =
+    promotedHero && promotedHero.id === promotedHeroSlug ? promotedHero : heroMovie;
+
+  /**
+   * The hot band: paid placements first, then the Admin's curation, capped at the same ten.
+   *
+   * Paid first because that is what was sold — a promoted event that lands eleventh is a promotion
+   * nobody sees. Deduplicated by slug, so an event that is both curated and promoted appears once,
+   * in the promoted position.
+   */
+  const tickerEvents = useMemo(() => {
+    const ids = paidFor("hot_events");
+    const promoted = events.filter(
+      (movie) =>
+        movie.eventId !== null && ids.has(movie.eventId) && movie.status !== "finished",
+    );
+    const slugs = new Set(promoted.map((movie) => movie.id));
+    return [...promoted, ...trendingEvents.filter((movie) => !slugs.has(movie.id))].slice(
+      0,
+      TRENDING_COUNT,
+    );
+  }, [events, trendingEvents, paidFor]);
 
   /** The landing page's four bands. Unfiltered — the landing page no longer carries any filter. */
   const landingSections = useMemo(() => buildLandingSections(events), [events]);
@@ -1790,8 +1925,8 @@ export default function App() {
         {activeScreen === "home" && (
           <>
             <HeroVideo
-              movie={heroMovie}
-              onBookNow={() => void handleStartBookingInput(heroMovie)}
+              movie={landingHero}
+              onBookNow={() => void handleStartBookingInput(landingHero)}
             />
             {/*
              * The curated ten on the moving band, then one band per kind of event.
@@ -1802,7 +1937,7 @@ export default function App() {
              * work moves to `/events` — the screen a reader who already knows goes to.
              */}
             <EventTicker
-              events={trendingEvents}
+              events={tickerEvents}
               onSelect={(movie) => void handleStartBookingInput(movie)}
               onViewAll={() => void leaveFlow(() => goTo("browse"))}
             />
@@ -1999,7 +2134,7 @@ export default function App() {
           <TicketTicket booking={finalBooking} onHomeClick={goHome} />
         )}
 
-        {activeScreen === "history" && (
+        {visibleScreen === "history" && (
           <BookingHistory
             bookings={bookingsHistory}
             onBack={goHome}
@@ -2069,7 +2204,7 @@ export default function App() {
             </div>
           ))}
 
-        {activeScreen === "admin" && <AdminConsole onBack={goHome} />}
+        {visibleScreen === "admin" && <AdminConsole onBack={goHome} />}
 
         {/*
          * The mailbox, guarded like the wallet: its messages belong to an account, so a stranger
@@ -2149,9 +2284,9 @@ export default function App() {
               </div>
             </div>
           ))}
-        {(activeScreen === "organizer" || activeScreen === "organizer-events") && <OrganizerEventsPage />}
-        {activeScreen === "organizer-event-detail" && <SingleEventPage />}
-        {activeScreen === "seatmaps" &&
+        {(visibleScreen === "organizer" || visibleScreen === "organizer-events") && <OrganizerEventsPage />}
+        {visibleScreen === "organizer-event-detail" && <SingleEventPage />}
+        {visibleScreen === "seatmaps" &&
           (seatmapLayoutId !== null ? (
             <ChartEditor
               layoutId={seatmapLayoutId}
@@ -2165,7 +2300,7 @@ export default function App() {
             />
           ))}
         {/* `/moderation` remains an alias for the current server-backed admin console. */}
-        {activeScreen === "moderation" && <AdminConsole onBack={goHome} />}
+        {visibleScreen === "moderation" && <AdminConsole onBack={goHome} />}
 
         {activeScreen === "about-us" && (
           <LegalPage title="Về chúng tôi" content={aboutUsMd} onBack={goHome} />

@@ -37,15 +37,21 @@ interface TopupRow {
   reservation_id: number | null;
 }
 
-/** One line of the wallet statement (UC-41). `amount` is signed: credits positive, debits negative. */
+/**
+ * One line of the wallet statement (UC-41). `amount` is signed: credits positive, debits negative.
+ *
+ * `ad_purchase`/`ad_refund` are an organizer buying promotion for one of their events (0033). They
+ * share this ledger rather than getting one of their own because they move the same balance — a
+ * statement that omitted them would stop summing to the number above it.
+ */
 export interface WalletEntry {
   id: number;
-  kind: "topup" | "purchase" | "refund";
+  kind: "topup" | "purchase" | "refund" | "ad_purchase" | "ad_refund";
   amount: number;
   balanceAfter: number;
   createdAt: string;
   orderId: number | null;
-  /** Present on purchase/refund rows, so the statement can link to the event it was for. */
+  /** Present on purchase/refund and ad rows, so the statement can name the event it was for. */
   eventTitle: string | null;
 }
 
@@ -198,9 +204,12 @@ export async function getStatement(
   if (!wallet) throw err.notFound("wallet_not_found", "Không tìm thấy ví của tài khoản.");
 
   // One extra row answers "is there more?" without a second COUNT over the whole ledger.
+  // Two ways a row names an event, and a row has at most one of them: a ticket row reaches it
+  // through its order, an ad row straight through the purchase. COALESCE rather than a UNION
+  // because both paths are outer joins on the same row and only one can be non-null.
   const { rows } = await db.query<{
     id: number;
-    kind: "topup" | "purchase" | "refund";
+    kind: WalletEntry["kind"];
     amount: number;
     balance_after: number;
     created_at: Date;
@@ -208,12 +217,14 @@ export async function getStatement(
     event_title: string | null;
   }>(
     `SELECT wt.id, wt.kind, wt.amount, wt.balance_after, wt.created_at, wt.order_id,
-            e.title AS event_title
+            COALESCE(e.title, ae.title) AS event_title
        FROM wallet_transactions wt
        LEFT JOIN orders o ON o.id = wt.order_id
        LEFT JOIN reservations r ON r.id = o.reservation_id
        LEFT JOIN showtimes s ON s.id = r.showtime_id
        LEFT JOIN events e ON e.id = s.event_id
+       LEFT JOIN ad_purchases ap ON ap.id = wt.ad_purchase_id
+       LEFT JOIN events ae ON ae.id = ap.event_id
       WHERE wt.wallet_id = $1 AND ($2::bigint IS NULL OR wt.id < $2)
       ORDER BY wt.id DESC
       LIMIT $3`,

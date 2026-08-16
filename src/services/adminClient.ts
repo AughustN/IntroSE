@@ -15,6 +15,7 @@ import type {
   ReviewReportPage,
   SystemSettings,
 } from "@shared/admin/types.js";
+import type { AdAnalytics } from "@shared/ads/types.js";
 import { withAuthRetry } from "./authClient";
 import { apiUrl } from "./api";
 
@@ -97,6 +98,7 @@ export const adminClient = {
   analytics: (
     params: { from?: string; to?: string; organizerId?: number; category?: string } = {},
   ) => request<AdminAnalytics>(`/analytics${qs(params)}`),
+  ads: () => request<AdAnalytics>("/ads"),
   orders: (params: { q?: string; status?: string; limit?: number; offset?: number } = {}) =>
     request<AdminOrderPage>(`/orders${qs(params)}`),
   contentReports: (
