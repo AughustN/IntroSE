@@ -7,7 +7,7 @@ export async function organizerQueue(db: Db = pool) {
 }
 
 export async function eventQueue(db: Db = pool) {
-  return (await db.query(`SELECT e.id, e.slug, e.title, e.status, e.moderation_status AS moderation, o.display_name AS organizer, e.review_note AS "reviewNote", e.created_at AS "createdAt" FROM events e JOIN organizers o ON o.id = e.organizer_id WHERE e.moderation_status IN ('pending_review', 'flagged', 'removed') ORDER BY e.created_at`)).rows;
+  return (await db.query(`SELECT e.id, e.slug, e.title, e.status, e.moderation_status AS moderation, o.display_name AS organizer, e.review_note AS "reviewNote", e.created_at AS "createdAt" FROM events e JOIN organizers o ON o.id = e.organizer_id WHERE (e.moderation_status = 'pending_review' AND e.status = 'on_sale') OR e.moderation_status IN ('flagged', 'removed') ORDER BY e.created_at`)).rows;
 }
 
 /*

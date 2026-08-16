@@ -28,6 +28,13 @@ const DECISION_LABEL: Record<Decision, string> = {
   remove: "Gỡ",
 };
 
+const EVENT_STATUS: Record<string, { label: string; tone: "good" | "warn" | "bad" | "neutral" }> = {
+  draft: { label: "Bản nháp", tone: "neutral" },
+  on_sale: { label: "Đang mở bán", tone: "good" },
+  finished: { label: "Đã kết thúc", tone: "neutral" },
+  cancelled: { label: "Đã hủy", tone: "bad" },
+};
+
 /**
  * Events waiting for a decision (UC-34).
  *
@@ -80,7 +87,9 @@ export default function ModerationScreen() {
     void run(call, `Đã ${DECISION_LABEL[decision].toLowerCase()} sự kiện #${id}.`);
   };
 
-  const events = data?.events ?? [];
+  // The shared moderation payload also retains flagged and removed events for the report and audit
+  // workflows. This screen is specifically the approval inbox, so only a pending review belongs here.
+  const events = (data?.events ?? []).filter((event) => event.moderation === "pending_review");
 
   return (
     <>
@@ -144,7 +153,8 @@ export default function ModerationScreen() {
               <tr>
                 <Th>Sự kiện</Th>
                 <Th>Ban tổ chức</Th>
-                <Th>Trạng thái</Th>
+                <Th>Trạng thái sự kiện</Th>
+                <Th>Kiểm duyệt</Th>
                 <Th>Ghi chú</Th>
                 <Th>Quyết định</Th>
               </tr>
@@ -158,8 +168,13 @@ export default function ModerationScreen() {
                   </Td>
                   <Td>{event.organizer}</Td>
                   <Td nowrap>
-                    <Pill tone={event.moderation === "flagged" ? "warn" : "neutral"}>
-                      {event.moderation}
+                    <Pill tone={EVENT_STATUS[event.status]?.tone ?? "neutral"}>
+                      {EVENT_STATUS[event.status]?.label ?? event.status}
+                    </Pill>
+                  </Td>
+                  <Td nowrap>
+                    <Pill tone="warn">
+                      Chờ duyệt
                     </Pill>
                   </Td>
                   <Td>{event.reviewNote ?? "—"}</Td>

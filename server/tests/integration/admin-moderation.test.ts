@@ -236,6 +236,16 @@ describe("T025 [US3] pre-publish approve/reject gate", () => {
     const admin = await seedAdmin();
     const org = await seedApprovedOrganizer();
     const ev = await seedPendingEvent(org, "Liveshow Chờ Duyệt");
+    const draft = await request(app)
+      .post("/api/organizer/events")
+      .set(bearer(org.token))
+      .send({
+        title: "Bản nháp chưa gửi duyệt",
+        categoryCode: "music",
+        description: "Mô tả sự kiện.",
+        eventType: "general_admission",
+      })
+      .expect(201);
 
     expect(await eventModeration(ev.eventId)).toMatchObject({
       status: "on_sale",
@@ -246,6 +256,7 @@ describe("T025 [US3] pre-publish approve/reject gate", () => {
 
     const queue = await request(app).get("/api/admin/moderation/queue").set(admin.h).expect(200);
     expect(queue.body.events.some((e: { id: number }) => e.id === ev.eventId)).toBe(true);
+    expect(queue.body.events.some((e: { id: number }) => e.id === draft.body.id)).toBe(false);
 
     await request(app).post(`/api/admin/events/${ev.eventId}/approve`).set(admin.h).expect(200);
     expect(await isPublic("Liveshow Chờ Duyệt")).toBe(true);

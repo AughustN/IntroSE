@@ -159,6 +159,7 @@ export const organizerApi = {
     categoryCode: string;
     description: string;
     eventType: "general_admission" | "seated";
+    imageUrl?: string | null;
   }) => authed<{ id: number; slug: string }>("/organizer/events", { method: "POST", body: b }),
   publish: (id: number) =>
     authed<{ ok: true }>(`/organizer/events/${id}/publish`, { method: "POST" }),
@@ -169,7 +170,11 @@ export const organizerApi = {
     authed<{ id: number }>("/organizer/venues", { method: "POST", body: b }),
   addShowtime: (
     eventId: number,
-    b: { venueId: number; startsAt: string; tiers: { label: string; price: number }[] },
+    b: {
+      venueId: number;
+      startsAt: string;
+      tiers: { label: string; price: number; totalQuantity?: number | null }[];
+    },
   ) =>
     authed<{ id: number }>(`/organizer/events/${eventId}/showtimes`, { method: "POST", body: b }),
 

@@ -337,6 +337,33 @@ export async function requestPublication(eventId: string): Promise<OrganizerEven
     throw new Error(`VALIDATION_ERROR: ${validation.errors.join(" ")}`);
   }
 
+  // The legacy organizer workspace used browser memory for drafts. Persist it before publishing so
+  // `pending_review` reaches the backend queue rather than only changing the local badge.
+  if (!Number.isSafeInteger(Number(event.eventId))) {
+    Object.assign(event, await persistEvent({
+      title: event.title,
+      description: event.description,
+      category: event.category,
+      categoryLabel: event.categoryLabel,
+      bannerUrl: event.bannerUrl,
+      videoUrl: event.videoUrl,
+      venueName: event.venueName,
+      venueAddress: event.venueAddress,
+      city: event.city,
+      startDatetime: event.startDatetime,
+      endDatetime: event.endDatetime,
+      salesStartDatetime: event.salesStartDatetime,
+      salesEndDatetime: event.salesEndDatetime,
+      ticketTiers: event.ticketTiers.map((tier) => ({
+        label: tier.label,
+        price: tier.price,
+        capacity: tier.capacity ?? 1,
+        description: tier.description,
+      })),
+    }));
+  }
+
+  await organizerApi.publish(Number(event.eventId));
   event.status = "pending_review";
   event.computedStatus = "pending_review";
   event.updatedAt = new Date().toISOString();
@@ -586,9 +613,7 @@ export interface CreateEventInput {
   }>;
 }
 
-export async function createOrganizerEvent(input: CreateEventInput): Promise<OrganizerEvent> {
-  const organizerId = getCurrentOrganizerId();
-
+async function persistEvent(input: CreateEventInput): Promise<OrganizerEvent> {
   if (!input.title || input.title.trim().length < 3) {
     throw new Error("VALIDATION_ERROR: Tên sự kiện phải từ 3 ký tự trở lên.");
   }
@@ -599,9 +624,31 @@ export async function createOrganizerEvent(input: CreateEventInput): Promise<Org
     throw new Error("VALIDATION_ERROR: Vui lòng nhập địa điểm và địa chỉ sự kiện.");
   }
 
-  const newEvent: OrganizerEvent = {
-    eventId: `evt-${Date.now()}`,
-    organizerId,
+  const event = await organizerApi.createEvent({
+    title: input.title.trim(),
+    categoryCode: input.category || "music",
+    description: input.description.trim(),
+    eventType: "general_admission",
+    imageUrl: input.bannerUrl.trim(),
+  });
+  const venue = await organizerApi.createVenue({
+    name: input.venueName.trim(),
+    city: input.city,
+    rawAddress: input.venueAddress.trim(),
+  });
+  await organizerApi.addShowtime(event.id, {
+    venueId: venue.id,
+    startsAt: input.startDatetime,
+    tiers: input.ticketTiers.map((tier) => ({
+      label: tier.label,
+      price: tier.price,
+      totalQuantity: tier.capacity,
+    })),
+  });
+
+  return {
+    eventId: String(event.id),
+    organizerId: getCurrentOrganizerId(),
     title: input.title.trim(),
     description: input.description.trim(),
     category: input.category || "music",
@@ -634,7 +681,10 @@ export async function createOrganizerEvent(input: CreateEventInput): Promise<Org
       isArchived: false
     }))
   };
+}
 
+export async function createOrganizerEvent(input: CreateEventInput): Promise<OrganizerEvent> {
+  const newEvent = await persistEvent(input);
   eventsStore.unshift(newEvent);
   return newEvent;
 }

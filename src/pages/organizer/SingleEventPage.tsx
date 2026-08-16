@@ -111,6 +111,10 @@ export const SingleEventPage: React.FC = () => {
       const updated = await requestPublication(eventId);
       setEventData({ ...updated, computedStatus: updated.status });
       showToast("success", "Yêu cầu xuất bản đã được gửi tới Quản trị viên để kiểm duyệt.");
+      if (updated.eventId !== eventId) {
+        navigate(`/organizer/${updated.eventId}`, { replace: true });
+        return;
+      }
       loadEvent();
     } catch (err: any) {
       showToast("error", err.message || "Gửi yêu cầu xuất bản thất bại.");
@@ -376,12 +380,16 @@ export const SingleEventPage: React.FC = () => {
             </button>
           )}
 
-          {eventData.computedStatus === "draft" && (
+          {(eventData.computedStatus === "draft" ||
+            (eventData.computedStatus === "pending_review" &&
+              !Number.isSafeInteger(Number(eventData.eventId)))) && (
             <button
               onClick={handleRequestPublish}
               className="px-4 py-2 border border-la-co bg-la-co/25 text-beige-kem hover:bg-la-co/40 font-bold rounded-xl text-xs transition-colors shadow-md"
             >
-              🚀 Gửi Yêu Cầu Duyệt
+              {eventData.computedStatus === "pending_review"
+                ? "Đồng bộ yêu cầu duyệt"
+                : "🚀 Gửi Yêu Cầu Duyệt"}
             </button>
           )}
 
