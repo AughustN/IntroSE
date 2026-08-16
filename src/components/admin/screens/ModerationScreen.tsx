@@ -18,12 +18,12 @@ import {
   Td,
   Th,
 } from "../adminUi";
+import Select from "../../Select";
 import { useAsync } from "../useAsync";
 
-type Decision = "reject" | "flag" | "remove";
+type Decision = "flag" | "remove";
 
 const DECISION_LABEL: Record<Decision, string> = {
-  reject: "Từ chối",
   flag: "Gắn cờ",
   remove: "Gỡ",
 };
@@ -35,13 +35,32 @@ const EVENT_STATUS: Record<string, { label: string; tone: "good" | "warn" | "bad
   cancelled: { label: "Đã hủy", tone: "bad" },
 };
 
+const MODERATION_LABEL: Record<string, string> = {
+  approved: "Đã duyệt",
+  flagged: "Đã gắn cờ",
+  removed: "Đã gỡ",
+};
+
+const MODERATION_TONE: Record<string, "good" | "warn" | "bad"> = {
+  approved: "good",
+  flagged: "warn",
+  removed: "bad",
+};
+
+const MODERATION_OPTIONS = [
+  { value: "", label: "Tất cả" },
+  { value: "approved", label: "Đã duyệt" },
+  { value: "flagged", label: "Đã gắn cờ" },
+  { value: "removed", label: "Đã gỡ" },
+] as const;
+
 /**
- * Events waiting for a decision (UC-34).
+ * Two lists, two jobs (UC-34).
  *
- * Approving is one press; the three refusals are not. Each of them puts a reason on the event that
- * the organizer reads, so the reason is typed into the page rather than into a `window.prompt` —
- * the prompt cannot be corrected, cannot be cancelled halfway, and gave no room to say what the
- * refusal will do.
+ * The queue is the approval inbox and nothing else — a decision is a single press. What has been
+ * approved lives below it: there the work is watching and taking down (flag, remove), never
+ * approving again. Both read the one moderation payload, so a reload after any decision keeps the
+ * two lists consistent with each other.
  */
 export default function ModerationScreen() {
   const { data, error, loading, reload } = useAsync(() => adminClient.queue(), "queue");
@@ -50,6 +69,7 @@ export default function ModerationScreen() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  const [moderationFilter, setModerationFilter] = useState<string>("");
 
   const run = async (action: () => Promise<unknown>, done: string) => {
     setBusy(true);
@@ -71,31 +91,29 @@ export default function ModerationScreen() {
     if (!pending) return;
     const { id, decision } = pending;
     const text = reason.trim();
-    if ((decision === "reject" || decision === "remove") && !text) {
+    if (decision === "remove" && !text) {
       setFailure(
-        decision === "remove"
-          ? "Gỡ vì vi phạm phải kèm lý do — thao tác này sẽ huỷ suất tương lai, void vé và hoàn tiền vào ví người mua."
-          : "Từ chối phải kèm lý do — ban tổ chức sẽ đọc dòng này.",
+        "Gỡ vì vi phạm phải kèm lý do — thao tác này sẽ huỷ suất tương lai, void vé và hoàn tiền vào ví người mua.",
       );
       return;
     }
     const call = {
-      reject: () => adminClient.rejectEvent(id, text),
       flag: () => adminClient.flagEvent(id, text || undefined),
       remove: () => adminClient.removeEvent(id, text),
     }[decision];
     void run(call, `Đã ${DECISION_LABEL[decision].toLowerCase()} sự kiện #${id}.`);
   };
 
-  // The shared moderation payload also retains flagged and removed events for the report and audit
-  // workflows. This screen is specifically the approval inbox, so only a pending review belongs here.
-  const events = (data?.events ?? []).filter((event) => event.moderation === "pending_review");
+  const queue = (data?.events ?? []).filter((event) => event.moderation === "pending_review");
+  const approved = (data?.approvedEvents ?? []).filter(
+    (event) => !moderationFilter || event.moderation === moderationFilter,
+  );
 
   return (
     <>
       <ScreenHead
         title="Hàng chờ sự kiện"
-        meta={`${events.length} sự kiện đang chờ quyết định`}
+        meta={`${queue.length} sự kiện đang chờ quyết định`}
         actions={
           <button onClick={reload} className={ACTION_GHOST} disabled={loading}>
             {loading ? "Đang tải…" : "Tải lại"}
@@ -113,11 +131,9 @@ export default function ModerationScreen() {
             {DECISION_LABEL[pending.decision]} sự kiện #{pending.id}
           </p>
           <p className="font-meta text-body text-ink-soft">
-            {pending.decision === "reject"
-              ? "Lý do bắt buộc. Ban tổ chức nhận đúng dòng này và sửa theo nó."
-              : pending.decision === "remove"
-                ? "Lý do bắt buộc. Thao tác này sẽ huỷ suất tương lai, void vé và hoàn tiền vào ví người mua."
-                : "Lý do không bắt buộc, nhưng nếu có thì được lưu vào nhật ký thao tác."}
+            {pending.decision === "remove"
+              ? "Lý do bắt buộc. Thao tác này sẽ huỷ suất tương lai, void vé và hoàn tiền vào ví người mua."
+              : "Lý do không bắt buộc, nhưng nếu có thì được lưu vào nhật ký thao tác."}
           </p>
           <div className="flex flex-wrap gap-2">
             <input
@@ -144,7 +160,7 @@ export default function ModerationScreen() {
         </div>
       )}
 
-      {events.length === 0 && !loading ? (
+      {queue.length === 0 && !loading ? (
         <EmptyState text="Không có sự kiện nào đang chờ duyệt." />
       ) : (
         <TableScroll>
@@ -154,13 +170,81 @@ export default function ModerationScreen() {
                 <Th>Sự kiện</Th>
                 <Th>Ban tổ chức</Th>
                 <Th>Trạng thái sự kiện</Th>
-                <Th>Kiểm duyệt</Th>
                 <Th>Ghi chú</Th>
                 <Th>Quyết định</Th>
               </tr>
             </thead>
             <tbody>
-              {events.map((event) => (
+              {queue.map((event) => (
+                <tr key={event.id} className="border-b border-beige-kem/15">
+                  <Td>
+                    <span className="font-bold text-beige-kem">{event.title}</span>
+                    <span className="block font-meta text-meta text-ink-soft">/{event.slug}</span>
+                  </Td>
+                  <Td>{event.organizer}</Td>
+                  <Td nowrap>
+                    <Pill tone={EVENT_STATUS[event.status]?.tone ?? "neutral"}>
+                      {EVENT_STATUS[event.status]?.label ?? event.status}
+                    </Pill>
+                  </Td>
+                  <Td>{event.reviewNote ?? "—"}</Td>
+                  <Td nowrap>
+                    <button
+                      className={ACTION_PRIMARY}
+                      disabled={busy}
+                      onClick={() =>
+                        void run(
+                          () => adminClient.approveEvent(event.id),
+                          `Đã duyệt “${event.title}”.`,
+                        )
+                      }
+                    >
+                      Duyệt
+                    </button>
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableScroll>
+      )}
+
+      <ScreenHead
+        title="Danh sách sự kiện"
+        meta={`${approved.length} sự kiện đã qua kiểm duyệt`}
+        actions={
+          <div className="w-44">
+            <Select
+              label="Kiểm duyệt"
+              value={moderationFilter}
+              options={MODERATION_OPTIONS.map((option) => ({
+                value: option.value,
+                label: option.label,
+              }))}
+              onChange={setModerationFilter}
+              triggerClassName={`${FIELD} w-full justify-between`}
+            />
+          </div>
+        }
+      />
+
+      {approved.length === 0 && !loading ? (
+        <EmptyState text="Chưa có sự kiện nào khớp bộ lọc." />
+      ) : (
+        <TableScroll>
+          <table className="w-full min-w-[820px] text-left text-body">
+            <thead className="label-eyebrow border-b border-beige-kem/25 text-ink-soft">
+              <tr>
+                <Th>Sự kiện</Th>
+                <Th>Ban tổ chức</Th>
+                <Th>Trạng thái sự kiện</Th>
+                <Th>Kiểm duyệt</Th>
+                <Th>Ghi chú</Th>
+                <Th>Thao tác</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {approved.map((event) => (
                 <tr key={event.id} className="border-b border-beige-kem/15">
                   <Td>
                     <span className="font-bold text-beige-kem">{event.title}</span>
@@ -173,39 +257,35 @@ export default function ModerationScreen() {
                     </Pill>
                   </Td>
                   <Td nowrap>
-                    <Pill tone="warn">
-                      Chờ duyệt
+                    <Pill tone={MODERATION_TONE[event.moderation] ?? "neutral"}>
+                      {MODERATION_LABEL[event.moderation] ?? event.moderation}
                     </Pill>
                   </Td>
                   <Td>{event.reviewNote ?? "—"}</Td>
                   <Td nowrap>
                     <div className="flex flex-wrap gap-2">
                       <button
-                        className={ACTION_PRIMARY}
+                        className={ACTION_GHOST}
                         disabled={busy}
-                        onClick={() =>
-                          void run(
-                            () => adminClient.approveEvent(event.id),
-                            `Đã duyệt “${event.title}”.`,
-                          )
-                        }
+                        onClick={() => {
+                          setPending({ id: event.id, decision: "flag" });
+                          setReason("");
+                          setFailure(null);
+                        }}
                       >
-                        Duyệt
+                        Gắn cờ
                       </button>
-                      {(["reject", "flag", "remove"] as Decision[]).map((decision) => (
-                        <button
-                          key={decision}
-                          className={ACTION_GHOST}
-                          disabled={busy}
-                          onClick={() => {
-                            setPending({ id: event.id, decision });
-                            setReason("");
-                            setFailure(null);
-                          }}
-                        >
-                          {DECISION_LABEL[decision]}
-                        </button>
-                      ))}
+                      <button
+                        className={ACTION_GHOST}
+                        disabled={busy}
+                        onClick={() => {
+                          setPending({ id: event.id, decision: "remove" });
+                          setReason("");
+                          setFailure(null);
+                        }}
+                      >
+                        Gỡ
+                      </button>
                     </div>
                   </Td>
                 </tr>

@@ -46,7 +46,10 @@ export interface ContentReportItem {
 
 export interface AdminModerationQueue {
   organizers: OrganizerQueueItem[];
+  /** The approval inbox only — events waiting on a decision (UC-34). */
   events: EventModerationItem[];
+  /** Every event that has been approved; flagged/removed rows stay for watch and takedown. */
+  approvedEvents: EventModerationItem[];
   reports: ContentReportItem[];
 }
 

@@ -5,6 +5,7 @@ import { insertAudit } from "./audit.js";
 // The reviews module owns what a review row may become; moderation only decides that it should.
 import { setStatus as setReviewStatus } from "../reviews/reviews.repo.js";
 import {
+  approvedEvents,
   eventQueue,
   insertNotification,
   listCategories,
@@ -130,6 +131,7 @@ export async function queue() {
   return withTransaction(async (db) => ({
     organizers: await organizerQueue(db),
     events: await eventQueue(db),
+    approvedEvents: await approvedEvents(db),
     reports: await reportQueue(db),
   }));
 }

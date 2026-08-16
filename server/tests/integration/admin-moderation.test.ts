@@ -260,6 +260,14 @@ describe("T025 [US3] pre-publish approve/reject gate", () => {
 
     await request(app).post(`/api/admin/events/${ev.eventId}/approve`).set(admin.h).expect(200);
     expect(await isPublic("Liveshow Chờ Duyệt")).toBe(true);
+    // approving moves the event out of the inbox and into the approved list
+    const after = await request(app).get("/api/admin/moderation/queue").set(admin.h).expect(200);
+    expect(after.body.events.some((e: { id: number }) => e.id === ev.eventId)).toBe(false);
+    expect(
+      after.body.approvedEvents.some(
+        (e: { id: number; moderation: string }) => e.id === ev.eventId && e.moderation === "approved",
+      ),
+    ).toBe(true);
 
     // approval alone is not enough — unpublishing (status → draft) hides it again
     await request(app)
@@ -456,10 +464,10 @@ describe("T026 [US4] reported content: dismiss, flag, remove", () => {
     });
     expect(await reportRow(reportId)).toMatchObject({ status: "flagged" });
 
-    // still visible to the admin queue and to the owning organizer, with the reason (FR-015/027)
+    // still visible to the admin's approved list and to the owning organizer, with the reason (FR-015/027)
     const queue = await request(app).get("/api/admin/moderation/queue").set(admin.h).expect(200);
     expect(
-      queue.body.events.some(
+      queue.body.approvedEvents.some(
         (e: { id: number; moderation: string }) =>
           e.id === ev.eventId && e.moderation === "flagged",
       ),

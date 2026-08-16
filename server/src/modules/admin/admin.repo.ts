@@ -6,8 +6,21 @@ export async function organizerQueue(db: Db = pool) {
   return (await db.query(`SELECT id, user_id AS "userId", display_name AS "displayName", description, status, review_note AS "reviewNote", applied_at AS "appliedAt" FROM organizers WHERE status IN ('pending', 'approved', 'suspended') ORDER BY applied_at`)).rows;
 }
 
+/*
+ * The approval queue only (UC-34). Flagged and removed events moved to `approvedEvents` —
+ * the inbox is a decision, not a registry, and the two screens no longer share one list.
+ */
 export async function eventQueue(db: Db = pool) {
-  return (await db.query(`SELECT e.id, e.slug, e.title, e.status, e.moderation_status AS moderation, o.display_name AS organizer, e.review_note AS "reviewNote", e.created_at AS "createdAt" FROM events e JOIN organizers o ON o.id = e.organizer_id WHERE (e.moderation_status = 'pending_review' AND e.status = 'on_sale') OR e.moderation_status IN ('flagged', 'removed') ORDER BY e.created_at`)).rows;
+  return (await db.query(`SELECT e.id, e.slug, e.title, e.status, e.moderation_status AS moderation, o.display_name AS organizer, e.review_note AS "reviewNote", e.created_at AS "createdAt" FROM events e JOIN organizers o ON o.id = e.organizer_id WHERE e.moderation_status = 'pending_review' AND e.status = 'on_sale' ORDER BY e.created_at`)).rows;
+}
+
+/**
+ * Every event that has been approved. Approving is the entry ticket — flagged and removed rows
+ * stay here because they once carried an approval, and the screen needs them exactly to watch or
+ * take them down (UC-34 list view).
+ */
+export async function approvedEvents(db: Db = pool) {
+  return (await db.query(`SELECT e.id, e.slug, e.title, e.status, e.moderation_status AS moderation, o.display_name AS organizer, e.review_note AS "reviewNote", e.created_at AS "createdAt" FROM events e JOIN organizers o ON o.id = e.organizer_id WHERE e.moderation_status IN ('approved', 'flagged', 'removed') ORDER BY e.created_at DESC`)).rows;
 }
 
 /*
