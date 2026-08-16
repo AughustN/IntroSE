@@ -143,9 +143,10 @@ export default function OrganizerPanel({ onBack }: { onBack: () => void }) {
   };
 
   // A camera hit is a code, not a check-in: look it up and show it, let the staff confirm.
+  // The camera stays open so the next ticket can be scanned without reopening it; QrCameraScan
+  // reports each code once, when the previous one has left the frame.
   const onCameraDetect = (code: string) => {
     setScanCode(code);
-    setCameraOn(false);
     setScanBusy(true);
     setScanErr(null);
     setScanAlready(false);

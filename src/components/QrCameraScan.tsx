@@ -21,10 +21,14 @@ export default function QrCameraScan({ onDetect, onError, onClose }: Props) {
   const streamRef = useRef<MediaStream | null>(null);
   const frameRef = useRef<number | null>(null);
   const runningRef = useRef(false);
+  // While a ticket is in front of the lens, every frame reads the same code. Only report the next
+  // ticket: resume once the held code has disappeared from the frame.
+  const heldCodeRef = useRef<string | null>(null);
   const [state, setState] = useState<"idle" | "starting" | "scanning" | "denied">("idle");
 
   const stop = () => {
     runningRef.current = false;
+    heldCodeRef.current = null;
     if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
     frameRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -53,6 +57,7 @@ export default function QrCameraScan({ onDetect, onError, onClose }: Props) {
     }
     runningRef.current = true;
 
+    // One loop for many tickets: scan → report → wait for the frame to clear → scan again.
     const tick = () => {
       if (!runningRef.current) return;
       const video = videoRef.current;
@@ -65,9 +70,13 @@ export default function QrCameraScan({ onDetect, onError, onClose }: Props) {
           inversionAttempts: "attemptBoth",
         });
         if (result) {
-          runningRef.current = false;
-          onDetect(result.data);
-          return;
+          if (heldCodeRef.current === null) {
+            // A new ticket: report it, then ignore it until it leaves the frame.
+            heldCodeRef.current = result.data;
+            onDetect(result.data);
+          }
+        } else if (heldCodeRef.current !== null) {
+          heldCodeRef.current = null;
         }
       }
       frameRef.current = requestAnimationFrame(tick);
@@ -137,7 +146,9 @@ export default function QrCameraScan({ onDetect, onError, onClose }: Props) {
       ) : (
         <>
           <p className="font-meta text-meta text-beige-kem/60">
-            {state === "starting" ? "Đang mở camera..." : "Đưa mã QR vào khung để quét."}
+            {state === "starting"
+              ? "Đang mở camera..."
+              : "Quét liên tục — đưa lần lượt từng vé vào khung, không cần mở lại camera."}
           </p>
           <button
             type="button"

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   getOrganizerEventDetail,
@@ -55,10 +55,24 @@ export const SingleEventPage: React.FC = () => {
   const [scanErr, setScanErr] = useState<string | null>(null);
   const [scanBusy, setScanBusy] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
+  // Continuous camera mode: the big card shows the LAST scan only; every scan also lands in the
+  // running log underneath the camera, so staff can keep scanning without reading one card at a time.
+  const [scanViaCamera, setScanViaCamera] = useState(false);
+  const [scanLog, setScanLog] = useState<{ id: number; kind: "ok" | "warning" | "bad"; text: string }[]>([]);
+  const [scanOk, setScanOk] = useState(0);
+  const [scanFail, setScanFail] = useState(0);
+  const cameraBusyRef = useRef(false);
+  // A ticket presented while one is still checking in — kept so it is not lost, run next.
+  const pendingScanRef = useRef<string | null>(null);
+
+  const logScan = (kind: "ok" | "warning" | "bad", text: string) => {
+    setScanLog((log) => [{ id: Date.now() + Math.random(), kind, text }, ...log].slice(0, 30));
+  };
 
   const doCheckIn = async (codeToScan: string) => {
     const code = codeToScan.trim();
     if (!code) return;
+    setScanViaCamera(false); // a deliberate check-in (manual / confirm button) earns the full card
     setScanBusy(true);
     setScanErr(null);
     setScanAlready(false);
@@ -77,6 +91,58 @@ export const SingleEventPage: React.FC = () => {
       setScanErr(e.message || "Không thể thực hiện check-in cho vé này.");
     } finally {
       setScanBusy(false);
+    }
+  };
+
+  /*
+   * Camera mode: the camera stays open and scans ticket after ticket until the organizer turns it
+   * off — no reopening between tickets (QrCameraScan reports each new code once, when the previous
+   * one has left the frame). `cameraBusyRef` serializes the check-ins so an answer can never race
+   * the next scan and overwrite it.
+   */
+  const cameraDetect = async (code: string) => {
+    const trimmed = code.trim();
+    if (!trimmed) return;
+    if (cameraBusyRef.current) {
+      pendingScanRef.current = trimmed; // scanned while the last one was in flight — run it next
+      return;
+    }
+    cameraBusyRef.current = true;
+    setScanViaCamera(true);
+    setScanCode(trimmed);
+    setScanErr(null);
+    setScanAlready(false);
+    try {
+      const { ticket, already } = await organizerApi.checkIn(trimmed);
+      setScanResult(ticket);
+      setScanAlready(already);
+      setScanOk((n) => n + 1);
+      const seat = ticket.seatLabel ? ` · ${ticket.seatLabel}` : "";
+      logScan(
+        already ? "warning" : "ok",
+        already
+          ? `${ticket.customerName} — đã soát vé từ trước`
+          : `${ticket.customerName} · ${ticket.tierLabel}${seat} — OK`,
+      );
+      showToast(
+        already ? "warning" : "success",
+        already
+          ? `Vé ${ticket.code} đã được check-in trước đó!`
+          : `Check-in thành công cho khán giả ${ticket.customerName}!`,
+      );
+      if (!already) loadEvent();
+    } catch (e: any) {
+      setScanResult(null);
+      setScanErr(e.message || "Không thể thực hiện check-in cho vé này.");
+      setScanFail((n) => n + 1);
+      logScan("bad", `${trimmed} — ${e.message || "không check-in được"}`);
+    } finally {
+      cameraBusyRef.current = false;
+      const next = pendingScanRef.current;
+      if (next) {
+        pendingScanRef.current = null;
+        void cameraDetect(next);
+      }
     }
   };
 
@@ -361,6 +427,16 @@ export const SingleEventPage: React.FC = () => {
                 setShowScanModal(true);
                 setScanErr(null);
                 setScanResult(null);
+                setScanCode("");
+                setScanViaCamera(false);
+                setScanLog([]);
+                setScanOk(0);
+                setScanFail(0);
+                pendingScanRef.current = null;
+                cameraBusyRef.current = false;
+                // Straight to scanning: the point of opening the modal is a line of guests, not
+                // the camera controls — the toggle underneath still turns it off or back on.
+                setCameraOn(true);
               }}
               className="px-4 py-2 bg-la-co hover:brightness-110 text-on-tint font-bold rounded-xl text-xs transition-colors shadow-md flex items-center gap-1.5 cursor-pointer"
             >
@@ -691,17 +767,47 @@ export const SingleEventPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Camera Stream Component Reused from QrCameraScan */}
+            {/* Camera Stream Component — continuous: stays open across tickets, one loop for all */}
             {cameraOn && (
               <div className="overflow-hidden rounded-xl border border-beige-kem/30">
                 <QrCameraScan
-                  onDetect={(code) => {
-                    setScanCode(code);
-                    doCheckIn(code);
-                  }}
+                  onDetect={(code) => void cameraDetect(code)}
                   onError={(msg) => setScanErr(msg)}
                   onClose={() => setCameraOn(false)}
                 />
+              </div>
+            )}
+
+            {/* Session tally + running scan log, only once scanning has actually happened */}
+            {(scanOk > 0 || scanFail > 0) && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-3 text-xs font-bold">
+                  <span className="rounded-full bg-la-co/20 border border-la-co/40 px-2.5 py-0.5 text-la-co">
+                    ✓ {scanOk} vé
+                  </span>
+                  <span className="rounded-full bg-burgundy/20 border border-burgundy/40 px-2.5 py-0.5 text-burgundy-ink">
+                    ✕ {scanFail} lỗi
+                  </span>
+                  <span className="text-beige-kem/60 font-meta font-normal">
+                    Quét liên tục — đưa lần lượt từng vé vào khung.
+                  </span>
+                </div>
+                <ul className="max-h-36 space-y-1 overflow-y-auto rounded-xl border border-beige-kem/20 bg-xanh-pho p-2">
+                  {scanLog.map((entry) => (
+                    <li
+                      key={entry.id}
+                      className={`text-[11px] font-medium ${
+                        entry.kind === "ok"
+                          ? "text-la-co"
+                          : entry.kind === "warning"
+                          ? "text-cam-dat"
+                          : "text-burgundy-ink"
+                      }`}
+                    >
+                      {entry.kind === "ok" ? "✓" : entry.kind === "warning" ? "⚠️" : "✕"} {entry.text}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
 
@@ -719,8 +825,9 @@ export const SingleEventPage: React.FC = () => {
               </div>
             )}
 
-            {/* Scan Result Card */}
-            {scanResult && (
+            {/* Last-scan card. In camera mode the running log under the camera is the readout —
+                one big card per guest would hide it; the card stays for deliberate look-ups. */}
+            {scanResult && !scanViaCamera && (
               <div className="rounded-xl border border-beige-kem/30 bg-xanh-pho p-4 space-y-3">
                 <div className="flex items-center justify-between border-b border-beige-kem/10 pb-2">
                   <div>
