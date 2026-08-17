@@ -27,12 +27,14 @@ export async function createApplication(
   userId: number,
   input: { displayName: string; description: string; logoUrl: string | null },
   db: Db = pool,
-): Promise<void> {
-  await db.query(
+): Promise<{ id: number }> {
+  const { rows } = await db.query<{ id: number }>(
     `INSERT INTO organizers (user_id, display_name, description, logo_url, status)
-     VALUES ($1, $2, $3, $4, 'pending')`,
+     VALUES ($1, $2, $3, $4, 'pending')
+     RETURNING id`,
     [userId, input.displayName, input.description, input.logoUrl],
   );
+  return rows[0];
 }
 
 /** Full application history for an account, newest first (FR-060). */

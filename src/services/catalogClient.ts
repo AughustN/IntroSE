@@ -524,6 +524,48 @@ export const studioApi = {
   ) => authed<EventMutationResult>(`/organizer/events/${eventId}`, { method: "PATCH", body: b }),
   deleteEvent: (eventId: number) =>
     authed<void>(`/organizer/events/${eventId}`, { method: "DELETE" }),
+
+  // Media (012-cloudinary-media-upload)
+  uploadBanner: async (eventId: number, file: File): Promise<{ bannerUrl: string; imageUrl: string }> => {
+    const form = new FormData();
+    form.append("banner", file);
+    const res = await withAuthRetry((token) =>
+      fetch(apiUrl(`/api/organizer/events/${eventId}/banner`), {
+        method: "POST",
+        headers: token
+          ? { Authorization: `Bearer ${token}`, Accept: "application/json" }
+          : { Accept: "application/json" },
+        credentials: "include",
+        body: form,
+      }),
+    );
+    if (!res.ok) {
+      const e = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+      throw new Error(e.message ?? e.error ?? `error ${res.status}`);
+    }
+    return (await res.json()) as { bannerUrl: string; imageUrl: string };
+  },
+  uploadTrailer: async (eventId: number, file: File): Promise<{ trailerUrl: string }> => {
+    const form = new FormData();
+    form.append("trailer", file);
+    const res = await withAuthRetry((token) =>
+      fetch(apiUrl(`/api/organizer/events/${eventId}/trailer`), {
+        method: "POST",
+        headers: token
+          ? { Authorization: `Bearer ${token}`, Accept: "application/json" }
+          : { Accept: "application/json" },
+        credentials: "include",
+        body: form,
+      }),
+    );
+    if (!res.ok) {
+      const e = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+      throw new Error(e.message ?? e.error ?? `error ${res.status}`);
+    }
+    return (await res.json()) as { trailerUrl: string };
+  },
+  removeTrailer: (eventId: number) =>
+    authed<{ trailerUrl: null }>(`/organizer/events/${eventId}/trailer`, { method: "DELETE" }),
 };
 
 /**

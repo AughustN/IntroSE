@@ -8,10 +8,13 @@ import {
   getOrganizerEvents,
   createOrganizerEvent,
   CreateEventInput,
+  uploadEventBannerFile,
+  uploadEventTrailerFile,
 } from "../../services/organizerClient";
 import { aiClient, type ListingSuggestion } from "../../services/aiClient";
 import { OrganizerPortfolioSummary } from "../../types";
 import { OrganizerBusinessAnalytics } from "../../components/account/OrganizerBusinessAnalytics";
+import { MediaDropzone } from "../../components/common/MediaDropzone";
 
 export const OrganizerEventsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -70,6 +73,9 @@ export const OrganizerEventsPage: React.FC = () => {
   const [createCategoryLabel, setCreateCategoryLabel] = useState("Âm nhạc");
   const [createPictureUrl, setCreatePictureUrl] = useState("");
   const [createVideoUrl, setCreateVideoUrl] = useState("");
+  const [stagedBannerFile, setStagedBannerFile] = useState<File | null>(null);
+  const [stagedTrailerFile, setStagedTrailerFile] = useState<File | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
   const [createVenueName, setCreateVenueName] = useState("");
   const [createVenueAddress, setCreateVenueAddress] = useState("");
   const [createCity, setCreateCity] = useState<"TP.HCM" | "Hà Nội" | "Đà Nẵng">("TP.HCM");
@@ -232,7 +238,7 @@ export const OrganizerEventsPage: React.FC = () => {
   // Submit Create Event Form
   const handleCreateEventSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!createPictureUrl || createPictureUrl.trim() === "") {
+    if (!createPictureUrl && !stagedBannerFile) {
       showToast("error", "Hình ảnh sự kiện (Picture) là bắt buộc!");
       return;
     }
@@ -263,13 +269,17 @@ export const OrganizerEventsPage: React.FC = () => {
       }
     }
 
+    setIsCreating(true);
     try {
+      let bannerUrlToSave = createPictureUrl;
+      let videoUrlToSave = createVideoUrl;
+
       const input: CreateEventInput = {
         title: createTitle,
         category: createCategory,
         categoryLabel: createCategoryLabel,
-        bannerUrl: createPictureUrl,
-        videoUrl: createVideoUrl || undefined,
+        bannerUrl: bannerUrlToSave || "https://res.cloudinary.com/tixhub/image/upload/placeholder.webp",
+        videoUrl: videoUrlToSave || undefined,
         venueName: createVenueName,
         venueAddress: createVenueAddress,
         city: createCity,
@@ -284,12 +294,24 @@ export const OrganizerEventsPage: React.FC = () => {
       };
 
       const newEvt = await createOrganizerEvent(input);
+
+      if (stagedBannerFile) {
+        bannerUrlToSave = await uploadEventBannerFile(newEvt.eventId, stagedBannerFile);
+        newEvt.bannerUrl = bannerUrlToSave;
+      }
+      if (stagedTrailerFile) {
+        videoUrlToSave = await uploadEventTrailerFile(newEvt.eventId, stagedTrailerFile);
+        newEvt.videoUrl = videoUrlToSave;
+      }
+
       showToast("success", "Tạo sự kiện mới thành công! Dữ liệu đã được lưu vào hệ thống.");
 
       // Reset Form
       setCreateTitle("");
       setCreatePictureUrl("");
       setCreateVideoUrl("");
+      setStagedBannerFile(null);
+      setStagedTrailerFile(null);
       setCreateVenueName("");
       setCreateVenueAddress("");
       setCreateDescription("");
@@ -309,6 +331,8 @@ export const OrganizerEventsPage: React.FC = () => {
       navigate(`/organizer/${newEvt.eventId}`);
     } catch (err: any) {
       showToast("error", err.message || "Tạo sự kiện thất bại.");
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -545,44 +569,32 @@ export const OrganizerEventsPage: React.FC = () => {
 
                   {/* Required Picture Upload */}
                   <div>
-                    <label className="block font-meta text-beige-kem font-semibold mb-1">
-                      Hình Ảnh Sự Kiện (Picture / Banner Cover){" "}
-                      <span className="text-burgundy-ink"> (Bắt buộc)</span>
-                    </label>
-                    <input
-                      type="url"
-                      value={createPictureUrl}
-                      onChange={(e) => setCreatePictureUrl(e.target.value)}
-                      placeholder="Dán link ảnh (https://...jpg/png) hoặc chọn file làm hình nền cho sự kiện"
+                    <MediaDropzone
+                      label="Hình Ảnh Sự Kiện (Picture / Banner Cover)"
+                      mediaType="banner"
+                      currentUrl={createPictureUrl}
+                      onFileSelected={(file) => setStagedBannerFile(file)}
                       required
-                      className="w-full bg-surface-2 border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none font-meta"
+                      helpText="PNG, JPG, WebP tối đa 5MB (Tỷ lệ 16:9)"
+                      aspectRatio="banner"
+                      disabled={isCreating}
                     />
-                    {createPictureUrl && (
-                      <div className="mt-2 h-28 w-full overflow-hidden relative border border-beige-kem/30">
-                        <img
-                          src={createPictureUrl}
-                          alt="Preview"
-                          className="w-full h-full object-cover"
-                        />
-                        <span className="absolute bottom-1 right-2 bg-black/70 px-2 py-0.5 text-[10px] text-white">
-                          ✓ Xem trước Picture
-                        </span>
-                      </div>
-                    )}
                   </div>
 
                   {/* Optional Video Upload */}
                   <div>
-                    <label className="block font-meta text-beige-kem font-semibold mb-1">
-                      Video Giới Thiệu / Trailer{" "}
-                      <span className="text-ink-soft font-normal">(Tùy chọn)</span>
-                    </label>
-                    <input
-                      type="url"
-                      value={createVideoUrl}
-                      onChange={(e) => setCreateVideoUrl(e.target.value)}
-                      placeholder="Dán link video/trailer (https://youtube.com/... hoặc .mp4)"
-                      className="w-full bg-surface-2 border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none font-meta"
+                    <MediaDropzone
+                      label="Video Giới Thiệu / Trailer (Tùy chọn)"
+                      mediaType="trailer"
+                      currentUrl={createVideoUrl}
+                      onFileSelected={(file) => setStagedTrailerFile(file)}
+                      onRemove={() => {
+                        setStagedTrailerFile(null);
+                        setCreateVideoUrl("");
+                      }}
+                      helpText="MP4, WebM tối đa 50MB"
+                      aspectRatio="video"
+                      disabled={isCreating}
                     />
                   </div>
                 </div>
@@ -882,15 +894,24 @@ export const OrganizerEventsPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setActiveTab("manage")}
-                    className="px-5 py-2.5 bg-surface-2 hover:bg-beige-kem/10 text-beige-kem font-semibold transition-colors border border-beige-kem/30"
+                    disabled={isCreating}
+                    className="px-5 py-2.5 bg-surface-2 hover:bg-beige-kem/10 text-beige-kem font-semibold transition-colors border border-beige-kem/30 disabled:opacity-50"
                   >
                     Hủy & Quay Lại Danh Sách
                   </button>
                   <button
                     type="submit"
-                    className="px-6 py-2.5 bg-burgundy hover:brightness-110 text-white font-bold transition-all"
+                    disabled={isCreating}
+                    className="px-6 py-2.5 bg-burgundy hover:brightness-110 text-white font-bold transition-all disabled:opacity-50 flex items-center gap-2"
                   >
-                    + Hoàn Tất Tạo Sự Kiện
+                    {isCreating ? (
+                      <>
+                        <span className="inline-block animate-spin">⏳</span>
+                        <span>Đang tải lên Cloudinary & Tạo sự kiện...</span>
+                      </>
+                    ) : (
+                      "+ Hoàn Tất Tạo Sự Kiện"
+                    )}
                   </button>
                 </div>
               </form>

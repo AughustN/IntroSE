@@ -221,3 +221,15 @@ export interface EventCancellationAuditRecord {
   totalRefundAmountVnd: number;
 }
 
+export type MediaType = 'avatar' | 'logo' | 'banner' | 'trailer' | 'floorplan' | 'reference';
+export type StagedMediaStatus = 'idle' | 'staged' | 'uploading' | 'error';
+
+export interface StagedMedia {
+  file: File | null;
+  previewUrl: string | null;
+  existingUrl: string | null;
+  mediaType: MediaType;
+  status: StagedMediaStatus;
+  errorMessage?: string;
+}
+

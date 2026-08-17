@@ -20,6 +20,8 @@ import { layoutApi } from "../../services/catalogClient";
  * switch: there is nothing to expose. Alignment moves the picture only — no seat ever follows it.
  */
 
+import { MediaDropzone } from "../common/MediaDropzone";
+
 const btn =
   " border-2 border-beige-kem px-2.5 py-1.5 text-eyebrow font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
 
@@ -59,7 +61,7 @@ export default function ReferenceChartPanel({
     );
 
   return (
-    <div className="border-2 border-beige-kem bg-surface-2 p-4">
+    <div className="border-2 border-beige-kem bg-surface-2 p-4 space-y-3">
       <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-beige-kem/70">
         Bản vẽ tham chiếu
       </h3>
@@ -68,15 +70,20 @@ export default function ReferenceChartPanel({
         này.
       </p>
 
-      <input
-        type="file"
-        accept="image/jpeg,image/png,image/webp,image/svg+xml,.svg"
+      <MediaDropzone
+        label="Tải lên bản vẽ tham chiếu"
+        mediaType="reference"
+        currentUrl={reference.url}
+        onFileSelected={(file) => void run(() => layoutApi.uploadReference(layoutId, file))}
+        onRemove={() =>
+          void run(async () => {
+            await layoutApi.removeReference(layoutId);
+            return { ...reference, url: null };
+          })
+        }
+        helpText="JPG, PNG, WEBP hoặc SVG tối đa 5MB"
+        aspectRatio="banner"
         disabled={busy}
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) void run(() => layoutApi.uploadReference(layoutId, file));
-        }}
-        className="mt-2 w-full text-meta text-beige-kem/70"
       />
 
       {error && <p className="mt-2 text-meta text-on-tint">{error}</p>}

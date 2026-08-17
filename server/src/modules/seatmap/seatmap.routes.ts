@@ -354,7 +354,7 @@ seatmapRouter.post(
     });
 
     const previous = await repo.currentPlanUrl(id);
-    const url = await saveFloorPlan(webp);
+    const url = await saveFloorPlan(id, webp, 'floorplan');
     try {
       await repo.setPlanUrl(id, url);
     } catch (e) {
@@ -429,7 +429,7 @@ seatmapRouter.post(
     });
 
     const previous = await repo.currentReferenceUrl(id);
-    const url = await saveFloorPlan(webp);
+    const url = await saveFloorPlan(id, webp, 'reference');
     try {
       await repo.setReferenceUrl(id, url);
     } catch (e) {

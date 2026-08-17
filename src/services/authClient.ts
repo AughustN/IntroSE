@@ -55,13 +55,14 @@ type Options = {
 
 async function raw(path: string, opts: Options = {}): Promise<Response> {
   const headers: Record<string, string> = { ...opts.headers };
-  if (opts.body !== undefined) headers["Content-Type"] = "application/json";
+  const isFormData = typeof FormData !== "undefined" && opts.body instanceof FormData;
+  if (opts.body !== undefined && !isFormData) headers["Content-Type"] = "application/json";
   if (opts.auth && accessToken) headers.Authorization = `Bearer ${accessToken}`;
   return fetch(apiUrl(`/api${path}`), {
     method: opts.method ?? "GET",
     headers,
     credentials: "include", // send/receive the tix_refresh cookie
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    body: opts.body !== undefined ? (isFormData ? (opts.body as FormData) : JSON.stringify(opts.body)) : undefined,
   });
 }
 
@@ -207,8 +208,26 @@ export const authClient = {
     displayName: string;
     description: string;
     logoUrl?: string | null;
-  }): Promise<{ ok: true }> {
-    return authed<{ ok: true }>("/organizers/apply", { method: "POST", body });
+    logo?: File | null;
+  }): Promise<{ ok: true; logoUrl?: string | null }> {
+    if (body.logo) {
+      const fd = new FormData();
+      fd.append("displayName", body.displayName);
+      fd.append("description", body.description);
+      fd.append("logo", body.logo);
+      return authed<{ ok: true; logoUrl?: string | null }>("/organizers/apply", {
+        method: "POST",
+        body: fd,
+      });
+    }
+    return authed<{ ok: true; logoUrl?: string | null }>("/organizers/apply", {
+      method: "POST",
+      body: {
+        displayName: body.displayName,
+        description: body.description,
+        logoUrl: body.logoUrl ?? null,
+      },
+    });
   },
 
   organizerStatus(): Promise<OrganizerStatusResponse> {

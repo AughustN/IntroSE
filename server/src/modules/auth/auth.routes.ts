@@ -412,7 +412,7 @@ authRouter.post(
       throw err.badRequest('invalid_image', 'Ảnh không hợp lệ (chỉ chấp nhận JPEG/PNG/WebP).');
     }
     const previous = req.auth!.user.avatarUrl;
-    const url = await saveAvatar(webp);
+    const url = await saveAvatar(req.auth!.userId, webp);
     await updateAvatarUrl(req.auth!.userId, url);
     await deleteAvatar(previous);
     res.json({ ...req.auth!.user, avatarUrl: url });
@@ -509,9 +509,20 @@ const applySchema = z.object({
 authRouter.post(
   '/organizers/apply',
   requireAuth,
-  validate(applySchema),
+  upload.single('logo'),
   asyncH(async (req, res) => {
-    const body = req.body as z.infer<typeof applySchema>;
+    const rawBody = req.body || {};
+    const displayName = String(rawBody.displayName || '').trim();
+    const description = String(rawBody.description || '').trim();
+    const logoUrl = rawBody.logoUrl ? String(rawBody.logoUrl).trim() : null;
+
+    if (!displayName || displayName.length < 1 || displayName.length > 100) {
+      throw err.badRequest('validation_failed', 'Tên hiển thị nhà tổ chức không hợp lệ.');
+    }
+    if (!description || description.length < 1) {
+      throw err.badRequest('validation_failed', 'Mô tả nhà tổ chức không hợp lệ.');
+    }
+
     const live = await getLiveApplication(req.auth!.userId);
     if (live) {
       if (live.status === 'pending') throw err.conflict('already_pending', 'Đơn của bạn đang chờ duyệt.');
@@ -519,19 +530,36 @@ authRouter.post(
       // suspended: re-applying must never shed a suspension (FR-059)
       throw err.conflict('suspended_cannot_reapply', 'Tài khoản nhà tổ chức đang bị đình chỉ, không thể nộp lại.');
     }
+
+    let finalLogoUrl = logoUrl;
     try {
-      await createApplication(req.auth!.userId, {
-        displayName: body.displayName,
-        description: body.description,
-        logoUrl: body.logoUrl ?? null,
+      const appRow = await createApplication(req.auth!.userId, {
+        displayName,
+        description,
+        logoUrl: finalLogoUrl,
       });
+
+      if (req.file?.buffer) {
+        const { sanitizeSquareImage } = await import('../media/sanitizer.js');
+        const { uploadToCloudinary } = await import('../../services/cloudinary.js');
+        const sanitized = await sanitizeSquareImage(req.file.buffer, 2 * 1024 * 1024);
+        const cloudResult = await uploadToCloudinary(sanitized, {
+          folder: `tixhub/organizers/${appRow.id}/logo`,
+          publicId: String(appRow.id),
+          resourceType: 'image',
+          overwrite: true,
+          invalidate: true,
+        });
+        finalLogoUrl = cloudResult.secure_url;
+        await pool.query(`UPDATE organizers SET logo_url = $1 WHERE id = $2`, [finalLogoUrl, appRow.id]);
+      }
     } catch (e) {
       // concurrent apply → unique live-application index → treat as already pending
       if ((e as { code?: string }).code === '23505') throw err.conflict('already_pending', 'Đơn của bạn đang chờ duyệt.');
       throw e;
     }
     await recordAuthEvent({ event: 'organizer_applied', userId: req.auth!.userId, sourceIp: req.ip });
-    res.status(201).json({ ok: true, message: 'Đã gửi đơn đăng ký nhà tổ chức, đang chờ duyệt.' });
+    res.status(201).json({ ok: true, message: 'Đã gửi đơn đăng ký nhà tổ chức, đang chờ duyệt.', logoUrl: finalLogoUrl });
   }),
 );
 

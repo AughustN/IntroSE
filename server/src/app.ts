@@ -46,13 +46,7 @@ export function createApp(): Express {
   // and fire-and-forget — see `activity.ts` for why it is not `optionalAuth`.
   app.use(recordActivity);
 
-  // Uploaded avatars, served as static files, never executed (ADR 0004).
-  app.use(
-    "/uploads",
-    express.static(join(process.cwd(), "uploads"), {
-      setHeaders: (res) => res.setHeader("X-Content-Type-Options", "nosniff"),
-    }),
-  );
+  // Media uploads are streamed directly to Cloudinary (012-cloudinary-media-upload). Local disk writes decommissioned.
 
   app.use("/api", authRouter);
   app.use("/api", catalogPublicRouter);

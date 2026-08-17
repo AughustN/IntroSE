@@ -1,6 +1,12 @@
 import React, { useState } from "react";
 import { OrganizerEvent } from "../../types";
 import { aiClient, type ListingSuggestion } from "../../services/aiClient";
+import { MediaDropzone } from "../common/MediaDropzone";
+import {
+  uploadEventBannerFile,
+  uploadEventTrailerFile,
+  deleteEventTrailerFile,
+} from "../../services/organizerClient";
 
 interface EditEventFormProps {
   event: OrganizerEvent;
@@ -17,6 +23,13 @@ export const EditEventForm: React.FC<EditEventFormProps> = ({ event, onSave, onC
   const [startDatetime, setStartDatetime] = useState(event.startDatetime);
   const [endDatetime, setEndDatetime] = useState(event.endDatetime);
   const [bannerUrl, setBannerUrl] = useState(event.bannerUrl);
+  const [videoUrl, setVideoUrl] = useState(event.videoUrl);
+
+  const [stagedBannerFile, setStagedBannerFile] = useState<File | null>(null);
+  const [stagedTrailerFile, setStagedTrailerFile] = useState<File | null>(null);
+  const [trailerDeleted, setTrailerDeleted] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   // AI Description Assistant State
   const [aiBrief, setAiBrief] = useState(event.title);
@@ -48,18 +61,42 @@ export const EditEventForm: React.FC<EditEventFormProps> = ({ event, onSave, onC
 
   const isPublished = event.computedStatus === "published";
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({
-      title,
-      description,
-      venueName,
-      venueAddress,
-      city,
-      startDatetime,
-      endDatetime,
-      bannerUrl,
-    });
+    setUploadError(null);
+    setIsUploading(true);
+
+    try {
+      let finalBannerUrl = bannerUrl;
+      let finalVideoUrl = videoUrl;
+
+      if (stagedBannerFile) {
+        finalBannerUrl = await uploadEventBannerFile(event.eventId, stagedBannerFile);
+      }
+
+      if (stagedTrailerFile) {
+        finalVideoUrl = await uploadEventTrailerFile(event.eventId, stagedTrailerFile);
+      } else if (trailerDeleted) {
+        await deleteEventTrailerFile(event.eventId);
+        finalVideoUrl = undefined;
+      }
+
+      onSave({
+        title,
+        description,
+        venueName,
+        venueAddress,
+        city,
+        startDatetime,
+        endDatetime,
+        bannerUrl: finalBannerUrl,
+        videoUrl: finalVideoUrl,
+      });
+    } catch (err: any) {
+      setUploadError(err.message || "Tải lên phương tiện thất bại. Vui lòng thử lại.");
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   return (
@@ -102,15 +139,38 @@ export const EditEventForm: React.FC<EditEventFormProps> = ({ event, onSave, onC
             />
           </div>
 
-          {/* Banner URL */}
+          {/* Banner Dropzone */}
           <div>
-            <label className="mb-1 block font-bold text-ink-soft">Link Hình Ảnh Banner *</label>
-            <input
-              type="url"
-              value={bannerUrl}
-              onChange={(e) => setBannerUrl(e.target.value)}
+            <MediaDropzone
+              label="Hình Ảnh Banner"
+              mediaType="banner"
+              currentUrl={bannerUrl}
+              onFileSelected={(file) => setStagedBannerFile(file)}
               required
-              className="w-full border border-beige-kem/25 bg-xanh-pho p-2.5 text-beige-kem outline-none transition-colors placeholder:text-ink-soft/60 focus:border-burgundy"
+              helpText="PNG, JPG, WebP tối đa 5MB (Tỷ lệ 16:9)"
+              aspectRatio="banner"
+              disabled={isUploading}
+            />
+          </div>
+
+          {/* Video Trailer Dropzone */}
+          <div>
+            <MediaDropzone
+              label="Video Trailer (Tùy chọn)"
+              mediaType="trailer"
+              currentUrl={videoUrl}
+              onFileSelected={(file) => {
+                setStagedTrailerFile(file);
+                setTrailerDeleted(false);
+              }}
+              onRemove={() => {
+                setStagedTrailerFile(null);
+                setVideoUrl(undefined);
+                setTrailerDeleted(true);
+              }}
+              helpText="MP4, WebM tối đa 50MB"
+              aspectRatio="video"
+              disabled={isUploading}
             />
           </div>
 
@@ -236,20 +296,35 @@ export const EditEventForm: React.FC<EditEventFormProps> = ({ event, onSave, onC
             />
           </div>
 
+          {uploadError && (
+            <div className="p-3 bg-red-950/60 border border-red-800 text-red-300 rounded text-xs">
+              {uploadError}
+            </div>
+          )}
+
           {/* Actions */}
           <div className="flex items-center justify-end space-x-3 border-t border-beige-kem/25 pt-4">
             <button
               type="button"
               onClick={onClose}
-              className="border border-beige-kem/40 px-4 py-2 font-bold text-beige-kem transition-colors hover:bg-bubblegum/20"
+              disabled={isUploading}
+              className="border border-beige-kem/40 px-4 py-2 font-bold text-beige-kem transition-colors hover:bg-bubblegum/20 disabled:opacity-50"
             >
               Hủy
             </button>
             <button
               type="submit"
-              className="bg-burgundy px-4 py-2 font-bold text-white transition hover:brightness-110"
+              disabled={isUploading}
+              className="bg-burgundy px-4 py-2 font-bold text-white transition hover:brightness-110 disabled:opacity-50 flex items-center gap-2"
             >
-              Lưu Thay Đổi
+              {isUploading ? (
+                <>
+                  <span className="inline-block animate-spin">⏳</span>
+                  <span>Đang tải lên Cloudinary...</span>
+                </>
+              ) : (
+                "Lưu Thay Đổi"
+              )}
             </button>
           </div>
         </form>

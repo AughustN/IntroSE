@@ -7,6 +7,8 @@ import { useState } from "react";
 import type { LayoutFloorPlan } from "@/shared/catalog/seatmap";
 import { layoutApi } from "../../services/catalogClient";
 
+import { MediaDropzone } from "../common/MediaDropzone";
+
 /**
  * Floor-plan upload and alignment (FR-020..FR-026a).
  *
@@ -55,25 +57,26 @@ export default function FloorPlanPanel({
     );
 
   return (
-    <div className="border-2 border-beige-kem bg-surface-2 p-4">
+    <div className="border-2 border-beige-kem bg-surface-2 p-4 space-y-3">
       <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-beige-kem/70">
         Bản vẽ mặt bằng
       </h3>
 
-      <input
-        type="file"
-        accept="image/jpeg,image/png,image/webp,image/svg+xml,.svg"
+      <MediaDropzone
+        label="Tải lên bản vẽ mặt bằng"
+        mediaType="floorplan"
+        currentUrl={plan.url}
+        onFileSelected={(file) => void run(() => layoutApi.uploadPlan(layoutId, file))}
+        onRemove={() =>
+          void run(async () => {
+            await layoutApi.removePlan(layoutId);
+            return { ...plan, url: null };
+          })
+        }
+        helpText="JPG, PNG, WEBP hoặc SVG tối đa 5MB"
+        aspectRatio="banner"
         disabled={busy}
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) void run(() => layoutApi.uploadPlan(layoutId, file));
-        }}
-        className="mt-2 w-full text-meta text-beige-kem/70"
       />
-      <p className="mt-1 font-meta text-[10px] leading-4 text-beige-kem/45">
-        JPG, PNG, WEBP hoặc SVG. File SVG được chuyển thành ảnh khi tải lên — nét vẽ giữ nguyên, còn
-        phần mã bên trong thì không được lưu.
-      </p>
 
       {error && <p className="mt-2 text-meta text-on-tint">{error}</p>}
 

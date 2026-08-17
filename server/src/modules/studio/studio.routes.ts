@@ -6,6 +6,8 @@ import { requireAuth } from "../../middleware/requireAuth.js";
 import { requireOrganizer } from "../../middleware/authz.js";
 import { validate } from "../../middleware/validate.js";
 import { draftListing } from "./ai/listing.service.js";
+import multer from 'multer';
+import { uploadEventBanner, uploadEventTrailer, deleteEventTrailer } from '../media/eventMedia.js';
 import { deleteEvent, updateEvent } from "./events.service.js";
 import {
   deleteShowtime,
@@ -229,3 +231,50 @@ studioRouter.post(
     res.json(await draftListing(req.auth!.userId, Boolean(req.auth!.user.isAdmin), body));
   }),
 );
+
+// ---- event media (012-cloudinary-media-upload) ----------------------------
+
+const uploadBanner = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
+
+const uploadTrailer = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 },
+});
+
+studioRouter.post(
+  "/events/:id/banner",
+  uploadBanner.single("banner"),
+  asyncH(async (req, res) => {
+    const eventId = await ownedEvent(req);
+    if (!req.file?.buffer) throw err.badRequest("validation_failed", "Thiếu tệp hình ảnh banner.");
+    const bannerUrl = await uploadEventBanner(eventId, req.file.buffer);
+    await pool.query(`UPDATE events SET image_url = $1, updated_at = now() WHERE id = $2`, [bannerUrl, eventId]);
+    res.json({ bannerUrl, imageUrl: bannerUrl });
+  }),
+);
+
+studioRouter.post(
+  "/events/:id/trailer",
+  uploadTrailer.single("trailer"),
+  asyncH(async (req, res) => {
+    const eventId = await ownedEvent(req);
+    if (!req.file?.buffer) throw err.badRequest("validation_failed", "Thiếu tệp video trailer.");
+    const trailerUrl = await uploadEventTrailer(eventId, req.file.buffer);
+    await pool.query(`UPDATE events SET trailer_url = $1, updated_at = now() WHERE id = $2`, [trailerUrl, eventId]);
+    res.json({ trailerUrl });
+  }),
+);
+
+studioRouter.delete(
+  "/events/:id/trailer",
+  asyncH(async (req, res) => {
+    const eventId = await ownedEvent(req);
+    await deleteEventTrailer(eventId);
+    await pool.query(`UPDATE events SET trailer_url = NULL, updated_at = now() WHERE id = $1`, [eventId]);
+    res.json({ trailerUrl: null });
+  }),
+);
+

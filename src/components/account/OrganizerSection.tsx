@@ -22,6 +22,7 @@ import {
   inputErrorClass,
   textareaClass,
 } from "./primitives";
+import { MediaDropzone } from "../common/MediaDropzone";
 
 interface Props {
   isOrganizer: boolean;
@@ -108,6 +109,7 @@ export default function OrganizerSection({
   const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState(rejected ? latest.display_name : "");
   const [description, setDescription] = useState(rejected ? (latest.description ?? "") : "");
+  const [logoFile, setLogoFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [touched, setTouched] = useState(false);
 
@@ -126,9 +128,11 @@ export default function OrganizerSection({
       await authClient.applyOrganizer({
         displayName: displayName.trim(),
         description: description.trim(),
+        logo: logoFile,
       });
       setEditing(false);
       setTouched(false);
+      setLogoFile(null);
       onNotice(
         "Đã gửi đơn đăng ký nhà tổ chức. Admin sẽ xét duyệt và bạn sẽ thấy trạng thái ở đây.",
       );
@@ -152,6 +156,7 @@ export default function OrganizerSection({
               onClick={() => {
                 setEditing(false);
                 setTouched(false);
+                setLogoFile(null);
               }}
               disabled={busy}
               className={btnHeader}
@@ -166,7 +171,7 @@ export default function OrganizerSection({
         }
       >
         <Stepper current={0} />
-        <form onSubmit={apply}>
+        <form onSubmit={apply} className="space-y-4">
           <FieldGrid>
             <FormField
               label="Tên hiển thị"
@@ -202,6 +207,18 @@ export default function OrganizerSection({
               />
             </FormField>
           </FieldGrid>
+
+          <div className="border-t border-beige-kem/20 pt-3">
+            <MediaDropzone
+              label="Logo Ban Tổ Chức (Tùy chọn)"
+              mediaType="logo"
+              onFileSelected={(file) => setLogoFile(file)}
+              onRemove={() => setLogoFile(null)}
+              helpText="PNG, JPG, WebP tối đa 2MB (Tỷ lệ 1:1)"
+              aspectRatio="square"
+              disabled={busy}
+            />
+          </div>
           <button type="submit" className="sr-only" disabled={busy}>
             Gửi đơn
           </button>

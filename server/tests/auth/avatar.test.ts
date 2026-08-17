@@ -22,7 +22,7 @@ describe('avatar upload (US5, ADR 0004)', () => {
       .set('Authorization', `Bearer ${t}`)
       .attach('file', png, { filename: 'a.png', contentType: 'image/png' })
       .expect(200);
-    expect(res.body.avatarUrl).toMatch(/^\/uploads\/avatars\/[\w-]+\.webp$/);
+    expect(res.body.avatarUrl).toMatch(/cloudinary\.com\/.*\/avatar/);
   });
 
   it('rejects an SVG (400 invalid_image)', async () => {

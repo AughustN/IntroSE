@@ -16,7 +16,7 @@ import {
   EventCancellationAuditRecord
 } from "../types";
 import { withAuthRetry } from "./authClient";
-import { organizerApi } from "./catalogClient";
+import { organizerApi, studioApi } from "./catalogClient";
 import { apiUrl } from "./api";
 
 // Default authenticated organizer session identity for demo/dev scoping (SEC-04)
@@ -696,3 +696,39 @@ export function resetOrganizerStore(): void {
   eventsStore = JSON.parse(JSON.stringify(INITIAL_ORGANIZER_EVENTS));
   currentOrganizerId = "org-888";
 }
+
+/**
+ * Upload event banner directly to Cloudinary via server-mediated endpoint (012-cloudinary-media-upload).
+ */
+export async function uploadEventBannerFile(eventId: string | number, file: File): Promise<string> {
+  const numericId = Number(eventId);
+  if (Number.isSafeInteger(numericId)) {
+    const res = await studioApi.uploadBanner(numericId, file);
+    return res.bannerUrl;
+  }
+  // Mock fallback for in-memory temporary drafts
+  return URL.createObjectURL(file);
+}
+
+/**
+ * Upload event trailer video directly to Cloudinary via server-mediated endpoint (012-cloudinary-media-upload).
+ */
+export async function uploadEventTrailerFile(eventId: string | number, file: File): Promise<string> {
+  const numericId = Number(eventId);
+  if (Number.isSafeInteger(numericId)) {
+    const res = await studioApi.uploadTrailer(numericId, file);
+    return res.trailerUrl;
+  }
+  return URL.createObjectURL(file);
+}
+
+/**
+ * Remove event trailer video and trigger Cloudinary active remote deletion (012-cloudinary-media-upload).
+ */
+export async function deleteEventTrailerFile(eventId: string | number): Promise<void> {
+  const numericId = Number(eventId);
+  if (Number.isSafeInteger(numericId)) {
+    await studioApi.removeTrailer(numericId);
+  }
+}
+
