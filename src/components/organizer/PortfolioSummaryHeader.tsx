@@ -22,7 +22,7 @@ export const PortfolioSummaryHeader: React.FC<PortfolioSummaryHeaderProps> = ({
   onFilterChange,
   onSearchChange,
   searchTerm,
-  onCreateEvent
+  onCreateEvent,
 }) => {
   const filterTabs = [
     { key: "all", label: "Tất cả", count: summary.totalEvents },
@@ -30,7 +30,7 @@ export const PortfolioSummaryHeader: React.FC<PortfolioSummaryHeaderProps> = ({
     { key: "pending_review", label: "Chờ duyệt", count: summary.pendingCount },
     { key: "draft", label: "Bản nháp", count: summary.draftCount },
     { key: "canceled", label: "Đã hủy", count: summary.canceledCount },
-    { key: "completed", label: "Đã kết thúc", count: summary.completedCount }
+    { key: "completed", label: "Đã kết thúc", count: summary.completedCount },
   ];
 
   return (
@@ -48,14 +48,14 @@ export const PortfolioSummaryHeader: React.FC<PortfolioSummaryHeaderProps> = ({
 
         <button
           onClick={onCreateEvent}
-          className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl text-xs font-bold bg-burgundy hover:brightness-110 text-white transition-all shadow-md flex-shrink-0"
+          className="inline-flex items-center justify-center px-4 py-2.5 text-xs font-bold bg-burgundy hover:brightness-110 text-white transition-all flex-shrink-0"
         >
           <span className="mr-1.5 text-base">+</span> Tạo Sự Kiện Mới
         </button>
       </div>
 
       {/* Filter Tabs & Search Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-surface-2 p-3 rounded-2xl border border-beige-kem/25 shadow-sm">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-surface-2 p-3 border border-beige-kem/25">
         {/* Status Tabs */}
         <div className="flex items-center space-x-1 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
           {filterTabs.map((tab) => {
@@ -64,16 +64,16 @@ export const PortfolioSummaryHeader: React.FC<PortfolioSummaryHeaderProps> = ({
               <button
                 key={tab.key}
                 onClick={() => onFilterChange(tab.key)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-colors flex items-center space-x-1.5 ${
+                className={`px-3 py-1.5 text-xs font-bold whitespace-nowrap transition-colors flex items-center space-x-1.5 ${
                   isActive
-                    ? "border border-la-co bg-la-co/25 text-beige-kem shadow-sm"
+                    ? "border border-la-co bg-la-co/25 text-beige-kem"
                     : "text-ink-soft hover:text-beige-kem hover:bg-beige-kem/10"
                 }`}
               >
                 <span>{tab.label}</span>
                 <span
-                  className={`px-1.5 py-0.2 rounded-full text-[10px] ${
-                    isActive ? "bg-black/20 text-on-tint" : "bg-xanh-pho text-ink-soft"
+                  className={`px-1.5 py-0.2 text-[10px] ${
+                    isActive ? "bg-beige-kem/15 text-beige-kem" : "bg-xanh-pho text-ink-soft"
                   }`}
                 >
                   {tab.count}
@@ -90,7 +90,7 @@ export const PortfolioSummaryHeader: React.FC<PortfolioSummaryHeaderProps> = ({
             value={searchTerm}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Tìm kiếm sự kiện, địa điểm..."
-            className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy text-beige-kem placeholder-ink-soft text-xs rounded-xl px-3 py-2 outline-none transition-colors font-meta"
+            className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy text-beige-kem placeholder-ink-soft text-xs px-3 py-2 outline-none transition-colors font-meta"
           />
           {searchTerm && (
             <button

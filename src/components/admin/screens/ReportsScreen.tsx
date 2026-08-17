@@ -7,11 +7,12 @@ import { useState } from "react";
 import type { ContentReportRow } from "@shared/admin/types.js";
 import { adminClient } from "../../../services/adminClient";
 import {
-  ACTION_GHOST,
   ACTION_PRIMARY,
+  ACTION_ROW_GHOST,
   EmptyState,
   FIELD,
   Notice,
+  Pager,
   PANEL,
   Pill,
   ScreenHead,
@@ -153,7 +154,7 @@ export default function ReportsScreen() {
       ) : (
         <>
           <TableScroll>
-            <table className="w-full min-w-[860px] text-left text-body">
+            <table className="w-full min-w-[860px] text-left text-meta">
               <thead className="label-eyebrow border-b border-beige-kem/25 text-ink-soft">
                 <tr>
                   <Th>Sự kiện</Th>
@@ -168,7 +169,7 @@ export default function ReportsScreen() {
                   <tr key={report.id} className="border-b border-beige-kem/15">
                     <Td>
                       <span className="block text-beige-kem">{report.eventTitle}</span>
-                      <span className="mt-1 block font-meta text-meta text-ink-soft">
+                      <span className="mt-1 block font-meta text-eyebrow text-ink-soft">
                         /{report.eventSlug} · {report.eventModeration}
                         {/* Several people flagging one event is the strongest signal this screen
                             carries, and it is invisible if each report is only ever read alone. */}
@@ -178,10 +179,10 @@ export default function ReportsScreen() {
                     </Td>
                     <Td>{report.reason}</Td>
                     <Td>
-                      <span className="block font-meta text-meta text-ink-soft">
+                      <span className="block font-meta text-eyebrow text-ink-soft">
                         {report.reporterEmail}
                       </span>
-                      <span className="block font-meta text-meta text-ink-soft">
+                      <span className="block font-meta text-eyebrow text-ink-soft">
                         {report.createdAt.slice(0, 10)}
                       </span>
                     </Td>
@@ -190,13 +191,13 @@ export default function ReportsScreen() {
                         {STATUS_LABEL[report.status] ?? report.status}
                       </Pill>
                       {report.resolutionNote && (
-                        <span className="mt-1 block font-meta text-meta text-ink-soft">
+                        <span className="mt-1 block font-meta text-eyebrow text-ink-soft">
                           {report.resolutionNote}
                         </span>
                       )}
                     </Td>
                     <Td nowrap>
-                      <button className={ACTION_GHOST} onClick={() => setOpenId(report.id)}>
+                      <button className={ACTION_ROW_GHOST} onClick={() => setOpenId(report.id)}>
                         Xem sự kiện
                       </button>
                     </Td>
@@ -206,27 +207,7 @@ export default function ReportsScreen() {
             </table>
           </TableScroll>
 
-          <div className="flex items-center justify-between gap-4">
-            <span className="font-meta text-body text-ink-soft">
-              Trang {page + 1} / {lastPage + 1}
-            </span>
-            <div className="flex gap-2">
-              <button
-                className={ACTION_GHOST}
-                disabled={page === 0 || loading}
-                onClick={() => setPage((value) => Math.max(0, value - 1))}
-              >
-                Trước
-              </button>
-              <button
-                className={ACTION_GHOST}
-                disabled={page >= lastPage || loading}
-                onClick={() => setPage((value) => value + 1)}
-              >
-                Sau
-              </button>
-            </div>
-          </div>
+          <Pager page={page} lastPage={lastPage} disabled={loading} onChange={setPage} />
         </>
       )}
     </>

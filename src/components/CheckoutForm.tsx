@@ -4,6 +4,7 @@
  */
 
 import { FormEvent, useEffect, useState } from "react";
+import { loadCheckoutDetails, saveCheckoutDetails } from "../services/checkoutDetails";
 import { CheckoutPayload, MovieEvent, Seat } from "../types";
 import { walletClient, type WalletLimits } from "../services/walletClient";
 import TopUpSheet from "./wallet/TopUpSheet";
@@ -35,6 +36,13 @@ interface CheckoutFormProps {
    * numbers so the top-up opens pre-filled with the exact shortfall (UC-12 A2).
    */
   shortfall: { required: number; balance: number; shortfall: number } | null;
+  /**
+   * The signed-in account, used to seed the three buyer fields the first time this hold reaches
+   * checkout. Checkout already requires an identity, so asking somebody to retype what the account
+   * knows is work for nothing — and it is the second line of defence for the top-up round trip, for
+   * the case where `sessionStorage` is unavailable and nothing could be restored.
+   */
+  buyer: { name: string; email: string; phone: string } | null;
   onBack: () => void;
   /** Jump back to a finished step. The last step, so nothing is ahead. */
   onGoToStep?: (step: BookingStep) => void;
@@ -60,14 +68,23 @@ export default function CheckoutForm({
   backLabel,
   reservationId,
   shortfall,
+  buyer,
   onBack,
   onGoToStep,
   onConfirmBooking,
 }: CheckoutFormProps) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [agreeTerms, setAgreeTerms] = useState(true);
+  /*
+   * Seeded once, from what survived the last detour and then from the account.
+   *
+   * A lazy initialiser rather than an effect: the very first paint has to show the restored values,
+   * or a buyer coming back from VNPay sees three empty boxes and starts retyping before the effect
+   * that would have filled them has run.
+   */
+  const restored = useState(() => loadCheckoutDetails(reservationId))[0];
+  const [name, setName] = useState(restored?.name || buyer?.name || "");
+  const [email, setEmail] = useState(restored?.email || buyer?.email || "");
+  const [phone, setPhone] = useState(restored?.phone || buyer?.phone || "");
+  const [agreeTerms, setAgreeTerms] = useState(restored?.agreeTerms ?? true);
   const [submitting, setSubmitting] = useState(false);
   const [balance, setBalance] = useState<number | null>(null);
   const [limits, setLimits] = useState<WalletLimits | null>(null);
@@ -92,6 +109,18 @@ export default function CheckoutForm({
       cancelled = true;
     };
   }, []);
+
+  /*
+   * Written on every change, so whatever is on screen is what comes back.
+   *
+   * Saving here rather than at the moment the top-up sheet opens: the buyer can also be sent away
+   * by a bank app, a password manager, or simply reloading — and none of those give us a hook to
+   * save on the way out.
+   */
+  useEffect(() => {
+    if (reservationId === null) return;
+    saveCheckoutDetails({ reservationId, name, email, phone, agreeTerms });
+  }, [reservationId, name, email, phone, agreeTerms]);
 
   // Arriving back with a rejection means the sheet should already be open, pre-filled.
   useEffect(() => {

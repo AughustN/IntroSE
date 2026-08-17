@@ -71,7 +71,7 @@ export default function AuditScreen() {
         <EmptyState text="Chưa có thao tác nào được ghi." />
       ) : (
         <TableScroll>
-          <table className="w-full min-w-[720px] text-left text-body">
+          <table className="w-full min-w-[720px] text-left text-meta">
             <thead className="label-eyebrow border-b border-beige-kem/25 text-ink-soft">
               <tr>
                 <Th>Thời điểm</Th>
@@ -102,7 +102,7 @@ export default function AuditScreen() {
         </TableScroll>
       )}
 
-      <p className="font-meta text-body text-ink-soft">
+      <p className="font-meta text-meta text-ink-soft">
         Nhật ký chỉ đọc. Quyền hạn do máy chủ thực thi; PostgreSQL chặn sửa/xoá các dòng này.
       </p>
     </>

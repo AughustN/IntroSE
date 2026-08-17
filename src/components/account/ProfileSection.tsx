@@ -21,6 +21,7 @@ import {
   inputErrorClass,
 } from "./primitives";
 import { NICKNAME_MAX, avatarError, nicknameError, normalizePhone, phoneError } from "./validation";
+import { formatPhone, toLocalPhone } from "../../services/phone";
 
 interface Props {
   me: Me;
@@ -40,15 +41,6 @@ function roleLabel(me: Me): string {
   return "Người mua vé";
 }
 
-/** Vietnamese formatting for a stored `+84…` number, which is not how anyone reads it aloud. */
-function displayPhone(phone: string | null): string {
-  if (!phone) return "";
-  const m = /^\+84(\d{9})$/.exec(phone);
-  if (!m) return phone;
-  const n = m[1];
-  return `0${n.slice(0, 2)} ${n.slice(2, 5)} ${n.slice(5)}`;
-}
-
 /**
  * Identity. Shows its values as text and turns into a form only when asked — the avatar included,
  * which an earlier version uploaded the instant a file was picked, with no preview and no way back.
@@ -56,7 +48,7 @@ function displayPhone(phone: string | null): string {
 export default function ProfileSection({ me, onSaved, onError, onDirtyChange }: Props) {
   const [editing, setEditing] = useState(false);
   const [nickname, setNickname] = useState(me.nickname ?? "");
-  const [phone, setPhone] = useState(me.phone ?? "");
+  const [phone, setPhone] = useState(() => toLocalPhone(me.phone));
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [avatarMsg, setAvatarMsg] = useState<string | null>(null);
@@ -65,10 +57,35 @@ export default function ProfileSection({ me, onSaved, onError, onDirtyChange }: 
 
   const nickErr = nicknameError(nickname);
   const phoneErr = phoneError(phone);
+
+  /** What the server currently holds — the baseline every "has this changed?" question is against. */
+  const savedNickname = me.nickname ?? "";
+  const savedPhone = me.phone ?? "";
+  /**
+   * The same number as the FIELD spells it.
+   *
+   * The input is seeded from this and compared against it, so an untouched box can never read as an
+   * edit. Comparing the box to the canonical `+84…` form would make every account with a phone dirty
+   * the moment the editor opened.
+   */
+  const savedPhoneField = toLocalPhone(me.phone);
+
+  /*
+   * Has anything actually been changed?
+   *
+   * Compared as text, against the value the field was loaded with. It used to run the stored phone
+   * through `normalizePhone` first and compare the result to the stored value — which put a
+   * VALIDATOR in the path of a "did the user type something" question. `normalizePhone` returns
+   * null for anything outside `+84[35789]\d{8}`, so an account holding a number the current rule
+   * no longer accepts compared `"" !== "+84…"` and was born dirty: the leave-confirmation fired on
+   * every section change, forever, for somebody who had never opened the editor.
+   *
+   * Gated on `editing` because the two text fields only exist while editing — untouched, they
+   * cannot differ, and there is nothing for the question to be about. The avatar is not gated: its
+   * picker sits in the summary card above and can be used without entering edit mode at all.
+   */
   const dirty =
-    nickname.trim() !== (me.nickname ?? "") ||
-    (normalizePhone(phone.trim()) ?? "") !== (me.phone ?? "") ||
-    avatarFile !== null;
+    (editing && (nickname !== savedNickname || phone !== savedPhoneField)) || avatarFile !== null;
 
   // Report upward so the shell can guard leaving. Clearing on unmount matters: without it a
   // discarded edit would leave the shell believing there is still something unsaved.
@@ -100,12 +117,27 @@ export default function ProfileSection({ me, onSaved, onError, onDirtyChange }: 
   };
 
   const reset = () => {
-    setNickname(me.nickname ?? "");
-    setPhone(me.phone ?? "");
+    setNickname(savedNickname);
+    setPhone(savedPhoneField);
     setAvatarFile(null);
     setAvatarMsg(null);
     setTouched({});
     setEditing(false);
+  };
+
+  /**
+   * Open the editor on what the server holds now, not on what was typed the last time it was open.
+   *
+   * A save sends the phone as typed and stores it normalised, so the field and the account disagree
+   * about spelling the moment a save lands. Re-seeding here means re-opening the editor never shows
+   * a pending change nobody made.
+   */
+  const startEditing = () => {
+    setNickname(savedNickname);
+    setPhone(savedPhoneField);
+    setAvatarMsg(null);
+    setTouched({});
+    setEditing(true);
   };
 
   const save = async () => {
@@ -115,8 +147,10 @@ export default function ProfileSection({ me, onSaved, onError, onDirtyChange }: 
     try {
       let updated = me;
       const normalized = normalizePhone(phone.trim());
+      // Here the normalised form IS the right comparison: this decides whether the server has
+      // anything new to store, and "0900000409" against a stored "+84900000409" is the same number.
       const fieldsChanged =
-        nickname.trim() !== (me.nickname ?? "") || (normalized ?? "") !== (me.phone ?? "");
+        nickname.trim() !== savedNickname || (normalized ?? phone.trim()) !== savedPhone;
       // Text first, image second: the avatar response echoes the account as the server sees it, so
       // running it last means the object handed back already carries the new nickname.
       if (fieldsChanged) {
@@ -219,7 +253,7 @@ export default function ProfileSection({ me, onSaved, onError, onDirtyChange }: 
               </button>
             </div>
           ) : (
-            <EditButton onClick={() => setEditing(true)} />
+            <EditButton onClick={startEditing} />
           )
         }
       >
@@ -281,7 +315,7 @@ export default function ProfileSection({ me, onSaved, onError, onDirtyChange }: 
         ) : (
           <FieldGrid>
             <Field label="Biệt danh" value={me.nickname} />
-            <Field label="Số điện thoại" value={displayPhone(me.phone)} />
+            <Field label="Số điện thoại" value={formatPhone(me.phone)} />
             <Field label="Email" value={me.email} />
             <Field label="Hình thức đăng nhập" value={PROVIDER_LABEL[me.provider]} />
             <Field label="Quyền" value={roleLabel(me)} />

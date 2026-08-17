@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Section from "../Section";
 import AdsScreen from "./screens/AdsScreen";
 import AnalyticsScreen from "./screens/AnalyticsScreen";
@@ -89,7 +89,7 @@ const NAV: NavGroup[] = [
     label: "Vận hành",
     items: [
       { id: "orders", label: "Đơn hàng" },
-      { id: "wallet", label: "Ví & hoàn tiền" },
+      { id: "wallet", label: "Giao dịch" },
       { id: "attendees", label: "Khách tham dự" },
     ],
   },
@@ -109,8 +109,50 @@ const NAV: NavGroup[] = [
   },
 ];
 
+/** Every screen the nav can reach, for validating whatever the address bar happens to say. */
+const SCREEN_IDS: ReadonlySet<string> = new Set(
+  NAV.flatMap((group) => group.items.map((i) => i.id)),
+);
+
+/**
+ * Which screen the URL names, or the overview.
+ *
+ * Read from `?screen=` rather than kept only in state: the console has sixteen screens and no way
+ * to link to any of them, a reload always dropped the reader back on the overview, and Back left
+ * the console entirely instead of stepping to the previous screen. Anything unrecognised falls
+ * through to the overview, which is also the value that carries no parameter.
+ */
+function screenFromUrl(): ScreenId {
+  if (typeof window === "undefined") return "overview";
+  const value = new URLSearchParams(window.location.search).get("screen");
+  return value && SCREEN_IDS.has(value) ? (value as ScreenId) : "overview";
+}
+
 export default function AdminConsole({ onBack }: { onBack: () => void }) {
-  const [screen, setScreen] = useState<ScreenId>("overview");
+  const [screen, setScreenState] = useState<ScreenId>(screenFromUrl);
+
+  /*
+   * A screen change is a history entry, so Back walks the console rather than leaving it.
+   *
+   * `pushState` directly instead of the router: the admin path itself is not changing — only which
+   * panel is open — and routing each screen would mean sixteen new entries in `routes.ts` for a
+   * surface that already knows its own names.
+   */
+  const setScreen = useCallback((next: ScreenId) => {
+    setScreenState(next);
+    const url = new URL(window.location.href);
+    if (next === "overview") url.searchParams.delete("screen");
+    else url.searchParams.set("screen", next);
+    window.history.pushState({}, "", url);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
+  // Back and Forward move between screens; the URL stays the one authority on which is open.
+  useEffect(() => {
+    const onPop = () => setScreenState(screenFromUrl());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   return (
     <Section divided={false}>
@@ -140,7 +182,14 @@ export default function AdminConsole({ onBack }: { onBack: () => void }) {
           </button>
         </div>
 
-        <div className="grid gap-8 lg:grid-cols-[220px_1fr]">
+        {/*
+          A narrower rail and a tighter gutter than the console opened with.
+          The nav holds sixteen short labels and never needed 220px; the tables beside it are the
+          part that runs out of room — the attendee and campaign tables both carry six columns and
+          start scrolling sideways well before the viewport does. The 38px this returns is 38px the
+          widest table no longer has to hide.
+        */}
+        <div className="grid gap-6 lg:grid-cols-[190px_1fr]">
           {/*
             The rail. Sticky for the same reason the filter rail on `/events` is: the screens beside
             it run long, and a nav that scrolls away is a nav you have to scroll back for.
@@ -156,7 +205,7 @@ export default function AdminConsole({ onBack }: { onBack: () => void }) {
                       key={item.id}
                       onClick={() => setScreen(item.id)}
                       aria-current={selected ? "page" : undefined}
-                      className={`flex w-full items-center border-l-2 px-3 py-2 text-left font-meta text-body transition ${
+                      className={`flex w-full items-center border-l-2 px-3 py-2 text-left font-meta text-meta transition ${
                         selected
                           ? "border-burgundy bg-surface-2 font-bold text-beige-kem"
                           : "border-transparent text-ink-soft hover:bg-bubblegum/20 hover:text-beige-kem"

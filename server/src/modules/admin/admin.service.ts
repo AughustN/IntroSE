@@ -200,9 +200,26 @@ async function moderateEventIn(
 ) {
   const current = await lockEvent(id, db);
   if (!current) throw err.notFound("not_found");
+  /*
+   * The moderation state machine.
+   *
+   *   pending_review → approved | removed
+   *   approved       → flagged  | removed
+   *   flagged        → approved | removed
+   *   removed        → (nothing)
+   *
+   * `flagged → approved` is the transition that used to be missing, and its absence made flagging a
+   * trap: the event came off sale, and the only exit the code allowed was `removed`, which cancels
+   * every future showtime and refunds every ticket. So an admin who flagged an event to look at it
+   * had no way to put it back — and the console has always told them otherwise ("Có thể duyệt lại
+   * sau"). Flagging is meant to be a pause, not a one-way door.
+   *
+   * `removed` stays terminal on purpose: it has already refunded the buyers, and re-approving would
+   * put an event back on sale whose tickets no longer exist.
+   */
   const allowed =
     next === "approved"
-      ? current.moderation_status === "pending_review"
+      ? ["pending_review", "flagged"].includes(current.moderation_status)
       : next === "flagged"
         ? current.moderation_status === "approved"
         : ["pending_review", "approved", "flagged"].includes(current.moderation_status);

@@ -38,6 +38,9 @@ import {
   VNPAY_RETURN_PATH,
   type Screen,
 } from "./routes";
+import { clearCheckoutDetails } from "./services/checkoutDetails";
+import { playableTrailer } from "./components/TrailerPanel";
+import { toLocalPhone } from "./services/phone";
 import {
   holdTotalPrice,
   loadHoldSession,
@@ -110,6 +113,15 @@ const toggleFilterValue =
 
 /** How many curated events the trending band runs. An editorial shortlist, the length Ticketbox uses. */
 const TRENDING_COUNT = 10;
+
+/**
+ * How many trailers the hero reel holds.
+ *
+ * A cap rather than the whole catalogue: nobody watches five hundred trailers in one visit, and an
+ * unbounded list would keep every one of their poster URLs alive in memory for a rotation that will
+ * never reach them.
+ */
+const HERO_PLAYLIST_MAX = 12;
 
 /**
  * Rows in the nav's search dropdown.
@@ -272,6 +284,8 @@ export default function App() {
   const [theme, setTheme] = useState<ThemeMode>(getInitialTheme);
   const [selectedMovie, setSelectedMovie] = useState<MovieEvent>(SAMPLE_MOVIES[0]);
   const [heroMovie, setHeroMovie] = useState<MovieEvent>(SAMPLE_MOVIES[0]);
+  /** True once the reader has chosen a hero by pressing a card; see `handleSelectEventForTrailer`. */
+  const [heroPinned, setHeroPinned] = useState(false);
   const [events, setEvents] = useState<MovieEvent[]>([]);
   /**
    * The trending row, in the order an Admin put it in (`featured_events`, UC-35).
@@ -371,6 +385,12 @@ export default function App() {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(getInitialAvatar);
   /** Only ever used to seed the default avatar's colour — never displayed in the header. */
   const [userEmail, setUserEmail] = useState<string | null>(getInitialEmail);
+  /**
+   * Not shown anywhere; it exists so checkout can prefill the buyer's details from the account
+   * rather than making somebody retype what we already know. Deliberately uncached: a phone number
+   * is the kind of thing that should leave with the session rather than sit in `localStorage`.
+   */
+  const [userPhone, setUserPhone] = useState<string | null>(null);
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -474,6 +494,7 @@ export default function App() {
     setIsOrganizer(user?.isOrganizer ?? false);
     setAvatarUrl(user?.avatarUrl ?? null);
     setUserEmail(user?.email ?? null);
+    setUserPhone(user?.phone ?? null);
     cacheValue(USER_CACHE_KEY, name || null);
     cacheValue(AVATAR_CACHE_KEY, user?.avatarUrl ?? null);
     cacheValue(EMAIL_CACHE_KEY, user?.email ?? null);
@@ -604,6 +625,9 @@ export default function App() {
   useEffect(() => {
     holdRef.current = hold;
     saveHoldSession(hold);
+    // The buyer's typed details belong to a hold. When there is no hold there is nothing for them
+    // to be about, so they go with it rather than waiting to be offered to the next purchase.
+    if (!hold) clearCheckoutDetails();
   }, [hold]);
 
   /**
@@ -882,7 +906,9 @@ export default function App() {
    * console stops rendering, in the same commit, without waiting for a navigation to land.
    */
   const visibleScreen: Screen | null =
-    SCREEN_ACCESS[activeScreen] && !(authReady && screenAllowed(activeScreen)) ? null : activeScreen;
+    SCREEN_ACCESS[activeScreen] && !(authReady && screenAllowed(activeScreen))
+      ? null
+      : activeScreen;
 
   /**
    * ...and the half that gets the address bar out of there.
@@ -1038,11 +1064,72 @@ export default function App() {
   }, [promotedHeroSlug]);
 
   /**
-   * What the hero actually shows: the bought slot if one is running and its detail has arrived,
-   * otherwise the catalogue's lead. The slug comparison is what makes the fallback automatic.
+   * The hero reel: a queue of trailers rather than one on repeat.
+   *
+   * It began as `events[0]` — whatever the catalogue happened to sort first, which is "still on
+   * sale, then soonest showtime, then id". A reasonable way to order a listing and a poor way to
+   * pick a headline: it drifts through the day as showtimes pass, and it lands just as happily on
+   * an event with no trailer, leaving a silent hero over a still poster. Then it was one trailer,
+   * chosen well and looped for ever, so a reader who stayed saw the same ninety seconds again.
+   *
+   * Now the choice makes a list, in this order:
+   *
+   *   1. the Admin's own shortlist (`featured_events`, UC-35) — somebody decided this;
+   *   2. the rest of the catalogue behind it, so a thin shortlist still has somewhere to go.
+   *
+   * Only entries with a trailer the browser can actually play are in it (`playableTrailer`), since
+   * an entry with nothing to play would end the reel rather than advance it.
    */
-  const landingHero =
-    promotedHero && promotedHero.id === promotedHeroSlug ? promotedHero : heroMovie;
+  /** False while a bought slot owns the hero — the one case the reel must not touch. */
+  const landingHeroIsAuto = !(promotedHero && promotedHero.id === promotedHeroSlug);
+
+  const heroPlaylist = useMemo(() => {
+    const playable = (list: MovieEvent[]) =>
+      list.filter((movie) => playableTrailer(movie.trailerUrl));
+    const curated = playable(trendingEvents);
+    const seen = new Set(curated.map((movie) => movie.id));
+    // The catalogue fills in behind the shortlist, so a thin curation still gives the reel
+    // somewhere to go — and nothing appears twice in one rotation.
+    const rest = playable(events).filter((movie) => !seen.has(movie.id));
+    return [...curated, ...rest].slice(0, HERO_PLAYLIST_MAX);
+  }, [trendingEvents, events]);
+
+  /** Which trailer of the reel is on. Advanced by the hero when one finishes. */
+  const [heroIndex, setHeroIndex] = useState(0);
+
+  const autoHero = useMemo(
+    () =>
+      heroPlaylist[heroIndex % (heroPlaylist.length || 1)] ??
+      // Nothing in the catalogue can play. The Admin's first pick still gets the slot; it will show
+      // its poster, which is a better answer than promoting a random event over their choice.
+      trendingEvents[0] ??
+      heroMovie,
+    [heroPlaylist, heroIndex, trendingEvents, heroMovie],
+  );
+
+  /**
+   * Hand the reel on when a trailer ends.
+   *
+   * Only for the automatic hero. A paid `hero_trailer` slot was bought and must not rotate away
+   * from what it bought, and a reader who pressed a card chose that one — neither is a queue.
+   */
+  const heroRotates = !heroPinned && landingHeroIsAuto && heroPlaylist.length > 1;
+  const advanceHero = useCallback(() => {
+    setHeroIndex((index) => index + 1);
+  }, []);
+
+  /**
+   * What the hero actually shows.
+   *
+   * A bought `hero_trailer` slot outranks everything — it was paid for. Then the reader's own
+   * choice, if they have made one. Then the automatic pick. The slug comparison on the promoted
+   * hero is what makes the fallback automatic when a campaign ends.
+   */
+  const landingHero = !landingHeroIsAuto
+    ? (promotedHero ?? heroMovie)
+    : heroPinned
+      ? heroMovie
+      : autoHero;
 
   /**
    * The hot band: paid placements first, then the Admin's curation, capped at the same ten.
@@ -1054,8 +1141,7 @@ export default function App() {
   const tickerEvents = useMemo(() => {
     const ids = paidFor("hot_events");
     const promoted = events.filter(
-      (movie) =>
-        movie.eventId !== null && ids.has(movie.eventId) && movie.status !== "finished",
+      (movie) => movie.eventId !== null && ids.has(movie.eventId) && movie.status !== "finished",
     );
     const slugs = new Set(promoted.map((movie) => movie.id));
     return [...promoted, ...trendingEvents.filter((movie) => !slugs.has(movie.id))].slice(
@@ -1347,6 +1433,9 @@ export default function App() {
     }
   };
   const handleSelectEventForTrailer = (movie: MovieEvent) => {
+    // Pressing a card is a decision. From here on the hero is theirs, and the automatic pick below
+    // stops applying — otherwise a curated list arriving late would yank the hero out from under it.
+    setHeroPinned(true);
     setHeroMovie(movie);
     const heroSection = document.getElementById("hero-trailer-section");
     if (heroSection) {
@@ -1760,9 +1849,7 @@ export default function App() {
       setNotificationsError(null);
       setNotifications(items);
     } catch (error) {
-      setNotificationsError(
-        error instanceof Error ? error.message : "Không tải được thông báo.",
-      );
+      setNotificationsError(error instanceof Error ? error.message : "Không tải được thông báo.");
     } finally {
       setNotificationsLoading(false);
     }
@@ -1883,9 +1970,7 @@ export default function App() {
         onViewHistory={() => void leaveFlow(() => goTo("history"))}
         onViewWallet={() => void leaveFlow(() => goTo("wallet"))}
         onViewSaved={() => void leaveFlow(() => runSignedIn(() => goTo("saved")))}
-        onViewNotifications={() =>
-          void leaveFlow(() => runSignedIn(() => goTo("notifications")))
-        }
+        onViewNotifications={() => void leaveFlow(() => runSignedIn(() => goTo("notifications")))}
         unreadNotifications={unreadCount(notifications)}
         onLogout={() => void leaveFlow(() => void handleLogout())}
         onHomeClick={goHome}
@@ -1927,6 +2012,8 @@ export default function App() {
             <HeroVideo
               movie={landingHero}
               onBookNow={() => void handleStartBookingInput(landingHero)}
+              // Undefined when the hero must not rotate, which is also what makes the video loop.
+              onTrailerEnded={heroRotates ? advanceHero : undefined}
             />
             {/*
              * The curated ten on the moving band, then one band per kind of event.
@@ -1949,12 +2036,18 @@ export default function App() {
                 eyebrow={section.eyebrow}
                 events={section.events}
                 emptyNote={section.emptyNote}
+                // Cinema gets the reel treatment: rails, a centred head, portrait posters. Keyed on
+                // the band, not on a category code — `sectionOfCategory` already decided which of
+                // the catalogue's admin-created categories count as film.
+                film={section.id === "movie"}
                 // No link out of an empty band: `/events` filtered to nothing is a blank page with
                 // no way to tell it from a broken one.
                 onViewMore={
                   section.codes.length > 0 ? () => openCategorySection(section.codes) : undefined
                 }
-                selectedEvent={heroMovie}
+                // The mark says "this is the one playing above", so it follows `landingHero` — which
+                // is not always `heroMovie` now that a shortlist or a paid slot can decide it.
+                selectedEvent={landingHero}
                 onSelectEvent={handleSelectEventForTrailer}
                 onBookNow={(movie) => void handleStartBookingInput(movie)}
                 wishlistedIds={wishlistedIds}
@@ -2126,6 +2219,7 @@ export default function App() {
             onGoToStep={() => void cancelBookingFlow()}
             reservationId={hold?.reservationId ?? null}
             shortfall={shortfall}
+            buyer={{ name: userName, email: userEmail ?? "", phone: toLocalPhone(userPhone) }}
             onConfirmBooking={handleConfirmPurchase}
           />
         )}
@@ -2284,7 +2378,9 @@ export default function App() {
               </div>
             </div>
           ))}
-        {(visibleScreen === "organizer" || visibleScreen === "organizer-events") && <OrganizerEventsPage />}
+        {(visibleScreen === "organizer" || visibleScreen === "organizer-events") && (
+          <OrganizerEventsPage />
+        )}
         {visibleScreen === "organizer-event-detail" && <SingleEventPage />}
         {visibleScreen === "seatmaps" &&
           (seatmapLayoutId !== null ? (

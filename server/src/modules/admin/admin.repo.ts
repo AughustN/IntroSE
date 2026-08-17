@@ -1,9 +1,123 @@
+import type { AdminOrganizerDetail } from '@shared/admin/types.js';
 import type { Db } from '../../db/pool.js';
 import { pool } from '../../db/pool.js';
 import { err } from '../../http.js';
 
 export async function organizerQueue(db: Db = pool) {
   return (await db.query(`SELECT id, user_id AS "userId", display_name AS "displayName", description, status, review_note AS "reviewNote", applied_at AS "appliedAt" FROM organizers WHERE status IN ('pending', 'approved', 'suspended') ORDER BY applied_at`)).rows;
+}
+
+/**
+ * One organizer, in full, for the preview an admin reads before deciding (UC-33).
+ *
+ * Four reads rather than one join: the profile, the account's other applications, the events, and
+ * the trading totals. Joining events to tickets in the same statement as the application history
+ * would multiply one against the other and make every count wrong — and the shapes are genuinely
+ * different lists, not columns of one row.
+ *
+ * The history is keyed on the USER, not on this row: `organizers` deliberately allows a user
+ * several applications over time (0001), so a re-application after a rejection is a new row, and
+ * what the last reviewer wrote is the thing this reviewer most needs to see.
+ */
+export async function organizerDetail(id: number, db: Db = pool): Promise<AdminOrganizerDetail> {
+  const profile = (
+    await db.query<{
+      id: number;
+      user_id: number;
+      display_name: string;
+      description: string | null;
+      logo_url: string | null;
+      status: string;
+      review_note: string | null;
+      applied_at: Date;
+      approved_at: Date | null;
+      owner_email: string;
+      owner_name: string | null;
+      owner_joined_at: Date;
+    }>(
+      `SELECT o.id, o.user_id, o.display_name, o.description, o.logo_url, o.status,
+              o.review_note, o.applied_at, o.approved_at,
+              u.email AS owner_email, u.nickname AS owner_name, u.created_at AS owner_joined_at
+         FROM organizers o
+         JOIN users u ON u.id = o.user_id
+        WHERE o.id = $1`,
+      [id],
+    )
+  ).rows[0];
+  if (!profile) throw err.notFound('not_found', 'Không tìm thấy ban tổ chức này.');
+
+  const history = await db.query<{
+    id: number;
+    status: string;
+    review_note: string | null;
+    applied_at: Date;
+  }>(
+    `SELECT id, status, review_note, applied_at
+       FROM organizers WHERE user_id = $1 ORDER BY applied_at DESC LIMIT 10`,
+    [profile.user_id],
+  );
+
+  const events = await db.query<{
+    id: number;
+    title: string;
+    slug: string;
+    status: string;
+    moderation: string;
+    created_at: Date;
+  }>(
+    `SELECT id, title, slug, status, moderation_status AS moderation, created_at
+       FROM events WHERE organizer_id = $1 ORDER BY created_at DESC LIMIT 20`,
+    [id],
+  );
+
+  // Sold, unvoided tickets across everything they have run — the figure that says whether a
+  // suspension would strand real buyers.
+  const totals = (
+    await db.query<{ event_count: number; tickets_sold: number; revenue: string }>(
+      `SELECT (SELECT count(*)::int FROM events WHERE organizer_id = $1) AS event_count,
+              count(t.id)::int AS tickets_sold,
+              COALESCE(SUM(t.price_cents), 0)::text AS revenue
+         FROM tickets t
+         JOIN orders ord ON ord.id = t.order_id
+         JOIN reservations r ON r.id = ord.reservation_id
+         JOIN showtimes s ON s.id = r.showtime_id
+         JOIN events e ON e.id = s.event_id
+        WHERE e.organizer_id = $1 AND t.qr_status <> 'void'
+          AND ord.payment_status IN ('paid', 'partially_refunded')`,
+      [id],
+    )
+  ).rows[0]!;
+
+  return {
+    id: profile.id,
+    displayName: profile.display_name,
+    description: profile.description,
+    logoUrl: profile.logo_url,
+    status: profile.status,
+    reviewNote: profile.review_note,
+    appliedAt: profile.applied_at.toISOString(),
+    approvedAt: profile.approved_at?.toISOString() ?? null,
+    ownerEmail: profile.owner_email,
+    ownerName: profile.owner_name,
+    ownerJoinedAt: profile.owner_joined_at.toISOString(),
+    history: history.rows.map((row) => ({
+      id: row.id,
+      status: row.status,
+      reviewNote: row.review_note,
+      appliedAt: row.applied_at.toISOString(),
+    })),
+    events: events.rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      slug: row.slug,
+      status: row.status,
+      moderation: row.moderation,
+      createdAt: row.created_at.toISOString(),
+    })),
+    eventCount: totals.event_count,
+    ticketsSold: totals.tickets_sold,
+    revenue: Number(totals.revenue),
+  };
 }
 
 /*

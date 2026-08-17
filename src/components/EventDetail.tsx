@@ -13,6 +13,8 @@ import { watchShowtime } from "../services/seatSocket";
 import { ChevronLeft, ChevronRight, Clock3, Heart, Tag, Ticket, Users } from "lucide-react";
 import { addDays, todayISO, weekDays, weekRange } from "../services/dateFilter";
 import Disclosure from "./Disclosure";
+import TrailerPanel, { playableTrailer } from "./TrailerPanel";
+import Select from "./Select";
 import {
   BookingHeader,
   BookingLayout,
@@ -22,6 +24,7 @@ import {
   type SummaryHighlight,
   type SummaryLine,
 } from "./booking/BookingChrome";
+import { chainLabel } from "../services/cinema";
 import { formatVnd } from "../services/currency";
 import { aiClient } from "../services/aiClient";
 import { WaitlistError, waitlistClient, type WaitlistEntry } from "../services/waitlistClient";
@@ -105,6 +108,9 @@ interface Slot {
   /** Full instant, kept beside the split date/time because the waitlist cutoff is measured on it. */
   startsAt: string;
   venue: string;
+  /** Province, and the chain read off the venue name — the two tiers above the cinema in the filter. */
+  city: string;
+  chain: string;
   soldOut: boolean;
 }
 
@@ -184,6 +190,8 @@ export default function EventDetail({
         time: s.startsAt.slice(11, 16),
         startsAt: s.startsAt,
         venue: s.venue.name,
+        city: s.venue.city,
+        chain: chainLabel(s.venue.name),
         soldOut: s.availability !== "available",
       }));
     }
@@ -196,10 +204,59 @@ export default function EventDetail({
         time,
         startsAt: `${date}T${time}`,
         venue: event.venueName,
+        city: event.location,
+        chain: chainLabel(event.venueName),
         soldOut: false,
       })),
     );
-  }, [showtimes, event.dates, event.times, event.venueName]);
+  }, [showtimes, event.dates, event.times, event.venueName, event.location]);
+
+  /*
+   * Where, before when.
+   *
+   * A film in cinemas plays 2,000 sessions across eight provinces, so the day strip and the time
+   * grid are answering a question nobody asked until the place is settled — "19:00 at which of the
+   * forty-four cinemas" is not a choice, it is a list. The three tiers narrow it the way a person
+   * actually decides: province, then chain, then the cinema itself.
+   *
+   * Cascading, so a lower tier can never contradict a higher one: pick a province and the chain
+   * list holds only chains present in it. Changing a tier clears the ones below rather than leaving
+   * a stale cinema selected in a city it is not in.
+   */
+  const [placeFilter, setPlaceFilter] = useState({ city: "", chain: "", venue: "" });
+
+  const byCity = useMemo(
+    () => (placeFilter.city ? slots.filter((slot) => slot.city === placeFilter.city) : slots),
+    [slots, placeFilter.city],
+  );
+  const byChain = useMemo(
+    () => (placeFilter.chain ? byCity.filter((slot) => slot.chain === placeFilter.chain) : byCity),
+    [byCity, placeFilter.chain],
+  );
+  /** Everything downstream — the day strip, the counts, the time grid — reads this, not `slots`. */
+  const visibleSlots = useMemo(
+    () =>
+      placeFilter.venue ? byChain.filter((slot) => slot.venue === placeFilter.venue) : byChain,
+    [byChain, placeFilter.venue],
+  );
+
+  /** Options for each tier, each drawn from what the tier above it has already allowed. */
+  const options = useMemo(() => {
+    const uniq = (values: string[]) => [...new Set(values)].filter(Boolean).sort();
+    return {
+      cities: uniq(slots.map((slot) => slot.city)),
+      chains: uniq(byCity.map((slot) => slot.chain)),
+      venues: uniq(byChain.map((slot) => slot.venue)),
+    };
+  }, [slots, byCity, byChain]);
+
+  /*
+   * Offered only when there is something to narrow.
+   *
+   * One venue is the ordinary case for a concert, and three dropdowns over a single cinema is three
+   * controls that can only ever return what is already on screen.
+   */
+  const showPlaceFilter = options.cities.length > 1 || options.venues.length > 1;
 
   const [selectedSlotKey, setSelectedSlotKey] = useState<string>("");
 
@@ -230,10 +287,13 @@ export default function EventDetail({
      * swap and matched no real slot — the date chip lit up from its own fallback while the time
      * grid showed nothing selected and the panel read "Chưa chọn suất" over a list of one showtime.
      */
-    if (slots.some((slot) => slot.key === selectedSlotKey)) return;
-    const firstOpen = slots.find((slot) => !slot.soldOut) ?? slots[0];
+    if (visibleSlots.some((slot) => slot.key === selectedSlotKey)) return;
+    const firstOpen = visibleSlots.find((slot) => !slot.soldOut) ?? visibleSlots[0];
     setSelectedSlotKey(firstOpen?.key ?? "");
-  }, [slots, selectedSlotKey]);
+  }, [visibleSlots, selectedSlotKey]);
+
+  /** Null unless the stored link is something a `<video>` can play — see `playableTrailer`. */
+  const trailer = playableTrailer(event.trailerUrl);
 
   const selectedSlot = slots.find((s) => s.key === selectedSlotKey) ?? null;
   // `finished` joins the other two: the event is still readable, but nothing on it is buyable.
@@ -521,23 +581,26 @@ export default function EventDetail({
    * the day is a decision with four or five options, and only then is the time a decision with
    * four or five options.
    */
-  const slotDates = useMemo(() => [...new Set(slots.map((slot) => slot.date))].sort(), [slots]);
+  const slotDates = useMemo(
+    () => [...new Set(visibleSlots.map((slot) => slot.date))].sort(),
+    [visibleSlots],
+  );
   const activeDate = selectedSlot?.date ?? slotDates[0] ?? "";
   const slotsOnActiveDate = useMemo(
-    () => slots.filter((slot) => slot.date === activeDate),
-    [slots, activeDate],
+    () => visibleSlots.filter((slot) => slot.date === activeDate),
+    [visibleSlots, activeDate],
   );
 
   /** Picking a day lands on its first open showtime, so the grid below is never showing nothing. */
   const chooseDate = (date: string) => {
-    const onDate = slots.filter((slot) => slot.date === date);
+    const onDate = visibleSlots.filter((slot) => slot.date === date);
     const firstOpen = onDate.find((slot) => !slot.soldOut) ?? onDate[0];
     if (firstOpen) setSelectedSlotKey(firstOpen.key);
   };
 
   /** Every showtime on a day being gone is what greys the day out — not the day itself. */
   const dateSoldOut = (date: string) =>
-    slots.filter((slot) => slot.date === date).every((slot) => slot.soldOut);
+    visibleSlots.filter((slot) => slot.date === date).every((slot) => slot.soldOut);
 
   /*
    * Two day pickers, chosen by how many days there are — never by what kind of event it is.
@@ -587,7 +650,8 @@ export default function EventDetail({
     setWeekStartOverride(weekRange(date).from);
     // …and select something on the way, so the times below follow the strip instead of staying on a
     // showtime the reader can no longer see.
-    const onOrAfter = slots.find((slot) => slot.date >= date && !slot.soldOut) ?? slots[0];
+    const onOrAfter =
+      visibleSlots.find((slot) => slot.date >= date && !slot.soldOut) ?? visibleSlots[0];
     if (onOrAfter) setSelectedSlotKey(onOrAfter.key);
   };
 
@@ -779,6 +843,50 @@ export default function EventDetail({
               makes the three decisions — day, time, tier — read as the work of the page.
             */
             <div className="space-y-9 border border-beige-kem/25 bg-surface-2 p-5 sm:p-6">
+              {/*
+                Place first, because it decides how much of the rest is worth reading. Three tiers,
+                each narrowing the next, and each one clearing what is below it — a chain chosen in
+                Hà Nội must not survive a switch to Đà Nẵng.
+              */}
+              {showPlaceFilter && (
+                <div>
+                  <p className="font-display text-lede font-black uppercase tracking-[0.03em] text-beige-kem">
+                    Nơi chiếu
+                  </p>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    <Select
+                      label="Tỉnh / Thành phố"
+                      value={placeFilter.city}
+                      placeholder="Tất cả"
+                      options={options.cities.map((city) => ({ value: city, label: city }))}
+                      onChange={(city) => setPlaceFilter({ city, chain: "", venue: "" })}
+                      triggerClassName="h-11 w-full justify-between border-2 border-beige-kem/35 bg-xanh-pho px-3 font-meta text-meta text-beige-kem"
+                    />
+                    <Select
+                      label="Cụm rạp"
+                      value={placeFilter.chain}
+                      placeholder="Tất cả"
+                      options={options.chains.map((chain) => ({ value: chain, label: chain }))}
+                      onChange={(chain) =>
+                        setPlaceFilter((prev) => ({ ...prev, chain, venue: "" }))
+                      }
+                      triggerClassName="h-11 w-full justify-between border-2 border-beige-kem/35 bg-xanh-pho px-3 font-meta text-meta text-beige-kem"
+                    />
+                    <Select
+                      label="Rạp"
+                      value={placeFilter.venue}
+                      placeholder="Tất cả"
+                      options={options.venues.map((venue) => ({ value: venue, label: venue }))}
+                      onChange={(venue) => setPlaceFilter((prev) => ({ ...prev, venue }))}
+                      triggerClassName="h-11 w-full justify-between border-2 border-beige-kem/35 bg-xanh-pho px-3 font-meta text-meta text-beige-kem"
+                    />
+                  </div>
+                  <p className="mt-3 font-meta text-meta text-ink-soft">
+                    {visibleSlots.length} suất tại {options.venues.length} rạp
+                  </p>
+                </div>
+              )}
+
               <div>
                 <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
                   <p className="font-display text-lede font-black uppercase tracking-[0.03em] text-beige-kem">
@@ -850,7 +958,7 @@ export default function EventDetail({
                     ))}
 
                   {(useWeekCalendar ? weekCells : slotDates).map((date) => {
-                    const count = slots.filter((slot) => slot.date === date).length;
+                    const count = visibleSlots.filter((slot) => slot.date === date).length;
                     const isActive = date === activeDate;
                     const gone = count > 0 && dateSoldOut(date);
                     const unavailable = count === 0 || gone;
@@ -1055,6 +1163,21 @@ export default function EventDetail({
           buy button, so folding it away here would be hiding what the page just said elsewhere.
         */}
         <div className="border-t border-beige-kem/30 pt-2">
+          {/*
+            The trailer opens the introduction, under the picker rather than above it.
+            Choosing a showtime is what the page is for; the trailer is what convinces somebody the
+            showtime is worth choosing, so it sits at the top of everything that is about the film
+            instead of competing with the step that sells it.
+          */}
+          {trailer && (
+            <div className="mb-8 space-y-3">
+              <p className="font-display text-lede font-black uppercase tracking-[0.03em] text-beige-kem">
+                Trailer
+              </p>
+              <TrailerPanel url={trailer} poster={event.imageUrl || null} title={event.title} />
+            </div>
+          )}
+
           <Disclosure label="Giới thiệu" heading="section" defaultOpen>
             {/*
               Set at reading size, not at caption size. This is the only prose on the page; at 14px

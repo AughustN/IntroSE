@@ -16,8 +16,7 @@ const input =
 const label = "mb-1 block font-mono text-[11px] text-beige-kem/70";
 const btn =
   " bg-burgundy px-4 py-2 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-50";
-const ghost =
-  " border-2 border-beige-kem px-3 py-1.5 text-xs font-bold text-beige-kem/80";
+const ghost = " border-2 border-beige-kem px-3 py-1.5 text-xs font-bold text-beige-kem/80";
 
 /**
  * Level 2 of the console: one event.

@@ -9,9 +9,12 @@ import { adminClient } from "../../../services/adminClient";
 import {
   ACTION_GHOST,
   ACTION_PRIMARY,
+  ACTION_ROW_GHOST,
+  ACTION_ROW_PRIMARY,
   EmptyState,
   FIELD,
   Notice,
+  Pager,
   PANEL,
   Pill,
   ScreenHead,
@@ -153,7 +156,7 @@ export default function ReviewReportsScreen() {
           <p className="label-eyebrow text-ink-soft">
             {pending.remove ? "Xoá bình luận" : "Giữ bình luận"} · tố cáo #{pending.id}
           </p>
-          <p className="font-meta text-body text-ink-soft">
+          <p className="font-meta text-meta text-ink-soft">
             {pending.remove
               ? "Bình luận được ẩn khỏi trang sự kiện. Không xoá hẳn khỏi cơ sở dữ liệu — tố cáo và nhật ký vẫn phải trỏ được vào nội dung để đối chiếu về sau."
               : "Bình luận giữ nguyên trên trang. Tố cáo đóng lại và không hiện trong hàng chờ nữa."}
@@ -194,7 +197,7 @@ export default function ReviewReportsScreen() {
       ) : (
         <>
           <TableScroll>
-            <table className="w-full min-w-[900px] text-left text-body">
+            <table className="w-full min-w-[900px] text-left text-meta">
               <thead className="label-eyebrow border-b border-beige-kem/25 text-ink-soft">
                 <tr>
                   <Th>Bình luận</Th>
@@ -221,27 +224,7 @@ export default function ReviewReportsScreen() {
             </table>
           </TableScroll>
 
-          <div className="flex items-center justify-between gap-4">
-            <span className="font-meta text-body text-ink-soft">
-              Trang {page + 1} / {lastPage + 1}
-            </span>
-            <div className="flex gap-2">
-              <button
-                className={ACTION_GHOST}
-                disabled={page === 0 || loading}
-                onClick={() => setPage((value) => Math.max(0, value - 1))}
-              >
-                Trước
-              </button>
-              <button
-                className={ACTION_GHOST}
-                disabled={page >= lastPage || loading}
-                onClick={() => setPage((value) => value + 1)}
-              >
-                Sau
-              </button>
-            </div>
-          </div>
+          <Pager page={page} lastPage={lastPage} disabled={loading} onChange={setPage} />
         </>
       )}
     </>
@@ -265,7 +248,7 @@ function ReportRow({
         <span className="block text-beige-kem">
           {report.reviewBody ? `“${report.reviewBody}”` : "(chỉ chấm sao, không có lời)"}
         </span>
-        <span className="mt-1 block font-meta text-meta text-ink-soft">
+        <span className="mt-1 block font-meta text-eyebrow text-ink-soft">
           {report.authorName ?? "Tài khoản đã xoá"} · {report.reviewRating}★ ·{" "}
           {report.reviewCreatedAt.slice(0, 10)}
           {report.reviewStatus === "removed" && " · đã ẩn"}
@@ -274,14 +257,14 @@ function ReportRow({
       <Td>{report.eventTitle}</Td>
       <Td>
         <span className="block text-beige-kem">{report.reason}</span>
-        <span className="mt-1 block font-meta text-meta text-ink-soft">
+        <span className="mt-1 block font-meta text-eyebrow text-ink-soft">
           {report.reporterEmail} · {report.createdAt.slice(0, 10)}
         </span>
       </Td>
       <Td nowrap>
         <Pill tone={open ? "warn" : "neutral"}>{open ? "Chưa xử lý" : "Đã xong"}</Pill>
         {!open && (
-          <span className="mt-1 block font-meta text-meta text-ink-soft">
+          <span className="mt-1 block font-meta text-eyebrow text-ink-soft">
             {report.reviewStatus === "removed" ? "Đã xoá bình luận" : "Giữ bình luận"}
             {report.resolutionNote ? ` · ${report.resolutionNote}` : ""}
           </span>
@@ -290,15 +273,15 @@ function ReportRow({
       <Td nowrap>
         {open ? (
           <div className="flex flex-wrap gap-2">
-            <button className={ACTION_PRIMARY} disabled={busy} onClick={() => onDecide(true)}>
+            <button className={ACTION_ROW_PRIMARY} disabled={busy} onClick={() => onDecide(true)}>
               Xoá bình luận
             </button>
-            <button className={ACTION_GHOST} disabled={busy} onClick={() => onDecide(false)}>
+            <button className={ACTION_ROW_GHOST} disabled={busy} onClick={() => onDecide(false)}>
               Giữ lại
             </button>
           </div>
         ) : (
-          <span className="font-meta text-meta text-ink-soft">
+          <span className="font-meta text-eyebrow text-ink-soft">
             {report.resolvedAt ? report.resolvedAt.slice(0, 10) : "—"}
           </span>
         )}

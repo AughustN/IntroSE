@@ -7,13 +7,17 @@ interface Props {
 }
 
 function formatVND(amount: number): string {
-  return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(amount);
+  return new Intl.NumberFormat("vi-VN", {
+    style: "currency",
+    currency: "VND",
+    maximumFractionDigits: 0,
+  }).format(amount);
 }
 
 const RANK_BADGE_COLORS = [
-  "bg-cam-dat text-ink-dark font-black", // #1 Gold / Peach
-  "bg-la-co text-ink-dark font-black",   // #2 Periwinkle
-  "bg-bubblegum text-ink-dark font-black", // #3 Bubblegum
+  "bg-cam-dat text-on-tint font-black", // #1 Gold / Peach
+  "bg-la-co text-on-tint font-black", // #2 Periwinkle
+  "bg-bubblegum text-on-tint font-black", // #3 Bubblegum
   "bg-beige-kem/20 text-beige-kem font-bold",
   "bg-beige-kem/20 text-beige-kem font-bold",
 ];
@@ -28,11 +32,11 @@ const BAR_PROGRESS_COLORS = [
 
 export function TopEventsChart({ data }: Props) {
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border-2 border-beige-kem/30 bg-surface-2 p-5 text-beige-kem shadow-md">
+    <div className="flex flex-col gap-4 border-2 border-beige-kem/30 bg-surface-2 p-5 text-beige-kem">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-beige-kem/10 pb-3">
         <div className="flex items-center gap-2.5">
-          <div className="rounded-xl bg-burgundy/20 p-2 text-burgundy">
+          <div className="bg-burgundy/20 p-2 text-burgundy">
             <Flame className="h-5 w-5" />
           </div>
           <div>
@@ -44,10 +48,12 @@ export function TopEventsChart({ data }: Props) {
 
       {/* Empty State */}
       {!data || data.length === 0 ? (
-        <div className="flex h-48 flex-col items-center justify-center rounded-xl border border-dashed border-beige-kem/30 p-6 text-center text-beige-kem/60">
+        <div className="flex h-48 flex-col items-center justify-center border border-dashed border-beige-kem/30 p-6 text-center text-beige-kem/60">
           <Award className="h-8 w-8 mb-2 text-beige-kem/40" />
           <p className="text-body font-bold">Chưa có xếp hạng sự kiện</p>
-          <p className="mt-1 text-xs text-beige-kem/50">Tạo sự kiện và bán vé để theo dõi các sự kiện dẫn đầu.</p>
+          <p className="mt-1 text-xs text-beige-kem/50">
+            Tạo sự kiện và bán vé để theo dõi các sự kiện dẫn đầu.
+          </p>
         </div>
       ) : (
         /* Ranked List Items */
@@ -55,17 +61,20 @@ export function TopEventsChart({ data }: Props) {
           {data.map((item, index) => {
             const fillPct = Math.min(100, Math.max(0, item.fill_percentage || 0));
             const barColor = BAR_PROGRESS_COLORS[index % BAR_PROGRESS_COLORS.length];
-            const badgeColor = RANK_BADGE_COLORS[index % RANK_BADGE_COLORS.length] || RANK_BADGE_COLORS[3];
+            const badgeColor =
+              RANK_BADGE_COLORS[index % RANK_BADGE_COLORS.length] || RANK_BADGE_COLORS[3];
 
             return (
               <div
                 key={item.event_id}
-                className="group relative flex flex-col gap-2 rounded-xl border border-beige-kem/20 bg-ink-dark/40 p-3.5 transition hover:border-beige-kem/50 hover:bg-ink-dark/60"
+                className="group relative flex flex-col gap-2 border border-beige-kem/20 bg-xanh-pho p-3.5 transition hover:border-beige-kem/50 hover:bg-xanh-pho"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-start gap-2.5">
                     {/* Rank Badge */}
-                    <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs ${badgeColor}`}>
+                    <span
+                      className={`inline-flex h-6 w-6 shrink-0 items-center justify-center text-xs ${badgeColor}`}
+                    >
                       #{index + 1}
                     </span>
 
@@ -75,13 +84,14 @@ export function TopEventsChart({ data }: Props) {
                       </h5>
                       <div className="mt-1 flex items-center gap-2 text-[11px] text-beige-kem/60">
                         {item.category && (
-                          <span className="rounded bg-beige-kem/10 px-1.5 py-0.5 font-bold text-beige-kem/80">
+                          <span className="bg-beige-kem/10 px-1.5 py-0.5 font-bold text-beige-kem/80">
                             {item.category}
                           </span>
                         )}
                         <span className="flex items-center gap-1">
                           <Ticket className="h-3 w-3 text-la-co" />
-                          {item.tickets_sold.toLocaleString("vi-VN")}/{item.total_capacity.toLocaleString("vi-VN")} vé
+                          {item.tickets_sold.toLocaleString("vi-VN")}/
+                          {item.total_capacity.toLocaleString("vi-VN")} vé
                         </span>
                       </div>
                     </div>
@@ -99,7 +109,7 @@ export function TopEventsChart({ data }: Props) {
                 </div>
 
                 {/* Capacity / Revenue Progress Bar */}
-                <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-beige-kem/15">
+                <div className="mt-1 h-2 w-full overflow-hidden bg-beige-kem/15">
                   <div
                     className={`h-full ${barColor} transition-all duration-500`}
                     style={{ width: `${fillPct}%` }}

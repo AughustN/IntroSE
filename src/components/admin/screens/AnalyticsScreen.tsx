@@ -97,7 +97,7 @@ export default function AnalyticsScreen() {
         >
           Đặt lại
         </button>
-        {loading && <span className="font-meta text-body text-ink-soft">Đang tính…</span>}
+        {loading && <span className="font-meta text-meta text-ink-soft">Đang tính…</span>}
       </div>
 
       {error && <Notice tone="error">{error}</Notice>}
@@ -105,8 +105,12 @@ export default function AnalyticsScreen() {
       {data && (
         <>
           <KpiStrip>
-            <Kpi label="Hoa hồng (5%)" value={formatVnd(data.totals.revenue)} />
-            <Kpi label="Vé đã bán" value={data.totals.tickets.toLocaleString("vi-VN")} />
+            <Kpi label="Hoa hồng (5%)" value={formatVnd(data.totals.revenue)} tone="money" />
+            <Kpi
+              label="Vé đã bán"
+              value={data.totals.tickets.toLocaleString("vi-VN")}
+              tone="volume"
+            />
             <Kpi
               label="Đã check-in"
               value={
@@ -114,9 +118,10 @@ export default function AnalyticsScreen() {
                   ? "—"
                   : `${Math.round((data.totals.checkedIn / data.totals.tickets) * 100)}%`
               }
+              tone="rate"
               note={`${data.totals.checkedIn} lượt quét`}
             />
-            <Kpi label="Sự kiện có doanh thu" value={`${data.totals.events}`} />
+            <Kpi label="Sự kiện có doanh thu" value={`${data.totals.events}`} tone="volume" />
           </KpiStrip>
 
           <div className={`${PANEL} space-y-3`}>
@@ -130,7 +135,7 @@ export default function AnalyticsScreen() {
               <EmptyState text="Không có vé nào bán ra trong khoảng này." />
             ) : (
               <TableScroll>
-                <table className="w-full min-w-[720px] text-left text-body">
+                <table className="w-full min-w-[720px] text-left text-meta">
                   <thead className="label-eyebrow border-b border-beige-kem/25 text-ink-soft">
                     <tr>
                       <Th>Sự kiện</Th>

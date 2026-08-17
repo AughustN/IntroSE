@@ -144,9 +144,92 @@ describe("orders and the wallet ledger", () => {
       200,
     );
 
-    const row = res.body.find((item: { userEmail: string }) => item.userEmail === sale.buyer.email);
+    const row = res.body.rows.find(
+      (item: { userEmail: string }) => item.userEmail === sale.buyer.email,
+    );
     expect(row.amount).toBeLessThan(0);
     expect(Math.abs(row.amount)).toBe(400_000);
     expect(row.orderCode).toBeTruthy();
+  });
+
+  it("totals the whole ledger, not the page, and not the filter", async () => {
+    const sale = await seedSale({ quantity: 1, price: 400_000 });
+    const admin = await adminSession();
+
+    // Narrowed to refunds. Nothing has been refunded, so `rows` is empty...
+    const refunds = await asAdmin(
+      admin.token,
+      "/api/admin/wallet-transactions?kind=refund",
+    ).expect(200);
+    expect(refunds.body.rows).toHaveLength(0);
+
+    // ...yet the purchase this sale made still shows in the totals. That is the whole point: the
+    // tiles are a fact about the platform, not about the slice on screen. Summed from `rows`, as
+    // the console used to, every tile here would read 0₫.
+    expect(refunds.body.totals.purchase).toBeGreaterThanOrEqual(400_000);
+    expect(refunds.body.totals.count).toBeGreaterThan(0);
+
+    // And they do not move when the table is sliced a different way.
+    const all = await asAdmin(admin.token, "/api/admin/wallet-transactions").expect(200);
+    expect(all.body.totals).toEqual(refunds.body.totals);
+    expect(all.body.rows.length).toBeGreaterThan(0);
+    expect(sale.orderId).toBeGreaterThan(0);
+  });
+});
+
+describe("the event moderation state machine (UC-34)", () => {
+  const approve = (token: string, id: number) =>
+    request(app).post(`/api/admin/events/${id}/approve`).set(bearer(token));
+
+  // `seedSale` creates its event already `approved` — it has to, or nothing could be sold against
+  // it — so these cases start from there rather than from `pending_review`.
+  it("lets a flagged event be approved again", async () => {
+    const sale = await seedSale();
+    const admin = await adminSession();
+
+    await request(app)
+      .post(`/api/admin/events/${sale.eventId}/flag`)
+      .set(bearer(admin.token))
+      .send({ reason: "Cần xem lại ảnh bìa" })
+      .expect(200);
+
+    // The transition this suite exists for: flagging is a pause, not a one-way door. Before the
+    // fix the only exit from `flagged` was `removed`, which refunds every ticket.
+    await approve(admin.token, sale.eventId).expect(200);
+
+    const { rows } = await pool.query<{ moderation_status: string }>(
+      `SELECT moderation_status FROM events WHERE id = $1`,
+      [sale.eventId],
+    );
+    expect(rows[0]!.moderation_status).toBe("approved");
+  });
+
+  it("refuses to flag an event that is already flagged", async () => {
+    const sale = await seedSale();
+    const admin = await adminSession();
+
+    const flag = () =>
+      request(app)
+        .post(`/api/admin/events/${sale.eventId}/flag`)
+        .set(bearer(admin.token))
+        .send({ reason: "x" });
+
+    await flag().expect(200);
+    // The console no longer offers this button on a flagged row; the server is what makes it true.
+    await flag().expect(409);
+  });
+
+  it("keeps `removed` terminal", async () => {
+    const sale = await seedSale();
+    const admin = await adminSession();
+
+    await request(app)
+      .post(`/api/admin/events/${sale.eventId}/remove`)
+      .set(bearer(admin.token))
+      .send({ reason: "Vi phạm" })
+      .expect(200);
+
+    // Re-approving would put an event back on sale whose tickets have already been refunded.
+    await approve(admin.token, sale.eventId).expect(409);
   });
 });

@@ -47,15 +47,25 @@ export default function WalletScreen() {
     kind || "all",
   );
 
-  const rows = data ?? [];
-  const sum = (of: keyof typeof KIND_LABEL) =>
-    rows.filter((row) => row.kind === of).reduce((total, row) => total + Math.abs(row.amount), 0);
+  /*
+   * Rows are a page; totals are the whole ledger.
+   *
+   * The two used to be the same array — the tiles summed whatever had been fetched, so they only
+   * ever covered the last 200 transactions AND collapsed to zero the moment a kind filter was
+   * applied. `totals` now comes from its own aggregate and never moves when the table is narrowed.
+   */
+  const rows = data?.rows ?? [];
+  const totals = data?.totals;
 
   return (
     <>
       <ScreenHead
-        title="Ví & hoàn tiền"
-        meta="200 giao dịch gần nhất"
+        title="Giao dịch"
+        meta={
+          totals
+            ? `${rows.length} / ${totals.count.toLocaleString("vi-VN")} giao dịch · mới nhất trước`
+            : "200 giao dịch gần nhất"
+        }
         actions={
           <button onClick={reload} className={ACTION_GHOST} disabled={loading}>
             {loading ? "Đang tải…" : "Tải lại"}
@@ -66,10 +76,30 @@ export default function WalletScreen() {
       {error && <Notice tone="error">{error}</Notice>}
 
       <KpiStrip>
-        <Kpi label="Tiền nạp vào" value={formatVnd(sum("topup"))} />
-        <Kpi label="Chi mua vé" value={formatVnd(sum("purchase"))} />
-        <Kpi label="Đã hoàn" value={formatVnd(sum("refund"))} />
-        <Kpi label="Chi quảng cáo" value={formatVnd(sum("ad_purchase"))} />
+        <Kpi
+          label="Tiền nạp vào"
+          value={totals ? formatVnd(totals.topup) : "—"}
+          tone="volume"
+          note="Toàn bộ sổ cái"
+        />
+        <Kpi
+          label="Chi mua vé"
+          value={totals ? formatVnd(totals.purchase) : "—"}
+          tone="money"
+          note="Toàn bộ sổ cái"
+        />
+        <Kpi
+          label="Đã hoàn"
+          value={totals ? formatVnd(totals.refund + totals.adRefund) : "—"}
+          tone="rate"
+          note="Gồm cả hoàn quảng cáo"
+        />
+        <Kpi
+          label="Chi quảng cáo"
+          value={totals ? formatVnd(totals.adPurchase) : "—"}
+          tone="money"
+          note="Toàn bộ sổ cái"
+        />
       </KpiStrip>
 
       <div className="flex flex-wrap gap-2">
@@ -92,7 +122,7 @@ export default function WalletScreen() {
         <EmptyState text="Chưa có giao dịch ví nào." />
       ) : (
         <TableScroll>
-          <table className="w-full min-w-[820px] text-left text-body">
+          <table className="w-full min-w-[820px] text-left text-meta">
             <thead className="label-eyebrow border-b border-beige-kem/25 text-ink-soft">
               <tr>
                 <Th>Thời điểm</Th>
@@ -130,7 +160,7 @@ export default function WalletScreen() {
                     {row.orderCode && <span className="font-meta">{row.orderCode}</span>}
                     {row.adEventTitle && <span className="font-meta">{row.adEventTitle}</span>}
                     {row.providerRef && (
-                      <span className="block font-meta text-meta text-ink-soft">
+                      <span className="block font-meta text-eyebrow text-ink-soft">
                         VNPay {row.providerRef} · {row.providerStatus}
                       </span>
                     )}

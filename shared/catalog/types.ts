@@ -10,6 +10,15 @@ export interface EventCard {
   slug: string;
   title: string;
   imageUrl: string | null;
+  /**
+   * The trailer, on the CARD and not only on the detail.
+   *
+   * The landing hero is built from a card, so leaving this to the detail payload meant the one
+   * place a trailer was meant to play had no trailer to play — `cardToMovie` filled the field with
+   * an empty string and the `<video>` silently had nothing to load. It is one column on a row the
+   * query already reads.
+   */
+  trailerUrl: string | null;
   category: string; // category code
   /**
    * The category's Vietnamese name, from the database.

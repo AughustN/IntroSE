@@ -86,7 +86,8 @@ export function RuledCard({
   onSelectEvent,
   onBookNow,
   onToggleWishlist,
-}: CardProps & { isActiveHero: boolean }) {
+  portrait,
+}: CardProps & { isActiveHero: boolean; portrait?: boolean }) {
   const meta = statusMeta[evt.status];
   const bookingDisabled = isUnbookable(evt.status);
 
@@ -113,7 +114,17 @@ export function RuledCard({
         between rows. It also aligns the still's left edge with the title beneath it.
       */}
       <div className="p-5 pb-0">
-        <div className="relative aspect-video overflow-hidden bg-black">
+        {/*
+          `2/3` for a film poster, `16/9` for everything else.
+
+          A poster is portrait by trade — the artwork is designed for a lightbox, not a still frame
+          — and in a 16/9 box it shrinks to a stamp with two thirds of the card given over to blur.
+          The taller frame is the one the artwork was drawn for, so the same picture arrives four
+          times the size without being cropped.
+        */}
+        <div
+          className={`relative overflow-hidden bg-black ${portrait ? "aspect-[2/3]" : "aspect-video"}`}
+        >
           {/*
             The blurred backdrop stays, for the minority that is not 16/9. The sharp copy is
             `object-contain` so nothing is ever cropped, and the slack it leaves is filled with the
@@ -266,7 +277,8 @@ export function PlainCard({
   onSelectEvent,
   onBookNow,
   onToggleWishlist,
-}: CardProps) {
+  portrait,
+}: CardProps & { portrait?: boolean }) {
   const meta = statusMeta[evt.status];
   const bookingDisabled = isUnbookable(evt.status);
 
@@ -280,7 +292,13 @@ export function PlainCard({
         wastes less of itself on backdrop. Fixed either way, because the rows have to line up — the
         one thing deliberately not taken from the reference, which is masonry.
       */}
-      <div className="relative aspect-[4/3] overflow-hidden bg-beige-kem/[0.07]">
+      <div
+        className={`relative overflow-hidden bg-beige-kem/[0.07] ${
+          // A listing of nothing but posters gets the frame posters are drawn for; a mixed
+          // catalogue keeps `4/3`, which is the compromise that suits both.
+          portrait ? "aspect-[2/3]" : "aspect-[4/3]"
+        }`}
+      >
         <img
           src={evt.imageUrl}
           alt=""

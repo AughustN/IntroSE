@@ -371,7 +371,37 @@ describe('US3 – System settings', () => {
       };
       const res = await request(app).put('/api/admin/settings').set(a.h).send(min).expect(200);
       expect(res.body.seat_hold_ttl_minutes).toBe(1);
-      expect(res.body.ai_features_enabled).toBe(false);
+      // The AI keys are read-only: `min` asked for `false` and the stored default survives. Spend
+      // against an outside provider is an operator decision, not a dial on the console.
+      expect(res.body.ai_features_enabled).toBe(DEFAULT_SYSTEM_SETTINGS.ai_features_enabled);
+    });
+
+    it('ignores the AI keys, whatever the request asks for', async () => {
+      const a = await admin();
+      const meddling = {
+        ...DEFAULT_SYSTEM_SETTINGS,
+        max_tickets_per_buyer: 7,
+        ai_features_enabled: !DEFAULT_SYSTEM_SETTINGS.ai_features_enabled,
+        ai_platform_request_ceiling: 999_999,
+        ai_platform_window_hours: 999,
+      };
+      const res = await request(app).put('/api/admin/settings').set(a.h).send(meddling).expect(200);
+
+      // The editable half still saves...
+      expect(res.body.max_tickets_per_buyer).toBe(7);
+      // ...and the read-only half is untouched, in the response and on the next read.
+      expect(res.body.ai_features_enabled).toBe(DEFAULT_SYSTEM_SETTINGS.ai_features_enabled);
+      expect(res.body.ai_platform_request_ceiling).toBe(
+        DEFAULT_SYSTEM_SETTINGS.ai_platform_request_ceiling,
+      );
+      expect(res.body.ai_platform_window_hours).toBe(
+        DEFAULT_SYSTEM_SETTINGS.ai_platform_window_hours,
+      );
+
+      const after = await request(app).get('/api/admin/settings').set(a.h).expect(200);
+      expect(after.body.ai_platform_request_ceiling).toBe(
+        DEFAULT_SYSTEM_SETTINGS.ai_platform_request_ceiling,
+      );
     });
 
     it('accepts valid settings at maximum bounds', async () => {

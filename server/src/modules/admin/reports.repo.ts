@@ -6,6 +6,7 @@ import type {
   ReportedReview,
 } from "@shared/admin/types.js";
 import { pool } from "../../db/pool.js";
+import { likePattern } from "../../db/like.js";
 import { err } from "../../http.js";
 
 /*
@@ -31,9 +32,9 @@ export async function eventReports(filter: ContentReportFilter): Promise<Content
        JOIN organizers org ON org.id = e.organizer_id
        JOIN users reporter ON reporter.id = c.reporter_user_id`;
   const where = `c.target_type = 'event'
-        AND ($1::text IS NULL OR e.title ILIKE '%' || $1 || '%')
+        AND ($1::text IS NULL OR e.title ILIKE $1)
         AND ($2::text IS NULL OR c.status = $2)`;
-  const params = [filter.query ?? null, filter.status ?? null, filter.limit, filter.offset];
+  const params = [likePattern(filter.query), filter.status ?? null, filter.limit, filter.offset];
 
   const rowsQuery = pool.query<{
     id: number;
@@ -67,7 +68,7 @@ export async function eventReports(filter: ContentReportFilter): Promise<Content
   const countQuery = pool.query<{ total: number; open_count: number }>(
     `SELECT count(*)::int AS total, count(*) FILTER (WHERE c.status = 'open')::int AS open_count
      ${from} WHERE ${where}`,
-    [filter.query ?? null, filter.status ?? null],
+    [likePattern(filter.query), filter.status ?? null],
   );
 
   const [list, counts] = await Promise.all([rowsQuery, countQuery]);
@@ -158,7 +159,15 @@ export async function reportDetail(id: number): Promise<ContentReportDetail> {
   };
 }
 
-async function eventTarget(eventId: number): Promise<ReportedEvent> {
+/**
+ * One event, in full, for an admin to read before deciding about it.
+ *
+ * Exported because the three moderation queues need exactly the page a report already opened onto.
+ * Approving a submission and taking down a reported one are the same judgement made at two moments,
+ * so they are owed the same evidence — and a second query built for the queues would be the same
+ * SELECT with its own opinion about which fields matter.
+ */
+export async function eventTarget(eventId: number): Promise<ReportedEvent> {
   const { rows } = await pool.query<{
     id: number;
     slug: string;

@@ -7,6 +7,7 @@ import { useMemo, useRef, useState } from "react";
 import { MovieEvent } from "../types";
 import Section, { BAND, SectionHead } from "./Section";
 import { isUnbookable, PlainCard, RuledCard, statusMeta } from "./EventCards";
+import { sectionOfCategory } from "../services/eventSections";
 
 interface EventGridProps {
   events: MovieEvent[];
@@ -141,6 +142,25 @@ export default function EventGrid({
         ? events.slice((current - 1) * pageSize, current * pageSize)
         : events.slice(0, pageSize),
     [events, catalog, current, pageSize],
+  );
+
+  /*
+   * Is this listing nothing but film?
+   *
+   * Posters get the frame they were drawn for, but only when every card on screen is one. Deciding
+   * per card would make a mixed catalogue ragged — one portrait card in a row of stills stretches
+   * that whole row to poster height and leaves the rest floating in it — so the shape is a property
+   * of the listing, not of the event. Filter to Phim and the grid turns; browse everything and it
+   * stays as it was.
+   *
+   * `sectionOfCategory` does the matching, so an admin-created category called "Điện ảnh" with a
+   * generated code counts as film exactly as the landing band counts it.
+   */
+  const allFilm = useMemo(
+    () =>
+      visible.length > 0 &&
+      visible.every((evt) => sectionOfCategory(evt.category, evt.categoryLabel) === "movie"),
+    [visible],
   );
 
   const goToPage = (next: number) => {
@@ -278,13 +298,20 @@ export default function EventGrid({
              */
             <div
               className={`grid grid-flow-dense grid-cols-1 gap-x-10 gap-y-14 sm:grid-cols-2 ${
-                sidebar ? "lg:grid-cols-3" : "lg:grid-cols-4"
+                allFilm
+                  ? sidebar
+                    ? "lg:grid-cols-4"
+                    : "lg:grid-cols-5"
+                  : sidebar
+                    ? "lg:grid-cols-3"
+                    : "lg:grid-cols-4"
               }`}
             >
               {visible.map((evt) => (
                 <PlainCard
                   key={evt.id}
                   evt={evt}
+                  portrait={allFilm}
                   isWishlisted={wishlistedIds.includes(evt.id)}
                   onSelectEvent={onSelectEvent}
                   onBookNow={onBookNow}
@@ -303,11 +330,16 @@ export default function EventGrid({
              * empty cells of a partial last row — four events in a three-column grid would show a
              * solid block of ink where the fifth and sixth cards are not.
              */
-            <div className="grid grid-flow-dense grid-cols-1 border-l border-t border-beige-kem/45 sm:grid-cols-2 lg:grid-cols-4">
+            <div
+              className={`grid grid-flow-dense grid-cols-1 border-l border-t border-beige-kem/45 sm:grid-cols-2 ${
+                allFilm ? "lg:grid-cols-5" : "lg:grid-cols-4"
+              }`}
+            >
               {visible.map((evt) => (
                 <RuledCard
                   key={evt.id}
                   evt={evt}
+                  portrait={allFilm}
                   isActiveHero={selectedEvent?.id === evt.id}
                   isWishlisted={wishlistedIds.includes(evt.id)}
                   onSelectEvent={onSelectEvent}

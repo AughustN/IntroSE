@@ -122,7 +122,7 @@ export default function QrCameraScan({ onDetect, onError, onClose }: Props) {
   const active = state === "starting" || state === "scanning";
 
   return (
-    <div className="mt-3 space-y-3 rounded-xl border-2 border-beige-kem p-4">
+    <div className="mt-3 space-y-3 border-2 border-beige-kem p-4">
       <video
         ref={videoRef}
         muted
@@ -130,7 +130,7 @@ export default function QrCameraScan({ onDetect, onError, onClose }: Props) {
         autoPlay
         className={
           active
-            ? "aspect-video w-full max-w-xs rounded-xl border border-beige-kem/40 bg-black object-cover"
+            ? "aspect-video w-full max-w-xs border border-beige-kem/40 bg-black object-cover"
             : "hidden"
         }
       />
@@ -139,7 +139,7 @@ export default function QrCameraScan({ onDetect, onError, onClose }: Props) {
         <button
           type="button"
           onClick={() => void start()}
-          className="rounded-xl bg-burgundy px-4 py-2.5 text-body font-black text-white transition hover:brightness-95"
+          className="bg-burgundy px-4 py-2.5 text-body font-black text-white transition hover:brightness-95"
         >
           Quét bằng camera
         </button>
@@ -153,7 +153,7 @@ export default function QrCameraScan({ onDetect, onError, onClose }: Props) {
           <button
             type="button"
             onClick={stop}
-            className="rounded-xl border-2 border-beige-kem px-3 py-2 text-eyebrow font-bold text-beige-kem/80 transition"
+            className="border-2 border-beige-kem px-3 py-2 text-eyebrow font-bold text-beige-kem/80 transition"
           >
             Dừng
           </button>

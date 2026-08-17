@@ -139,12 +139,12 @@ export default function CategoriesScreen() {
                   <p className="font-bold text-beige-kem">
                     {category.labelVi}
                     {category.labelEn && (
-                      <span className="ml-2 font-meta text-meta text-ink-soft">
+                      <span className="ml-2 font-meta text-eyebrow text-ink-soft">
                         ({category.labelEn})
                       </span>
                     )}
                   </p>
-                  <p className="font-meta text-meta text-ink-soft">{category.code}</p>
+                  <p className="font-meta text-eyebrow text-ink-soft">{category.code}</p>
                 </div>
                 <div className="flex gap-2">
                   <button

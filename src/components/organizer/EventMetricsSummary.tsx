@@ -24,7 +24,7 @@ export const EventMetricsSummary: React.FC<EventMetricsSummaryProps> = ({ metric
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <div className="space-y-2 rounded-xl border border-beige-kem/25 bg-surface-2 p-5">
+      <div className="space-y-2 border border-beige-kem/25 bg-surface-2 p-5">
         <div className="flex items-center justify-between font-meta text-meta text-ink-soft">
           <span>Vé đã bán</span>
           <span aria-hidden>🎟️</span>
@@ -36,9 +36,9 @@ export const EventMetricsSummary: React.FC<EventMetricsSummaryProps> = ({ metric
           </span>
         </div>
         {/* The track is the ink at low opacity, so the bar keeps its contrast in both themes. */}
-        <div className="h-1.5 w-full overflow-hidden rounded-full bg-beige-kem/15">
+        <div className="h-1.5 w-full overflow-hidden bg-beige-kem/15">
           <div
-            className="h-full rounded-full bg-cam-dat transition-all duration-300"
+            className="h-full bg-cam-dat transition-all duration-300"
             style={{ width: `${selloutPercentage}%` }}
           />
         </div>
@@ -47,7 +47,7 @@ export const EventMetricsSummary: React.FC<EventMetricsSummaryProps> = ({ metric
         </div>
       </div>
 
-      <div className="space-y-2 rounded-xl border border-beige-kem/25 bg-surface-2 p-5">
+      <div className="space-y-2 border border-beige-kem/25 bg-surface-2 p-5">
         <div className="flex items-center justify-between font-meta text-meta text-ink-soft">
           <span>Vé còn lại</span>
           <span aria-hidden>📦</span>
@@ -58,7 +58,7 @@ export const EventMetricsSummary: React.FC<EventMetricsSummaryProps> = ({ metric
         <p className="font-meta text-meta text-ink-soft">Sức chứa khả dụng cho sự kiện này.</p>
       </div>
 
-      <div className="space-y-2 rounded-xl border border-beige-kem/25 bg-surface-2 p-5">
+      <div className="space-y-2 border border-beige-kem/25 bg-surface-2 p-5">
         <div className="flex items-center justify-between font-meta text-meta text-ink-soft">
           <span>Tổng doanh thu</span>
           <span aria-hidden>💰</span>
@@ -73,7 +73,7 @@ export const EventMetricsSummary: React.FC<EventMetricsSummaryProps> = ({ metric
         </p>
       </div>
 
-      <div className="space-y-2 rounded-xl border border-beige-kem/25 bg-surface-2 p-5">
+      <div className="space-y-2 border border-beige-kem/25 bg-surface-2 p-5">
         <div className="flex items-center justify-between font-meta text-meta text-ink-soft">
           <span>Tỷ lệ lấp đầy</span>
           <span aria-hidden>📊</span>

@@ -44,7 +44,8 @@ export default function OrganizerNav({ current }: { current: string }) {
             key={s.path}
             onClick={() => navigate(s.path)}
             aria-current={active ? "page" : undefined}
-            className={`border-2 px-3 py-1.5 text-eyebrow font-bold transition ${ active
+            className={`border-2 px-3 py-1.5 text-eyebrow font-bold transition ${
+              active
                 ? "border-beige-kem bg-beige-kem/10 text-beige-kem"
                 : "border-beige-kem/40 text-beige-kem/65 hover:border-beige-kem hover:text-beige-kem"
             }`}

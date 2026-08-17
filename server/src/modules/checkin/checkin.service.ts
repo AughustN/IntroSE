@@ -1,5 +1,11 @@
-import type { AttendeeList, AttendeeRow, CheckinResult } from "@shared/admin/types.js";
+import type {
+  AttendeeList,
+  AttendeeRow,
+  AttendeeShowtime,
+  CheckinResult,
+} from "@shared/admin/types.js";
 import { pool, withTransaction } from "../../db/pool.js";
+import { likePattern } from "../../db/like.js";
 import { err } from "../../http.js";
 
 /*
@@ -126,16 +132,40 @@ export async function checkIn(actor: Actor, barcode: string): Promise<CheckinRes
 }
 
 /**
+ * How the caller wants the door list narrowed.
+ *
+ * `limit: null` means "every row", which only the CSV export asks for. Everything with a screen
+ * behind it passes a page.
+ */
+export interface AttendeeFilter {
+  showtimeId?: number;
+  /** Matched against buyer name, buyer email and order code. */
+  query?: string;
+  status?: "valid" | "checked_in" | "void";
+  limit: number | null;
+  offset: number;
+}
+
+/**
  * Who is coming, and who has arrived (UC-29).
  *
  * Void tickets stay in the list rather than being filtered out: a cancelled seat is part of the
  * story of an event, and a door list that silently drops it leaves staff unable to explain why the
  * numbers do not add up.
+ *
+ * **The list is paged; the counts are not.** A sold-out arena is tens of thousands of tickets, and
+ * this used to answer with all of them in one array — then derive the KPI figures by counting that
+ * array in JavaScript. Paging alone would therefore have turned "Tổng vé" into "vé trên trang này".
+ * So the totals come from their own aggregate over the whole event, and only the rows are windowed.
+ *
+ * The counts deliberately ignore `query` and `status` and honour only `showtimeId`: they answer
+ * "how full is this door", which is a fact about the event, not about what the reader typed. The
+ * matching row count travels separately as `total`.
  */
 export async function attendees(
   actor: Actor,
   eventId: number,
-  showtimeId?: number,
+  filter: AttendeeFilter,
 ): Promise<AttendeeList> {
   const owner = await pool.query<{ user_id: number; title: string }>(
     `SELECT org.user_id, e.title FROM events e JOIN organizers org ON org.id = e.organizer_id
@@ -147,6 +177,36 @@ export async function attendees(
   if (!actor.isAdmin && event.user_id !== actor.userId)
     throw err.forbidden("not_owner", "Bạn không sở hữu sự kiện này.");
 
+  /*
+   * One FROM, three readers: the page, the matching-row count, and the event-wide totals. Written
+   * once so a ticket can never be counted by one and missed by another.
+   *
+   * `qr_status = 'unused'` is what the API calls `valid`, so the status filter translates rather
+   * than passing the caller's word through to the column.
+   */
+  const FROM = `
+       FROM tickets t
+       JOIN orders o ON o.id = t.order_id
+       JOIN reservation_items ri ON ri.id = t.reservation_item_id
+       JOIN ticket_tiers tt ON tt.id = ri.ticket_tier_id
+       LEFT JOIN showtime_seats ss ON ss.id = ri.showtime_seat_id
+       LEFT JOIN seats se ON se.id = ss.seat_id
+       JOIN reservations r ON r.id = o.reservation_id
+       JOIN showtimes s ON s.id = r.showtime_id
+      WHERE s.event_id = $1 AND ($2::bigint IS NULL OR s.id = $2)
+        AND o.payment_status IN ('paid', 'partially_refunded')`;
+
+  const scope = [eventId, filter.showtimeId ?? null];
+
+  const narrowed = `${FROM}
+        AND ($3::text IS NULL OR o.customer_name ILIKE $3
+             OR o.customer_email ILIKE $3
+             OR o.order_code ILIKE $3)
+        AND ($4::text IS NULL OR t.qr_status = (CASE WHEN $4 = 'valid' THEN 'unused' ELSE $4 END))`;
+
+  const narrowedParams = [...scope, likePattern(filter.query), filter.status ?? null];
+
+  // `LIMIT NULL` is "no limit" in Postgres, so the CSV path needs no second statement.
   const { rows } = await pool.query<{
     ticket_id: number;
     barcode: string;
@@ -162,18 +222,23 @@ export async function attendees(
             o.customer_email AS buyer_email, tt.label AS tier,
             CASE WHEN ss.id IS NULL THEN NULL ELSE se.row_label || se.seat_number::text END AS seat,
             t.qr_status, t.checked_in_at
-       FROM tickets t
-       JOIN orders o ON o.id = t.order_id
-       JOIN reservation_items ri ON ri.id = t.reservation_item_id
-       JOIN ticket_tiers tt ON tt.id = ri.ticket_tier_id
-       LEFT JOIN showtime_seats ss ON ss.id = ri.showtime_seat_id
-       LEFT JOIN seats se ON se.id = ss.seat_id
-       JOIN reservations r ON r.id = o.reservation_id
-       JOIN showtimes s ON s.id = r.showtime_id
-      WHERE s.event_id = $1 AND ($2::bigint IS NULL OR s.id = $2)
-        AND o.payment_status IN ('paid', 'partially_refunded')
-      ORDER BY o.customer_name, t.id`,
-    [eventId, showtimeId ?? null],
+     ${narrowed}
+      ORDER BY o.customer_name, t.id
+      LIMIT $5 OFFSET $6`,
+    [...narrowedParams, filter.limit, filter.offset],
+  );
+
+  const matching = await pool.query<{ total: number }>(
+    `SELECT count(*)::int AS total ${narrowed}`,
+    narrowedParams,
+  );
+
+  const totals = await pool.query<{ total: number; checked_in: number; void: number }>(
+    `SELECT count(*)::int AS total,
+            count(*) FILTER (WHERE t.qr_status = 'checked_in')::int AS checked_in,
+            count(*) FILTER (WHERE t.qr_status = 'void')::int AS void
+     ${FROM}`,
+    scope,
   );
 
   const list: AttendeeRow[] = rows.map((row) => ({
@@ -191,14 +256,64 @@ export async function attendees(
   return {
     eventId,
     eventTitle: event.title,
-    showtimeId: showtimeId ?? null,
+    showtimeId: filter.showtimeId ?? null,
     rows: list,
+    total: matching.rows[0]?.total ?? 0,
     counts: {
-      total: list.length,
-      checkedIn: list.filter((row) => row.status === "checked_in").length,
-      void: list.filter((row) => row.status === "void").length,
+      total: totals.rows[0]?.total ?? 0,
+      checkedIn: totals.rows[0]?.checked_in ?? 0,
+      void: totals.rows[0]?.void ?? 0,
     },
   };
+}
+
+/**
+ * The event's showtimes, for the picker.
+ *
+ * A door list is per-showtime in reality: a three-night run shown as one merged list tells the
+ * person on the door nothing about tonight. The count rides along so the picker can say how big
+ * each night is before it is chosen.
+ */
+export async function attendeeShowtimes(
+  actor: Actor,
+  eventId: number,
+): Promise<AttendeeShowtime[]> {
+  const owner = await pool.query<{ user_id: number }>(
+    `SELECT org.user_id FROM events e JOIN organizers org ON org.id = e.organizer_id
+      WHERE e.id = $1`,
+    [eventId],
+  );
+  const event = owner.rows[0];
+  if (!event) throw err.notFound("not_found", "Không tìm thấy sự kiện.");
+  if (!actor.isAdmin && event.user_id !== actor.userId)
+    throw err.forbidden("not_owner", "Bạn không sở hữu sự kiện này.");
+
+  const { rows } = await pool.query<{
+    id: number;
+    starts_at: Date;
+    venue: string;
+    tickets: number;
+  }>(
+    `SELECT s.id, s.starts_at, v.name AS venue,
+            (SELECT count(*)::int
+               FROM tickets t
+               JOIN orders o ON o.id = t.order_id
+               JOIN reservations r ON r.id = o.reservation_id
+              WHERE r.showtime_id = s.id
+                AND o.payment_status IN ('paid', 'partially_refunded')) AS tickets
+       FROM showtimes s
+       JOIN venues v ON v.id = s.venue_id
+      WHERE s.event_id = $1
+      ORDER BY s.starts_at`,
+    [eventId],
+  );
+
+  return rows.map((row) => ({
+    id: row.id,
+    startsAt: row.starts_at.toISOString(),
+    venue: row.venue,
+    tickets: row.tickets,
+  }));
 }
 
 /**

@@ -18,7 +18,7 @@
 
 import { MovieEvent } from "../types";
 import { RuledCard } from "./EventCards";
-import Section, { BAND, SectionHead } from "./Section";
+import Section, { BAND, FilmRail, SectionHead } from "./Section";
 
 interface CategoryRowProps {
   title: string;
@@ -37,6 +37,11 @@ interface CategoryRowProps {
   onBookNow: (event: MovieEvent) => void;
   wishlistedIds: string[];
   onToggleWishlist: (eventId: string) => void;
+  /**
+   * Draw this band as a reel: perforated rails top and bottom, a centred head, and portrait cards.
+   * Set for the cinema band, whose artwork is posters rather than stills.
+   */
+  film?: boolean;
 }
 
 export default function CategoryRow({
@@ -50,6 +55,7 @@ export default function CategoryRow({
   onBookNow,
   wishlistedIds,
   onToggleWishlist,
+  film = false,
 }: CategoryRowProps) {
   return (
     /*
@@ -58,11 +64,18 @@ export default function CategoryRow({
       five titles floating between five grids.
     */
     <Section density="row" divided={false} bleed className="space-y-5">
+      {film && <FilmRail />}
+
       <div className={BAND}>
         <SectionHead
-          // A stack of bands, so no rules: the burgundy stroke down the left of the title is what
-          // says a new band has started. See `SectionHead`.
-          variant="bar"
+          /*
+            A stack of bands, so no rules: the burgundy stroke down the left of the title is what
+            says a new band has started. See `SectionHead`.
+
+            The cinema band is the exception. It is held between two rails, so it is already marked
+            off from its neighbours, and the head centres inside that frame instead.
+          */
+          variant={film ? "reel" : "bar"}
           eyebrow={eyebrow}
           title={title}
           actionLabel={onViewMore ? "Xem thêm" : undefined}
@@ -86,11 +99,18 @@ export default function CategoryRow({
             and right edge and the container supplies the missing top and left, so neighbours share
             a single rule the way a printed listing page is ruled.
           */
-          <div className="grid grid-flow-dense grid-cols-1 border-l border-t border-beige-kem/45 sm:grid-cols-2 lg:grid-cols-4">
+          <div
+            className={`grid grid-flow-dense grid-cols-1 border-l border-t border-beige-kem/45 sm:grid-cols-2 ${
+              // Posters are half the width of a still at the same height, so more of them fit
+              // across before the row starts to tower over the bands around it.
+              film ? "lg:grid-cols-5" : "lg:grid-cols-4"
+            }`}
+          >
             {events.map((evt) => (
               <RuledCard
                 key={evt.id}
                 evt={evt}
+                portrait={film}
                 isActiveHero={selectedEvent?.id === evt.id}
                 isWishlisted={wishlistedIds.includes(evt.id)}
                 onSelectEvent={onSelectEvent}
@@ -101,6 +121,8 @@ export default function CategoryRow({
           </div>
         )}
       </div>
+
+      {film && <FilmRail />}
     </Section>
   );
 }

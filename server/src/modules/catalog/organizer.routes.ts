@@ -257,10 +257,12 @@ organizerRouter.get(
     const showtimeId = req.query.showtimeId === undefined ? undefined : Number(req.query.showtimeId);
     if (showtimeId !== undefined && !Number.isInteger(showtimeId))
       throw err.badRequest("validation_failed", "Mã suất diễn không hợp lệ.");
+    // Unpaged here: this route has always answered with the whole list and its only consumer is the
+    // organizer's own door screen. Widening it to pages is a change to that screen, not to this one.
     const list = await attendees(
       { userId: req.auth!.userId, isAdmin: req.auth!.user.isAdmin },
       eventId,
-      showtimeId,
+      { showtimeId, limit: null, offset: 0 },
     );
     if (req.query.format !== "csv") {
       res.json(list);

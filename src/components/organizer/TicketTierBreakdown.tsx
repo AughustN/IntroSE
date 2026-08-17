@@ -14,17 +14,19 @@ export const TicketTierBreakdown: React.FC<TicketTierBreakdownProps> = ({
   onDeleteOrArchive,
   onEditTier,
   onAddTier,
-  isReadonly = false
+  isReadonly = false,
 }) => {
   const formatVND = (amount: number) => {
     return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(amount);
   };
 
   return (
-    <div className="space-y-4 rounded-xl border border-beige-kem/25 bg-surface-2 p-6">
+    <div className="space-y-4 border border-beige-kem/25 bg-surface-2 p-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="font-display text-title-s font-black text-beige-kem">Danh Sách Hạng Vé & Sức Chứa</h2>
+          <h2 className="font-display text-title-s font-black text-beige-kem">
+            Danh Sách Hạng Vé & Sức Chứa
+          </h2>
           <p className="font-meta text-meta text-ink-soft">
             Quản lý từng hạng vé, giá bán (VND) và theo dõi số lượng vé bán ra.
           </p>
@@ -33,7 +35,7 @@ export const TicketTierBreakdown: React.FC<TicketTierBreakdownProps> = ({
         {!isReadonly && (
           <button
             onClick={onAddTier}
-            className="rounded-lg border border-beige-kem/40 px-3 py-1.5 font-meta text-meta font-bold text-beige-kem transition-colors hover:bg-bubblegum/20"
+            className="border border-beige-kem/40 px-3 py-1.5 font-meta text-meta font-bold text-beige-kem transition-colors hover:bg-bubblegum/20"
           >
             + Thêm Hạng Vé
           </button>
@@ -61,24 +63,31 @@ export const TicketTierBreakdown: React.FC<TicketTierBreakdownProps> = ({
               const isArchived = tier.isArchived;
 
               return (
-                <tr key={tier.id} className={isArchived ? "bg-beige-kem/5 text-ink-soft" : "hover:bg-bubblegum/15"}>
+                <tr
+                  key={tier.id}
+                  className={isArchived ? "bg-beige-kem/5 text-ink-soft" : "hover:bg-bubblegum/15"}
+                >
                   <td className="px-4 py-3 font-bold text-beige-kem">
                     {tier.label}
                     {tier.description && (
-                      <span className="block font-meta text-meta font-normal text-ink-soft">{tier.description}</span>
+                      <span className="block font-meta text-meta font-normal text-ink-soft">
+                        {tier.description}
+                      </span>
                     )}
                   </td>
-                  <td className="px-4 py-3 font-bold tabular-nums text-beige-kem">{formatVND(tier.price)}</td>
+                  <td className="px-4 py-3 font-bold tabular-nums text-beige-kem">
+                    {formatVND(tier.price)}
+                  </td>
                   <td className="py-3 px-4 font-medium">{cap}</td>
                   <td className="px-4 py-3 font-bold tabular-nums text-burgundy-ink">{sold}</td>
                   <td className="py-3 px-4">{remaining}</td>
                   <td className="py-3 px-4">
                     {isArchived ? (
-                      <span className="inline-flex items-center rounded border border-beige-kem/30 px-2 py-0.5 font-meta text-meta text-ink-soft">
+                      <span className="inline-flex items-center border border-beige-kem/30 px-2 py-0.5 font-meta text-meta text-ink-soft">
                         Đã Lưu Trữ
                       </span>
                     ) : (
-                      <span className="inline-flex items-center rounded border border-la-co bg-la-co/25 px-2 py-0.5 font-meta text-meta text-beige-kem">
+                      <span className="inline-flex items-center border border-la-co bg-la-co/25 px-2 py-0.5 font-meta text-meta text-beige-kem">
                         ● Hoạt động
                       </span>
                     )}

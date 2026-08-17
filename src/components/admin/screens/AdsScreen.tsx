@@ -8,6 +8,7 @@ import { formatVnd } from "../../../services/currency";
 import { adminClient } from "../../../services/adminClient";
 import {
   ACTION_GHOST,
+  Delta,
   EmptyState,
   Kpi,
   KpiStrip,
@@ -21,14 +22,6 @@ import {
 } from "../adminUi";
 import { PackageSalesChart, RevenueAreaChart } from "../AdminCharts";
 import { useAsync } from "../useAsync";
-
-/** How much a figure moved against the previous window, in the words a reader uses. */
-function delta(now: number, before: number): string {
-  if (before === 0) return now === 0 ? "không đổi" : "kỳ trước chưa có";
-  const change = Math.round(((now - before) / before) * 100);
-  if (change === 0) return "không đổi";
-  return `${change > 0 ? "▲" : "▼"} ${Math.abs(change)}% so với 30 ngày trước`;
-}
 
 const day = (iso: string) => new Date(iso).toLocaleDateString("vi-VN");
 
@@ -66,20 +59,24 @@ export default function AdsScreen() {
             <Kpi
               label="Doanh thu quảng cáo 30 ngày"
               value={formatVnd(data.revenue30d)}
-              note={delta(data.revenue30d, data.revenuePrev30d)}
+              tone="money"
+              note={<Delta now={data.revenue30d} before={data.revenuePrev30d} />}
             />
             <Kpi
               label="Gói đã bán"
               value={data.purchases30d.toLocaleString("vi-VN")}
+              tone="volume"
               note="Trong 30 ngày gần nhất"
             />
             <Kpi
               label="Chiến dịch đang chạy"
               value={data.liveCampaigns.toLocaleString("vi-VN")}
+              tone="rate"
               note="Đang hiển thị trên trang chủ"
             />
             <Kpi
               label="Giá trị trung bình"
+              tone="money"
               value={
                 data.purchases30d === 0
                   ? "—"
@@ -116,7 +113,7 @@ export default function AdsScreen() {
               <EmptyState text="Chưa có ban tổ chức nào mua gói quảng cáo." />
             ) : (
               <TableScroll>
-                <table className="w-full min-w-[860px] text-left text-body">
+                <table className="w-full min-w-[860px] text-left text-meta">
                   <thead className="label-eyebrow border-b border-beige-kem/25 text-ink-soft">
                     <tr>
                       <Th>Sự kiện</Th>

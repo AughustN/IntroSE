@@ -15,6 +15,7 @@ import {
   PANEL,
   ScreenHead,
 } from "../adminUi";
+import Select from "../../Select";
 import { useAsync } from "../useAsync";
 
 /**
@@ -40,9 +41,25 @@ export default function FeaturedScreen() {
     setDraft(data.map((row) => ({ eventId: row.eventId, displayOrder: row.displayOrder })));
   }, [data]);
 
+  /*
+   * Everything the server would accept: approved, on sale, organizer in good standing — the same
+   * predicate `replaceFeatured` re-checks inside its transaction.
+   */
+  const eligible = useAsync(() => adminClient.queue(), "featured-eligible");
+  const candidates = (eligible.data?.approvedEvents ?? []).filter(
+    (event) => event.moderation === "approved" && event.status === "on_sale",
+  );
+
+  /** Titles from either source, so a freshly added row reads as itself and not as an id. */
   const titleOf = (eventId: number) =>
     (data ?? []).find((row: FeaturedEvent) => row.eventId === eventId)?.title ??
+    candidates.find((event) => event.id === eventId)?.title ??
     `Sự kiện #${eventId}`;
+
+  // Already on the band, so not offered twice.
+  const addable = candidates
+    .filter((event) => !draft.some((row) => row.eventId === event.id))
+    .map((event) => ({ value: String(event.id), label: `${event.title} · /${event.slug}` }));
 
   const move = (index: number, direction: -1 | 1) => {
     const next = [...draft];
@@ -89,19 +106,26 @@ export default function FeaturedScreen() {
       {failure && <Notice tone="error">{failure}</Notice>}
       {notice && !dirty && <Notice tone="ok">{notice}</Notice>}
 
+      {/*
+        Chosen from a list, not typed as a number.
+        The endpoint only accepts events that are on sale, approved, and whose organizer is approved
+        — so a typed id was a guess that the admin found out about on save, and the row until then
+        read "Sự kiện #418". The picker offers exactly the events the server would accept.
+      */}
       <div className={`${PANEL} flex flex-wrap items-end gap-3`}>
-        <label className="space-y-1">
-          <span className="label-eyebrow block text-ink-soft">Thêm theo mã sự kiện</span>
-          <input
-            type="number"
+        <div className="min-w-[320px] flex-1">
+          <Select
+            label="Thêm sự kiện"
             value={newId}
-            onChange={(event) => setNewId(event.target.value)}
-            placeholder="Event ID"
-            className={`${FIELD} w-40`}
+            options={addable}
+            placeholder={eligible.loading ? "Đang tải sự kiện…" : "— Chọn sự kiện đủ điều kiện —"}
+            onChange={setNewId}
+            triggerClassName={`${FIELD} w-full justify-between`}
           />
-        </label>
+        </div>
         <button
           className={ACTION_GHOST}
+          disabled={!newId}
           onClick={() => {
             const id = Number(newId);
             if (!Number.isInteger(id) || id < 1) return;
@@ -116,6 +140,11 @@ export default function FeaturedScreen() {
         >
           Thêm
         </button>
+        {addable.length === 0 && !eligible.loading && (
+          <span className="font-meta text-meta text-ink-soft">
+            Không còn sự kiện nào đủ điều kiện để thêm.
+          </span>
+        )}
       </div>
 
       {draft.length === 0 && !loading ? (

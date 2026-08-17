@@ -156,7 +156,7 @@ export default function AdPackagesPanel() {
         {packages.map((pkg) => (
           <div
             key={pkg.id}
-            className="flex flex-col gap-4 rounded-2xl border-2 border-beige-kem/25 bg-surface-2 p-5 transition hover:border-beige-kem/60"
+            className="flex flex-col gap-4 border-2 border-beige-kem/25 bg-surface-2 p-5 transition hover:border-beige-kem/60"
           >
             <div>
               <h3 className="font-display text-base font-black text-beige-kem">{pkg.name}</h3>
@@ -190,7 +190,7 @@ export default function AdPackagesPanel() {
                   setEventId("");
                   setNotice(null);
                 }}
-                className="w-full rounded-xl bg-burgundy px-4 py-2.5 text-xs font-bold text-white transition hover:bg-burgundy/85"
+                className="w-full bg-burgundy px-4 py-2.5 text-xs font-bold text-white transition hover:bg-burgundy/85"
               >
                 Mua gói này
               </button>
@@ -200,7 +200,7 @@ export default function AdPackagesPanel() {
       </div>
 
       {choosing && (
-        <div className="space-y-3 rounded-2xl border-2 border-beige-kem/40 bg-surface-2 p-5">
+        <div className="space-y-3 border-2 border-beige-kem/40 bg-surface-2 p-5">
           <h3 className="font-display text-sm font-black text-beige-kem">
             Chọn sự kiện cho {choosing.name}
           </h3>
@@ -213,7 +213,7 @@ export default function AdPackagesPanel() {
               <select
                 value={eventId}
                 onChange={(event) => setEventId(event.target.value)}
-                className="min-w-[16rem] rounded-xl border-2 border-beige-kem/30 bg-xanh-pho px-3 py-2 text-xs text-beige-kem"
+                className="min-w-[16rem] border-2 border-beige-kem/30 bg-xanh-pho px-3 py-2 text-xs text-beige-kem"
               >
                 <option value="">— Chọn sự kiện —</option>
                 {choices.map((event) => (
@@ -226,7 +226,7 @@ export default function AdPackagesPanel() {
                 type="button"
                 disabled={!eventId || busy}
                 onClick={() => void buy()}
-                className="rounded-xl bg-burgundy px-4 py-2 text-xs font-bold text-white transition hover:bg-burgundy/85 disabled:opacity-40"
+                className="bg-burgundy px-4 py-2 text-xs font-bold text-white transition hover:bg-burgundy/85 disabled:opacity-40"
               >
                 {busy ? "Đang xử lý…" : `Thanh toán ${formatVnd(choosing.price)}`}
               </button>
@@ -251,12 +251,13 @@ export default function AdPackagesPanel() {
             {purchases.map((row) => (
               <div
                 key={row.id}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-beige-kem/20 bg-surface-2 px-4 py-3"
+                className="flex flex-wrap items-center justify-between gap-3 border border-beige-kem/20 bg-surface-2 px-4 py-3"
               >
                 <div className="min-w-0">
                   <p className="text-sm font-bold text-beige-kem">{row.eventTitle}</p>
                   <p className="mt-0.5 text-xs text-ink-soft">
-                    {row.packageName} · {row.placements.map((s) => AD_PLACEMENT_LABELS[s]).join(" · ")}
+                    {row.packageName} ·{" "}
+                    {row.placements.map((s) => AD_PLACEMENT_LABELS[s]).join(" · ")}
                   </p>
                 </div>
                 <div className="flex items-center gap-3 text-xs">
@@ -265,7 +266,7 @@ export default function AdPackagesPanel() {
                   </span>
                   <span className="tabular-nums text-beige-kem">{formatVnd(row.price)}</span>
                   <span
-                    className={`rounded-full px-2.5 py-1 font-bold ${
+                    className={` px-2.5 py-1 font-bold ${
                       row.status === "cancelled"
                         ? "bg-burgundy text-white"
                         : row.live
@@ -273,11 +274,7 @@ export default function AdPackagesPanel() {
                           : "border border-beige-kem/30 text-ink-soft"
                     }`}
                   >
-                    {row.status === "cancelled"
-                      ? "Đã huỷ"
-                      : row.live
-                        ? "Đang chạy"
-                        : "Đã kết thúc"}
+                    {row.status === "cancelled" ? "Đã huỷ" : row.live ? "Đang chạy" : "Đã kết thúc"}
                   </span>
                 </div>
               </div>

@@ -19,6 +19,7 @@ type Row = {
   slug: string;
   title: string;
   image_url: string | null;
+  trailer_url: string | null;
   category: string;
   category_label: string;
   earliest_showtime: string | null;
@@ -33,6 +34,7 @@ const toCard = (r: Row): EventCard => ({
   slug: r.slug,
   title: r.title,
   imageUrl: r.image_url,
+  trailerUrl: r.trailer_url,
   category: r.category,
   categoryLabel: r.category_label,
   city: r.city,
@@ -100,7 +102,7 @@ export async function listEvents(f: EventFilters, db: Db = pool): Promise<{ even
   );
 
   const rows = await db.query<Row>(
-    `SELECT e.id, e.slug, e.title, e.image_url, ec.code AS category, ec.label_vi AS category_label,
+    `SELECT e.id, e.slug, e.title, e.image_url, e.trailer_url, ec.code AS category, ec.label_vi AS category_label,
             ${EARLIEST} AS earliest_showtime, ${START_PRICE} AS starting_price, ${CITY} AS city,
             ${HAS_UPCOMING} AS has_upcoming, ${HAS_AVAILABLE} AS has_available, ${rank} AS rank
        FROM events e ${VISIBLE_JOIN} JOIN event_categories ec ON ec.id = e.category_id
@@ -116,7 +118,7 @@ export async function listEvents(f: EventFilters, db: Db = pool): Promise<{ even
 /** Public homepage curation. Hidden events disappear immediately through the live visibility predicate. */
 export async function listFeaturedEvents(db: Db = pool): Promise<EventCard[]> {
   const { rows } = await db.query<Row>(
-    `SELECT e.id, e.slug, e.title, e.image_url, ec.code AS category, ec.label_vi AS category_label,
+    `SELECT e.id, e.slug, e.title, e.image_url, e.trailer_url, ec.code AS category, ec.label_vi AS category_label,
             ${EARLIEST} AS earliest_showtime, ${START_PRICE} AS starting_price, ${CITY} AS city,
             ${HAS_UPCOMING} AS has_upcoming, ${HAS_AVAILABLE} AS has_available
        FROM featured_events f
@@ -167,7 +169,7 @@ export async function getEventDetail(slug: string, db: Db = pool): Promise<Event
   const tiers: Tier[] = tiersRes.rows.map((t, i) => ({ id: i, label: t.label, price: Number(t.price), remaining: null }));
 
   const relatedRes = await db.query<Row>(
-    `SELECT e.id, e.slug, e.title, e.image_url, ec.code AS category, ec.label_vi AS category_label,
+    `SELECT e.id, e.slug, e.title, e.image_url, e.trailer_url, ec.code AS category, ec.label_vi AS category_label,
             ${EARLIEST} AS earliest_showtime, ${START_PRICE} AS starting_price, ${CITY} AS city,
             ${HAS_UPCOMING} AS has_upcoming, ${HAS_AVAILABLE} AS has_available
        FROM events e ${VISIBLE_JOIN} JOIN event_categories ec ON ec.id = e.category_id

@@ -4,22 +4,20 @@
  */
 
 import { useState } from "react";
-import type { ReportedEvent, ReportedReview } from "@shared/admin/types.js";
-import { formatVnd } from "../../../services/currency";
+import type { ReportedReview } from "@shared/admin/types.js";
 import { adminClient } from "../../../services/adminClient";
 import {
   ACTION_GHOST,
   ACTION_PRIMARY,
   EmptyState,
   FIELD,
-  Kpi,
-  KpiStrip,
   Notice,
   PANEL,
   Pill,
   ScreenHead,
 } from "../adminUi";
 import { useAsync } from "../useAsync";
+import EventBody from "./EventPreview";
 
 type Decision = "flag" | "remove" | "dismiss";
 
@@ -120,7 +118,7 @@ export default function ReportDetail({
               </Pill>
             </div>
             <p className="text-body leading-7 text-beige-kem">“{data.reason}”</p>
-            <p className="font-meta text-meta text-ink-soft">
+            <p className="font-meta text-eyebrow text-ink-soft">
               {data.reporterEmail} · gửi ngày {data.createdAt.slice(0, 10)}
             </p>
             {data.resolutionNote && (
@@ -137,7 +135,7 @@ export default function ReportDetail({
                 {data.otherReports.map((other) => (
                   <div key={other.id} className="border-b border-beige-kem/15 pb-2">
                     <p className="text-body text-beige-kem">“{other.reason}”</p>
-                    <p className="font-meta text-meta text-ink-soft">
+                    <p className="font-meta text-eyebrow text-ink-soft">
                       {other.reporterEmail} · {other.createdAt.slice(0, 10)} · {other.status}
                     </p>
                   </div>
@@ -151,7 +149,7 @@ export default function ReportDetail({
               <p className="label-eyebrow text-ink-soft">Quyết định</p>
               {pending ? (
                 <>
-                  <p className="font-meta text-body text-ink-soft">{DECISION_EFFECT[pending]}</p>
+                  <p className="font-meta text-meta text-ink-soft">{DECISION_EFFECT[pending]}</p>
                   <div className="flex flex-wrap gap-2">
                     <input
                       autoFocus
@@ -208,85 +206,6 @@ export default function ReportDetail({
   );
 }
 
-/** The event, read-only: everything a reader sees, minus everything that sells. */
-function EventBody({ event }: { event: ReportedEvent }) {
-  const price =
-    event.priceFrom === null
-      ? "Chưa có hạng vé"
-      : event.priceFrom === event.priceTo
-        ? formatVnd(event.priceFrom)
-        : `${formatVnd(event.priceFrom)} – ${formatVnd(event.priceTo ?? event.priceFrom)}`;
-
-  return (
-    <div className="space-y-5">
-      <div className="grid gap-5 md:grid-cols-[240px_1fr]">
-        {event.imageUrl ? (
-          <img
-            src={event.imageUrl}
-            alt={event.title}
-            referrerPolicy="no-referrer"
-            className="h-[320px] w-full border border-beige-kem/25 object-cover md:h-[340px]"
-          />
-        ) : (
-          <div className="grid h-[320px] place-items-center border border-dashed border-beige-kem/30 font-meta text-body text-ink-soft">
-            Không có ảnh bìa
-          </div>
-        )}
-
-        <div className="min-w-0 space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Pill tone={event.moderationStatus === "approved" ? "neutral" : "warn"}>
-              {event.moderationStatus}
-            </Pill>
-            <Pill tone="neutral">{event.status}</Pill>
-            <Pill tone="neutral">{event.category}</Pill>
-            <Pill tone="neutral">{event.ageRestriction}</Pill>
-          </div>
-          <h3 className="font-display text-title-m font-black uppercase tracking-[0.03em] text-beige-kem">
-            {event.title}
-          </h3>
-          <p className="font-meta text-body text-ink-soft">
-            {event.organizer} · /{event.slug} · tạo ngày {event.createdAt.slice(0, 10)}
-          </p>
-          <p className="whitespace-pre-line text-body leading-7 text-beige-kem">
-            {event.description}
-          </p>
-          {event.reviewNote && (
-            <p className="border-l-2 border-cam-dat bg-cam-dat/15 px-4 py-3 font-meta text-body text-beige-kem">
-              Ghi chú kiểm duyệt trước đó: {event.reviewNote}
-            </p>
-          )}
-        </div>
-      </div>
-
-      <KpiStrip>
-        <Kpi label="Giá vé" value={price} />
-        <Kpi label="Vé đã bán" value={`${event.ticketsSold}`} />
-        <Kpi label="Số suất diễn" value={`${event.showtimes.length}`} />
-        <Kpi
-          label="Suất gần nhất"
-          value={
-            event.showtimes[0]
-              ? event.showtimes[0].startsAt.slice(0, 10).split("-").reverse().join("/")
-              : "—"
-          }
-        />
-      </KpiStrip>
-
-      {event.showtimes.length > 0 && (
-        <div className={`${PANEL} space-y-2`}>
-          <p className="label-eyebrow text-ink-soft">Suất diễn</p>
-          {event.showtimes.map((showtime) => (
-            <p key={showtime.id} className="font-meta text-body text-beige-kem">
-              {showtime.startsAt.slice(0, 16).replace("T", " ")} · {showtime.venue}, {showtime.city}
-            </p>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 /** The same page for a reported comment, so one route serves both kinds of report. */
 function ReviewBody({ review }: { review: ReportedReview }) {
   return (
@@ -300,7 +219,7 @@ function ReviewBody({ review }: { review: ReportedReview }) {
       <p className="text-body leading-7 text-beige-kem">
         {review.body ? `“${review.body}”` : "(chỉ chấm sao, không có lời)"}
       </p>
-      <p className="font-meta text-meta text-ink-soft">
+      <p className="font-meta text-eyebrow text-ink-soft">
         {review.authorName ?? "Tài khoản đã xoá"} · {review.createdAt.slice(0, 10)} · dưới sự kiện{" "}
         {review.eventTitle}
       </p>

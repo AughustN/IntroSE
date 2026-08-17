@@ -221,6 +221,29 @@ export interface AdminWalletTxRow {
 }
 
 /**
+ * The ledger, and what it sums to.
+ *
+ * `totals` is aggregated over the WHOLE ledger, not over `rows`. The console used to add up the two
+ * hundred transactions it had fetched and label the result "Tiền nạp vào" — so the tiles were a
+ * window presented as a total, and filtering by kind zeroed three of the four.
+ *
+ * `kind` narrows only the rows. The totals answer "what has moved through the platform", which is
+ * not a question about which slice the reader is currently looking at.
+ */
+export interface AdminWalletPage {
+  rows: AdminWalletTxRow[];
+  totals: {
+    topup: number;
+    purchase: number;
+    refund: number;
+    adPurchase: number;
+    adRefund: number;
+    /** Rows in the whole ledger, so the screen can say how much of it the page is showing. */
+    count: number;
+  };
+}
+
+/**
  * One reported comment, with everything needed to judge it in the row (UC-39 → UC-34).
  *
  * The moderation queue only ever returned *open* reports, so an admin could not see what had
@@ -303,6 +326,52 @@ export interface ReportedEvent {
   ticketsSold: number;
 }
 
+/**
+ * One organizer, in full, for an admin to read before approving or suspending them.
+ *
+ * The queue row carries a display name and a description — enough to tell two applications apart,
+ * not enough to judge either. What decides an application is who is behind it and what they have
+ * already put on the platform, so this adds the account, the application history and the events.
+ */
+export interface AdminOrganizerDetail {
+  id: number;
+  displayName: string;
+  description: string | null;
+  logoUrl: string | null;
+  status: string;
+  reviewNote: string | null;
+  appliedAt: string;
+  approvedAt: string | null;
+  /** The account behind the application. One user may hold several over time. */
+  ownerEmail: string;
+  ownerName: string | null;
+  ownerJoinedAt: string;
+  /**
+   * Every application this account has filed, newest first, this one included.
+   *
+   * A re-application after a rejection is the case this exists for: the admin about to approve it
+   * should be able to see what was said the first time without hunting the audit log.
+   */
+  history: Array<{
+    id: number;
+    status: string;
+    reviewNote: string | null;
+    appliedAt: string;
+  }>;
+  events: Array<{
+    id: number;
+    title: string;
+    slug: string;
+    status: string;
+    moderation: string;
+    createdAt: string;
+  }>;
+  eventCount: number;
+  ticketsSold: number;
+  /** Gross ticket money across their events — the organizer's own take, not the platform's cut. */
+  revenue: number;
+}
+
 /** The comment behind a report, with the event it sits under. */
 export interface ReportedReview {
   kind: "review";
@@ -353,11 +422,29 @@ export interface AttendeeRow {
   checkedInAt: string | null;
 }
 
+/** One night of a run, for the door list's showtime picker. */
+export interface AttendeeShowtime {
+  id: number;
+  startsAt: string;
+  venue: string;
+  /** Paid, unvoided tickets for this showtime — so the picker says how big each night is. */
+  tickets: number;
+}
+
 export interface AttendeeList {
   eventId: number;
   eventTitle: string;
   showtimeId: number | null;
+  /** One page of the list, not the whole event. */
   rows: AttendeeRow[];
+  /** How many rows match the current filters — what the pager counts. */
+  total: number;
+  /**
+   * Event-wide totals, unaffected by search and status.
+   *
+   * They answer "how full is this door", which is a fact about the event rather than about what the
+   * reader typed, so narrowing the table must not move them. Only the showtime filter applies.
+   */
   counts: { total: number; checkedIn: number; void: number };
 }
 

@@ -1,17 +1,20 @@
 import type {
   AdminAnalytics,
   AdminCategory,
+  AdminOrganizerDetail,
   AdminModerationQueue,
   AdminOrderPage,
   AdminOverview,
-  AdminWalletTxRow,
+  AdminWalletPage,
   AttendeeList,
+  AttendeeShowtime,
   AuditLog,
   FeaturedEvent,
   FeaturedEventInput,
   ContentReportDetail,
   ContentReportPage,
   ModerationActionBody,
+  ReportedEvent,
   ReviewReportPage,
   SystemSettings,
 } from "@shared/admin/types.js";
@@ -99,6 +102,9 @@ export const adminClient = {
     params: { from?: string; to?: string; organizerId?: number; category?: string } = {},
   ) => request<AdminAnalytics>(`/analytics${qs(params)}`),
   ads: () => request<AdAnalytics>("/ads"),
+  /* The two moderation previews: what is waiting, read in full before it is decided on. */
+  eventDetail: (id: number) => request<ReportedEvent>(`/events/${id}/detail`),
+  organizerDetail: (id: number) => request<AdminOrganizerDetail>(`/organizers/${id}/detail`),
   orders: (params: { q?: string; status?: string; limit?: number; offset?: number } = {}) =>
     request<AdminOrderPage>(`/orders${qs(params)}`),
   contentReports: (
@@ -114,11 +120,22 @@ export const adminClient = {
     params: { q?: string; status?: "open" | "done"; limit?: number; offset?: number } = {},
   ) => request<ReviewReportPage>(`/review-reports${qs(params)}`),
   walletTransactions: (params: { kind?: string; limit?: number } = {}) =>
-    request<AdminWalletTxRow[]>(`/wallet-transactions${qs(params)}`),
+    request<AdminWalletPage>(`/wallet-transactions${qs(params)}`),
 
   // ── The door ──
-  attendees: (eventId: number, showtimeId?: number) =>
-    request<AttendeeList>(`/events/${eventId}/attendees${qs({ showtimeId })}`),
+  attendees: (
+    eventId: number,
+    params: {
+      showtimeId?: number;
+      q?: string;
+      status?: string;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ) => request<AttendeeList>(`/events/${eventId}/attendees${qs(params)}`),
+  /** The event's showtimes, for narrowing the door list to one night. */
+  eventShowtimes: (eventId: number) =>
+    request<AttendeeShowtime[]>(`/events/${eventId}/showtimes`),
   /**
    * The same list as a file.
    *
@@ -126,9 +143,12 @@ export const adminClient = {
    * linked directly: a plain `<a href>` carries no Authorization header, so the link would download
    * a 401 page named like a spreadsheet.
    */
-  attendeesCsv: async (eventId: number, showtimeId?: number): Promise<Blob> => {
+  attendeesCsv: async (
+    eventId: number,
+    params: { showtimeId?: number; q?: string; status?: string } = {},
+  ): Promise<Blob> => {
     const response = await withAuthRetry((token) =>
-      fetch(apiUrl(`/api/admin/events/${eventId}/attendees${qs({ showtimeId, format: "csv" })}`), {
+      fetch(apiUrl(`/api/admin/events/${eventId}/attendees${qs({ ...params, format: "csv" })}`), {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         credentials: "include",
       }),

@@ -3,6 +3,7 @@ import type {
   AdminAnalytics,
   AdminOrderPage,
   AdminOverview,
+  AdminWalletPage,
   AdminWalletTxRow,
   AnalyticsRow,
   CategorySlice,
@@ -11,6 +12,7 @@ import type {
   ReviewReportRow,
 } from "@shared/admin/types.js";
 import { pool } from "../../db/pool.js";
+import { likePattern } from "../../db/like.js";
 import { adRevenueBetween } from "../ads/ads.repo.js";
 
 /*
@@ -336,10 +338,10 @@ export interface OrderFilter {
  * person can quote from their own mailbox.
  */
 export async function orders(filter: OrderFilter): Promise<AdminOrderPage> {
-  const params = [filter.query ?? null, filter.status ?? null, filter.limit, filter.offset];
-  const where = `($1::text IS NULL OR o.order_code ILIKE '%' || $1 || '%'
-                   OR o.customer_email ILIKE '%' || $1 || '%'
-                   OR o.customer_name ILIKE '%' || $1 || '%')
+  const params = [likePattern(filter.query), filter.status ?? null, filter.limit, filter.offset];
+  const where = `($1::text IS NULL OR o.order_code ILIKE $1
+                   OR o.customer_email ILIKE $1
+                   OR o.customer_name ILIKE $1)
         AND ($2::text IS NULL OR o.payment_status = $2)`;
 
   const rowsQuery = pool.query<{
@@ -375,7 +377,7 @@ export async function orders(filter: OrderFilter): Promise<AdminOrderPage> {
 
   const countQuery = pool.query<{ total: number }>(
     `SELECT count(*)::int AS total FROM orders o WHERE ${where}`,
-    [filter.query ?? null, filter.status ?? null],
+    [likePattern(filter.query), filter.status ?? null],
   );
 
   const [list, count] = await Promise.all([rowsQuery, countQuery]);
@@ -418,7 +420,7 @@ export interface ReviewReportFilter {
  */
 export async function reviewReports(filter: ReviewReportFilter): Promise<ReviewReportPage> {
   const where = `c.target_type = 'review'
-        AND ($1::text IS NULL OR e.title ILIKE '%' || $1 || '%')
+        AND ($1::text IS NULL OR e.title ILIKE $1)
         AND ($2::text IS NULL
              OR ($2 = 'open' AND c.status = 'open')
              OR ($2 = 'done' AND c.status <> 'open'))`;
@@ -427,7 +429,7 @@ export async function reviewReports(filter: ReviewReportFilter): Promise<ReviewR
        JOIN events e ON e.id = r.event_id
        LEFT JOIN users author ON author.id = r.user_id
        JOIN users reporter ON reporter.id = c.reporter_user_id`;
-  const params = [filter.query ?? null, filter.status ?? null, filter.limit, filter.offset];
+  const params = [likePattern(filter.query), filter.status ?? null, filter.limit, filter.offset];
 
   const rowsQuery = pool.query<{
     id: number;
@@ -463,7 +465,7 @@ export async function reviewReports(filter: ReviewReportFilter): Promise<ReviewR
     `SELECT count(*)::int AS total,
             count(*) FILTER (WHERE c.status = 'open')::int AS open_count
      ${from} WHERE ${where}`,
-    [filter.query ?? null, filter.status ?? null],
+    [likePattern(filter.query), filter.status ?? null],
   );
 
   const [list, counts] = await Promise.all([rowsQuery, countQuery]);
@@ -501,10 +503,21 @@ export async function reviewReports(filter: ReviewReportFilter): Promise<ReviewR
  * This is the reconciliation view: a top-up that VNPay says succeeded and the ledger does not show
  * is the one case where money is genuinely missing, and it is invisible from any per-account screen.
  */
+/**
+ * The ledger page, and the ledger's totals.
+ *
+ * Two reads, deliberately. The rows honour `kind`; the totals never do — they are a fact about the
+ * platform's money, and narrowing the table to refunds does not mean no top-up ever happened. The
+ * screen used to sum the fetched rows in JavaScript, which made both mistakes at once: the figure
+ * covered only the last 200 transactions, and picking a kind filter zeroed the other three tiles.
+ *
+ * `abs()` because the ledger is signed — a purchase is negative — and the tiles read as "how much
+ * went this way", not as a balance.
+ */
 export async function walletTransactions(
   limit: number,
   kind?: string,
-): Promise<AdminWalletTxRow[]> {
+): Promise<AdminWalletPage> {
   const { rows } = await pool.query<{
     id: number;
     created_at: Date;
@@ -533,16 +546,44 @@ export async function walletTransactions(
       LIMIT $1`,
     [limit, kind ?? null],
   );
-  return rows.map((row) => ({
-    id: row.id,
-    createdAt: row.created_at.toISOString(),
-    kind: row.kind,
-    amount: Number(row.amount),
-    balanceAfter: Number(row.balance_after),
-    userEmail: row.user_email,
-    orderCode: row.order_code,
-    adEventTitle: row.ad_event_title,
-    providerRef: row.provider_ref,
-    providerStatus: row.provider_status,
-  }));
+  const totals = await pool.query<{
+    topup: string;
+    purchase: string;
+    refund: string;
+    ad_purchase: string;
+    ad_refund: string;
+    count: number;
+  }>(
+    `SELECT COALESCE(SUM(abs(amount)) FILTER (WHERE kind = 'topup'), 0)::text AS topup,
+            COALESCE(SUM(abs(amount)) FILTER (WHERE kind = 'purchase'), 0)::text AS purchase,
+            COALESCE(SUM(abs(amount)) FILTER (WHERE kind = 'refund'), 0)::text AS refund,
+            COALESCE(SUM(abs(amount)) FILTER (WHERE kind = 'ad_purchase'), 0)::text AS ad_purchase,
+            COALESCE(SUM(abs(amount)) FILTER (WHERE kind = 'ad_refund'), 0)::text AS ad_refund,
+            count(*)::int AS count
+       FROM wallet_transactions`,
+  );
+  const sums = totals.rows[0]!;
+
+  return {
+    rows: rows.map((row) => ({
+      id: row.id,
+      createdAt: row.created_at.toISOString(),
+      kind: row.kind,
+      amount: Number(row.amount),
+      balanceAfter: Number(row.balance_after),
+      userEmail: row.user_email,
+      orderCode: row.order_code,
+      adEventTitle: row.ad_event_title,
+      providerRef: row.provider_ref,
+      providerStatus: row.provider_status,
+    })),
+    totals: {
+      topup: Number(sums.topup),
+      purchase: Number(sums.purchase),
+      refund: Number(sums.refund),
+      adPurchase: Number(sums.ad_purchase),
+      adRefund: Number(sums.ad_refund),
+      count: sums.count,
+    },
+  };
 }

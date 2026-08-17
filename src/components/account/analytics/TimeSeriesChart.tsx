@@ -29,16 +29,18 @@ function formatShortVND(val: number): string {
 
 export function TimeSeriesChart({ data, period, onPeriodChange, onRefresh, loading }: Props) {
   return (
-    <div className="rounded-2xl border-2 border-beige-kem/30 bg-surface-2 p-5 text-beige-kem shadow-md">
+    <div className="border-2 border-beige-kem/30 bg-surface-2 p-5 text-beige-kem">
       {/* Header with Title & Period Selector / Refresh controls */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-beige-kem/10 pb-3">
         <div className="flex items-center gap-2.5">
-          <div className="rounded-xl bg-burgundy/20 p-2 text-burgundy">
+          <div className="bg-burgundy/20 p-2 text-burgundy">
             <TrendingUp className="h-5 w-5" />
           </div>
           <div>
             <h4 className="text-base font-black text-beige-kem">Thống kê doanh số</h4>
-            <p className="text-xs text-beige-kem/60">Xu hướng doanh thu & lượt vé bán ra theo thời gian</p>
+            <p className="text-xs text-beige-kem/60">
+              Xu hướng doanh thu & lượt vé bán ra theo thời gian
+            </p>
           </div>
         </div>
 
@@ -47,7 +49,7 @@ export function TimeSeriesChart({ data, period, onPeriodChange, onRefresh, loadi
             <select
               value={period}
               onChange={(e) => onPeriodChange(e.target.value as DatePeriodFilter)}
-              className="h-8 rounded-lg border border-beige-kem/40 bg-surface-2 px-2.5 text-xs font-bold text-beige-kem outline-none transition focus:border-burgundy cursor-pointer"
+              className="h-8 border border-beige-kem/40 bg-surface-2 px-2.5 text-xs font-bold text-beige-kem outline-none transition focus:border-burgundy cursor-pointer"
             >
               <option value="7d">7 ngày gần đây</option>
               <option value="this_month">Tháng này</option>
@@ -60,7 +62,7 @@ export function TimeSeriesChart({ data, period, onPeriodChange, onRefresh, loadi
               type="button"
               onClick={onRefresh}
               disabled={loading}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-beige-kem/40 text-beige-kem/80 transition hover:border-beige-kem hover:text-beige-kem disabled:opacity-50"
+              className="inline-flex h-8 w-8 items-center justify-center border border-beige-kem/40 text-beige-kem/80 transition hover:border-beige-kem hover:text-beige-kem disabled:opacity-50"
               title="Làm mới biểu đồ"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin text-burgundy" : ""}`} />
@@ -71,9 +73,11 @@ export function TimeSeriesChart({ data, period, onPeriodChange, onRefresh, loadi
 
       {/* Chart Canvas or Empty State */}
       {!data || data.length === 0 ? (
-        <div className="flex h-72 flex-col items-center justify-center rounded-xl border border-dashed border-beige-kem/30 bg-beige-kem/5 p-6 text-center text-beige-kem/70">
+        <div className="flex h-72 flex-col items-center justify-center border border-dashed border-beige-kem/30 bg-beige-kem/5 p-6 text-center text-beige-kem/70">
           <p className="text-body font-bold">Chưa có dữ liệu xu hướng doanh thu</p>
-          <p className="mt-1 text-xs text-beige-kem/50">Dữ liệu sẽ xuất hiện khi có lượt mua vé trong khoảng thời gian này.</p>
+          <p className="mt-1 text-xs text-beige-kem/50">
+            Dữ liệu sẽ xuất hiện khi có lượt mua vé trong khoảng thời gian này.
+          </p>
         </div>
       ) : (
         <div className="h-72 w-full">
@@ -94,10 +98,23 @@ export function TimeSeriesChart({ data, period, onPeriodChange, onRefresh, loadi
               <YAxis yAxisId="left" stroke="#fdf6ea" fontSize={11} tickFormatter={formatShortVND} />
               <YAxis yAxisId="right" orientation="right" stroke="#bfc0f2" fontSize={11} />
               <Tooltip
-                contentStyle={{ backgroundColor: "#3d0d1a", borderColor: "#fdf6ea30", borderRadius: "12px", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}
+                contentStyle={{
+                  backgroundColor: "#3d0d1a",
+                  borderColor: "#fdf6ea30",
+                  borderRadius: "12px",
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+                }}
                 labelStyle={{ color: "#fdf6ea", fontWeight: "bold" }}
                 formatter={(value: any, name: any) => {
-                  if (name === "Doanh thu kỳ này") return [new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(value), name];
+                  if (name === "Doanh thu kỳ này")
+                    return [
+                      new Intl.NumberFormat("vi-VN", {
+                        style: "currency",
+                        currency: "VND",
+                        maximumFractionDigits: 0,
+                      }).format(value),
+                      name,
+                    ];
                   return [`${value} vé`, name];
                 }}
               />

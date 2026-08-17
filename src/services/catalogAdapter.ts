@@ -37,7 +37,7 @@ export function cardToMovie(c: EventCard): MovieEvent {
     doublePrice: 0,
     ticketTiers: [],
     imageUrl: c.imageUrl ?? '',
-    trailerUrl: '',
+    trailerUrl: c.trailerUrl ?? '',
     times: [],
     dates: c.earliestShowtime ? [c.earliestShowtime.slice(0, 10)] : [],
     city: toCity(c.city),

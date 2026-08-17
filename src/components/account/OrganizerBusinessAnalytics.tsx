@@ -1,5 +1,13 @@
 import React, { useEffect, useState } from "react";
-import { Loader2, AlertCircle, RefreshCw, Sparkles, TrendingUp, DollarSign, Activity } from "lucide-react";
+import {
+  Loader2,
+  AlertCircle,
+  RefreshCw,
+  Sparkles,
+  TrendingUp,
+  DollarSign,
+  Activity,
+} from "lucide-react";
 import type {
   DatePeriodFilter,
   OrganizerAnalyticsDashboardResponse,
@@ -15,18 +23,24 @@ import { RecentTransactionsTable } from "./analytics/RecentTransactionsTable";
 import { InfoCard } from "./primitives";
 
 function formatVND(amount: number): string {
-  return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(amount);
+  return new Intl.NumberFormat("vi-VN", {
+    style: "currency",
+    currency: "VND",
+    maximumFractionDigits: 0,
+  }).format(amount);
 }
 
 export function OrganizerBusinessAnalytics() {
   const [period, setPeriod] = useState<DatePeriodFilter>("7d");
   const [startDate, setStartDate] = useState<string>("");
-  const [endDate, setEndDate] = useState<string>("",);
+  const [endDate, setEndDate] = useState<string>("");
   const [selectedEventId, setSelectedEventId] = useState<string>("all");
 
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [dashboardData, setDashboardData] = useState<OrganizerAnalyticsDashboardResponse | null>(null);
+  const [dashboardData, setDashboardData] = useState<OrganizerAnalyticsDashboardResponse | null>(
+    null,
+  );
 
   const loadData = async () => {
     setLoading(true);
@@ -50,7 +64,9 @@ export function OrganizerBusinessAnalytics() {
     loadData();
   }, [period, startDate, endDate, selectedEventId]);
 
-  const [eventListOptions, setEventListOptions] = useState<Array<{ id: string; title: string }>>([]);
+  const [eventListOptions, setEventListOptions] = useState<Array<{ id: string; title: string }>>(
+    [],
+  );
 
   useEffect(() => {
     if (!dashboardData) return;
@@ -78,7 +94,7 @@ export function OrganizerBusinessAnalytics() {
           type="button"
           onClick={loadData}
           disabled={loading}
-          className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border-2 border-beige-kem px-3.5 text-xs font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-50 cursor-pointer"
+          className="inline-flex h-9 items-center justify-center gap-1.5 border-2 border-beige-kem px-3.5 text-xs font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-50 cursor-pointer"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin text-burgundy" : ""}`} />
           <span>Tải lại</span>
@@ -87,16 +103,16 @@ export function OrganizerBusinessAnalytics() {
     >
       <div className="space-y-6">
         {/* 1. Friendly Greeting Header with Hero Illustration & Today's Sales Quick Stat */}
-        <div className="relative overflow-hidden rounded-2xl border-2 border-beige-kem/30 bg-surface-2 p-6 text-beige-kem shadow-lg">
+        <div className="relative overflow-hidden border-2 border-beige-kem/30 bg-surface-2 p-6 text-beige-kem">
           {/* Subtle Background Glow Elements */}
-          <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-burgundy/15 blur-3xl" />
-          <div className="pointer-events-none absolute -left-16 -bottom-16 h-64 w-64 rounded-full bg-la-co/10 blur-3xl" />
+          <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 bg-burgundy/15 blur-3xl" />
+          <div className="pointer-events-none absolute -left-16 -bottom-16 h-64 w-64 bg-la-co/10 blur-3xl" />
 
           <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             {/* Left: Greeting & Description */}
             <div className="flex items-start gap-4">
               {/* Illustration Hero Icon Box */}
-              <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border-2 border-beige-kem/30 bg-burgundy/20 text-burgundy shadow-inner">
+              <div className="relative flex h-14 w-14 shrink-0 items-center justify-center border-2 border-beige-kem/30 bg-burgundy/20 text-burgundy">
                 <Sparkles className="h-7 w-7 animate-pulse text-la-co" />
                 <svg
                   className="absolute inset-0 h-full w-full opacity-30 pointer-events-none"
@@ -106,7 +122,12 @@ export function OrganizerBusinessAnalytics() {
                   <circle cx="20" cy="20" r="3" fill="#bfc0f2" />
                   <circle cx="80" cy="30" r="2" fill="#f7a97c" />
                   <circle cx="70" cy="80" r="4" fill="#d93025" />
-                  <path d="M10 50 Q 50 10 90 50" stroke="#fdf6ea" strokeWidth="1" strokeDasharray="3 3" />
+                  <path
+                    d="M10 50 Q 50 10 90 50"
+                    stroke="#fdf6ea"
+                    strokeWidth="1"
+                    strokeDasharray="3 3"
+                  />
                 </svg>
               </div>
 
@@ -117,15 +138,16 @@ export function OrganizerBusinessAnalytics() {
                   </h2>
                 </div>
                 <p className="mt-1 text-xs text-beige-kem/70 sm:text-sm max-w-xl">
-                  Bảng điều khiển kinh doanh tổng quan — theo dõi xu hướng doanh thu, tiến độ bán vé, và hiệu suất của toàn bộ chuỗi sự kiện.
+                  Bảng điều khiển kinh doanh tổng quan — theo dõi xu hướng doanh thu, tiến độ bán
+                  vé, và hiệu suất của toàn bộ chuỗi sự kiện.
                 </p>
               </div>
             </div>
 
             {/* Right: Today's Sales / Quick Stat Highlight Widget */}
             <div className="flex shrink-0 flex-wrap items-center gap-3">
-              <div className="flex items-center gap-3 rounded-2xl border border-beige-kem/30 bg-ink-dark/80 px-4 py-3 shadow-md backdrop-blur">
-                <div className="rounded-xl bg-la-co/20 p-2.5 text-la-co">
+              <div className="flex items-center gap-3 border border-beige-kem/30 bg-xanh-pho px-4 py-3 backdrop-blur">
+                <div className="bg-la-co/20 p-2.5 text-la-co">
                   <DollarSign className="h-5 w-5" />
                 </div>
                 <div>
@@ -138,8 +160,8 @@ export function OrganizerBusinessAnalytics() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 rounded-2xl border border-beige-kem/30 bg-ink-dark/80 px-4 py-3 shadow-md backdrop-blur">
-                <div className="rounded-xl bg-cam-dat/20 p-2.5 text-cam-dat">
+              <div className="flex items-center gap-3 border border-beige-kem/30 bg-xanh-pho px-4 py-3 backdrop-blur">
+                <div className="bg-cam-dat/20 p-2.5 text-cam-dat">
                   <TrendingUp className="h-5 w-5" />
                 </div>
                 <div>
@@ -147,7 +169,8 @@ export function OrganizerBusinessAnalytics() {
                     Vé đã bán
                   </div>
                   <div className="text-lg font-black text-beige-kem sm:text-xl">
-                    {ticketsSold.toLocaleString("vi-VN")} <span className="text-xs text-beige-kem/70 font-normal">vé</span>
+                    {ticketsSold.toLocaleString("vi-VN")}{" "}
+                    <span className="text-xs text-beige-kem/70 font-normal">vé</span>
                   </div>
                 </div>
               </div>
@@ -172,15 +195,17 @@ export function OrganizerBusinessAnalytics() {
 
         {/* Loading State */}
         {loading && !dashboardData && (
-          <div className="flex h-64 flex-col items-center justify-center space-y-3 rounded-2xl border-2 border-beige-kem/30 bg-surface-2 p-6 text-center">
+          <div className="flex h-64 flex-col items-center justify-center space-y-3 border-2 border-beige-kem/30 bg-surface-2 p-6 text-center">
             <Loader2 className="h-8 w-8 animate-spin text-burgundy" />
-            <p className="text-body font-bold text-beige-kem/80">Đang tổng hợp báo cáo kinh doanh…</p>
+            <p className="text-body font-bold text-beige-kem/80">
+              Đang tổng hợp báo cáo kinh doanh…
+            </p>
           </div>
         )}
 
         {/* Error State */}
         {error && (
-          <div className="flex items-center gap-3 rounded-2xl border-2 border-burgundy bg-burgundy/20 p-4 text-beige-kem shadow">
+          <div className="flex items-center gap-3 border-2 border-burgundy bg-burgundy/20 p-4 text-beige-kem">
             <AlertCircle className="h-5 w-5 shrink-0 text-burgundy" />
             <p className="text-body font-bold">{error}</p>
           </div>

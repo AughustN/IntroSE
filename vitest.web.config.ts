@@ -25,7 +25,13 @@ export default defineConfig({
     // `shared/` too: the projection and the document helpers live there because BOTH sides import
     // them, and they are pure — so they belong in the no-database project rather than the one whose
     // setup file opens Postgres.
-    include: ["src/**/*.test.ts", "shared/**/*.test.ts"],
+    /*
+     * `server/src/**` too, for the same reason `shared/` is here: a pure function does not stop
+     * being pure for living on the server side. The repair in `fix-movie-lineups.ts` is string
+     * work with no database in it, and running it under `vitest.config.ts` would truncate thirty
+     * tables to test a regex.
+     */
+    include: ["src/**/*.test.ts", "shared/**/*.test.ts", "server/src/**/*.test.ts"],
     environment: "node",
   },
 });

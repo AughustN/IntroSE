@@ -70,20 +70,47 @@ export async function getSettings(db: Db = pool): Promise<SystemSettings> {
   return { ...settings };
 }
 
+/*
+ * Settings the console may read but not write.
+ *
+ * The AI ceiling governs spend with an outside provider, and the switch in front of it is the only
+ * thing standing between a misconfiguration and an unbounded bill. That is an operator decision,
+ * made where the API key lives, not a dial on a screen any admin can reach.
+ *
+ * Enforced here rather than by removing the fields from the form: a hidden input is not a rule, and
+ * this endpoint takes a whole settings object, so anything omitted from the UI is still one crafted
+ * request away from being written.
+ */
+const READ_ONLY: SystemSettingKey[] = [
+  'ai_features_enabled',
+  'ai_platform_request_ceiling',
+  'ai_platform_window_hours',
+];
+const EDITABLE = keys.filter((key) => !READ_ONLY.includes(key));
+
 export async function updateSettings(actorUserId: number, input: SystemSettings): Promise<SystemSettings> {
-  validate(input);
   const updated = await withTransaction(async (db) => {
     const before = await load(db);
-    for (const key of keys) {
+    /*
+     * The stored value wins for every read-only key, whatever the request said.
+     *
+     * Merged BEFORE validation, so a caller sending nonsense in a field they cannot change gets
+     * their legitimate edits saved rather than a 400 about a value that was never going to be used.
+     */
+    const next: SystemSettings = { ...input };
+    for (const key of READ_ONLY) (next[key] as SystemSettings[SystemSettingKey]) = before[key];
+    validate(next);
+
+    for (const key of EDITABLE) {
       await db.query(
         `INSERT INTO system_settings (key, value, updated_by, updated_at)
          VALUES ($1, $2::jsonb, $3, now())
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at`,
-        [key, JSON.stringify(input[key]), actorUserId],
+        [key, JSON.stringify(next[key]), actorUserId],
       );
     }
-    await insertAudit(db, { actorUserId, action: 'system_settings_updated', targetType: 'system_settings', targetId: null, outcome: 'applied', detail: { changedKeys: keys, before, after: input } });
-    return { ...input };
+    await insertAudit(db, { actorUserId, action: 'system_settings_updated', targetType: 'system_settings', targetId: null, outcome: 'applied', detail: { changedKeys: EDITABLE, before, after: next } });
+    return { ...next };
   });
   cache = { value: updated, expiresAt: now() + SETTINGS_CACHE_TTL_MS };
   return updated;

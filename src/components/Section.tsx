@@ -74,7 +74,8 @@ export default function Section({
 
   return (
     <section
-      className={`bg-xanh-pho ${pad} ${divided ? "border-t border-beige-kem/25" : ""} ${ bleed ? "" : GUTTER
+      className={`bg-xanh-pho ${pad} ${divided ? "border-t border-beige-kem/25" : ""} ${
+        bleed ? "" : GUTTER
       } ${className}`}
     >
       {bleed ? (
@@ -113,6 +114,33 @@ export function SectionMeasure({
  *    ledger: three lines above every title and one below, at 32px intervals, is more rule than
  *    content. The stroke marks a new band in one glyph's worth of ink.
  */
+/**
+ * A strip of film, drawn as a rule with sprocket holes.
+ *
+ * Two hairlines with a run of perforations between them — the top and bottom edge of the cinema
+ * band, so that section is framed as a reel rather than merely titled. The holes are a repeating
+ * gradient rather than elements: there is no count to get right at any width, and nothing for a
+ * screen reader to read out.
+ *
+ * `currentColor` so the caller sets the ink with a text class, and the strip follows the theme
+ * instead of hard-coding a colour that only works on one ground.
+ */
+export function FilmRail({ className = "" }: { className?: string }) {
+  return (
+    <div
+      aria-hidden="true"
+      className={`h-[18px] border-y border-beige-kem/45 text-beige-kem/30 ${className}`}
+      style={{
+        backgroundImage:
+          "repeating-linear-gradient(to right, currentColor 0 14px, transparent 14px 34px)",
+        backgroundSize: "100% 8px",
+        backgroundPosition: "center",
+        backgroundRepeat: "repeat-x",
+      }}
+    />
+  );
+}
+
 export function SectionHead({
   eyebrow,
   title,
@@ -133,7 +161,7 @@ export function SectionHead({
   meta?: string;
   actionLabel?: string;
   onAction?: () => void;
-  variant?: "ruled" | "bar";
+  variant?: "ruled" | "bar" | "reel";
   icon?: React.ReactNode;
 }) {
   const bar = variant === "bar";
@@ -153,6 +181,29 @@ export function SectionHead({
       )}
     </div>
   );
+
+  /*
+   * Centred, for a band that is framed rather than ruled.
+   *
+   * The stroke in `bar` is a divider: it marks where one band starts by putting ink down the left
+   * of the title. A band already held between two perforated rails does not need that mark — it is
+   * bounded on all four sides — and a left-anchored title inside a symmetrical frame reads as
+   * having slipped. So the head centres, and the "Xem thêm" sits under it rather than opposite it.
+   */
+  if (variant === "reel") {
+    return (
+      <div className="flex flex-col items-center gap-3 text-center">
+        <p className="label-eyebrow flex items-center gap-2 text-ink-soft">
+          {icon}
+          {eyebrow}
+        </p>
+        <h2 className="font-display text-title-l font-black leading-none text-beige-kem">
+          {title}
+        </h2>
+        {right}
+      </div>
+    );
+  }
 
   if (bar) {
     return (

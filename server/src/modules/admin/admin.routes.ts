@@ -29,8 +29,9 @@ import {
   walletTransactions,
 } from "./analytics.repo.js";
 import { analytics as adAnalytics } from "../ads/ads.repo.js";
-import { eventReports, reportDetail } from "./reports.repo.js";
-import { attendees, checkIn, toCsv } from "../checkin/checkin.service.js";
+import { eventReports, eventTarget, reportDetail } from "./reports.repo.js";
+import { organizerDetail } from "./admin.repo.js";
+import { attendees, attendeeShowtimes, checkIn, toCsv } from "../checkin/checkin.service.js";
 import { getSettings, updateSettings } from "./settings.service.js";
 
 export const adminRouter = Router();
@@ -79,9 +80,17 @@ const settingsBody = z
     wallet_topup_min: z.number().int().nonnegative(),
     wallet_topup_max: z.number().int().nonnegative(),
     wallet_balance_ceiling: z.number().int().nonnegative(),
-    ai_features_enabled: z.boolean(),
-    ai_platform_request_ceiling: z.number().int().nonnegative(),
-    ai_platform_window_hours: z.number().int().min(1).max(720),
+    /*
+     * Accepted and ignored.
+     *
+     * `updateSettings` keeps the stored AI values whatever a request says, so bounds here would only
+     * ever reject a save for a field that was never going to be written — and the console still
+     * posts the whole settings object back, so refusing to accept the keys at all would break the
+     * one legitimate caller. Optional, unbounded, discarded downstream.
+     */
+    ai_features_enabled: z.boolean().optional(),
+    ai_platform_request_ceiling: z.number().int().optional(),
+    ai_platform_window_hours: z.number().int().optional(),
   })
   .strict();
 
@@ -101,6 +110,26 @@ adminRouter.get(
   "/organizers",
   asyncH(async (_req, res) => {
     res.json((await queue()).organizers);
+  }),
+);
+/*
+ * The two preview reads: one event, one organizer, in full.
+ *
+ * The moderation queues answer "what is waiting"; these answer "what is it". Both are GETs beside
+ * the decision endpoints they inform, and both are behind the same admin guard the whole router
+ * carries — the event one in particular must stay here rather than reuse the public catalogue read,
+ * because a submission awaiting approval is by definition not public yet.
+ */
+adminRouter.get(
+  "/organizers/:id/detail",
+  asyncH(async (req, res) => {
+    res.json(await organizerDetail(id(req)));
+  }),
+);
+adminRouter.get(
+  "/events/:id/detail",
+  asyncH(async (req, res) => {
+    res.json(await eventTarget(id(req)));
   }),
 );
 adminRouter.post(
@@ -277,6 +306,10 @@ const walletQuery = z.object({
 const barcodeBody = z.object({ barcode: z.string().trim().min(4).max(120) }).strict();
 const attendeeQuery = z.object({
   showtimeId: z.coerce.number().int().positive().optional(),
+  q: z.string().trim().max(200).optional(),
+  status: z.enum(["valid", "checked_in", "void"]).optional(),
+  limit: positiveInt(200).optional(),
+  offset: z.coerce.number().int().nonnegative().optional(),
   format: z.enum(["json", "csv"]).optional(),
 });
 
@@ -411,12 +444,28 @@ adminRouter.post(
     res.json(await checkIn(actor(req), req.body.barcode));
   }),
 );
+/** The event's showtimes, so the door list can be narrowed to one night. */
+adminRouter.get(
+  "/events/:id/showtimes",
+  asyncH(async (req, res) => {
+    res.json(await attendeeShowtimes(actor(req), id(req)));
+  }),
+);
 adminRouter.get(
   "/events/:id/attendees",
   asyncH(async (req, res) => {
     const q = parseQuery(attendeeQuery, req);
-    const list = await attendees(actor(req), id(req), q.showtimeId);
-    if (q.format !== "csv") {
+    // The export is the one caller that wants every row: a door list saved to a file is useless if
+    // it stops at the first page. `limit: null` is what asks for that.
+    const csv = q.format === "csv";
+    const list = await attendees(actor(req), id(req), {
+      showtimeId: q.showtimeId,
+      query: q.q,
+      status: q.status,
+      limit: csv ? null : (q.limit ?? 50),
+      offset: csv ? 0 : (q.offset ?? 0),
+    });
+    if (!csv) {
       res.json(list);
       return;
     }

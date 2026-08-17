@@ -6,8 +6,7 @@
 import { MyEvent } from "../../services/catalogClient";
 import { Empty } from "./states";
 
-const ghost =
-  " border-2 border-beige-kem px-3 py-1.5 text-xs font-bold text-beige-kem/80";
+const ghost = " border-2 border-beige-kem px-3 py-1.5 text-xs font-bold text-beige-kem/80";
 
 const BADGE: Record<string, { cls: string; text: string }> = {
   pending_review: { cls: "text-on-tint border-beige-kem bg-cam-dat", text: "Chờ duyệt" },
@@ -60,9 +59,7 @@ export default function EventList({
               <div>
                 <span className="font-bold">{ev.title}</span>
                 <span className="ml-2 font-mono text-[10px] text-beige-kem/40">{ev.status}</span>
-                <span
-                  className={`ml-2 border px-2 py-0.5 font-mono text-[10px] ${badge.cls}`}
-                >
+                <span className={`ml-2 border px-2 py-0.5 font-mono text-[10px] ${badge.cls}`}>
                   {badge.text}
                 </span>
               </div>

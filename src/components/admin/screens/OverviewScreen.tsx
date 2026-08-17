@@ -5,7 +5,17 @@
 
 import { formatVnd } from "../../../services/currency";
 import { adminClient } from "../../../services/adminClient";
-import { ACTION_GHOST, EmptyState, Kpi, KpiStrip, Notice, PANEL, ScreenHead } from "../adminUi";
+import {
+  ACTION_GHOST,
+  Delta,
+  EmptyState,
+  Kpi,
+  KpiStrip,
+  Notice,
+  PANEL,
+  ROW_LINK,
+  ScreenHead,
+} from "../adminUi";
 import {
   ActiveUsersLineChart,
   CategoryDonutChart,
@@ -14,14 +24,6 @@ import {
 } from "../AdminCharts";
 import { useAsync } from "../useAsync";
 import type { ScreenId } from "../AdminConsole";
-
-/** How much a figure moved against the previous window, in the words a reader uses. */
-function delta(now: number, before: number): string {
-  if (before === 0) return now === 0 ? "không đổi" : "kỳ trước chưa có";
-  const change = Math.round(((now - before) / before) * 100);
-  if (change === 0) return "không đổi";
-  return `${change > 0 ? "▲" : "▼"} ${Math.abs(change)}% so với 30 ngày trước`;
-}
 
 /**
  * What is true right now, in the order somebody on shift asks it.
@@ -33,6 +35,21 @@ function delta(now: number, before: number): string {
  * already counts, and each row's only action was to open the queue screen that owns it — which is
  * what the tile itself now does.
  */
+/**
+ * One queue's depth, and the way into it.
+ *
+ * An empty queue is plain text rather than a dead link: there is nothing to go and do, and a control
+ * that opens an empty screen is a control that wastes the one press somebody had time for.
+ */
+function QueueLink({ count, label, onOpen }: { count: number; label: string; onOpen: () => void }) {
+  if (count === 0) return <span>0 {label}</span>;
+  return (
+    <button type="button" className={ROW_LINK} onClick={onOpen}>
+      {count} {label}
+    </button>
+  );
+}
+
 export default function OverviewScreen({ onOpen }: { onOpen: (screen: ScreenId) => void }) {
   const { data, error, loading, reload } = useAsync(() => adminClient.overview(), "overview");
 
@@ -57,22 +74,52 @@ export default function OverviewScreen({ onOpen }: { onOpen: (screen: ScreenId) 
             <Kpi
               label="Doanh thu 30 ngày"
               value={formatVnd(data.revenue30d)}
-              note={delta(data.revenue30d, data.revenuePrev30d)}
+              tone="money"
+              note={<Delta now={data.revenue30d} before={data.revenuePrev30d} />}
             />
             <Kpi
               label="Vé đã bán"
               value={data.ticketsSold30d.toLocaleString("vi-VN")}
-              note={delta(data.ticketsSold30d, data.ticketsSoldPrev30d)}
+              tone="volume"
+              note={<Delta now={data.ticketsSold30d} before={data.ticketsSoldPrev30d} />}
             />
+            {/*
+              Three queues, three destinations.
+              The tile used to be one big button that always opened the event queue, so a count made
+              entirely of open reports sent the reader to an empty screen. The whole tile is no
+              longer the target — each figure in the note is, which is also the only way to keep it
+              valid HTML (a button cannot hold three more).
+            */}
             <Kpi
               label="Chờ xử lý"
               value={`${data.pendingEvents + data.pendingOrganizers + data.openReports}`}
-              note={`${data.pendingEvents} sự kiện · ${data.pendingOrganizers} ban tổ chức · ${data.openReports} tố cáo`}
-              onClick={() => onOpen("moderation")}
+              tone="rate"
+              note={
+                <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                  <QueueLink
+                    count={data.pendingEvents}
+                    label="sự kiện"
+                    onOpen={() => onOpen("moderation")}
+                  />
+                  <span aria-hidden="true">·</span>
+                  <QueueLink
+                    count={data.pendingOrganizers}
+                    label="ban tổ chức"
+                    onOpen={() => onOpen("organizers")}
+                  />
+                  <span aria-hidden="true">·</span>
+                  <QueueLink
+                    count={data.openReports}
+                    label="tố cáo"
+                    onOpen={() => onOpen("reports")}
+                  />
+                </span>
+              }
             />
             <Kpi
               label="Tỷ lệ check-in"
               value={data.checkedInRate === null ? "—" : `${Math.round(data.checkedInRate * 100)}%`}
+              tone="rate"
               note={
                 data.checkedInRate === null
                   ? "Chưa có suất diễn nào đã bắt đầu"

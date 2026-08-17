@@ -7,11 +7,11 @@ import { useState } from "react";
 import { formatVnd } from "../../../services/currency";
 import { adminClient } from "../../../services/adminClient";
 import {
-  ACTION_GHOST,
   ACTION_PRIMARY,
   EmptyState,
   FIELD,
   Notice,
+  Pager,
   PANEL,
   Pill,
   ScreenHead,
@@ -131,7 +131,7 @@ export default function OrdersScreen() {
       ) : (
         <>
           <TableScroll>
-            <table className="w-full min-w-[860px] text-left text-body">
+            <table className="w-full min-w-[860px] text-left text-meta">
               <thead className="label-eyebrow border-b border-beige-kem/25 text-ink-soft">
                 <tr>
                   <Th>Mã đơn</Th>
@@ -151,13 +151,13 @@ export default function OrdersScreen() {
                     </Td>
                     <Td>
                       <span className="block text-beige-kem">{order.customerName}</span>
-                      <span className="block font-meta text-meta text-ink-soft">
+                      <span className="block font-meta text-eyebrow text-ink-soft">
                         {order.customerEmail}
                       </span>
                     </Td>
                     <Td>
                       <span className="block">{order.eventTitle}</span>
-                      <span className="block font-meta text-meta text-ink-soft">
+                      <span className="block font-meta text-eyebrow text-ink-soft">
                         {order.startsAt.slice(0, 16).replace("T", " ")}
                       </span>
                     </Td>
@@ -166,7 +166,7 @@ export default function OrdersScreen() {
                       {/* A voided ticket is the trace a refund leaves; hiding it makes a
                           partially-refunded order look like a miscounted one. */}
                       {order.voidTickets > 0 && (
-                        <span className="ml-2 font-meta text-meta text-ink-soft">
+                        <span className="ml-2 font-meta text-eyebrow text-ink-soft">
                           +{order.voidTickets} đã huỷ
                         </span>
                       )}
@@ -186,27 +186,7 @@ export default function OrdersScreen() {
             </table>
           </TableScroll>
 
-          <div className="flex items-center justify-between gap-4">
-            <span className="font-meta text-body text-ink-soft">
-              Trang {page + 1} / {lastPage + 1}
-            </span>
-            <div className="flex gap-2">
-              <button
-                className={ACTION_GHOST}
-                disabled={page === 0 || loading}
-                onClick={() => setPage((value) => Math.max(0, value - 1))}
-              >
-                Trước
-              </button>
-              <button
-                className={ACTION_GHOST}
-                disabled={page >= lastPage || loading}
-                onClick={() => setPage((value) => value + 1)}
-              >
-                Sau
-              </button>
-            </div>
-          </div>
+          <Pager page={page} lastPage={lastPage} disabled={loading} onChange={setPage} />
         </>
       )}
     </>

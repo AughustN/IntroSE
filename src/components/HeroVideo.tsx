@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MovieEvent } from "../types";
 import { Pause, Play } from "lucide-react";
+import { playableTrailer } from "./TrailerPanel";
 
 interface HeroVideoProps {
   movie: MovieEvent;
@@ -20,6 +21,14 @@ interface HeroVideoProps {
    * eats two viewports on the way is in the way.
    */
   variant?: "cinema" | "plain";
+  /**
+   * Called when the trailer reaches its end, so the caller can hand over the next one.
+   *
+   * Its presence is also what decides whether this loops: with a queue behind it, looping would
+   * mean the first trailer plays for ever and the rest never do. Absent — one trailer, or a reader
+   * who has pinned this hero themselves — and it loops as before.
+   */
+  onTrailerEnded?: () => void;
 }
 
 /**
@@ -148,7 +157,12 @@ function screenPath(w: number, h: number, bx: number, by: number): string {
   );
 }
 
-export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: HeroVideoProps) {
+export default function HeroVideo({
+  movie,
+  onBookNow,
+  variant = "cinema",
+  onTrailerEnded,
+}: HeroVideoProps) {
   const plain = variant === "plain";
   const videoRef = useRef<HTMLVideoElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
@@ -156,6 +170,7 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
   const stageRef = useRef<HTMLDivElement>(null);
   const typeRef = useRef<HTMLDivElement>(null);
   const [showPoster, setShowPoster] = useState(true);
+  const heroTrailer = playableTrailer(movie.trailerUrl);
 
   /*
    * Mirrors the element, rather than being the source of truth for it.
@@ -405,7 +420,8 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
     >
       <div
         ref={shellRef}
-        className={`flex w-full items-center justify-center overflow-hidden ${ plain ? "h-full" : "sticky top-0 h-[100dvh]"
+        className={`flex w-full items-center justify-center overflow-hidden ${
+          plain ? "h-full" : "sticky top-0 h-[100dvh]"
         }`}
       >
         {/*
@@ -637,17 +653,28 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
             src={movie.imageUrl}
             alt={movie.title}
             referrerPolicy="no-referrer"
-            className={`absolute inset-0 z-[2] h-full w-full object-cover transition-opacity duration-700 ${ showPoster ? "opacity-100" : "opacity-0"
+            className={`absolute inset-0 z-[2] h-full w-full object-cover transition-opacity duration-700 ${
+              showPoster ? "opacity-100" : "opacity-0"
             }`}
           />
 
           <video
             ref={videoRef}
+            /*
+             * Keyed on the trailer, so a new one actually loads.
+             *
+             * React updating the `src` of a `<source>` does not reload the element — the browser
+             * read its sources once and is done. Without this the queue would advance in state and
+             * the same trailer would keep playing. Remounting also resets `showPoster`, so the next
+             * film's poster covers the gap while its video buffers.
+             */
+            key={heroTrailer ?? movie.id}
             className="absolute left-1/2 top-1/2 z-[1] min-h-full min-w-full -translate-x-1/2 -translate-y-1/2 object-cover"
             poster={movie.imageUrl}
             autoPlay
             muted
-            loop
+            loop={!onTrailerEnded}
+            onEnded={onTrailerEnded}
             playsInline
             preload="metadata"
             onPlay={() => {
@@ -656,7 +683,12 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
             }}
             onPause={() => setPaused(true)}
           >
-            <source src={movie.trailerUrl} />
+            {/*
+              Only a link the element can actually load. A YouTube watch page as a `<source>` fails
+              silently — the poster simply never moves — so an unplayable link is treated as no
+              trailer at all, and the poster underneath stays as the honest answer.
+            */}
+            {heroTrailer && <source src={heroTrailer} />}
           </video>
 
           <div className="absolute inset-0 z-[3] bg-black/35" />
@@ -770,7 +802,8 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
         */}
         <div
           ref={typeRef}
-          className={`pointer-events-none absolute inset-0 z-10 flex px-5 sm:px-10 lg:px-[8%] ${ plain ? "items-end pb-10" : "items-center pt-24"
+          className={`pointer-events-none absolute inset-0 z-10 flex px-5 sm:px-10 lg:px-[8%] ${
+            plain ? "items-end pb-10" : "items-center pt-24"
           }`}
         >
           <div
@@ -806,7 +839,8 @@ export default function HeroVideo({ movie, onBookNow, variant = "cinema" }: Hero
                 className="block max-w-full text-left transition hover:text-cam-dat"
               >
                 <h1
-                  className={`line-clamp-3 font-display font-black uppercase leading-[0.9] tracking-normal ${titleSize( movie.title,
+                  className={`line-clamp-3 font-display font-black uppercase leading-[0.9] tracking-normal ${titleSize(
+                    movie.title,
                   )}`}
                 >
                   {movie.title}

@@ -17,12 +17,20 @@ interface Meta {
 }
 
 /**
- * The ten keys, grouped by the thing they govern.
+ * The editable keys, grouped by the thing they govern.
  *
- * Flat, they were ten number fields in one grid and an admin had to know which three interact — the
+ * Flat, they were number fields in one grid and an admin had to know which three interact — the
  * hold clock, its grace period and the absolute ceiling are one rule spread across three settings,
  * and setting the grace above the ceiling is refused by the server with a message that only makes
  * sense once you know they are related.
+ *
+ * The three `ai_*` keys are deliberately absent. They still exist and the AI module still reads
+ * them; they are simply not the console's to change, and `updateSettings` keeps the stored values
+ * whatever a request asks for — so removing the fields here is the visible half of a rule the
+ * server enforces, not the rule itself.
+ *
+ * The draft still CARRIES those keys, because it is seeded from the saved settings and posted back
+ * whole. Dropping them from the payload would fail the endpoint's strict schema for no gain.
  */
 const GROUPS: Array<{ title: string; note: string; keys: Array<[keyof SystemSettings, Meta]> }> = [
   {
@@ -62,21 +70,6 @@ const GROUPS: Array<{ title: string; note: string; keys: Array<[keyof SystemSett
         { label: "Nạp tối đa (VND)", hint: "≥ nạp tối thiểu; ≤ số dư tối đa", min: 0 },
       ],
       ["wallet_balance_ceiling", { label: "Số dư tối đa (VND)", hint: "≥ nạp tối đa", min: 0 }],
-    ],
-  },
-  {
-    title: "AI",
-    note: "Tắt công tắc là không gọi ra ngoài, bất kể trần còn dư.",
-    keys: [
-      ["ai_features_enabled", { label: "Bật tính năng AI", hint: "Bật/Tắt" }],
-      [
-        "ai_platform_request_ceiling",
-        { label: "Trần yêu cầu AI mỗi kỳ", hint: "Toàn nền tảng; 0 = ngừng gọi", min: 0 },
-      ],
-      [
-        "ai_platform_window_hours",
-        { label: "Độ dài kỳ tính trần (giờ)", hint: "1–720", min: 1, max: 720 },
-      ],
     ],
   },
 ];
@@ -142,15 +135,15 @@ export default function SettingsScreen() {
           <div key={group.title} className={`${PANEL} space-y-4`}>
             <div>
               <p className="label-eyebrow text-ink-soft">{group.title}</p>
-              <p className="mt-1 font-meta text-body text-ink-soft">{group.note}</p>
+              <p className="mt-1 font-meta text-meta text-ink-soft">{group.note}</p>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               {group.keys.map(([key, meta]) => {
                 const value = draft[key];
                 return (
-                  <label key={key} className="space-y-1.5 text-body text-beige-kem">
+                  <label key={key} className="space-y-1.5 text-meta text-beige-kem">
                     <span className="block font-bold">{meta.label}</span>
-                    <span className="block font-meta text-meta text-ink-soft">{meta.hint}</span>
+                    <span className="block font-meta text-eyebrow text-ink-soft">{meta.hint}</span>
                     {typeof value === "boolean" ? (
                       <div className="flex items-center gap-3 pt-1">
                         <button
@@ -176,7 +169,7 @@ export default function SettingsScreen() {
                             }`}
                           />
                         </button>
-                        <span className="font-meta text-meta text-ink-soft">
+                        <span className="font-meta text-eyebrow text-ink-soft">
                           {value ? "Bật" : "Tắt"}
                         </span>
                       </div>

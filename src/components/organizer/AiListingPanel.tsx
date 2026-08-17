@@ -12,8 +12,7 @@ const input =
   "h-10 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
 const btn =
   " bg-burgundy px-3 py-2 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-50";
-const ghost =
-  " border-2 border-beige-kem px-3 py-1.5 text-xs font-bold text-beige-kem/80";
+const ghost = " border-2 border-beige-kem px-3 py-1.5 text-xs font-bold text-beige-kem/80";
 
 /**
  * UC-22, bound by constitution Principle III: assistive, never autonomous.
