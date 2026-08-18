@@ -23,6 +23,7 @@ import ConfirmDialog, { type ConfirmRequest } from "../ConfirmDialog";
 import { layoutApi } from "../../services/catalogClient";
 import BlockInspector from "./BlockInspector";
 import BlockPalette from "./BlockPalette";
+import ChartEditorCoachmarks from "./ChartEditorCoachmarks";
 import LayersPanel from "./LayersPanel";
 import PreviewOverlay from "./PreviewOverlay";
 import { renumberSection, renumberSelection } from "./numbering";
@@ -391,6 +392,12 @@ export default function ChartEditor({
    * of the same thing.
    */
   const [tool, setTool] = useState<BlockKind | null>(null);
+  /**
+   * First-open coachmarks (Phase 4). Shown once per browser — the flag survives per-chart keys, and
+   * the panel only mounts while the chart it opened on is still EMPTY, because five sentences about
+   * "how to start drawing" are exactly wrong advice on a chart that already has work in it.
+   */
+  const [showCoachmarks, setShowCoachmarks] = useState(false);
 
   const { draft, commit, reset, undo, redo, canUndo, canRedo } =
     useLayoutHistory<ChartDocument>(emptyDocument());
@@ -410,6 +417,16 @@ export default function ChartEditor({
         // may well have abandoned it on purpose, and quietly resurrecting it would be its own surprise.
         const stored = readStoredDraft(layoutId, l.version);
         if (stored && JSON.stringify(stored.document) !== json) setRecovery(stored);
+        // Coachmarks: the once-in-a-browser flag AND an empty chart. Both, or neither — a full chart
+        // skips them even on a first visit, and a first visit to a full chart keeps the flag unset so
+        // the NEXT empty chart still gets its walkthrough.
+        try {
+          const seen = window.localStorage.getItem("tixhub:coachmarks:chart-editor") === "seen";
+          const isEmpty = doc.blocks.length === 0;
+          if (!seen && isEmpty) setShowCoachmarks(true);
+        } catch {
+          /* storage unavailable — skip the walkthrough, never block the editor */
+        }
       })
       .catch((e) => setError((e as Error).message));
   }, [layoutId, reset]);
@@ -2630,6 +2647,21 @@ export default function ChartEditor({
           blocks={blocks}
           colorOfSeat={colorOfSeat}
           onClose={() => setPreviewing(false)}
+        />
+      )}
+
+      {/* First-open walkthrough (Phase 4) — mounted at the front so it paints above everything, and
+          dismissed by setting the once-in-a-browser flag. */}
+      {showCoachmarks && (
+        <ChartEditorCoachmarks
+          onDone={() => {
+            setShowCoachmarks(false);
+            try {
+              window.localStorage.setItem("tixhub:coachmarks:chart-editor", "seen");
+            } catch {
+              /* storage unavailable — the walkthrough simply shows again next time */
+            }
+          }}
         />
       )}
 

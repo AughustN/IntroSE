@@ -8,6 +8,7 @@ import { isMaterialEdit } from "@/shared/catalog/material-edit";
 import { MyEvent, MyVenue, organizerApi, studioApi } from "../../services/catalogClient";
 import { useEventCategories } from "../../hooks/useEventCategories";
 import AiListingPanel from "./AiListingPanel";
+import PublishChecklist from "./PublishChecklist";
 import ShowtimeList from "./ShowtimeList";
 import { Refusal } from "./states";
 
@@ -230,6 +231,10 @@ export default function EventEditor({
         eventId={isLive ? undefined : event.id}
         onAccept={(field, value) => (field === "title" ? setTitle(value) : setDescription(value))}
       />
+
+      {/* What the server's publish gate demands, stated in advance — and, for seated events, the one
+          thing the gate cannot see (a showtime with no map sells nothing). Hidden once live. */}
+      {!isLive && <PublishChecklist event={event} onOpenSeatMap={onOpenSeatMap} />}
 
       <div className="border-2 border-beige-kem bg-surface-2 p-5">
         <h3 className="mb-3 font-display text-base font-bold">Suất chiếu</h3>

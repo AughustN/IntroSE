@@ -5,6 +5,7 @@ import { queueEventNotification } from "../notifications/notifications.service.j
 import { refreshSnapshot } from "../seatmap/apply.js";
 import { defaultCategoryId } from "../seatmap/layouts.repo.js";
 import { err } from "../../http.js";
+import { CATEGORY_COLORS } from "@shared/catalog/tier-palette.js";
 
 /** The caller's approved organizer row id, or null (events bind to this — D-E). */
 export async function getApprovedOrganizerId(
@@ -175,10 +176,22 @@ export async function updateEvent(
   });
 }
 
-/** Publish requires ≥1 upcoming showtime with ≥1 tier (FR-017); → on_sale + pending_review (D-C). */
+/**
+ * Publish requires ≥1 upcoming showtime with ≥1 ACTIVE tier (FR-017); → on_sale + pending_review (D-C).
+ *
+ * `tt.archived_at IS NULL` is the load-bearing half. Without it this gate and the catalog's
+ * `SHOWTIME_HAS_AVAILABILITY` (visibility.ts) disagree about what a sellable tier is, and the gap
+ * between them is reachable: the `tier_last_active` guard in `removeTier` only fires while the event
+ * is `on_sale`, so unpublishing (which sets `status = 'draft'`) lets the last tier be archived, and a
+ * republish then matched the archived row. The event went back on sale carrying nothing anyone could
+ * buy — visible as "đang bán" to the organizer and the admin, and absent from the catalog, because
+ * visibility filters what this did not.
+ */
 export async function publishEvent(eventId: number, db: Db = pool): Promise<boolean> {
   const ready = await db.query(
-    `SELECT 1 FROM showtimes s JOIN ticket_tiers tt ON tt.showtime_id = s.id WHERE s.event_id = $1 AND s.starts_at > now() LIMIT 1`,
+    `SELECT 1 FROM showtimes s
+        JOIN ticket_tiers tt ON tt.showtime_id = s.id AND tt.archived_at IS NULL
+       WHERE s.event_id = $1 AND s.starts_at > now() LIMIT 1`,
     [eventId],
   );
   if (ready.rows.length === 0) return false;
@@ -315,9 +328,11 @@ export async function createSection(venueId: number, name: string, db: Db = pool
   const layoutId = await defaultLayoutId(venueId, db);
   const { rows } = await db.query(
     // Default the colour by position: FR-066 blocks publishing without one, and this path predates
-    // the colour picker, so a section created here must not be born unpublishable.
+    // the colour picker, so a section created here must not be born unpublishable. The ARRAY is
+    // built from the SHARED palette — the same constant the editor and buyer legend read — so the
+    // database and the chart can never hand out different defaults (Principle VI).
     `INSERT INTO sections (layout_id, name, color)
-     VALUES ($1, $2, (ARRAY['#4C9A6B','#3E7CB1','#C9762F','#9B4D8E','#B3453C'])[(SELECT count(*) FROM sections WHERE layout_id = $1)::int % 5 + 1])
+     VALUES ($1, $2, (ARRAY[${CATEGORY_COLORS.map((c) => `'${c}'`).join(",")}])[(SELECT count(*) FROM sections WHERE layout_id = $1)::int % ${CATEGORY_COLORS.length} + 1])
      RETURNING id`,
     [layoutId, name],
   );

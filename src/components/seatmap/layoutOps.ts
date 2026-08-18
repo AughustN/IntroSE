@@ -10,11 +10,8 @@ import type {
   LayoutSection,
   SeatType,
 } from "@/shared/catalog/seatmap";
-import {
-  LAYOUT_MAX_SEATS,
-  clampCoord,
-  normaliseRotation,
-} from "@/shared/catalog/seatmap-validate";
+import { LAYOUT_MAX_SEATS, clampCoord, normaliseRotation } from "@/shared/catalog/seatmap-validate";
+import { CATEGORY_COLORS } from "@/shared/catalog/tier-palette";
 
 /**
  * The canvas operations (FR-009). Pure functions over a seat list so each one is a single undoable
@@ -109,11 +106,14 @@ export function readableInk(hex: string | undefined): string | undefined {
     return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
   };
   const luminance =
-    0.2126 * channel((n >> 16) & 255) + 0.7152 * channel((n >> 8) & 255) + 0.0722 * channel(n & 255);
+    0.2126 * channel((n >> 16) & 255) +
+    0.7152 * channel((n >> 8) & 255) +
+    0.0722 * channel(n & 255);
   return luminance > 0.179 ? "#17100f" : "#ffffff";
 }
 
-export const snap = (v: number, enabled: boolean): number => (enabled ? Math.round(v / GRID) * GRID : Math.round(v));
+export const snap = (v: number, enabled: boolean): number =>
+  enabled ? Math.round(v / GRID) * GRID : Math.round(v);
 
 const isSelected = (s: LayoutSeat, ids: Set<number>) => s.id !== undefined && ids.has(s.id);
 
@@ -398,7 +398,6 @@ export function assignSection(
   return seats.map((s) => (isSelected(s, ids) ? { ...s, sectionId } : s));
 }
 
-
 /**
  * Re-letter and renumber a selection as one row, in the order it reads on the map.
  *
@@ -517,7 +516,11 @@ export function copySeats(seats: LayoutSeat[], ids: Set<number>): SeatClipboard 
   const originX = Math.min(...sel.map((s) => s.x));
   const originY = Math.min(...sel.map((s) => s.y));
   return {
-    seats: sel.map(({ id: _id, ...rest }) => ({ ...rest, x: rest.x - originX, y: rest.y - originY })),
+    seats: sel.map(({ id: _id, ...rest }) => ({
+      ...rest,
+      x: rest.x - originX,
+      y: rest.y - originY,
+    })),
   };
 }
 
@@ -553,9 +556,13 @@ export function addSection(name: string): LayoutSection {
   return { id: mintId(), name, description: null };
 }
 
-/** Palette for a new category. Same five colours the server defaults sections to, so a chart drawn
- *  entirely in the editor and one backfilled from sections look like the same product. */
-export const CATEGORY_COLORS = ["#4C9A6B", "#3E7CB1", "#C9762F", "#9B4D8E", "#B3453C"] as const;
+/**
+ * Section & class colours — the SHARED palette, not a copy (Principle VI). The buyer's legend
+ * (`buildTierLegend`) picks its fills from the same five values, so the colour an organizer paints
+ * on the chart is, byte for byte, the colour the buyer later reads as a price. Editing the list in
+ * `shared/catalog/tier-palette.ts` once is how both stay colour-blind-safe.
+ */
+export { CATEGORY_COLORS };
 
 export function addCategory(name: string, existing: number): LayoutCategory {
   return { id: mintId(), name, color: CATEGORY_COLORS[existing % CATEGORY_COLORS.length] };
@@ -605,7 +612,6 @@ export function removeSection(
     seats: seats.map((s) => (s.sectionId === sectionId ? { ...s, sectionId: null } : s)),
   };
 }
-
 
 export interface Rect {
   x1: number;
