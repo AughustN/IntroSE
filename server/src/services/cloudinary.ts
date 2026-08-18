@@ -1,10 +1,10 @@
-import { createHash } from 'node:crypto';
-import { Buffer } from 'node:buffer';
+import { createHash } from "node:crypto";
+import { Buffer } from "node:buffer";
 
 export interface CloudinaryUploadOptions {
   folder: string;
   publicId: string;
-  resourceType?: 'image' | 'video' | 'raw' | 'auto';
+  resourceType?: "image" | "video" | "raw" | "auto";
   overwrite?: boolean;
   invalidate?: boolean;
 }
@@ -18,18 +18,32 @@ export interface CloudinaryUploadResult {
 }
 
 export interface CloudinaryDeleteResult {
-  result: 'ok' | 'not found' | string;
+  result: "ok" | "not found" | string;
 }
 
 export function getCloudinaryConfig() {
   return {
-    cloudName: process.env.CLOUDINARY_CLOUD_NAME || process.env.CLOUDINARY_NAME || '',
-    apiKey: process.env.CLOUDINARY_API_KEY || '',
-    apiSecret: process.env.CLOUDINARY_API_SECRET || '',
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME || process.env.CLOUDINARY_NAME || "",
+    apiKey: process.env.CLOUDINARY_API_KEY || "",
+    apiSecret: process.env.CLOUDINARY_API_SECRET || "",
   };
 }
 
 export function isCloudinaryConfigured(): boolean {
+  /*
+   * Under vitest, never — whatever is in the developer's `.env`.
+   *
+   * The same rule `config.ts` applies to the database, for the same reason: a suite that reaches
+   * whatever account happens to be configured is an accident waiting for someone to run it with
+   * production credentials. It also uploads a real file per case over a real network, which is
+   * what pushed the floor-plan cases past their timeout, and it makes the result depend on
+   * whether the person running the suite has credentials at all.
+   *
+   * Everything below this line then takes the offline branch: a deterministic URL of the same
+   * shape, with nothing sent anywhere.
+   */
+  if (process.env.VITEST) return false;
+
   const { cloudName, apiKey, apiSecret } = getCloudinaryConfig();
   return Boolean(cloudName && apiKey && apiSecret);
 }
@@ -37,12 +51,15 @@ export function isCloudinaryConfigured(): boolean {
 /**
  * Generate SHA-1 signature for Cloudinary API request based on sorted parameters.
  */
-function generateSignature(params: Record<string, string | number | boolean>, apiSecret: string): string {
+function generateSignature(
+  params: Record<string, string | number | boolean>,
+  apiSecret: string,
+): string {
   const sortedKeys = Object.keys(params).sort();
-  const serialized = sortedKeys.map((key) => `${key}=${params[key]}`).join('&');
-  return createHash('sha1')
+  const serialized = sortedKeys.map((key) => `${key}=${params[key]}`).join("&");
+  return createHash("sha1")
     .update(serialized + apiSecret)
-    .digest('hex');
+    .digest("hex");
 }
 
 /**
@@ -54,16 +71,16 @@ export async function uploadToCloudinary(
   options: CloudinaryUploadOptions,
 ): Promise<CloudinaryUploadResult> {
   const { cloudName, apiKey, apiSecret } = getCloudinaryConfig();
-  const resourceType = options.resourceType || 'image';
-  const folder = options.folder.replace(/^\/+|\/+$/g, '');
+  const resourceType = options.resourceType || "image";
+  const folder = options.folder.replace(/^\/+|\/+$/g, "");
   const publicId = options.publicId;
   const overwrite = options.overwrite !== false;
   const invalidate = options.invalidate !== false;
 
   if (!isCloudinaryConfigured()) {
     // Graceful offline / test fallback
-    const ext = resourceType === 'video' ? 'mp4' : 'webp';
-    const mockUrl = `https://res.cloudinary.com/${cloudName || 'tixhub'}/${resourceType}/upload/v1723900000/${folder}/${publicId}.${ext}`;
+    const ext = resourceType === "video" ? "mp4" : "webp";
+    const mockUrl = `https://res.cloudinary.com/${cloudName || "tixhub"}/${resourceType}/upload/v1723900000/${folder}/${publicId}.${ext}`;
     return {
       public_id: `${folder}/${publicId}`,
       secure_url: mockUrl,
@@ -86,24 +103,24 @@ export async function uploadToCloudinary(
 
   const formData = new FormData();
   const blob = new Blob([buffer]);
-  formData.append('file', blob, `${publicId}`);
-  formData.append('api_key', apiKey);
-  formData.append('timestamp', timestamp.toString());
-  formData.append('signature', signature);
-  formData.append('folder', folder);
-  formData.append('public_id', publicId);
-  formData.append('overwrite', overwrite ? 'true' : 'false');
-  formData.append('invalidate', invalidate ? 'true' : 'false');
+  formData.append("file", blob, `${publicId}`);
+  formData.append("api_key", apiKey);
+  formData.append("timestamp", timestamp.toString());
+  formData.append("signature", signature);
+  formData.append("folder", folder);
+  formData.append("public_id", publicId);
+  formData.append("overwrite", overwrite ? "true" : "false");
+  formData.append("invalidate", invalidate ? "true" : "false");
 
   const uploadEndpoint = `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`;
 
   const response = await fetch(uploadEndpoint, {
-    method: 'POST',
+    method: "POST",
     body: formData,
   });
 
   if (!response.ok) {
-    const errorText = await response.text().catch(() => 'Upload failed');
+    const errorText = await response.text().catch(() => "Upload failed");
     throw new Error(`Cloudinary upload failed (${response.status}): ${errorText}`);
   }
 
@@ -128,13 +145,16 @@ export async function uploadToCloudinary(
  * Delete a media asset from Cloudinary by public ID.
  */
 export async function deleteFromCloudinary(
-  fullPublicId: string,
-  resourceType: 'image' | 'video' | 'raw' = 'image',
+  // Nullable because every caller reads it from a nullable column: an event with no trailer, a
+  // layout with no plan. The body already returns early on a falsy id — the signature was the only
+  // part claiming otherwise, which forced callers to pre-check what this function already handles.
+  fullPublicId: string | null | undefined,
+  resourceType: "image" | "video" | "raw" = "image",
 ): Promise<CloudinaryDeleteResult> {
   const { cloudName, apiKey, apiSecret } = getCloudinaryConfig();
 
   if (!isCloudinaryConfigured() || !fullPublicId) {
-    return { result: 'ok' };
+    return { result: "ok" };
   }
 
   const timestamp = Math.floor(Date.now() / 1000);
@@ -146,20 +166,20 @@ export async function deleteFromCloudinary(
   const signature = generateSignature(signParams, apiSecret);
 
   const formData = new FormData();
-  formData.append('public_id', fullPublicId);
-  formData.append('api_key', apiKey);
-  formData.append('timestamp', timestamp.toString());
-  formData.append('signature', signature);
+  formData.append("public_id", fullPublicId);
+  formData.append("api_key", apiKey);
+  formData.append("timestamp", timestamp.toString());
+  formData.append("signature", signature);
 
   const destroyEndpoint = `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/destroy`;
 
   const response = await fetch(destroyEndpoint, {
-    method: 'POST',
+    method: "POST",
     body: formData,
   });
 
   if (!response.ok) {
-    return { result: 'not found' };
+    return { result: "not found" };
   }
 
   const data = (await response.json()) as CloudinaryDeleteResult;

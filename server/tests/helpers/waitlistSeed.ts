@@ -1,6 +1,6 @@
-import { pool } from '../../src/db/pool.js';
-import * as seed from './catalogSeed.js';
-import { registerUser } from './authFixture.js';
+import { pool } from "../../src/db/pool.js";
+import * as seed from "./catalogSeed.js";
+import { registerUser } from "./authFixture.js";
 
 // Fixtures for the waitlist tests (011, UC-17). The interesting shapes are all about *absence* of
 // stock, which the holds fixtures never needed: a tier with nothing left, a seated showtime with no
@@ -33,10 +33,10 @@ export interface MixedGaFixture {
 export async function seedMixedGaShowtime(): Promise<MixedGaFixture> {
   const org = await seed.seedOrganizer(await seed.seedUser());
   const venue = await seed.seedVenue(await seed.seedUser());
-  const ev = await seed.seedEvent({ organizerId: org, eventType: 'general_admission' });
+  const ev = await seed.seedEvent({ organizerId: org, eventType: "general_admission" });
   const showtimeId = await seed.seedShowtime(ev.id, venue, OUTSIDE_CUTOFF_MS);
-  const soldOutTierId = await seed.seedTier(showtimeId, { label: 'Hạng A', total: 2, sold: 2 });
-  const sellingTierId = await seed.seedTier(showtimeId, { label: 'Hạng B', total: 5, sold: 1 });
+  const soldOutTierId = await seed.seedTier(showtimeId, { label: "Hạng A", total: 2, sold: 2 });
+  const sellingTierId = await seed.seedTier(showtimeId, { label: "Hạng B", total: 5, sold: 1 });
   return { eventId: ev.id, showtimeId, soldOutTierId, sellingTierId };
 }
 
@@ -50,7 +50,7 @@ export interface SoldOutGaFixture {
 export async function seedSoldOutGaShowtime(total = 2): Promise<SoldOutGaFixture> {
   const org = await seed.seedOrganizer(await seed.seedUser());
   const venue = await seed.seedVenue(await seed.seedUser());
-  const ev = await seed.seedEvent({ organizerId: org, eventType: 'general_admission' });
+  const ev = await seed.seedEvent({ organizerId: org, eventType: "general_admission" });
   const showtimeId = await seed.seedShowtime(ev.id, venue, OUTSIDE_CUTOFF_MS);
   const tierId = await seed.seedTier(showtimeId, { total, sold: total });
   return { eventId: ev.id, showtimeId, tierId };
@@ -80,11 +80,13 @@ export async function seedSoldOutSeated(seatCount = 2): Promise<SoldOutSeatedFix
     )
   ).rows[0].id;
   const section = (
-    await pool.query(`INSERT INTO sections (layout_id, name) VALUES ($1, 'Khu A') RETURNING id`, [layout])
+    await pool.query(`INSERT INTO sections (layout_id, name) VALUES ($1, 'Khu A') RETURNING id`, [
+      layout,
+    ])
   ).rows[0].id;
-  const ev = await seed.seedEvent({ organizerId: org, eventType: 'seated' });
+  const ev = await seed.seedEvent({ organizerId: org, eventType: "seated" });
   const showtimeId = await seed.seedShowtime(ev.id, venue, OUTSIDE_CUTOFF_MS);
-  const tierId = await seed.seedTier(showtimeId, { label: 'VIP', total: null });
+  const tierId = await seed.seedTier(showtimeId, { label: "VIP", total: null });
 
   const seatIds: number[] = [];
   for (let i = 1; i <= seatCount; i++) {
@@ -115,26 +117,38 @@ export async function seedSoldOutSeated(seatCount = 2): Promise<SoldOutSeatedFix
 export async function seedSeatedWithoutSeatMap(tierCount = 2): Promise<SoldOutSeatedFixture> {
   const org = await seed.seedOrganizer(await seed.seedUser());
   const venue = await seed.seedVenue(await seed.seedUser());
-  const ev = await seed.seedEvent({ organizerId: org, eventType: 'seated' });
+  const ev = await seed.seedEvent({ organizerId: org, eventType: "seated" });
   const showtimeId = await seed.seedShowtime(ev.id, venue, OUTSIDE_CUTOFF_MS);
   let tierId = 0;
   for (let i = 0; i < tierCount; i++) {
-    tierId = await seed.seedTier(showtimeId, { label: `Hạng ${i + 1}`, total: 100, sold: 0 });
+    /*
+     * `total: null` is what makes these seat-gated tiers, and it is the whole point of the fixture.
+     *
+     * A seated tier carrying a NUMBER is a capacity zone since 0027 — a standing floor sold by
+     * count, which produces no `showtime_seats` and is genuinely on sale. Seeded with `total: 100`
+     * this fixture described exactly that, so "seated, no seat map" was being read as sold out by
+     * the queue and as sellable by the catalog, and the two were right about different things.
+     *
+     * NULL says "my inventory is my seat rows" — and with no rows, there is nothing to sell.
+     */
+    tierId = await seed.seedTier(showtimeId, { label: `Hạng ${i + 1}`, total: null, sold: 0 });
   }
   return { eventId: ev.id, showtimeId, tierId, seatIds: [] };
 }
 
 /** Free one seat again, as a cancellation or an expired hold would. */
 export async function releaseSeat(showtimeSeatId: number): Promise<void> {
-  await pool.query(`UPDATE showtime_seats SET status = 'available' WHERE id = $1`, [showtimeSeatId]);
+  await pool.query(`UPDATE showtime_seats SET status = 'available' WHERE id = $1`, [
+    showtimeSeatId,
+  ]);
 }
 
 /** Return `count` tickets to a general-admission tier, as a cancellation would. */
 export async function releaseGaQuantity(tierId: number, count = 1): Promise<void> {
-  await pool.query(`UPDATE ticket_tiers SET sold_quantity = GREATEST(sold_quantity - $2, 0) WHERE id = $1`, [
-    tierId,
-    count,
-  ]);
+  await pool.query(
+    `UPDATE ticket_tiers SET sold_quantity = GREATEST(sold_quantity - $2, 0) WHERE id = $1`,
+    [tierId, count],
+  );
 }
 
 export interface WaitlistRow {
@@ -244,13 +258,31 @@ export async function ageNotifications(showtimeId: number, minutes = 30): Promis
  * `channel = 'in_app'` matters: `enqueue` writes every message twice, once per channel, so a count
  * without this filter is double what any reader will ever see.
  */
-export async function getNotifications(userId: number): Promise<
-  Array<{ id: number; type: string; event_id: number | null; read_at: Date | null }>
-> {
+export async function getNotifications(
+  userId: number,
+): Promise<Array<{ id: number; type: string; event_id: number | null; read_at: Date | null }>> {
   const { rows } = await pool.query(
     `SELECT id, type, event_id, read_at FROM notifications
       WHERE user_id = $1 AND channel = 'in_app' ORDER BY id DESC`,
     [userId],
   );
   return rows;
+}
+
+/**
+ * A seated showtime sold as a CAPACITY ZONE (0027): a standing floor priced by a tier quantity,
+ * with no `showtime_seats` behind it. Indistinguishable from a seat-gated showtime by seat rows
+ * alone, and the whole reason the queue gate cannot judge a seated tier on those alone.
+ */
+export async function seedSeatedCapacityZone(remaining = 5): Promise<SoldOutSeatedFixture> {
+  const org = await seed.seedOrganizer(await seed.seedUser());
+  const venue = await seed.seedVenue(await seed.seedUser());
+  const ev = await seed.seedEvent({ organizerId: org, eventType: "seated" });
+  const showtimeId = await seed.seedShowtime(ev.id, venue, OUTSIDE_CUTOFF_MS);
+  const tierId = await seed.seedTier(showtimeId, {
+    label: "Khu đứng",
+    total: 100,
+    sold: 100 - remaining,
+  });
+  return { eventId: ev.id, showtimeId, tierId, seatIds: [] };
 }

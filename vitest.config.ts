@@ -18,7 +18,17 @@ export default defineConfig({
     // Integration tests share one Postgres database and truncate between tests,
     // so they must not run concurrently against each other.
     fileParallelism: false,
-    testTimeout: 20_000,
+    /*
+     * 20s was written against a database on the same machine. The suite now runs on a Neon branch
+     * in us-east-2, where one round trip costs ~230ms measured from here — so a case that drives a
+     * dozen HTTP calls, each several queries deep, spends most of a minute in transit while doing
+     * nothing wrong. Raised rather than left to fail: a timeout that fires on latency reports
+     * "broken" for something that is merely far away, and it hid four real failures behind it.
+     *
+     * Cases that assert on a rate limiter set their own, longer bound inline.
+     */
+    testTimeout: 60_000,
+    hookTimeout: 60_000,
     setupFiles: ["server/tests/helpers/setup.ts"],
     coverage: {
       provider: "v8",

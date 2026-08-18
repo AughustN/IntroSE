@@ -3,10 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Eye, EyeOff, Info, Loader2, MonitorSmartphone, ShieldCheck } from "lucide-react";
+import { Info, Loader2, MonitorSmartphone, ShieldCheck } from "lucide-react";
 import { FormEvent, useState } from "react";
 import type { Me } from "@/shared/auth/types";
 import { authClient } from "../../services/authClient";
+import { RevealPasswordButton } from "../common/RevealPasswordButton";
 import { errorMessage } from "./errors";
 import {
   EditButton,
@@ -46,6 +47,7 @@ export default function SecuritySection({ me, onNotice, onError, onConfirmLogout
   const [pw1, setPw1] = useState("");
   const [pw2, setPw2] = useState("");
   const [reveal, setReveal] = useState(false);
+  const [revealCur, setRevealCur] = useState(false);
   const [busy, setBusy] = useState(false);
   const [touched, setTouched] = useState<{ pw1?: boolean; pw2?: boolean }>({});
 
@@ -141,14 +143,21 @@ export default function SecuritySection({ me, onNotice, onError, onConfirmLogout
 
             <FieldGrid>
               <FormField label="Mật khẩu hiện tại" htmlFor="acc-cur">
-                <input
-                  id="acc-cur"
-                  type="password"
-                  autoComplete="current-password"
-                  value={cur}
-                  onChange={(e) => setCur(e.target.value)}
-                  className={inputClass}
-                />
+                <div className="relative">
+                  <input
+                    id="acc-cur"
+                    type={revealCur ? "text" : "password"}
+                    autoComplete="current-password"
+                    value={cur}
+                    onChange={(e) => setCur(e.target.value)}
+                    className={`${inputClass} pr-12`}
+                  />
+                  {/* Its own switch: this box holds the old secret, the two below the new one. */}
+                  <RevealPasswordButton
+                    shown={revealCur}
+                    onToggle={() => setRevealCur((v) => !v)}
+                  />
+                </div>
               </FormField>
 
               <FormField
@@ -169,18 +178,7 @@ export default function SecuritySection({ me, onNotice, onError, onConfirmLogout
                     aria-describedby="acc-pw-rules"
                     className={`${touched.pw1 && pw1Err ? inputErrorClass : inputClass} pr-12`}
                   />
-                  <button
-                    type="button"
-                    onClick={() => setReveal((v) => !v)}
-                    aria-label={reveal ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
-                    className="absolute right-1 top-1 grid h-9 w-9 place-items-center text-beige-kem/70 transition hover:text-beige-kem"
-                  >
-                    {reveal ? (
-                      <EyeOff className="h-4 w-4" aria-hidden />
-                    ) : (
-                      <Eye className="h-4 w-4" aria-hidden />
-                    )}
-                  </button>
+                  <RevealPasswordButton shown={reveal} onToggle={() => setReveal((v) => !v)} />
                 </div>
                 <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-bubblegum">
                   {pw1 && <div className={`h-full rounded-full transition-all ${strengthBar}`} />}

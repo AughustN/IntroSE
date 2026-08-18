@@ -111,6 +111,79 @@ export async function enqueue(db: Db, input: EnqueueInput): Promise<void> {
   );
 }
 
+/**
+ * Enqueue for the bell only, with no mail beside it.
+ *
+ * `enqueue` writes both channels because most messages are things a reader must not miss — a
+ * ticket, a cancellation, stock coming back. A confirmation of something the reader did a second
+ * ago is not one of those: they are looking at the screen that already says it. Mailing it would
+ * put a message in their inbox for every queue they join and teach them that our mail is noise.
+ */
+export async function enqueueInApp(db: Db, input: EnqueueInput): Promise<void> {
+  await db.query(
+    `INSERT INTO notifications (user_id, order_id, event_id, type, channel, dedupe_key, title, body, payload, sent_at)
+     VALUES ($1, $2, $3, $4, 'in_app', $5 || ':in_app', $6, $7, $8::jsonb, now())
+     ON CONFLICT (dedupe_key) DO NOTHING`,
+    [
+      input.userId,
+      input.orderId ?? null,
+      input.eventId ?? null,
+      input.type,
+      input.dedupeKey,
+      input.title,
+      input.body,
+      JSON.stringify(input.payload ?? {}),
+    ],
+  );
+}
+
+/**
+ * The receipt for taking a place in a queue (UC-17).
+ *
+ * Runs inside the caller's transaction, so a queue place and its confirmation are written together
+ * or not at all — a place recorded without a receipt is the state the reader reads as "my click did
+ * nothing", and it is exactly the state a separate write would leave behind when it failed.
+ *
+ * The dedupe key is the entry id: one place, one receipt. Re-joining a queue you are already in
+ * returns the existing entry rather than making a new one, so no second receipt is due.
+ */
+export async function queueWaitlistJoined(
+  db: Db,
+  entry: { id: number; userId: number; showtimeId: number },
+): Promise<void> {
+  const { rows } = await db.query<{
+    event_id: number;
+    title: string;
+    starts_at: Date;
+    venue_name: string;
+    city: string;
+  }>(
+    `SELECT e.id AS event_id, e.title, s.starts_at, v.name AS venue_name, v.city
+       FROM showtimes s JOIN events e ON e.id = s.event_id JOIN venues v ON v.id = s.venue_id
+      WHERE s.id = $1`,
+    [entry.showtimeId],
+  );
+  const row = rows[0];
+  if (!row) return;
+
+  await enqueueInApp(db, {
+    userId: entry.userId,
+    eventId: row.event_id,
+    type: "waitlist_joined",
+    dedupeKey: `waitlist_joined:${entry.id}`,
+    title: `Đã vào danh sách chờ: ${row.title}`,
+    // Says plainly what the place is and is not, because that is the one thing a waiter
+    // misremembers: no ticket is held, and the message is the whole of what they are owed.
+    body: "Bạn đã vào danh sách chờ. Không có vé nào được giữ riêng cho bạn — chúng tôi sẽ báo ngay khi có vé trả lại.",
+    payload: {
+      eventTitle: row.title,
+      showtimeId: entry.showtimeId,
+      startsAt: row.starts_at.toISOString(),
+      venue: `${row.venue_name}, ${row.city}`,
+    },
+  });
+}
+
 async function orderPayload(
   db: Db,
   orderId: number,
@@ -300,14 +373,26 @@ export async function availableForWaitlist(
 ): Promise<boolean> {
   if (tierId !== null) {
     const tier = await db.query<{ available: boolean }>(
-      // Branched on the *event's type*, the same axis `SHOWTIME_HAS_AVAILABILITY` branches on. A
-      // seated tier's inventory is its seat rows and nothing else: a seated showtime whose tiers
-      // carry a capacity but whose seat map is empty has nothing to sell, however encouraging the
-      // counters look.
+      // Branched on the *event's type*, the same axis `SHOWTIME_HAS_AVAILABILITY` branches on, and
+      // with the same two halves on the seated side.
+      //
+      // The second half is capacity zones (0027): a standing floor is sold as a tier quantity and
+      // produces no `showtime_seats` at all. Judged on seat rows alone, such a tier read as sold
+      // out here while the catalog was still selling it — so the queue would take someone's place
+      // in line for stock they could have bought outright.
+      //
+      // `total_quantity IS NOT NULL` is what keeps the half honest, exactly as in the catalog
+      // predicate: a seat-gated tier carries NULL there, and counting those would make a genuinely
+      // sold-out seated showtime look open.
       `SELECT CASE WHEN e.event_type = 'seated'
                    THEN EXISTS (SELECT 1 FROM showtime_seats ss
                                  WHERE ss.showtime_id = s.id AND ss.ticket_tier_id = $1
                                    AND ss.status = 'available')
+                     OR EXISTS (SELECT 1 FROM ticket_tiers tt
+                                 WHERE tt.id = $1 AND tt.showtime_id = s.id
+                                   AND tt.archived_at IS NULL
+                                   AND tt.total_quantity IS NOT NULL
+                                   AND tt.sold_quantity + tt.reserved_quantity < tt.total_quantity)
                    ELSE EXISTS (SELECT 1 FROM ticket_tiers tt
                                  WHERE tt.id = $1 AND tt.showtime_id = s.id
                                    AND (tt.total_quantity IS NULL
@@ -733,7 +818,7 @@ async function sendMail(
 async function writeLog(
   notificationId: number,
   attempt: number,
-  status: 'sent' | 'failed',
+  status: "sent" | "failed",
   error?: string,
 ): Promise<void> {
   try {
@@ -742,7 +827,7 @@ async function writeLog(
       [notificationId, attempt, status, error ?? null],
     );
   } catch (logError) {
-    console.error('[notifications] could not write attempt log:', {
+    console.error("[notifications] could not write attempt log:", {
       notificationId,
       attempt,
       status,
@@ -785,7 +870,7 @@ export async function processPendingNotifications(): Promise<number> {
       await pool.query(`UPDATE notifications SET sent_at = now() WHERE id = $1`, [notification.id]);
       // Outside the try: the mail is already gone, so a failure to *record* that must not be
       // reported as a failure to send. Treating it as one used to send the reader a second copy.
-      await writeLog(notification.id, attempt, 'sent');
+      await writeLog(notification.id, attempt, "sent");
     } catch (error) {
       const message = error instanceof Error ? error.message.slice(0, 1000) : "unknown send error";
       /*
@@ -803,12 +888,12 @@ export async function processPendingNotifications(): Promise<number> {
           [notification.id, retryDelayMs(attempt)],
         );
       } catch (scheduleError) {
-        console.error('[notifications] could not reschedule:', {
+        console.error("[notifications] could not reschedule:", {
           notificationId: notification.id,
           message: scheduleError instanceof Error ? scheduleError.message : scheduleError,
         });
       }
-      await writeLog(notification.id, attempt, 'failed', message);
+      await writeLog(notification.id, attempt, "failed", message);
       console.error("[notifications] delivery failed:", {
         notificationId: notification.id,
         message,
@@ -830,7 +915,10 @@ export async function processPendingNotifications(): Promise<number> {
  */
 export function kickNotificationWorker(): void {
   void processPendingNotifications().catch((error) =>
-    console.error('[notifications] worker run failed:', error instanceof Error ? error.message : error),
+    console.error(
+      "[notifications] worker run failed:",
+      error instanceof Error ? error.message : error,
+    ),
   );
 }
 

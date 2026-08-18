@@ -6,6 +6,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { Me } from "@/shared/auth/types";
 import { ApiClientError, authClient } from "../services/authClient";
+import { RevealPasswordButton } from "./common/RevealPasswordButton";
 
 interface AuthModalProps {
   onClose: () => void;
@@ -37,7 +38,13 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
   // would freeze the first render's onLogin (and the pending post-login action it closes over).
   // Route the Google callback through a ref that always holds the latest onLogin.
   const onLoginRef = useRef(onLogin);
-  onLoginRef.current = onLogin;
+  // Written in an effect, not during render: a render may be thrown away or replayed, and mutating
+  // a ref there is the write React cannot account for (react-hooks/refs). The effect commits after
+  // every render that changes the prop, which is well before any Google callback can fire — the
+  // script's own initialize() runs from an effect below.
+  useEffect(() => {
+    onLoginRef.current = onLogin;
+  }, [onLogin]);
 
   const [mode, setMode] = useState<Mode>("login");
   const [identifier, setIdentifier] = useState("");
@@ -46,6 +53,9 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
+  // One switch for both boxes: on the register form they hold the same secret, and revealing one
+  // while the other stays masked is what makes people think the two do not match.
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -134,7 +144,6 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
       if (render()) clearInterval(timer);
     }, 300);
     return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -208,25 +217,37 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
 
           <label className="block">
             <span className={labelText}>Mật khẩu</span>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className={inputClass}
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className={`${inputClass} pr-12`}
+              />
+              <RevealPasswordButton
+                shown={showPassword}
+                onToggle={() => setShowPassword((v) => !v)}
+              />
+            </div>
           </label>
 
           {mode === "register" && (
             <label className="block">
               <span className={labelText}>Nhập lại mật khẩu</span>
-              <input
-                type="password"
-                required
-                value={passwordConfirm}
-                onChange={(e) => setPasswordConfirm(e.target.value)}
-                className={inputClass}
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  required
+                  value={passwordConfirm}
+                  onChange={(e) => setPasswordConfirm(e.target.value)}
+                  className={`${inputClass} pr-12`}
+                />
+                <RevealPasswordButton
+                  shown={showPassword}
+                  onToggle={() => setShowPassword((v) => !v)}
+                />
+              </div>
             </label>
           )}
 

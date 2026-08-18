@@ -9,16 +9,18 @@
  * that eventually differs.
  */
 export type NotificationType =
-  | 'order_confirmed'
-  | 'ticket_resend'
-  | 'reminder_7d'
-  | 'reminder_1d'
-  | 'event_changed'
-  | 'event_cancelled'
-  | 'waitlist_open'
+  | "order_confirmed"
+  | "ticket_resend"
+  | "reminder_7d"
+  | "reminder_1d"
+  | "event_changed"
+  | "event_cancelled"
+  /** Confirmation that a place in a queue was taken — in-app only, no mail. */
+  | "waitlist_joined"
+  | "waitlist_open"
   /** A queue place closed before it could be served, with the reason it closed. */
-  | 'waitlist_closed'
-  | 'announcement';
+  | "waitlist_closed"
+  | "announcement";
 
 export interface NotificationItem {
   id: number;
@@ -28,6 +30,8 @@ export interface NotificationItem {
   /**
    * Type-specific context. For `waitlist_open`: `eventTitle`, `showtimeId`, `eventUrl`, `startsAt`
    * and `venue`. For `waitlist_closed`: the same, plus `reason` — `cutoff`, `cancelled`, or `event_removed`.
+   * For `waitlist_joined`: `eventTitle`, `showtimeId`, `startsAt` and `venue` — no `eventUrl`,
+   * since the confirmation is never mailed and the in-app row links through `event_id`.
    */
   payload: Record<string, unknown>;
   /**

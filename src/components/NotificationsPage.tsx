@@ -5,6 +5,7 @@
 
 import {
   BellOff,
+  BellPlus,
   BellRing,
   CalendarClock,
   CheckCheck,
@@ -16,6 +17,7 @@ import type { NotificationItem, NotificationType } from "../services/notificatio
 
 /** What each kind of message is about, at a glance. */
 const ICONS: Record<NotificationType, typeof BellRing> = {
+  waitlist_joined: BellPlus,
   waitlist_open: BellRing,
   waitlist_closed: BellOff,
   order_confirmed: Ticket,

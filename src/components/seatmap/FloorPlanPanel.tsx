@@ -66,7 +66,12 @@ export default function FloorPlanPanel({
         label="Tải lên bản vẽ mặt bằng"
         mediaType="floorplan"
         currentUrl={plan.url}
-        onFileSelected={(file) => void run(() => layoutApi.uploadPlan(layoutId, file))}
+        // The dropzone reports `null` when its own clear button empties the field. That is not an
+        // upload of nothing — removal has its own call below, and firing this one with no file
+        // would post an empty body to the upload route.
+        onFileSelected={(file) => {
+          if (file) void run(() => layoutApi.uploadPlan(layoutId, file));
+        }}
         onRemove={() =>
           void run(async () => {
             await layoutApi.removePlan(layoutId);

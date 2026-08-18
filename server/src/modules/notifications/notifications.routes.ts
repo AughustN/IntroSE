@@ -6,7 +6,11 @@ import { pool, withTransaction } from "../../db/pool.js";
 import { err } from "../../http.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
 import { validate } from "../../middleware/validate.js";
-import { availableForWaitlist, WAITLIST_CUTOFF_HOURS } from "./notifications.service.js";
+import {
+  availableForWaitlist,
+  queueWaitlistJoined,
+  WAITLIST_CUTOFF_HOURS,
+} from "./notifications.service.js";
 
 export const notificationRouter = Router();
 
@@ -208,6 +212,13 @@ notificationRouter.post(
          RETURNING id, showtime_id, ticket_tier_id, status, joined_at, notified_at`,
         [req.auth!.userId, body.showtimeId, tierId],
       );
+      // The receipt rides in the same transaction as the place it confirms (UC-17, FR-011). Only
+      // on a fresh join: the branch above returns an entry that already has one.
+      await queueWaitlistJoined(db, {
+        id: inserted.rows[0].id,
+        userId: req.auth!.userId,
+        showtimeId: body.showtimeId,
+      });
       return { row: inserted.rows[0], existing: false };
     });
     res.status(result.existing ? 200 : 201).json({

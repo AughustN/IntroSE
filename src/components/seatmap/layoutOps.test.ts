@@ -126,7 +126,11 @@ describe("a single drawing gesture can never exceed the layout's seat ceiling", 
 
   it("honours a smaller budget when the layout is already partly full", () => {
     const budget = 25;
-    const seats = makeGrid({ x1: 0, y1: 0, x2: 10000, y2: 10000 }, f({ pitch: 110, budget }), false);
+    const seats = makeGrid(
+      { x1: 0, y1: 0, x2: 10000, y2: 10000 },
+      f({ pitch: 110, budget }),
+      false,
+    );
     expect(seats).toHaveLength(budget);
     expectNoDuplicateLabels(seats);
   });
@@ -142,11 +146,14 @@ describe("a single drawing gesture can never exceed the layout's seat ceiling", 
 describe("every op keeps seats storable and uniquely labelled", () => {
   // A seeded sweep, so a failure is reproducible rather than a flake.
   let seed = 12345;
-  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
   const ri = (a: number, b: number) => a + Math.floor(rnd() * (b - a + 1));
   const pt = () => ({ x: ri(0, 10000), y: ri(0, 10000) });
 
-  it("survives 300 randomised rounds of every operation", () => {
+  // The one case in this project that is not a millisecond: 300 rounds, each running every op over
+  // a growing layout, costs ~15s of real arithmetic. Bounded here rather than by raising the
+  // project default, which is 5s on purpose — everything else here should stay instant.
+  it("survives 300 randomised rounds of every operation", { timeout: 60_000 }, () => {
     for (let i = 0; i < 300; i++) {
       const grid = rnd() < 0.5;
       const a = pt();
@@ -198,7 +205,15 @@ describe("supporting contracts the editor leans on", () => {
     for (let k = 0; k < 30; k++) {
       const label = nextRowLabel(seats, 1);
       expect(seats.some((s) => s.sectionId === 1 && s.rowLabel === label)).toBe(false);
-      seats = [...seats, ...makeRow({ x: 500, y: 600 + k * 20 }, { x: 2000, y: 600 + k * 20 }, f({ rowLabel: label }), false)];
+      seats = [
+        ...seats,
+        ...makeRow(
+          { x: 500, y: 600 + k * 20 },
+          { x: 2000, y: 600 + k * 20 },
+          f({ rowLabel: label }),
+          false,
+        ),
+      ];
     }
   });
 
@@ -292,7 +307,13 @@ describe("ink that stays readable on a seat's own colour", () => {
 });
 
 describe("row letters", () => {
-  const seat = (row: string, number: number, x: number, y: number, section: string | null = "Khu A") => ({
+  const seat = (
+    row: string,
+    number: number,
+    x: number,
+    y: number,
+    section: string | null = "Khu A",
+  ) => ({
     row,
     number,
     x,
@@ -315,7 +336,11 @@ describe("row letters", () => {
       seat("B", 1, 1000, 650),
       seat("B", 2, 1150, 650),
     ];
-    expect(rowMarkers(seats, 100).map((m) => m.label).sort()).toEqual(["A", "B"]);
+    expect(
+      rowMarkers(seats, 100)
+        .map((m) => m.label)
+        .sort(),
+    ).toEqual(["A", "B"]);
   });
 
   it("follows a rotated row instead of pointing world-right", () => {

@@ -5,6 +5,7 @@
 
 import { FormEvent, useState } from "react";
 import { ApiClientError, authClient } from "../services/authClient";
+import { RevealPasswordButton } from "./common/RevealPasswordButton";
 
 const inputClass =
   "h-11 w-full border-2 border-beige-kem bg-surface-2 px-4 text-body text-beige-kem outline-none focus:border-burgundy";
@@ -13,6 +14,7 @@ const labelText = "mb-1.5 block font-meta text-eyebrow text-beige-kem/70";
 export default function ResetPassword({ token }: { token: string }) {
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -56,23 +58,35 @@ export default function ResetPassword({ token }: { token: string }) {
           <form onSubmit={submit} className="mt-6 space-y-4">
             <label className="block">
               <span className={labelText}>Mật khẩu mới</span>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className={inputClass}
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className={`${inputClass} pr-12`}
+                />
+                <RevealPasswordButton
+                  shown={showPassword}
+                  onToggle={() => setShowPassword((v) => !v)}
+                />
+              </div>
             </label>
             <label className="block">
               <span className={labelText}>Nhập lại mật khẩu mới</span>
-              <input
-                type="password"
-                required
-                value={passwordConfirm}
-                onChange={(e) => setPasswordConfirm(e.target.value)}
-                className={inputClass}
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  required
+                  value={passwordConfirm}
+                  onChange={(e) => setPasswordConfirm(e.target.value)}
+                  className={`${inputClass} pr-12`}
+                />
+                <RevealPasswordButton
+                  shown={showPassword}
+                  onToggle={() => setShowPassword((v) => !v)}
+                />
+              </div>
             </label>
 
             {error && (

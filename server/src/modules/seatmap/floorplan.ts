@@ -1,8 +1,9 @@
-import { uploadToCloudinary, deleteFromCloudinary } from '../../services/cloudinary.js';
-import { sanitizeVenuePlan, MediaRejected } from '../media/sanitizer.js';
+import { FLOORPLAN_MAX_PX } from "../../config.js";
+import { uploadToCloudinary, deleteFromCloudinary } from "../../services/cloudinary.js";
+import { sanitizeVenuePlan, MediaRejected } from "../media/sanitizer.js";
 
 export class ImageRejected extends Error {
-  constructor(public reason: 'invalid_image' | 'image_too_large') {
+  constructor(public reason: "invalid_image" | "image_too_large") {
     super(reason);
   }
 }
@@ -13,21 +14,27 @@ export class ImageRejected extends Error {
  */
 export async function processFloorPlan(buffer: Buffer): Promise<Buffer> {
   try {
-    return await sanitizeVenuePlan(buffer);
+    // The ceiling the route's refusal message quotes (FR-023). Left to the sanitizer's own default
+    // it was 8192, twice what the message claimed.
+    return await sanitizeVenuePlan(buffer, 5 * 1024 * 1024, FLOORPLAN_MAX_PX);
   } catch (e) {
     if (e instanceof MediaRejected) {
-      throw new ImageRejected(e.reason === 'image_too_large' ? 'image_too_large' : 'invalid_image');
+      throw new ImageRejected(e.reason === "image_too_large" ? "image_too_large" : "invalid_image");
     }
     throw e;
   }
 }
 
 /** Store the processed plan directly in Cloudinary under deterministic layout folder. */
-export async function saveFloorPlan(layoutId: number, webp: Buffer, type: 'floorplan' | 'reference' = 'floorplan'): Promise<string> {
+export async function saveFloorPlan(
+  layoutId: number,
+  webp: Buffer,
+  type: "floorplan" | "reference" = "floorplan",
+): Promise<string> {
   const result = await uploadToCloudinary(webp, {
     folder: `tixhub/layouts/${layoutId}/${type}`,
     publicId: String(layoutId),
-    resourceType: 'image',
+    resourceType: "image",
     overwrite: true,
     invalidate: true,
   });
@@ -37,7 +44,7 @@ export async function saveFloorPlan(layoutId: number, webp: Buffer, type: 'floor
 /** Best-effort delete of a previously-uploaded plan from Cloudinary. */
 export async function deleteFloorPlan(url: string | null): Promise<void> {
   if (!url) return;
-  if (url.includes('cloudinary.com')) {
-    await deleteFromCloudinary(url, 'image').catch(() => {});
+  if (url.includes("cloudinary.com")) {
+    await deleteFromCloudinary(url, "image").catch(() => {});
   }
 }
