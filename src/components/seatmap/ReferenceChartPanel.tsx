@@ -74,7 +74,7 @@ export default function ReferenceChartPanel({
         label="Tải lên bản vẽ tham chiếu"
         mediaType="reference"
         currentUrl={reference.url}
-        onFileSelected={(file) => void run(() => layoutApi.uploadReference(layoutId, file))}
+        onFileSelected={(file) => file && void run(() => layoutApi.uploadReference(layoutId, file))}
         onRemove={() =>
           void run(async () => {
             await layoutApi.removeReference(layoutId);

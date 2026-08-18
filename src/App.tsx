@@ -1659,6 +1659,45 @@ export default function App() {
   };
 
   /**
+   * Hold several seats in ONE round trip — what the "chọn giúp tôi" button on the seat map calls
+   * with its chosen contiguous run (feature 005, FR-072).
+   *
+   * A single `hold`/`add` with the whole `seatIds` array, rather than N toggles: N toggles are N
+   * racing claims, and two buyers could each grab half of the run between presses. One call holds
+   * the entire run or none of it, which is the only atomicity a "best seats" promise can keep —
+   * a run that arrives half-filled is not the thing that was offered.
+   */
+  const handleHoldBestSeats = async (seats: Seat[]) => {
+    const seatIds = seats
+      .map((s) => s.showtimeSeatId)
+      .filter((id): id is number => id !== undefined);
+    if (bookingShowtimeId === null || seatIds.length === 0 || holdBusy) return;
+
+    const context = {
+      eventId: selectedMovie.id,
+      eventTitle: selectedMovie.title,
+      selectedDate: bookingDate,
+      selectedTime: bookingTime,
+      mode: "seated" as const,
+    };
+    setHoldBusy(true);
+    try {
+      const updated = hold
+        ? await holdsClient.add(hold.reservationId, { seatIds })
+        : await holdsClient.hold({ showtimeId: bookingShowtimeId, seatIds });
+      setHold(sessionFromReservation(updated, context));
+    } catch (e) {
+      pushToast(
+        "error",
+        e instanceof HoldError ? e.message : "Không giữ được ghế. Vui lòng thử lại.",
+      );
+      if (e instanceof HoldError && e.status === 404) setHold(null);
+    } finally {
+      setHoldBusy(false);
+    }
+  };
+
+  /**
    * A general-admission stepper press, straight through to the server.
    *
    * The quantity is not local state any more. It used to be picked on the event page and only
@@ -2196,6 +2235,7 @@ export default function App() {
             remainingMs={holdRemainingMs}
             busy={holdBusy}
             onToggleSeat={(seat) => void handleToggleSeat(seat)}
+            onHoldBestSeats={(seats) => void handleHoldBestSeats(seats)}
             // Backward is a cancel, here and everywhere else in the flow.
             onBack={() => void cancelBookingFlow()}
             onGoToStep={() => void cancelBookingFlow()}

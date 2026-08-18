@@ -1,5 +1,5 @@
-import pg from 'pg';
-import { config } from '../config.js';
+import pg from "pg";
+import { config } from "../config.js";
 
 type PromiseQuery = (...args: unknown[]) => Promise<pg.QueryResult>;
 
@@ -8,23 +8,32 @@ const sensitiveField = /password|secret|token|hash|key|authorization|cookie|otp/
 function queryInfo(args: unknown[]) {
   const statement = args[0];
   const query =
-    typeof statement === 'string'
+    typeof statement === "string"
       ? statement
-      : statement && typeof statement === 'object' && 'text' in statement && typeof statement.text === 'string'
+      : statement &&
+          typeof statement === "object" &&
+          "text" in statement &&
+          typeof statement.text === "string"
         ? statement.text
-        : '[unknown query]';
-  const configValues = statement && typeof statement === 'object' && 'values' in statement ? statement.values : undefined;
+        : "[unknown query]";
+  const configValues =
+    statement && typeof statement === "object" && "values" in statement
+      ? statement.values
+      : undefined;
   const values = Array.isArray(args[1]) ? args[1] : configValues;
 
-  return { query, values: sensitiveField.test(query) ? '[redacted]' : values };
+  return { query, values: sensitiveField.test(query) ? "[redacted]" : values };
 }
 
 function sanitizeForLog(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sanitizeForLog);
-  if (!value || typeof value !== 'object') return value;
+  if (!value || typeof value !== "object") return value;
 
   return Object.fromEntries(
-    Object.entries(value).map(([key, item]) => [key, sensitiveField.test(key) ? '[redacted]' : sanitizeForLog(item)]),
+    Object.entries(value).map(([key, item]) => [
+      key,
+      sensitiveField.test(key) ? "[redacted]" : sanitizeForLog(item),
+    ]),
   );
 }
 
@@ -33,7 +42,7 @@ async function logQuery(args: unknown[], execute: PromiseQuery): Promise<pg.Quer
 
   try {
     const result = await execute(...args);
-    console.log('[sql] success', {
+    console.log("[sql] success", {
       ...info,
       rowCount: result.rowCount,
       rows: sanitizeForLog(result.rows),
@@ -41,7 +50,7 @@ async function logQuery(args: unknown[], execute: PromiseQuery): Promise<pg.Quer
     return result;
   } catch (error) {
     const err = error as { message?: string; code?: string; detail?: string };
-    console.error('[sql] error', {
+    console.error("[sql] error", {
       ...info,
       message: err.message ?? String(error),
       code: err.code,
@@ -66,28 +75,42 @@ export const pool = new pg.Pool({
 const originalPoolQuery = pool.query.bind(pool) as unknown as PromiseQuery;
 (pool.query as unknown as PromiseQuery) = (...args) => logQuery(args, originalPoolQuery);
 
-pool.on('error', (error) => {
-  console.error('[sql] pool error', error);
+pool.on("error", (error) => {
+  console.error("[sql] pool error", error);
 });
 
 export type Db = pg.Pool | pg.PoolClient;
 
-/** Run a function inside a single transaction, rolling back on any error. */
-export async function withTransaction<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
-  const client = await pool.connect();
-  const originalClientQuery = client.query.bind(client) as unknown as PromiseQuery;
-  (client.query as unknown as PromiseQuery) = (...args) => logQuery(args, originalClientQuery);
+/** Run a function inside a single transaction, rolling back on any error.
+ *
+ *  A Postgres deadlock (40P01) means the server picked THIS transaction as the victim and already
+ *  rolled it back — re-running the same work from a clean BEGIN is the sanctioned recovery, so the
+ *  helper retries a few times with jitter before surfacing the error. Every caller wraps its whole
+ *  statement set in one transaction, so the retry never observes its own half-applied writes. */
+const DEADLOCK = "40P01";
+const DEADLOCK_RETRIES = 3;
 
-  try {
-    await client.query('BEGIN');
-    const result = await fn(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
-    throw err;
-  } finally {
-    (client.query as unknown as PromiseQuery) = originalClientQuery;
-    client.release();
+export async function withTransaction<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    const client = await pool.connect();
+    const originalClientQuery = client.query.bind(client) as unknown as PromiseQuery;
+    (client.query as unknown as PromiseQuery) = (...args) => logQuery(args, originalClientQuery);
+
+    try {
+      await client.query("BEGIN");
+      const result = await fn(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      if ((err as { code?: string }).code === DEADLOCK && attempt <= DEADLOCK_RETRIES) {
+        await new Promise((r) => setTimeout(r, 40 * attempt + Math.random() * 80));
+        continue;
+      }
+      throw err;
+    } finally {
+      (client.query as unknown as PromiseQuery) = originalClientQuery;
+      client.release();
+    }
   }
 }

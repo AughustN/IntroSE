@@ -650,6 +650,25 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
     const keptSeats: number[] = inSeats.filter((s) => s.id).map((s) => s.id as number);
 
     /*
+     * The same ids again, but POSITIONALLY — one entry per `inSeats` slot, in `inSeats` order.
+     *
+     * `keptSeats` cannot serve both jobs, and using it for the second is a bug that corrupts the
+     * stored document. It is a SET: the archive and delete statements below read it as
+     * `= ANY($2)`, where order is meaningless, and it is built by FILTERING OUT the seats that have
+     * no id yet — so its indices no longer line up with `inSeats`. New ids are then appended as each
+     * INSERT returns, which puts every new seat after every kept one.
+     *
+     * `stitchSeatIds` addresses seats through `projected.seatOrigin`, which IS parallel to
+     * `projected.seats` (= `inSeats` here). The two agree only when the document happens to carry
+     * its new seats last. The editor's own path does the opposite: growing `seatsPerRow` through
+     * `setBlockParams` → `regenerateBlock` re-emits the block row-major, so a widened 2×3 comes back
+     * as A1 A2 A3 A4 B1 B2 B3 B4 with the new seats INTERLEAVED at index 3 and 7. Stitching that
+     * against the set wrote B1's row id onto seat A4, and the next save then moved labels and
+     * positions across the wrong physical rows.
+     */
+    const savedIds: number[] = [];
+
+    /*
      * A seat a showtime has generated from is ARCHIVED rather than deleted (§18, §42 Rule 7).
      *
      * `showtime_seats.seat_id` is a plain `REFERENCES seats(id)` with no ON DELETE clause, so removing
@@ -680,6 +699,27 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
       [layoutId, keptSeats],
     );
 
+    /*
+     * The third statement, and the counterpart of the first: a seat the document names again is
+     * BACK on the chart, so it stops being archived.
+     *
+     * Without this, re-adding a row that was archived leaves a seat the document points at while
+     * every read still filters it out — drawn in the editor, absent from the projection, and not
+     * generated from. `restoreRevision` reaches exactly that state whenever an older revision names
+     * a seat that has since been archived.
+     *
+     * This is also why `liveSeatIds` does NOT filter archived seats. Reusing the archived id is what
+     * makes this an UPDATE; filtering there would re-mint the seat instead, and the INSERT would
+     * collide with the archived row still holding that label under
+     * `seats_section_row_number_key (section_id, row_label, seat_number)` — which has no archived
+     * predicate — turning a legitimate restore into a 409.
+     */
+    await client.query(
+      `UPDATE seats SET archived_at = NULL
+         WHERE layout_id = $1 AND id = ANY($2::bigint[]) AND archived_at IS NOT NULL`,
+      [layoutId, keptSeats],
+    );
+
     for (const seat of inSeats) {
       const x = clampCoord(seat.x);
       const y = clampCoord(seat.y);
@@ -696,6 +736,7 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
           [seat.id, sectionId, seat.rowLabel, seat.seatNumber, seat.seatType, x, y, rot, layoutId, categoryId,
            seat.isAccessible ?? false, rowId],
         );
+        savedIds.push(seat.id);
       } else {
         const { rows } = await client.query<{ id: number }>(
           `INSERT INTO seats (layout_id, section_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation,
@@ -705,6 +746,7 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
            seat.isAccessible ?? false, rowId],
         );
         keptSeats.push(rows[0].id);
+        savedIds.push(rows[0].id);
       }
     }
 
@@ -757,7 +799,8 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
         // real ids. Without it the stored document keeps the placeholders and the NEXT save tries to
         // insert the same rows again, which `layout_rows_label_idx` refuses.
         stitchRows(
-          stitchSeatIds(body.document, projected.seatOrigin, keptSeats),
+          // `savedIds`, NOT `keptSeats`: this is the one caller that needs the ids POSITIONALLY.
+          stitchSeatIds(body.document, projected.seatOrigin, savedIds),
           projected,
           (id) => rowIdMap.get(id) ?? id,
         ),

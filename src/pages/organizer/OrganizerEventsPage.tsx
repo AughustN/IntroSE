@@ -2,17 +2,15 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Calendar, BarChart3, Armchair, Megaphone } from "lucide-react";
 import AdPackagesPanel from "../../components/organizer/AdPackagesPanel";
-import { EventCard } from "../../components/organizer/EventCard";
-import { PortfolioSummaryHeader } from "../../components/organizer/PortfolioSummaryHeader";
+import OrganizerConsole from "../../components/organizer/OrganizerConsole";
+import SeatMapBuilder from "../../components/SeatMapBuilder";
 import {
-  getOrganizerEvents,
   createOrganizerEvent,
   CreateEventInput,
   uploadEventBannerFile,
   uploadEventTrailerFile,
 } from "../../services/organizerClient";
 import { aiClient, type ListingSuggestion } from "../../services/aiClient";
-import { OrganizerPortfolioSummary } from "../../types";
 import { OrganizerBusinessAnalytics } from "../../components/account/OrganizerBusinessAnalytics";
 import { MediaDropzone } from "../../components/common/MediaDropzone";
 
@@ -49,23 +47,16 @@ export const OrganizerEventsPage: React.FC = () => {
   // Active Part / Tab:"manage"(Quản lý sự kiện) or"create"(Tạo sự kiện mới)
   const [activeTab, setActiveTab] = useState<"manage" | "create">("manage");
 
-  // Portfolio State
-  const [events, setEvents] = useState<OrganizerPortfolioSummary[]>([]);
-  const [activeFilter, setActiveFilter] = useState<string>("all");
-  const [searchTerm, setSearchTerm] = useState<string>("");
-  const [loading, setLoading] = useState<boolean>(true);
-  const [toastMsg, setToastMsg] = useState<{ type: "success" | "error"; text: string } | null>(
-    null,
-  );
+  // The server-backed console (feature 006) owns the event list and its drill-down — event →
+  // editor → showtimes → tiers — while this page keeps the shell (analytics / ads) and the create
+  // form around it. State below is therefore console plumbing, not its own copy of the portfolio.
 
-  const [summary, setSummary] = useState({
-    totalEvents: 0,
-    draftCount: 0,
-    pendingCount: 0,
-    publishedCount: 0,
-    canceledCount: 0,
-    completedCount: 0,
-  });
+  // Which event is open in the console (level 2+), or null for the list.
+  const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
+  /** Bumped after a create (or a seat-map apply) so the console refetches. */
+  const [reloadKey, setReloadKey] = useState(0);
+  /** The overlay `SeatMapBuilder` runs for this event, or null if closed. */
+  const [seatMapEventId, setSeatMapEventId] = useState<number | null>(null);
 
   // Create Event Form State
   const [createTitle, setCreateTitle] = useState("");
@@ -110,6 +101,10 @@ export const OrganizerEventsPage: React.FC = () => {
     }
     return tier.preset;
   };
+
+  const [toastMsg, setToastMsg] = useState<{ type: "success" | "error"; text: string } | null>(
+    null,
+  );
 
   const handleAddTierItem = () => {
     setCreateTicketTiers((prev) => [
@@ -211,30 +206,6 @@ export const OrganizerEventsPage: React.FC = () => {
     showToast("success", "Đã áp dụng thông tin & hạng vé từ AI vào biểu mẫu!");
   };
 
-  const loadPortfolio = async () => {
-    setLoading(true);
-    try {
-      const res = await getOrganizerEvents({ status: activeFilter, search: searchTerm });
-      setEvents(res.data);
-      setSummary(res.summary);
-    } catch (err) {
-      console.error("Failed to load organizer events portfolio:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (activeTab === "manage") {
-      loadPortfolio();
-    }
-  }, [activeFilter, searchTerm, activeTab]);
-
-  const handleSelectEvent = (eventId: string) => {
-    window.scrollTo(0, 0);
-    navigate(`/organizer/${eventId}`);
-  };
-
   // Submit Create Event Form
   const handleCreateEventSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -278,7 +249,8 @@ export const OrganizerEventsPage: React.FC = () => {
         title: createTitle,
         category: createCategory,
         categoryLabel: createCategoryLabel,
-        bannerUrl: bannerUrlToSave || "https://res.cloudinary.com/tixhub/image/upload/placeholder.webp",
+        bannerUrl:
+          bannerUrlToSave || "https://res.cloudinary.com/tixhub/image/upload/placeholder.webp",
         videoUrl: videoUrlToSave || undefined,
         venueName: createVenueName,
         venueAddress: createVenueAddress,
@@ -326,9 +298,12 @@ export const OrganizerEventsPage: React.FC = () => {
         },
       ]);
 
-      // Switch to Management view & navigate to newly created event
+      // Stay on this page: open the new event inside the console (level 2) and refetch it there.
+      // Navigation to `/organizer/:id` used to leave the console; the console now owns the
+      // drill-down, so selecting the id is the single navigation it needs.
       setActiveTab("manage");
-      navigate(`/organizer/${newEvt.eventId}`);
+      setSelectedEventId(Number(newEvt.eventId));
+      setReloadKey((k) => k + 1);
     } catch (err: any) {
       showToast("error", err.message || "Tạo sự kiện thất bại.");
     } finally {
@@ -429,9 +404,6 @@ export const OrganizerEventsPage: React.FC = () => {
               }`}
             >
               <span>📋 Phần 1: Quản Lý Sự Kiện Hiện Có</span>
-              <span className="px-1.5 py-0.5 bg-beige-kem/15 text-[10px]">
-                {summary.totalEvents}
-              </span>
             </button>
 
             <button
@@ -446,64 +418,16 @@ export const OrganizerEventsPage: React.FC = () => {
             </button>
           </div>
 
-          {/* PART 1: MANAGE CURRENT EVENTS */}
+          {/* PART 1: MANAGE CURRENT EVENTS — the server-backed 006 console (events → editor →
+              showtimes → tiers), replacing the old portfolio cards + SingleEventPage. */}
           {activeTab === "manage" && (
-            <div className="space-y-6">
-              <PortfolioSummaryHeader
-                summary={summary}
-                activeFilter={activeFilter}
-                onFilterChange={setActiveFilter}
-                onSearchChange={setSearchTerm}
-                searchTerm={searchTerm}
-                onCreateEvent={() => setActiveTab("create")}
-              />
-
-              {loading ? (
-                <div className="flex items-center justify-center py-20">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-burgundy"></div>
-                </div>
-              ) : events.length === 0 ? (
-                /* Empty State */
-                <div className="bg-surface-2 border border-beige-kem/20 p-12 text-center space-y-4 max-w-md mx-auto my-12">
-                  <div className="w-16 h-16 bg-cam-dat/20 text-burgundy flex items-center justify-center mx-auto text-2xl font-bold">
-                    📅
-                  </div>
-                  <h3 className="font-display text-lg font-bold text-beige-kem">
-                    Chưa có sự kiện nào
-                  </h3>
-                  <p className="font-meta text-xs text-ink-soft">
-                    {searchTerm || activeFilter !== "all"
-                      ? "Không tìm thấy sự kiện khớp với bộ lọc hoặc từ khóa tìm kiếm của bạn."
-                      : "Bạn chưa tạo sự kiện nào trên TixHub. Chuyển sang Phần 2 để tạo sự kiện đầu tiên!"}
-                  </p>
-                  {searchTerm || activeFilter !== "all" ? (
-                    <button
-                      onClick={() => {
-                        setActiveFilter("all");
-                        setSearchTerm("");
-                      }}
-                      className="font-meta text-xs text-burgundy-ink hover:underline font-bold"
-                    >
-                      Xóa bộ lọc tìm kiếm
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => setActiveTab("create")}
-                      className="inline-flex items-center px-4 py-2 text-xs font-bold bg-burgundy hover:brightness-110 text-white transition-colors"
-                    >
-                      + Sang Phần Tạo Sự Kiện Mới
-                    </button>
-                  )}
-                </div>
-              ) : (
-                /* Event Cards Grid with Background Image Overlay Layout */
-                <div className="grid grid-cols-1 gap-6">
-                  {events.map((event) => (
-                    <EventCard key={event.eventId} event={event} onSelect={handleSelectEvent} />
-                  ))}
-                </div>
-              )}
-            </div>
+            <OrganizerConsole
+              selectedEventId={selectedEventId}
+              onSelectEvent={setSelectedEventId}
+              onCreateRequested={() => setActiveTab("create")}
+              onOpenSeatMap={(eventId) => setSeatMapEventId(eventId)}
+              reloadKey={reloadKey}
+            />
           )}
 
           {/* PART 2: CREATE NEW EVENT FORM */}
@@ -918,6 +842,19 @@ export const OrganizerEventsPage: React.FC = () => {
             </div>
           )}
         </div>
+      )}
+
+      {/* The overlay `SeatMapBuilder` opens for one event — design the venue chart, then apply it
+          to each showtime with a tier per class. Closing it refetches the console, so a new map
+          shows up in the list beneath without leaving the page. */}
+      {seatMapEventId !== null && (
+        <SeatMapBuilder
+          eventId={seatMapEventId}
+          onClose={() => {
+            setSeatMapEventId(null);
+            setReloadKey((k) => k + 1);
+          }}
+        />
       )}
     </div>
   );

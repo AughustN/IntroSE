@@ -66,7 +66,7 @@ export default function FloorPlanPanel({
         label="Tải lên bản vẽ mặt bằng"
         mediaType="floorplan"
         currentUrl={plan.url}
-        onFileSelected={(file) => void run(() => layoutApi.uploadPlan(layoutId, file))}
+        onFileSelected={(file) => file && void run(() => layoutApi.uploadPlan(layoutId, file))}
         onRemove={() =>
           void run(async () => {
             await layoutApi.removePlan(layoutId);

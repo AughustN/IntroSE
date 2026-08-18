@@ -137,7 +137,9 @@ export async function updateEvent(
     imageUrl?: string | null;
     refundPolicy?: string | null;
   },
-  db: Db = pool,
+  // Unused: `withTransaction` draws its client from the pool; the parameter stays for signature
+  // symmetry with the read helpers above.
+  _db: Db = pool,
 ) {
   return withTransaction(async (client) => {
     const { rows } = await client.query<{
@@ -201,22 +203,20 @@ export async function unpublishEvent(eventId: number, db: Db = pool): Promise<vo
  * 'finished' is the correct value (not 'completed', which is a frontend alias).
  */
 export async function finishEvent(eventId: number, db: Db = pool): Promise<void> {
-  const { rows } = await db.query<{ status: string }>(
-    `SELECT status FROM events WHERE id = $1`,
-    [eventId],
-  );
-  if (!rows[0]) throw err.notFound('not_found', 'Không tìm thấy sự kiện.');
-  if (rows[0].status === 'finished') return; // idempotent
-  if (rows[0].status === 'cancelled') {
-    throw err.conflict('already_cancelled', 'Sự kiện đã bị hủy, không thể hoàn tất.');
+  const { rows } = await db.query<{ status: string }>(`SELECT status FROM events WHERE id = $1`, [
+    eventId,
+  ]);
+  if (!rows[0]) throw err.notFound("not_found", "Không tìm thấy sự kiện.");
+  if (rows[0].status === "finished") return; // idempotent
+  if (rows[0].status === "cancelled") {
+    throw err.conflict("already_cancelled", "Sự kiện đã bị hủy, không thể hoàn tất.");
   }
-  if (rows[0].status === 'draft') {
-    throw err.conflict('not_published', 'Chỉ có thể hoàn tất sự kiện đang đăng bán.');
+  if (rows[0].status === "draft") {
+    throw err.conflict("not_published", "Chỉ có thể hoàn tất sự kiện đang đăng bán.");
   }
-  await db.query(
-    `UPDATE events SET status = 'finished', updated_at = now() WHERE id = $1`,
-    [eventId],
-  );
+  await db.query(`UPDATE events SET status = 'finished', updated_at = now() WHERE id = $1`, [
+    eventId,
+  ]);
   // Mark all future showtimes (if any remain) as finished too.
   await db.query(
     `UPDATE showtimes SET status = 'finished' WHERE event_id = $1 AND status NOT IN ('cancelled', 'finished')`,
@@ -395,7 +395,9 @@ export async function listSections(venueId: number, db: Db = pool) {
       `SELECT s.id, s.name, count(se.id)::int AS "seatCount"
          FROM sections s
          JOIN venue_layouts l ON l.id = s.layout_id
-         LEFT JOIN seats se ON se.section_id = s.id
+         -- Archived seats have left the chart, so they must not be counted in what the organizer
+         -- is shown as the section's size (§18, §42 Rule 7).
+         LEFT JOIN seats se ON se.section_id = s.id AND se.archived_at IS NULL
         WHERE l.venue_id = $1 GROUP BY s.id ORDER BY s.id`,
       [venueId],
     )
@@ -456,7 +458,11 @@ export async function eventShowtimesManage(eventId: number, db: Db = pool) {
       ? (
           await db.query(
             `SELECT c.id, c.name, c.color,
-                    (SELECT count(*)::int FROM seats s WHERE s.category_id = c.id) AS "seatCount"
+                    -- Without \`archived_at IS NULL\` a class whose seats have all left the chart
+                    -- still reports inventory, and the seat map builder then requires a price for a
+                    -- class that can sell nothing before it will apply the chart.
+                    (SELECT count(*)::int FROM seats s
+                      WHERE s.category_id = c.id AND s.archived_at IS NULL) AS "seatCount"
                FROM layout_categories c WHERE c.layout_id = $1 ORDER BY c.name`,
             [chart[0].id],
           )
@@ -514,7 +520,10 @@ export async function generateSeatMap(showtimeId: number, layoutId: number): Pro
                 (SELECT c.name FROM layout_categories c WHERE c.id = s.category_id),
                 s.is_accessible, s.table_id,
                 (SELECT t.booking_mode FROM layout_tables t WHERE t.id = s.table_id)
-           FROM seats s WHERE s.layout_id = $3 AND s.category_id = $4`,
+           -- The invariant archiving rests on: a seat kept only because an EARLIER showtime sold it
+           -- must not become bookable inventory on the next one bound to this chart.
+           FROM seats s
+          WHERE s.layout_id = $3 AND s.category_id = $4 AND s.archived_at IS NULL`,
         [showtimeId, tier.id, layoutId, tier.category_id],
       );
       total += res.rowCount ?? 0;
@@ -532,7 +541,11 @@ export async function generateSeatMap(showtimeId: number, layoutId: number): Pro
      * class, because silently keeping the old capacity would leave the organizer believing an edit
      * took effect.
      */
-    const { rows: zones } = await client.query<{ category_id: number; capacity: string; name: string }>(
+    const { rows: zones } = await client.query<{
+      category_id: number;
+      capacity: string;
+      name: string;
+    }>(
       `SELECT e.category_id, sum(e.capacity)::bigint AS capacity, c.name
          FROM layout_elements e
          JOIN layout_categories c ON c.id = e.category_id
@@ -556,11 +569,14 @@ export async function generateSeatMap(showtimeId: number, layoutId: number): Pro
       const taken = Number(committed[0]?.taken ?? 0);
       if (capacity < taken) {
         throw err.conflict(
-          'zone_capacity_below_sold',
+          "zone_capacity_below_sold",
           `Khu "${zone.name}" chỉ còn ${capacity} chỗ nhưng đã bán hoặc giữ ${taken}.`,
         );
       }
-      await client.query(`UPDATE ticket_tiers SET total_quantity = $2 WHERE id = $1`, [tier.id, capacity]);
+      await client.query(`UPDATE ticket_tiers SET total_quantity = $2 WHERE id = $1`, [
+        tier.id,
+        capacity,
+      ]);
       total += capacity;
     }
 
@@ -583,7 +599,10 @@ export async function generateSeatMap(showtimeId: number, layoutId: number): Pro
  */
 export async function categoriesWithInventory(layoutId: number, db: Db = pool): Promise<number[]> {
   const { rows } = await db.query<{ category_id: number }>(
-    `SELECT DISTINCT category_id FROM seats WHERE layout_id = $1 AND category_id IS NOT NULL
+    // Archived seats are not inventory, so a class holding nothing but archived ones must not
+    // report itself as stocked — this answer gates validation and publish.
+    `SELECT DISTINCT category_id FROM seats
+       WHERE layout_id = $1 AND category_id IS NOT NULL AND archived_at IS NULL
      UNION
      SELECT DISTINCT category_id FROM layout_elements
        WHERE layout_id = $1 AND kind = 'area' AND capacity IS NOT NULL AND category_id IS NOT NULL`,

@@ -4,10 +4,20 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BlockKind, BlockParams, ChartDocument, DocumentBlock } from "@/shared/catalog/seatmap-document";
+import type {
+  BlockKind,
+  BlockParams,
+  ChartDocument,
+  DocumentBlock,
+} from "@/shared/catalog/seatmap-document";
 import { emptyDocument, nextBlockKey } from "@/shared/catalog/seatmap-document";
 import { projectDocument } from "@/shared/catalog/seatmap-project";
-import { LAYOUT_SPACE, clampCoord, type ValidationIssue, validateLayout } from "@/shared/catalog/seatmap-validate";
+import {
+  LAYOUT_SPACE,
+  clampCoord,
+  type ValidationIssue,
+  validateLayout,
+} from "@/shared/catalog/seatmap-validate";
 import type { Layout } from "@/shared/catalog/seatmap";
 import ConfirmDialog, { type ConfirmRequest } from "../ConfirmDialog";
 import { layoutApi } from "../../services/catalogClient";
@@ -284,6 +294,18 @@ export default function ChartEditor({
   const [clipboard, setClipboard] = useState<DocumentBlock[]>([]);
   /** Preview mode (§34) — the same chart, drawn as a buyer meets it. */
   const [previewing, setPreviewing] = useState(false);
+  /**
+   * Section hulls on/off (FR-035, §12).
+   *
+   * They are a VIEW aid — a coloured outline telling the organizer which seats belong to which named
+   * area. But on a dense chart they become visual noise that fights the seat grid for attention, so they
+   * are a toggle the organizer can quieten rather than an always-on layer they cannot remove. Default
+   * on: a brand-new chart has nothing to separate yet, and first impressions matter more than noise on
+   * day one.
+   */
+  const [showHulls, setShowHulls] = useState(true);
+  /** The keyboard-shortcuts reference (§44). Hidden until asked for. */
+  const [showKeys, setShowKeys] = useState(false);
   /** When the last successful server save landed, for the save-state readout (§29). */
   const [savedAt, setSavedAt] = useState<number | null>(null);
   /** When the recovery copy was last parked locally — the safety net's own state. */
@@ -295,7 +317,9 @@ export default function ChartEditor({
    * still unable to reach this server. So it drives the reassuring half of the message only, and a
    * failed save is what actually tells the organizer something is wrong.
    */
-  const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
+  const [online, setOnline] = useState(() =>
+    typeof navigator === "undefined" ? true : navigator.onLine,
+  );
   /**
    * The clock the save-state reads, ticked rather than sampled.
    *
@@ -305,7 +329,11 @@ export default function ChartEditor({
    */
   const [now, setNow] = useState(() => Date.now());
   /** Zoom and pointer position, pushed up by the canvas for the status bar (§3). */
-  const [viewReport, setViewReport] = useState<{ zoom: number; x: number | null; y: number | null }>({
+  const [viewReport, setViewReport] = useState<{
+    zoom: number;
+    x: number | null;
+    y: number | null;
+  }>({
     zoom: 1,
     x: null,
     y: null,
@@ -364,9 +392,8 @@ export default function ChartEditor({
    */
   const [tool, setTool] = useState<BlockKind | null>(null);
 
-  const { draft, commit, reset, undo, redo, canUndo, canRedo } = useLayoutHistory<ChartDocument>(
-    emptyDocument(),
-  );
+  const { draft, commit, reset, undo, redo, canUndo, canRedo } =
+    useLayoutHistory<ChartDocument>(emptyDocument());
 
   useEffect(() => {
     layoutApi
@@ -578,14 +605,20 @@ export default function ChartEditor({
   /** Section hulls, drawn behind the seats — the canvas already knows how to title a group. */
   const blocks = useMemo<CanvasBlock[]>(
     () =>
-      draft.sections.map((s) => ({
-        id: s.id,
-        name: s.name,
-        // Stable per section id, so a hull keeps its colour as sections are added and removed. It is an
-        // IDENTITY colour, never a price: a section may hold several classes, and the seats carry those.
-        color: CATEGORY_COLORS[Math.abs(s.id) % CATEGORY_COLORS.length],
-      })),
-    [draft.sections],
+      // The hulls are a view aid the organizer can switch off (§44), so an empty list when hidden
+      // rather than a filtered one: the canvas treats "no blocks" as "draw no hulls", which is the
+      // intended off-state and avoids computing a colour palette nobody reads.
+      showHulls
+        ? draft.sections.map((s) => ({
+            id: s.id,
+            name: s.name,
+            // Stable per section id, so a hull keeps its colour as sections are added and removed. It
+            // is an IDENTITY colour, never a price: a section may hold several classes, and the seats
+            // carry those.
+            color: CATEGORY_COLORS[Math.abs(s.id) % CATEGORY_COLORS.length],
+          }))
+        : [],
+    [draft.sections, showHulls],
   );
 
   /**
@@ -669,7 +702,13 @@ export default function ChartEditor({
         // The live resize preview, applied to the one element being dragged by a handle.
         .map((el, i) =>
           resizing && blockOfElement[i] === resizing.key
-            ? { ...el, x: resizing.box.x, y: resizing.box.y, width: resizing.box.width, height: resizing.box.height }
+            ? {
+                ...el,
+                x: resizing.box.x,
+                y: resizing.box.y,
+                width: resizing.box.width,
+                height: resizing.box.height,
+              }
             : el,
         )
         .map((el, i) =>
@@ -709,7 +748,8 @@ export default function ChartEditor({
     for (const b of draft.blocks) {
       const seats = (b.seats ?? []).filter((seat) => seat.rowLabel === label);
       if (seats.length === 0) continue;
-      const name = draft.sections.find((x) => x.id === (seats[0].sectionId ?? b.sectionId))?.name ?? null;
+      const name =
+        draft.sections.find((x) => x.id === (seats[0].sectionId ?? b.sectionId))?.name ?? null;
       if (name !== sectionName) continue;
       return {
         label,
@@ -817,7 +857,6 @@ export default function ChartEditor({
     // over are all in this list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft, dirty, online, busy, drawing, dragDelta, resizing, layout]);
-
 
   /**
    * Publish — but only ever the chart that was actually judged.
@@ -1090,7 +1129,10 @@ export default function ChartEditor({
     if (tables.length === 0 || !box || selected.size < 2) return;
     void tableOp(
       next,
-      () => Promise.all(tables.map((t) => layoutApi.updateTable(t.tableId, alignedPosition(box, t, edge)))),
+      () =>
+        Promise.all(
+          tables.map((t) => layoutApi.updateTable(t.tableId, alignedPosition(box, t, edge))),
+        ),
       "Đã canh hàng.",
     );
   };
@@ -1107,7 +1149,8 @@ export default function ChartEditor({
    */
   /** The document positions of the seats currently selected, if any. */
   const selectedSeatRefs = useMemo(
-    () => [...seatSel].map((id) => originOfSeat.get(id)).filter((r): r is SeatRef => r !== undefined),
+    () =>
+      [...seatSel].map((id) => originOfSeat.get(id)).filter((r): r is SeatRef => r !== undefined),
     [seatSel, originOfSeat],
   );
 
@@ -1205,7 +1248,9 @@ export default function ChartEditor({
    * `seat.categoryId ?? block.categoryId` — so reading the block would report "VIP" for a block whose
    * seats had been individually re-classed, and the control would then quietly not apply to them.
    */
-  const sharedValue = (pick: (s: (typeof subjectSeats)[number]) => number | null): number | null | "mixed" => {
+  const sharedValue = (
+    pick: (s: (typeof subjectSeats)[number]) => number | null,
+  ): number | null | "mixed" => {
     if (subjectSeats.length === 0) return null;
     const first = pick(subjectSeats[0]);
     return subjectSeats.every((s) => pick(s) === first) ? first : "mixed";
@@ -1320,10 +1365,12 @@ export default function ChartEditor({
   ) => {
     // Where the organizer dropped it, else the centre of what they are looking at — never the centre of
     // the coordinate space, which is how the reference editor ended up with everything stacked.
-    const at =
-      (dropAt
-        ? canvas.current?.toLayout(dropAt.clientX, dropAt.clientY)
-        : canvas.current?.toLayout(window.innerWidth / 2, window.innerHeight / 2)) ?? { x: 5000, y: 5000 };
+    const at = (dropAt
+      ? canvas.current?.toLayout(dropAt.clientX, dropAt.clientY)
+      : canvas.current?.toLayout(window.innerWidth / 2, window.innerHeight / 2)) ?? {
+      x: 5000,
+      y: 5000,
+    };
     addAtPoint(kind, at, geometry);
   };
 
@@ -1467,7 +1514,6 @@ export default function ChartEditor({
     // — which is to say empty.
   }, [draft, draft.blocks, selected, clipboard, grid, layout, drawing, op, commit, undo, redo]);
 
-
   if (error && !layout) return <p className="p-6 text-sm text-on-tint">{error}</p>;
   if (!layout) return <p className="p-6 font-mono text-xs text-beige-kem/60">Đang tải sơ đồ…</p>;
 
@@ -1508,7 +1554,8 @@ export default function ChartEditor({
           the organizer had forgotten to press save, when in fact pressing it would have failed.
         */}
         <span
-          className={`border px-2 py-0.5 font-mono text-[10px] ${ busy
+          className={`border px-2 py-0.5 font-mono text-[10px] ${
+            busy
               ? "border-beige-kem/50 text-beige-kem/70"
               : !online
                 ? "border-cam-dat text-cam-dat"
@@ -1570,6 +1617,20 @@ export default function ChartEditor({
           </button>
           <button onClick={() => canvas.current?.zoomToVenue()} className={btn}>
             Vừa khung
+          </button>
+          <button
+            onClick={() => setShowHulls((h) => !h)}
+            className={btn}
+            title="Bật/tắt viền màu quanh các khu vực — lớp trợ giúp nhìn, không ảnh hưởng dữ liệu"
+          >
+            {showHulls ? "Ẩn viền khu" : "Hiện viền khu"}
+          </button>
+          <button
+            onClick={() => setShowKeys(true)}
+            className={btn}
+            title="Bảng phím tắt của trình thiết kế"
+          >
+            Phím tắt
           </button>
           <button
             onClick={() => setPreviewing(true)}
@@ -1675,7 +1736,9 @@ export default function ChartEditor({
                       const v = sharedValue((s) => s.sectionId ?? null);
                       return v === "mixed" ? "mixed" : v === null ? "" : String(v);
                     })()}
-                    onChange={(e) => assignSectionTo(e.target.value === "" ? null : Number(e.target.value))}
+                    onChange={(e) =>
+                      assignSectionTo(e.target.value === "" ? null : Number(e.target.value))
+                    }
                     className="border-2 border-beige-kem/50 bg-transparent px-1.5 py-0.5 text-beige-kem"
                   >
                     {sharedValue((s) => s.sectionId ?? null) === "mixed" && (
@@ -1697,7 +1760,9 @@ export default function ChartEditor({
                       const v = sharedValue((s) => s.categoryId ?? null);
                       return v === "mixed" ? "mixed" : v === null ? "" : String(v);
                     })()}
-                    onChange={(e) => assignCategoryTo(e.target.value === "" ? null : Number(e.target.value))}
+                    onChange={(e) =>
+                      assignCategoryTo(e.target.value === "" ? null : Number(e.target.value))
+                    }
                     className="border-2 border-beige-kem/50 bg-transparent px-1.5 py-0.5 text-beige-kem"
                   >
                     {sharedValue((s) => s.categoryId ?? null) === "mixed" && (
@@ -1747,14 +1812,18 @@ export default function ChartEditor({
 
                 <button
                   onClick={() => {
-                    const anyOpen = draft.blocks.some((b) => selected.has(b.key) && b.locked !== true);
+                    const anyOpen = draft.blocks.some(
+                      (b) => selected.has(b.key) && b.locked !== true,
+                    );
                     op((d) => setLocked(d, selected, anyOpen));
                   }}
                   className={btn}
                   disabled={selected.size === 0}
                   title="Khoá khối đã chọn để không kéo nhầm"
                 >
-                  {draft.blocks.some((b) => selected.has(b.key) && b.locked !== true) ? "Khoá" : "Mở khoá"}
+                  {draft.blocks.some((b) => selected.has(b.key) && b.locked !== true)
+                    ? "Khoá"
+                    : "Mở khoá"}
                 </button>
 
                 <button
@@ -1782,25 +1851,36 @@ export default function ChartEditor({
                 </button>
 
                 {selected.size > 1 &&
-                  (["left", "centerX", "right", "top", "centerY", "bottom"] as const).map((edge) => (
-                    <button
-                      key={edge}
-                      className={btn}
-                      onClick={() => applyAlign(edge)}
-                      title={
+                  (["left", "centerX", "right", "top", "centerY", "bottom"] as const).map(
+                    (edge) => (
+                      <button
+                        key={edge}
+                        className={btn}
+                        onClick={() => applyAlign(edge)}
+                        title={
+                          {
+                            left: "Canh trái",
+                            centerX: "Canh giữa ngang",
+                            right: "Canh phải",
+                            top: "Canh trên",
+                            centerY: "Canh giữa dọc",
+                            bottom: "Canh dưới",
+                          }[edge]
+                        }
+                      >
                         {
-                          left: "Canh trái",
-                          centerX: "Canh giữa ngang",
-                          right: "Canh phải",
-                          top: "Canh trên",
-                          centerY: "Canh giữa dọc",
-                          bottom: "Canh dưới",
-                        }[edge]
-                      }
-                    >
-                      {{ left: "⇤", centerX: "↔", right: "⇥", top: "⇧", centerY: "↕", bottom: "⇩" }[edge]}
-                    </button>
-                  ))}
+                          {
+                            left: "⇤",
+                            centerX: "↔",
+                            right: "⇥",
+                            top: "⇧",
+                            centerY: "↕",
+                            bottom: "⇩",
+                          }[edge]
+                        }
+                      </button>
+                    ),
+                  )}
 
                 {/* Distribute (§26). Needs three: two blocks have no gap between them to even out. */}
                 {selected.size > 2 &&
@@ -1809,7 +1889,11 @@ export default function ChartEditor({
                       key={axis}
                       className={btn}
                       onClick={() => op((d) => distributeBlocks(d, selected, axis))}
-                      title={axis === "horizontal" ? "Dàn đều theo chiều ngang" : "Dàn đều theo chiều dọc"}
+                      title={
+                        axis === "horizontal"
+                          ? "Dàn đều theo chiều ngang"
+                          : "Dàn đều theo chiều dọc"
+                      }
                     >
                       {axis === "horizontal" ? "⇹" : "⇳"}
                     </button>
@@ -2071,14 +2155,22 @@ export default function ChartEditor({
               // the organizer is acting on is never hidden behind its colour — the same precedence the
               // buyer's map uses, where status outranks price.
               seatFill={(s) =>
-                overlapping.has(s.id) || selected.has(blockOfSeat.get(s.id) ?? "") || seatSel.has(s.id)
+                overlapping.has(s.id) ||
+                selected.has(blockOfSeat.get(s.id) ?? "") ||
+                seatSel.has(s.id)
                   ? undefined
                   : colorOfSeat.get(s.id)
               }
               seatLabel={(s) =>
                 `${s.section ? `${s.section}, ` : ""}hàng ${s.row}, ghế ${s.number}`
               }
-              selectedIds={new Set(canvasSeats.filter((s) => selected.has(blockOfSeat.get(s.id) ?? "")).map((s) => s.id))}
+              selectedIds={
+                new Set(
+                  canvasSeats
+                    .filter((s) => selected.has(blockOfSeat.get(s.id) ?? ""))
+                    .map((s) => s.id),
+                )
+              }
               onSeatPointerDown={onSeatPointerDown}
               onSeatDrag={onSeatDrag}
               onSeatActivate={(s) => onSeatPointerDown(s, true)}
@@ -2241,9 +2333,9 @@ export default function ChartEditor({
             {drawing
               ? `Đang vẽ: bấm để đặt điểm (${drawing.length}) · bấm lại điểm đầu hoặc Enter để khép hình · Backspace lùi một điểm · Esc huỷ`
               : null}
-            {drawing ? null : "Kéo khối để dời"} · giữ Ctrl (hoặc ⌘) và kéo để di chuyển khung nhìn · lăn chuột để phóng to
-            · Shift+bấm chọn thêm · mũi tên nhích, Shift+mũi tên nhích xa · Ctrl+D nhân đôi · Delete
-            xoá khối · Ctrl+Z hoàn tác.
+            {drawing ? null : "Kéo khối để dời"} · giữ Ctrl (hoặc ⌘) và kéo để di chuyển khung nhìn
+            · lăn chuột để phóng to · Shift+bấm chọn thêm · mũi tên nhích, Shift+mũi tên nhích xa ·
+            Ctrl+D nhân đôi · Delete xoá khối · Ctrl+Z hoàn tác.
           </p>
         </main>
 
@@ -2294,7 +2386,9 @@ export default function ChartEditor({
                               ? {
                                   ...b,
                                   seats: b.seats?.map((seat) =>
-                                    seat.rowLabel === ref.label ? { ...seat, rowLabel: label } : seat,
+                                    seat.rowLabel === ref.label
+                                      ? { ...seat, rowLabel: label }
+                                      : seat,
                                   ),
                                 }
                               : b,
@@ -2304,10 +2398,14 @@ export default function ChartEditor({
                   setRowSel(`${selectedRow.sectionName ?? ""}|${label}`);
                 }}
                 onReverse={() =>
-                  op((d) => reverseRow(d, { blockKey: selectedRow.blockKey, label: selectedRow.label }))
+                  op((d) =>
+                    reverseRow(d, { blockKey: selectedRow.blockKey, label: selectedRow.label }),
+                  )
                 }
                 onDuplicate={() =>
-                  op((d) => duplicateRow(d, { blockKey: selectedRow.blockKey, label: selectedRow.label }))
+                  op((d) =>
+                    duplicateRow(d, { blockKey: selectedRow.blockKey, label: selectedRow.label }),
+                  )
                 }
                 onDelete={() =>
                   ask(
@@ -2319,7 +2417,9 @@ export default function ChartEditor({
                       tone: "danger",
                     },
                     () => {
-                      op((d) => deleteRow(d, { blockKey: selectedRow.blockKey, label: selectedRow.label }));
+                      op((d) =>
+                        deleteRow(d, { blockKey: selectedRow.blockKey, label: selectedRow.label }),
+                      );
                       setRowSel(null);
                     },
                   )
@@ -2330,41 +2430,41 @@ export default function ChartEditor({
 
           {selectedBlock && (
             <RailGroup title="Thuộc tính khối" defaultOpen>
-          <BlockInspector
-            block={selectedBlock}
-            sections={draft.sections}
-            categories={draft.categories}
-            seatBudget={budget}
-            onChange={(patch: Partial<DocumentBlock>) =>
-              selectedBlock && op((d) => updateBlock(d, selectedBlock.key, patch))
-            }
-            onParams={(patch: Partial<BlockParams>) =>
-              selectedBlock &&
-              // Shrinking frees row labels exactly as deleting a block does, so the same close-the-gap
-              // rule applies — otherwise 8 rows cut to 4 would leave the block after it starting at I.
-              op((d) => repack(setBlockParams(d, selectedBlock.key, patch)))
-            }
-            onRotate={(deg) => applyRotate(deg)}
-            onGeometry={(geometry) =>
-              selectedBlock &&
-              op((d) =>
-                updateBlock(d, selectedBlock.key, {
-                  geometry,
-                  points: geometryPoints(geometry, selectedBlock),
-                }),
-              )
-            }
-            onDuplicate={() =>
-              commit((d) => {
-                const dup = duplicateBlocks(d, selected, 300, 300);
-                setSelected(dup.keys);
-                return dup.doc;
-              })
-            }
-            // Through the same path as the keyboard, so the inspector button cannot be the one route
-            // that skips the confirmation and the table endpoint.
-            onDelete={applyDelete}
-          />
+              <BlockInspector
+                block={selectedBlock}
+                sections={draft.sections}
+                categories={draft.categories}
+                seatBudget={budget}
+                onChange={(patch: Partial<DocumentBlock>) =>
+                  selectedBlock && op((d) => updateBlock(d, selectedBlock.key, patch))
+                }
+                onParams={(patch: Partial<BlockParams>) =>
+                  selectedBlock &&
+                  // Shrinking frees row labels exactly as deleting a block does, so the same close-the-gap
+                  // rule applies — otherwise 8 rows cut to 4 would leave the block after it starting at I.
+                  op((d) => repack(setBlockParams(d, selectedBlock.key, patch)))
+                }
+                onRotate={(deg) => applyRotate(deg)}
+                onGeometry={(geometry) =>
+                  selectedBlock &&
+                  op((d) =>
+                    updateBlock(d, selectedBlock.key, {
+                      geometry,
+                      points: geometryPoints(geometry, selectedBlock),
+                    }),
+                  )
+                }
+                onDuplicate={() =>
+                  commit((d) => {
+                    const dup = duplicateBlocks(d, selected, 300, 300);
+                    setSelected(dup.keys);
+                    return dup.doc;
+                  })
+                }
+                // Through the same path as the keyboard, so the inspector button cannot be the one route
+                // that skips the confirmation and the table endpoint.
+                onDelete={applyDelete}
+              />
             </RailGroup>
           )}
 
@@ -2372,130 +2472,128 @@ export default function ChartEditor({
               selected — reasonable when it only made blocks, wrong now that it also paints them, which
               is something you do TO a selection. */}
           <RailGroup title="Thêm vào sơ đồ" defaultOpen>
-          <BlockPalette
-            onAdd={(kind, geometry) => addAt(kind, geometry)}
-            onDraw={() => {
-              setDrawing((cur) => (cur ? null : []));
-              setSelected(new Set());
-              setSeatSel(new Set());
-            }}
-            drawing={drawing !== null}
-            color={paint.color}
-            colorTarget={paint.targets}
-            onColor={(color) => {
-              // Remembered either way, so the next block matches what was just painted.
-              setShapeColor(color);
-              if (paint.targets > 0) op((d) => setBlockColor(d, selected, color));
-            }}
-            disabled={busy}
-            remaining={budget}
-            sections={draft.sections}
-            categories={draft.categories}
-            pinned={lastUsed}
-            resolved={nextBlockContext(draft, selected, lastUsed)}
-            onPin={(patch) => setLastUsed((cur) => ({ ...cur, ...patch }))}
-          />
+            <BlockPalette
+              onAdd={(kind, geometry) => addAt(kind, geometry)}
+              onDraw={() => {
+                setDrawing((cur) => (cur ? null : []));
+                setSelected(new Set());
+                setSeatSel(new Set());
+              }}
+              drawing={drawing !== null}
+              color={paint.color}
+              colorTarget={paint.targets}
+              onColor={(color) => {
+                // Remembered either way, so the next block matches what was just painted.
+                setShapeColor(color);
+                if (paint.targets > 0) op((d) => setBlockColor(d, selected, color));
+              }}
+              disabled={busy}
+              remaining={budget}
+              sections={draft.sections}
+              categories={draft.categories}
+              pinned={lastUsed}
+              resolved={nextBlockContext(draft, selected, lastUsed)}
+              onPin={(patch) => setLastUsed((cur) => ({ ...cur, ...patch }))}
+            />
 
-          {/* Tables and standing areas keep their own endpoints: their seat geometry is computed on the
+            {/* Tables and standing areas keep their own endpoints: their seat geometry is computed on the
               server (a table's seats sit outside its edge, a standing area's fall inside a polygon), so
               there is no document equivalent to draw them from. */}
 
-          <TablePalette
-            sections={draft.sections.map((sec) => ({ id: sec.id, name: sec.name }))}
-            tables={layout.tables}
-            busy={busy}
-            onAddTable={(t) =>
-              void serverOp(
-                () => layoutApi.addTable(layout.id, t as unknown as Record<string, unknown>),
-                `Đã thêm ${t.name}.`,
-              )
-            }
-            onAddStandingArea={(a) =>
-              void serverOp(
-                () => layoutApi.addStandingArea(layout.id, a as unknown as Record<string, unknown>),
-                `Đã tạo ${a.count} chỗ đứng.`,
-              )
-            }
-            // Hall outlines and dividers are blocks now, so this routes to the document rather than to
-            // a separate element list.
-            onAddElement={() => addAt("shape")}
-          />
+            <TablePalette
+              sections={draft.sections.map((sec) => ({ id: sec.id, name: sec.name }))}
+              tables={layout.tables}
+              busy={busy}
+              onAddTable={(t) =>
+                void serverOp(
+                  () => layoutApi.addTable(layout.id, t as unknown as Record<string, unknown>),
+                  `Đã thêm ${t.name}.`,
+                )
+              }
+              onAddStandingArea={(a) =>
+                void serverOp(
+                  () =>
+                    layoutApi.addStandingArea(layout.id, a as unknown as Record<string, unknown>),
+                  `Đã tạo ${a.count} chỗ đứng.`,
+                )
+              }
+              // Hall outlines and dividers are blocks now, so this routes to the document rather than to
+              // a separate element list.
+              onAddElement={() => addAt("shape")}
+            />
           </RailGroup>
 
           <RailGroup title="Khu vực & hạng ghế" defaultOpen={!!selectedBlock}>
-          <SectionPanel
-            sections={draft.sections.map((s) => ({ id: s.id, name: s.name }))}
-            seats={projected.seats}
-            selectedCount={selected.size}
-            activeSectionId={selectedBlock?.sectionId ?? null}
-            onActivate={(id) =>
-              assignSectionTo(id)
-            }
-            onAdd={(name) => commit((d) => addSection(d, name).doc)}
-            onRename={(id, name) => op((d) => ({ ...d, sections: d.sections.map((s) => (s.id === id ? { ...s, name } : s)) }))}
-            onRemove={(id) => {
-              const affected = draft.blocks.filter((b) => b.sectionId === id);
-              const seats = affected.reduce((n, b) => n + (b.seats?.length ?? 0), 0);
-              if (seats === 0 && affected.length === 0) {
-                op((d) => removeSection(d, id));
-                return;
+            <SectionPanel
+              sections={draft.sections.map((s) => ({ id: s.id, name: s.name }))}
+              seats={projected.seats}
+              selectedCount={selected.size}
+              activeSectionId={selectedBlock?.sectionId ?? null}
+              onActivate={(id) => assignSectionTo(id)}
+              onAdd={(name) => commit((d) => addSection(d, name).doc)}
+              onRename={(id, name) =>
+                op((d) => ({
+                  ...d,
+                  sections: d.sections.map((s) => (s.id === id ? { ...s, name } : s)),
+                }))
               }
-              ask(
-                {
-                  title: "Xoá khu vực?",
-                  message: `${affected.length} khối (${seats} ghế) sẽ không còn thuộc khu vực nào, và sơ đồ sẽ không phát hành được cho tới khi bạn gán lại.`,
-                  confirmLabel: "Xoá khu vực",
-                  cancelLabel: "Huỷ",
-                  tone: "danger",
-                },
-                () => op((d) => removeSection(d, id)),
-              );
-            }}
-            onAssign={(id) =>
-              assignSectionTo(id)
-            }
-            onZoom={(id) => {
-              const box = selectionBounds(
-                draft,
-                new Set(draft.blocks.filter((b) => b.sectionId === id).map((b) => b.key)),
-              );
-              if (box) canvas.current?.zoomToBlock(id);
-            }}
-          />
+              onRemove={(id) => {
+                const affected = draft.blocks.filter((b) => b.sectionId === id);
+                const seats = affected.reduce((n, b) => n + (b.seats?.length ?? 0), 0);
+                if (seats === 0 && affected.length === 0) {
+                  op((d) => removeSection(d, id));
+                  return;
+                }
+                ask(
+                  {
+                    title: "Xoá khu vực?",
+                    message: `${affected.length} khối (${seats} ghế) sẽ không còn thuộc khu vực nào, và sơ đồ sẽ không phát hành được cho tới khi bạn gán lại.`,
+                    confirmLabel: "Xoá khu vực",
+                    cancelLabel: "Huỷ",
+                    tone: "danger",
+                  },
+                  () => op((d) => removeSection(d, id)),
+                );
+              }}
+              onAssign={(id) => assignSectionTo(id)}
+              onZoom={(id) => {
+                const box = selectionBounds(
+                  draft,
+                  new Set(draft.blocks.filter((b) => b.sectionId === id).map((b) => b.key)),
+                );
+                if (box) canvas.current?.zoomToBlock(id);
+              }}
+            />
 
-          <CategoryPanel
-            categories={draft.categories}
-            seats={projected.seats}
-            selectedCount={selected.size}
-            activeCategoryId={selectedBlock?.categoryId ?? null}
-            onActivate={(id) =>
-              assignCategoryTo(id)
-            }
-            onAdd={(name) => commit((d) => addCategory(d, name).doc)}
-            onRename={(id, name) => op((d) => updateCategory(d, id, { name }))}
-            onRecolor={(id, color) => op((d) => updateCategory(d, id, { color }))}
-            onRemove={(id) => {
-              const affected = draft.blocks.filter((b) => b.categoryId === id);
-              const seats = affected.reduce((n, b) => n + (b.seats?.length ?? 0), 0);
-              if (seats === 0 && affected.length === 0) {
-                op((d) => removeCategory(d, id));
-                return;
-              }
-              ask(
-                {
-                  title: "Xoá hạng ghế?",
-                  message: `${seats} ghế sẽ mất hạng ghế. Suất chiếu nào đang bán hạng này sẽ phải chọn lại hạng ghế trước khi bán.`,
-                  confirmLabel: "Xoá hạng ghế",
-                  cancelLabel: "Huỷ",
-                  tone: "danger",
-                },
-                () => op((d) => removeCategory(d, id)),
-              );
-            }}
-            onAssign={(id) =>
-              assignCategoryTo(id)
-            }
-          />
+            <CategoryPanel
+              categories={draft.categories}
+              seats={projected.seats}
+              selectedCount={selected.size}
+              activeCategoryId={selectedBlock?.categoryId ?? null}
+              onActivate={(id) => assignCategoryTo(id)}
+              onAdd={(name) => commit((d) => addCategory(d, name).doc)}
+              onRename={(id, name) => op((d) => updateCategory(d, id, { name }))}
+              onRecolor={(id, color) => op((d) => updateCategory(d, id, { color }))}
+              onRemove={(id) => {
+                const affected = draft.blocks.filter((b) => b.categoryId === id);
+                const seats = affected.reduce((n, b) => n + (b.seats?.length ?? 0), 0);
+                if (seats === 0 && affected.length === 0) {
+                  op((d) => removeCategory(d, id));
+                  return;
+                }
+                ask(
+                  {
+                    title: "Xoá hạng ghế?",
+                    message: `${seats} ghế sẽ mất hạng ghế. Suất chiếu nào đang bán hạng này sẽ phải chọn lại hạng ghế trước khi bán.`,
+                    confirmLabel: "Xoá hạng ghế",
+                    cancelLabel: "Huỷ",
+                    tone: "danger",
+                  },
+                  () => op((d) => removeCategory(d, id)),
+                );
+              }}
+              onAssign={(id) => assignCategoryTo(id)}
+            />
           </RailGroup>
 
           {/* Never folded: an unresolved problem must not be something the organizer has to go and
@@ -2511,17 +2609,17 @@ export default function ChartEditor({
 
           {/* Set up once per venue, then never touched again — folded by default. */}
           <RailGroup title="Ảnh nền & bản vẽ tham chiếu">
-          <FloorPlanPanel
-            layoutId={layout.id}
-            plan={layout.floorPlan}
-            onChange={(fp) => setLayout({ ...layout, floorPlan: fp })}
-          />
+            <FloorPlanPanel
+              layoutId={layout.id}
+              plan={layout.floorPlan}
+              onChange={(fp) => setLayout({ ...layout, floorPlan: fp })}
+            />
 
-          <ReferenceChartPanel
-            layoutId={layout.id}
-            reference={layout.referenceChart}
-            onChange={(rc) => setLayout({ ...layout, referenceChart: rc })}
-          />
+            <ReferenceChartPanel
+              layoutId={layout.id}
+              reference={layout.referenceChart}
+              onChange={(rc) => setLayout({ ...layout, referenceChart: rc })}
+            />
           </RailGroup>
         </aside>
       </div>
@@ -2533,6 +2631,57 @@ export default function ChartEditor({
           colorOfSeat={colorOfSeat}
           onClose={() => setPreviewing(false)}
         />
+      )}
+
+      {/* The keyboard reference (§44) — a dialog, not a page, so the organizer never loses their
+          canvas position while reading it. It mirrors the handler above; if one changes, change both. */}
+      {showKeys && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setShowKeys(false)}
+        >
+          <div
+            className="max-h-[85vh] w-full max-w-md overflow-y-auto border-2 border-beige-kem bg-surface-2 p-5 text-beige-kem"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="font-display text-lg font-bold">Phím tắt</h3>
+              <button onClick={() => setShowKeys(false)} className={btn}>
+                Đóng
+              </button>
+            </div>
+            <dl className="mt-4 space-y-2 text-eyebrow">
+              {(
+                [
+                  ["Ctrl/Cmd + Z", "Hoàn tác"],
+                  ["Ctrl/Cmd + Shift + Z hoặc Ctrl/Cmd + Y", "Làm lại"],
+                  ["Ctrl/Cmd + A", "Chọn tất cả các khối"],
+                  ["Ctrl/Cmd + C", "Sao chép khối đang chọn"],
+                  ["Ctrl/Cmd + V", "Dán khối đã sao chép"],
+                  ["Ctrl/Cmd + D", "Nhân đôi khối đang chọn"],
+                  ["Phím mũi tên", "Di chuyển khối đang chọn theo lưới"],
+                  ["Shift + phím mũi tên", "Di chuyển nhanh hơn (bước ×4)"],
+                  ["Delete / Backspace", "Xoá khối đang chọn"],
+                  ["Escape", "Bỏ chọn / thoát công cụ / thoát khi đang vẽ"],
+                  ["Enter (khi đang vẽ)", "Hoàn tất nét vẽ khu vực"],
+                  ["Backspace (khi đang vẽ)", "Bỏ điểm vẽ cuối cùng"],
+                ] as const
+              ).map(([key, what]) => (
+                <div key={key} className="flex items-baseline justify-between gap-3">
+                  <dt>
+                    <kbd className="rounded border border-beige-kem/50 bg-xanh-pho px-1.5 py-0.5 font-mono text-[11px]">
+                      {key}
+                    </kbd>
+                  </dt>
+                  <dd className="text-right text-eyebrow text-beige-kem/80">{what}</dd>
+                </div>
+              ))}
+            </dl>
+            <p className="mt-4 font-meta text-meta text-beige-kem/55">
+              Phím mũi tên không hoạt động khi con trỏ đang ở trong một ô nhập liệu.
+            </p>
+          </div>
+        </div>
       )}
 
       {confirm && (

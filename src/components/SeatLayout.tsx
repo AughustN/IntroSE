@@ -8,7 +8,9 @@ import type { SeatMap, SeatMapSeat, SeatStatus } from "@/shared/catalog/types";
 import { MovieEvent, Seat } from "../types";
 import { catalogClient } from "../services/catalogClient";
 import { watchShowtime } from "../services/seatSocket";
-import SeatCanvas from "./seatmap/SeatCanvas";
+import { NEUTRAL_TIER_COLOR } from "@/shared/catalog/tier-palette";
+import SeatCanvas, { type CanvasBlock, type SeatCanvasHandle } from "./seatmap/SeatCanvas";
+import { bestSeats } from "./seatmap/bestAvailable";
 import TierLegend from "./seatmap/TierLegend";
 import {
   type BookingStep,
@@ -36,6 +38,11 @@ interface SeatLayoutProps {
   /** Placing/releasing the hold is a server round trip, so clicks are disabled while one is open. */
   busy: boolean;
   onToggleSeat: (seat: Seat) => void;
+  /**
+   * Hold the chosen contiguous run in one round trip — the "chọn giúp tôi" path (FR-072). A single
+   * hold call for the whole run is what keeps the offer atomic; see `handleHoldBestSeats` in App.
+   */
+  onHoldBestSeats: (seats: Seat[]) => void;
   onBack: () => void;
   /** A finished step on the bar. Pressing one cancels the order, like the back link. */
   onGoToStep?: (step: BookingStep) => void;
@@ -51,6 +58,7 @@ export default function SeatLayout({
   remainingMs,
   busy,
   onToggleSeat,
+  onHoldBestSeats,
   onBack,
   onGoToStep,
   onProceedToCheckout,
@@ -61,6 +69,27 @@ export default function SeatLayout({
   >({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  /**
+   * Jump-to-section (FR-071, Eventbrite/Humanitix parity). The canvas imperatively zooms when a chip
+   * is pressed; the chip itself is a scroll anchor, not a filter, so every section stays selectable
+   * and no seat ever disappears from view (which a filter would do, and which a map must not).
+   */
+  const canvas = useRef<SeatCanvasHandle>(null);
+  /**
+   * One chip per section, in the section→row→number order the seats arrive in (FR-039a), stable per
+   * render. Section colours never reach the buyer (FR-064: colour means price only), so the chips are
+   * neutrally tinted and named.
+   */
+  const sections = useMemo(
+    () => [...new Set(seats.map((s) => s.section).filter((s): s is string => !!s))],
+    [seats],
+  );
+  const blocks = useMemo<CanvasBlock[]>(
+    // Neutral hull colour: on the buyer's map colour is PRICE and nothing else (FR-064), so a
+    // section outline names a group but claims no hue of its own.
+    () => sections.map((name) => ({ id: name, name, color: NEUTRAL_TIER_COLOR })),
+    [sections],
+  );
 
   const heldByMe = useMemo(
     () =>
@@ -147,6 +176,52 @@ export default function SeatLayout({
     });
 
   /**
+   * The number of seats to ask the picker for. The server caps a hold at `max_tickets_per_buyer`
+   * (default 8) and refuses anything over it, but the picker should not aim past that cap — a
+   * "chọn giúp tôi" that returns "cap_exceeded" would be the answer nobody asked for. 8 matches
+   * the default; the exact cap lives on the server, and it enforces it anyway.
+   */
+  const BEST_SEAT_CAP = 8;
+  /** What the buyer asked the picker for; a stepper the buyer controls (FR-072). */
+  const [bestCount, setBestCount] = useState(2);
+  const [bestError, setBestError] = useState<string | null>(null);
+
+  /**
+   * "Chọn giúp tôi" — pick the contiguous run nearest the stage and hold it in one call.
+   *
+   * Everything a buyer could do wrong scanning the map is done right here: contiguous seats, closest
+   * to the focal point, centred on the row, and not the buyer's own held seats. The hold is one
+   * round trip — the whole run at once — so it either all lands or none of it does (see
+   * `handleHoldBestSeats` in App).
+   */
+  const chooseBestAvailable = () => {
+    const heldIds = new Set(
+      heldSeats.map((s) => s.showtimeSeatId).filter((id): id is number => id !== undefined),
+    );
+    const result = bestSeats(seats, mapMeta.elements, bestCount, heldIds);
+    if (result.seats.length === 0) {
+      setBestError(
+        result.reason === "none_available"
+          ? "Suất này hiện không còn ghế trống."
+          : `Không tìm được ${bestCount} ghế trống liền nhau. Giảm số ghế hoặc chọn ghế khác nhé.`,
+      );
+      return;
+    }
+    setBestError(null);
+    onHoldBestSeats(
+      result.seats.map((s) => ({
+        id: `${s.row}${s.number}`,
+        row: s.row,
+        number: s.number,
+        type: "single" as const,
+        price: s.price,
+        isBooked: false,
+        showtimeSeatId: s.id,
+      })),
+    );
+  };
+
+  /**
    * Picking a seat — or, at a table sold whole, picking the whole table.
    *
    * `whole_table` is expressed HERE, as a selection rule, rather than as a different kind of
@@ -178,8 +253,12 @@ export default function SeatLayout({
 
   const seatClasses = (seat: SeatMapSeat): string => {
     if (heldByMe.has(seat.id)) return "fill-burgundy stroke-burgundy";
-    if (seat.status === "sold" || seat.status === "blocked")
-      return "fill-stone-800 stroke-stone-800";
+    // Sold and blocked used to share one dark fill, and a buyer could not tell a finished seat from
+    // one the organizer pulled — so a sold-out chart looked the same as a half-retracted one. They
+    // are now two pictures: solid dark for sold, a light outline with diagonal stripes unavailable
+    // anywhere on the map but unmistakably distinct (FR-070, Eventive parity).
+    if (seat.status === "sold") return "fill-stone-800 stroke-stone-800";
+    if (seat.status === "blocked") return "fill-stone-800/30 stroke-stone-600";
     if (seat.status === "held") return "fill-stone-700/60 stroke-stone-700";
     return "fill-transparent stroke-beige-kem/40 hover:stroke-burgundy";
   };
@@ -270,27 +349,91 @@ export default function SeatLayout({
                 Suất diễn này chưa có sơ đồ ghế.
               </p>
             ) : (
-              <SeatCanvas
-                seats={seats}
-                elements={mapMeta.elements}
-                floorPlan={mapMeta.floorPlan}
-                space={mapMeta.space}
-                tables={mapMeta.tables}
-                interactive={!busy}
-                seatClass={seatClasses}
-                // Colour means PRICE on the buyer's map and nothing else (FR-067); status still
-                // outranks it, which `seatFillStyle`'s available-only rule enforces.
-                seatFill={(seat) =>
-                  seat.status === "available" && !heldByMe.has(seat.id)
-                    ? mapMeta.tierLegend?.find((t) => t.tierId === seat.tierId)?.color
-                    : undefined
-                }
-                seatLabel={statusTitle}
-                onSeatActivate={toggleSeatSelection}
-              />
+              <>
+                {/* Jump-to-section chips (FR-071). Only when the map actually has sections — a
+                    general-admission chart has one unnamed area and nothing to jump between.
+                    Each chip zooms the canvas onto its section; "Toàn bộ" returns to the fit view. */}
+                {sections.length > 1 && (
+                  <div className="mb-4 flex flex-wrap gap-2">
+                    <button
+                      onClick={() => canvas.current?.zoomToVenue()}
+                      className="rounded-full border-2 border-beige-kem/60 px-3 py-1 font-meta text-meta text-beige-kem/80 transition hover:border-burgundy hover:text-beige-kem"
+                    >
+                      Toàn bộ
+                    </button>
+                    {sections.map((name) => (
+                      <button
+                        key={name}
+                        onClick={() => canvas.current?.zoomToBlock(name)}
+                        className="rounded-full border-2 border-beige-kem/60 px-3 py-1 font-meta text-meta text-beige-kem/80 transition hover:border-burgundy hover:text-beige-kem"
+                      >
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* "Chọn giúp tôi" (FR-072). A count stepper plus one button that holds the best
+                    contiguous run nearest the stage — the buyer doesn't scan the map, the picker
+                    does. Errors from the picker (none left, no run of that length) are shown
+                    inline, not as a toast the buyer can miss. */}
+                <div className="mb-4 flex flex-wrap items-center gap-3 border-b border-beige-kem/25 pb-4">
+                  <label className="flex items-center gap-2 font-meta text-meta text-beige-kem/80">
+                    <span>Số ghế</span>
+                    <button
+                      onClick={() => setBestCount((n) => Math.max(1, n - 1))}
+                      disabled={busy || bestCount <= 1}
+                      className="h-8 w-8 rounded border-2 border-beige-kem/60 font-bold text-beige-kem transition hover:border-burgundy disabled:opacity-40"
+                      aria-label="Giảm số ghế"
+                    >
+                      −
+                    </button>
+                    <span className="w-6 text-center font-bold text-beige-kem">{bestCount}</span>
+                    <button
+                      onClick={() => setBestCount((n) => Math.min(BEST_SEAT_CAP, n + 1))}
+                      disabled={busy || bestCount >= BEST_SEAT_CAP}
+                      className="h-8 w-8 rounded border-2 border-beige-kem/60 font-bold text-beige-kem transition hover:border-burgundy disabled:opacity-40"
+                      aria-label="Tăng số ghế"
+                    >
+                      +
+                    </button>
+                  </label>
+                  <button
+                    onClick={chooseBestAvailable}
+                    disabled={busy || loading}
+                    className="rounded bg-burgundy px-5 py-2 font-meta text-sm font-black text-white transition hover:brightness-95 disabled:opacity-50"
+                  >
+                    Chọn giúp tôi
+                  </button>
+                  {bestError && (
+                    <p className="w-full font-meta text-meta text-cam-dat">{bestError}</p>
+                  )}
+                </div>
+
+                <SeatCanvas
+                  ref={canvas}
+                  seats={seats}
+                  elements={mapMeta.elements}
+                  floorPlan={mapMeta.floorPlan}
+                  space={mapMeta.space}
+                  tables={mapMeta.tables}
+                  blocks={blocks}
+                  interactive={!busy}
+                  seatClass={seatClasses}
+                  // Colour means PRICE on the buyer's map and nothing else (FR-067); status still
+                  // outranks it, which `seatFillStyle`'s available-only rule enforces.
+                  seatFill={(seat) =>
+                    seat.status === "available" && !heldByMe.has(seat.id)
+                      ? mapMeta.tierLegend?.find((t) => t.tierId === seat.tierId)?.color
+                      : undefined
+                  }
+                  seatLabel={statusTitle}
+                  onSeatActivate={toggleSeatSelection}
+                />
+              </>
             )}
 
-            <div className="mt-8 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-beige-kem/25 pt-6 font-meta text-meta text-beige-kem/80 sm:grid-cols-4">
+            <div className="mt-8 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-beige-kem/25 pt-6 font-meta text-meta text-beige-kem/80 sm:grid-cols-5">
               <span className="flex items-center gap-2">
                 <span className="h-4 w-4 shrink-0 border-2 border-beige-kem/60" />
                 Còn trống
@@ -305,7 +448,11 @@ export default function SeatLayout({
               </span>
               <span className="flex items-center gap-2">
                 <span className="h-4 w-4 shrink-0 bg-stone-800" />
-                Đã bán / không bán
+                Đã bán
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="h-4 w-4 shrink-0 border-2 border-stone-600 bg-stone-800/30" />
+                Không mở bán
               </span>
             </div>
 

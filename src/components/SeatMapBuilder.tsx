@@ -3,19 +3,33 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useState } from "react";
-import { ManageShowtime, layoutApi, organizerApi } from "../services/catalogClient";
-import LayoutEditor from "./seatmap/LayoutEditor";
+import { useCallback, useEffect, useState } from "react";
+import { ManageShowtime, layoutApi, organizerApi, studioApi } from "../services/catalogClient";
+import { Empty, ErrorRetry, Loading } from "./organizer/states";
+import ChartEditor from "./seatmap/ChartEditor";
 import ShowtimeMapPanel from "./seatmap/ShowtimeMapPanel";
 import Select from "./Select";
 
 const input =
   "h-10 w-full rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-body text-beige-kem outline-none focus:border-burgundy";
 const btn =
-  "rounded-lg bg-burgundy px-3 py-2 text-eyebrow font-black text-white transition hover:brightness-95";
+  "rounded-lg bg-burgundy px-3 py-2 text-eyebrow font-black text-white transition hover:brightness-95 disabled:opacity-50";
 const ghost =
-  "rounded-lg border-2 border-beige-kem px-3 py-2 text-eyebrow font-bold text-beige-kem/80 transition";
+  "rounded-lg border-2 border-beige-kem px-3 py-2 text-eyebrow font-bold text-beige-kem/80 transition disabled:opacity-40";
 
+/**
+ * Seat maps for one event.
+ *
+ * The screen is organised around the two steps that actually exist, because the old flat list hid
+ * them behind two near-synonymous buttons ("Vẽ sơ đồ" / "Tạo sơ đồ ghế") and left organizers with a
+ * drawn layout and nothing on sale, wondering which one they had already done:
+ *
+ *   1. DESIGN a chart — belongs to the VENUE, shared by every showtime there, and sells nothing.
+ *   2. APPLY it to a showtime — snapshots the drawing into bookable, priced seats for that one date.
+ *
+ * So the design step is presented once per venue (not once per showtime, which implied it was
+ * per-date), and every showtime states plainly how many seats are actually on sale.
+ */
 export default function SeatMapBuilder({
   eventId,
   onClose,
@@ -23,68 +37,83 @@ export default function SeatMapBuilder({
   eventId: number;
   onClose: () => void;
 }) {
-  const [rows, setRows] = useState<ManageShowtime[]>([]);
-  const [map, setMap] = useState<Record<string, number>>({}); // `${showtimeId}:${sectionId}` → tierId
+  const [rows, setRows] = useState<ManageShowtime[] | null>(null);
+  const [map, setMap] = useState<Record<string, number>>({}); // `${showtimeId}:${categoryId}` → tierId
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  // add-section / add-seats forms per venue
-  const [secName, setSecName] = useState("");
-  const [seatSection, setSeatSection] = useState<number | "">("");
-  const [seatRow, setSeatRow] = useState("A");
-  const [seatCount, setSeatCount] = useState("10");
-  // Which layout the free-hand editor is open on. The Section/Row/Count form above stays as the fast
-  // first step; the canvas is where it gets refined by hand (FR-010).
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
+  /** Which venue has its quick-tools drawer open. Per venue, so two venues cannot share one form. */
+  const [tools, setTools] = useState<number | null>(null);
 
-  /** Open the venue's layout on the canvas, creating one if the venue has none yet. */
-  const openEditor = (venueId: number) =>
-    run(async () => {
-      const { layouts } = await layoutApi.list(venueId);
-      const target = layouts[0] ?? (await layoutApi.create(venueId, "Sơ đồ mặc định"));
-      setEditing(target.id);
-    }, "Đang mở trình vẽ sơ đồ.");
-
-  const reload = () =>
-    organizerApi
-      .showtimesManage(eventId)
-      .then(setRows)
-      .catch((e) => setErr((e as Error).message));
-  useEffect(() => {
-    reload();
+  const reload = useCallback(async () => {
+    setLoadError(null);
+    try {
+      setRows(await organizerApi.showtimesManage(eventId));
+    } catch (e) {
+      setRows(null);
+      setLoadError((e as Error).message);
+    }
   }, [eventId]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
 
   const run = async (fn: () => Promise<void>, ok: string) => {
     setErr(null);
     setNotice(null);
+    setBusy(true);
     try {
       await fn();
       setNotice(ok);
       await reload();
     } catch (e) {
       setErr((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
 
-  const generate = (st: ManageShowtime) => {
-    const withSeats = st.sections.filter((s) => s.seatCount > 0);
-    const sectionTiers = withSeats.map((s) => ({
-      sectionId: s.id,
-      ticketTierId: map[`${st.id}:${s.id}`],
-    }));
-    if (sectionTiers.some((m) => !m.ticketTierId)) {
-      setErr("Mỗi khu vực có ghế phải chọn một hạng vé.");
+  /** Open the venue's chart on the canvas, creating one if the venue has none yet. */
+  const openEditor = (venueId: number) =>
+    run(async () => {
+      const { layouts } = await layoutApi.list(venueId);
+      const target = layouts[0] ?? (await layoutApi.create(venueId, "Sơ đồ mặc định"));
+      setEditing(target.id);
+    }, "Đang mở trình thiết kế sơ đồ.");
+
+  /**
+   * Price every class, then bind the chart.
+   *
+   * The mapping is written onto the TIERS rather than passed to the generate call, so it survives:
+   * the next showtime of this chart already knows which class costs what, instead of asking again.
+   * The older flow validated this same mapping and then dropped it on the floor — it never reached
+   * the server at all, so a generated map came back with nothing priced.
+   */
+  const applyToShowtime = (st: ManageShowtime) => {
+    if (st.layoutId === null) {
+      setErr("Suất này chưa có sơ đồ để áp dụng.");
       return;
     }
-    run(async () => {
-      const { layouts } = await layoutApi.list(st.venueId);
-      const layoutId = layouts[0]?.id ?? (await layoutApi.create(st.venueId, "Sơ đồ mặc định")).id;
-      await organizerApi.generateSeatMap(st.id, layoutId);
-    }, "Đã tạo sơ đồ ghế.");
+    const withSeats = st.categories.filter((c) => c.seatCount > 0);
+    const chosen = withSeats.map((c) => ({ categoryId: c.id, tierId: map[`${st.id}:${c.id}`] }));
+    if (chosen.some((m) => !m.tierId)) {
+      setErr("Mỗi hạng vé có ghế phải chọn một mức giá.");
+      return;
+    }
+    void run(async () => {
+      for (const { categoryId, tierId } of chosen) {
+        await studioApi.updateTier(tierId, { categoryId });
+      }
+      await organizerApi.generateSeatMap(st.id, st.layoutId as number);
+    }, "Đã áp dụng sơ đồ — ghế đã sẵn sàng để bán.");
   };
 
   if (editing !== null) {
     return (
-      <LayoutEditor
+      <ChartEditor
         layoutId={editing}
         onClose={() => {
           setEditing(null);
@@ -92,6 +121,14 @@ export default function SeatMapBuilder({
         }}
       />
     );
+  }
+
+  // One card per venue, with its showtimes beneath — the design step is a property of the venue.
+  const venues = new Map<number, { name: string; showtimes: ManageShowtime[] }>();
+  for (const st of rows ?? []) {
+    const entry = venues.get(st.venueId) ?? { name: st.venueName, showtimes: [] };
+    entry.showtimes.push(st);
+    venues.set(st.venueId, entry);
   }
 
   return (
@@ -103,6 +140,21 @@ export default function SeatMapBuilder({
             Đóng
           </button>
         </div>
+
+        <div className="rounded-2xl border-2 border-beige-kem/40 bg-surface-2 p-4">
+          <p className="text-body text-beige-kem/80">Hai bước, làm theo thứ tự:</p>
+          <ol className="mt-2 space-y-1 text-body text-beige-kem/70">
+            <li>
+              <b>1. Thiết kế sơ đồ địa điểm</b> — vẽ vị trí ghế cho <i>địa điểm</i>. Dùng chung cho
+              mọi suất tại đó, và <b>chưa bán được vé</b>.
+            </li>
+            <li>
+              <b>2. Áp dụng cho từng suất</b> — chép sơ đồ vào một suất cụ thể và gán hạng vé. Sau
+              bước này ghế mới thực sự lên sàn bán.
+            </li>
+          </ol>
+        </div>
+
         {notice && (
           <div className="rounded-xl border-2 border-la-co bg-la-co/20 p-3 text-eyebrow text-beige-kem">
             {notice}
@@ -113,136 +165,224 @@ export default function SeatMapBuilder({
             {err}
           </div>
         )}
-        {rows.length === 0 && (
-          <p className="text-body text-beige-kem/60">
-            Chưa có suất chiếu. Thêm suất chiếu trước ở màn "Quản lý sự kiện".
-          </p>
+
+        {loadError && <ErrorRetry message={loadError} onRetry={reload} />}
+        {!loadError && rows === null && <Loading label="Đang tải suất chiếu…" />}
+        {!loadError && rows?.length === 0 && (
+          <Empty
+            title="Sự kiện chưa có suất chiếu nào."
+            hint='Thêm suất chiếu ở màn "Quản lý sự kiện" trước, rồi quay lại đây để dựng sơ đồ ghế.'
+          />
         )}
 
-        {rows.map((st) => (
-          <div key={st.id} className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <span className="font-bold">
-                {new Date(st.startsAt).toLocaleString("vi-VN")} · {st.venueName}
-              </span>
-              <div className="flex items-center gap-2">
-                {st.hasSeatMap && (
-                  <span className="rounded-lg border-2 border-la-co bg-la-co/25 px-2 py-0.5 font-meta text-eyebrow text-beige-kem">
-                    Đã có sơ đồ ghế
-                  </span>
-                )}
-                <button className={ghost} onClick={() => openEditor(st.venueId)}>
-                  Vẽ sơ đồ
-                </button>
+        {[...venues.entries()].map(([venueId, venue]) => {
+          const drawn = venue.showtimes[0].sections.reduce((n, s) => n + s.seatCount, 0);
+          return (
+            <div key={venueId} className="rounded-2xl border-2 border-beige-kem bg-surface-2 p-4">
+              {/* ---- step 1: the venue's design ---- */}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="font-display text-body font-bold">{venue.name}</p>
+                  <p className="font-meta text-meta text-beige-kem/55">
+                    Đã vẽ {drawn} ghế · dùng chung cho {venue.showtimes.length} suất tại địa điểm
+                    này
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    className={ghost}
+                    onClick={() => setTools(tools === venueId ? null : venueId)}
+                  >
+                    Công cụ nhanh
+                  </button>
+                  <button className={btn} disabled={busy} onClick={() => openEditor(venueId)}>
+                    Thiết kế sơ đồ
+                  </button>
+                </div>
+              </div>
+
+              {drawn === 0 && (
+                <p className="mt-2 font-meta text-meta text-cam-dat">
+                  Địa điểm này chưa có ghế nào. Hãy thiết kế sơ đồ trước khi áp dụng cho suất.
+                </p>
+              )}
+
+              {tools === venueId && (
+                <QuickTools venueId={venueId} showtime={venue.showtimes[0]} run={run} />
+              )}
+
+              {/* ---- step 2: apply to each showtime ---- */}
+              <div className="mt-4 space-y-3 border-t border-beige-kem/25 pt-4">
+                {venue.showtimes.map((st) => (
+                  <div key={st.id} className="rounded-xl border-2 border-beige-kem/50 p-3">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-body font-bold">
+                        {new Date(st.startsAt).toLocaleString("vi-VN")}
+                      </span>
+                      <span
+                        className={`rounded-lg border-2 border-beige-kem px-2 py-0.5 font-meta text-meta ${
+                          st.hasSeatMap ? "bg-la-co text-on-tint" : "text-beige-kem/60"
+                        }`}
+                      >
+                        {st.hasSeatMap ? `${st.bookableSeats} ghế đang bán` : "Chưa áp dụng sơ đồ"}
+                      </span>
+                    </div>
+
+                    {st.hasSeatMap ? (
+                      <ShowtimeMapPanel
+                        showtimeId={st.id}
+                        tiers={st.tiers}
+                        onDone={() => void reload()}
+                      />
+                    ) : st.categories.filter((c) => c.seatCount > 0).length === 0 ? (
+                      <p className="text-eyebrow text-beige-kem/50">
+                        Chưa có ghế để áp dụng — hoàn tất bước 1 trước.
+                      </p>
+                    ) : st.layoutStatus !== "ready" ? (
+                      <p className="text-eyebrow text-beige-kem/50">
+                        Sơ đồ đang là bản nháp. Mở trình thiết kế và bấm “Phát hành” trước khi áp
+                        dụng cho suất diễn.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        <p className="font-meta text-meta text-beige-kem/60">
+                          Đặt giá cho từng hạng vé, rồi áp dụng:
+                        </p>
+                        {st.categories
+                          .filter((c) => c.seatCount > 0)
+                          .map((c) => (
+                            <div key={c.id} className="flex items-center gap-3">
+                              <span
+                                aria-hidden="true"
+                                className="h-4 w-4 shrink-0 rounded border-2"
+                                style={{ borderColor: c.color, backgroundColor: `${c.color}59` }}
+                              />
+                              <span className="w-36 shrink-0 text-body">
+                                {c.name}{" "}
+                                <span className="font-meta text-meta text-beige-kem/40">
+                                  ({c.seatCount} ghế)
+                                </span>
+                              </span>
+                              <Select
+                                triggerClassName={input}
+                                placeholder="Chọn mức giá"
+                                value={String(map[`${st.id}:${c.id}`] ?? "")}
+                                onChange={(v) =>
+                                  setMap((m) => ({ ...m, [`${st.id}:${c.id}`]: Number(v) }))
+                                }
+                                options={st.tiers
+                                  .filter((t) => !t.archived)
+                                  .map((t) => ({
+                                    value: String(t.id),
+                                    label: `${t.label} — ${t.price.toLocaleString("vi-VN")}đ`,
+                                  }))}
+                              />
+                            </div>
+                          ))}
+                        <button
+                          className={`${btn} mt-1`}
+                          disabled={busy}
+                          onClick={() => applyToShowtime(st)}
+                        >
+                          Áp dụng sơ đồ cho suất này
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
-            {st.hasSeatMap && (
-              <ShowtimeMapPanel showtimeId={st.id} tiers={st.tiers} onDone={() => void reload()} />
-            )}
+/**
+ * The Section/Row/Count generator that predates the canvas (feature 002). Kept as a fast way to seed
+ * a block of seats, but demoted behind a drawer: having it sit level with the canvas made it look
+ * like a second, competing way to build a map.
+ *
+ * Its form state lives HERE, per venue — as one shared set of fields on the parent it leaked between
+ * cards, so typing a row label under one venue changed what another would submit.
+ */
+function QuickTools({
+  venueId,
+  showtime,
+  run,
+}: {
+  venueId: number;
+  showtime: ManageShowtime;
+  run: (fn: () => Promise<void>, ok: string) => Promise<void>;
+}) {
+  const [secName, setSecName] = useState("");
+  const [seatSection, setSeatSection] = useState<number | "">("");
+  const [seatRow, setSeatRow] = useState("A");
+  const [seatCount, setSeatCount] = useState("10");
 
-            {!st.hasSeatMap && (
-              <>
-                {/* manage sections + seats for this venue */}
-                <div className="mb-3 grid gap-2 sm:grid-cols-2">
-                  <div className="flex gap-2">
-                    <input
-                      value={secName}
-                      onChange={(e) => setSecName(e.target.value)}
-                      placeholder="Tên khu vực (VD Khu A)"
-                      className={input}
-                    />
-                    <button
-                      className={ghost}
-                      onClick={() =>
-                        secName &&
-                        run(async () => {
-                          await organizerApi.createSection(st.venueId, secName);
-                          setSecName("");
-                        }, "Đã thêm khu vực.")
-                      }
-                    >
-                      Thêm khu
-                    </button>
-                  </div>
-                  <div className="flex gap-2">
-                    <Select
-                      triggerClassName={input}
-                      placeholder="Khu vực"
-                      value={String(seatSection)}
-                      onChange={(v) => setSeatSection(Number(v) || "")}
-                      options={st.sections.map((s) => ({ value: String(s.id), label: s.name }))}
-                    />
-                    <input
-                      value={seatRow}
-                      onChange={(e) => setSeatRow(e.target.value)}
-                      placeholder="Hàng"
-                      className={`${input} w-16`}
-                    />
-                    <input
-                      value={seatCount}
-                      onChange={(e) => setSeatCount(e.target.value)}
-                      placeholder="SL"
-                      className={`${input} w-16`}
-                    />
-                    <button
-                      className={ghost}
-                      onClick={() =>
-                        seatSection &&
-                        run(async () => {
-                          await organizerApi.addSeats(st.venueId, {
-                            sectionId: Number(seatSection),
-                            rowLabel: seatRow,
-                            count: Number(seatCount),
-                          });
-                        }, "Đã thêm ghế.")
-                      }
-                    >
-                      Thêm ghế
-                    </button>
-                  </div>
-                </div>
-
-                {/* section → tier mapping */}
-                {st.sections.filter((s) => s.seatCount > 0).length === 0 ? (
-                  <p className="text-eyebrow text-beige-kem/50">
-                    Thêm khu vực + ghế, rồi gán hạng vé cho từng khu để tạo sơ đồ.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {st.sections
-                      .filter((s) => s.seatCount > 0)
-                      .map((s) => (
-                        <div key={s.id} className="flex items-center gap-3">
-                          <span className="w-40 text-body">
-                            {s.name}{" "}
-                            <span className="font-meta text-eyebrow text-beige-kem/40">
-                              ({s.seatCount} ghế)
-                            </span>
-                          </span>
-                          <Select
-                            triggerClassName={input}
-                            placeholder="Chọn hạng vé"
-                            value={String(map[`${st.id}:${s.id}`] ?? "")}
-                            onChange={(v) =>
-                              setMap((m) => ({ ...m, [`${st.id}:${s.id}`]: Number(v) }))
-                            }
-                            options={st.tiers.map((t) => ({
-                              value: String(t.id),
-                              label: `${t.label} — ${t.price.toLocaleString("vi-VN")}đ`,
-                            }))}
-                          />
-                        </div>
-                      ))}
-                    <button className={`${btn} mt-2`} onClick={() => generate(st)}>
-                      Tạo sơ đồ ghế
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        ))}
+  return (
+    <div className="mt-3 space-y-2 rounded-xl border-2 border-dashed border-beige-kem/40 p-3">
+      <p className="font-meta text-meta text-beige-kem/60">
+        Tạo nhanh một dãy ghế. Vị trí sẽ xếp theo lưới — tinh chỉnh bằng trình thiết kế.
+      </p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="flex gap-2">
+          <input
+            value={secName}
+            onChange={(e) => setSecName(e.target.value)}
+            placeholder="Tên khu vực (VD Khu A)"
+            className={input}
+          />
+          <button
+            className={ghost}
+            onClick={() =>
+              secName &&
+              run(async () => {
+                await organizerApi.createSection(venueId, secName);
+                setSecName("");
+              }, "Đã thêm khu vực.")
+            }
+          >
+            Thêm khu
+          </button>
+        </div>
+        <div className="flex gap-2">
+          <Select
+            triggerClassName={input}
+            placeholder="Khu vực"
+            value={String(seatSection)}
+            onChange={(v) => setSeatSection(Number(v) || "")}
+            options={showtime.sections.map((s) => ({ value: String(s.id), label: s.name }))}
+          />
+          <input
+            value={seatRow}
+            onChange={(e) => setSeatRow(e.target.value)}
+            placeholder="Hàng"
+            className={`${input} w-16`}
+          />
+          <input
+            value={seatCount}
+            onChange={(e) => setSeatCount(e.target.value)}
+            placeholder="SL"
+            className={`${input} w-16`}
+          />
+          <button
+            className={ghost}
+            onClick={() =>
+              seatSection &&
+              run(async () => {
+                await organizerApi.addSeats(venueId, {
+                  sectionId: Number(seatSection),
+                  rowLabel: seatRow,
+                  count: Number(seatCount),
+                });
+              }, "Đã thêm ghế.")
+            }
+          >
+            Thêm ghế
+          </button>
+        </div>
       </div>
     </div>
   );
