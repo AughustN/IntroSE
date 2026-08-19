@@ -30,8 +30,10 @@ describe("the seat map library and editor", () => {
 
   it("does not collide with the organizer console beneath the same prefix", () => {
     expect(pathToRoute("/organizer")).toEqual({ screen: "organizer" });
+    // One event is a level of the console, not a screen of its own: same screen as the list, with
+    // which event is open carried alongside.
     expect(pathToRoute("/organizer/events/7")).toEqual({
-      screen: "organizer-event-detail",
+      screen: "organizer-events",
       organizerEventId: "7",
     });
   });

@@ -65,7 +65,7 @@ export default function SeatLayout({
 }: SeatLayoutProps) {
   const [seats, setSeats] = useState<SeatMapSeat[]>([]);
   const [mapMeta, setMapMeta] = useState<
-    Pick<SeatMap, "space" | "elements" | "floorPlan" | "tables" | "tierLegend">
+    Pick<SeatMap, "space" | "elements" | "floorPlan" | "tables" | "tierLegend" | "orphanRule">
   >({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -114,6 +114,7 @@ export default function SeatLayout({
         floorPlan: map.floorPlan,
         tables: map.tables,
         tierLegend: map.tierLegend,
+        orphanRule: map.orphanRule,
       });
       setLoadError(null);
     } catch {
@@ -184,7 +185,9 @@ export default function SeatLayout({
   const BEST_SEAT_CAP = 8;
   /** What the buyer asked the picker for; a stepper the buyer controls (FR-072). */
   const [bestCount, setBestCount] = useState(2);
-  const [bestError, setBestError] = useState<string | null>(null);
+  const [bestNotice, setBestNotice] = useState<string | null>(null);
+  /** Spotlight the wheelchair-accessible seats. Dims the rest; never removes them. */
+  const [accessibleOnly, setAccessibleOnly] = useState(false);
 
   /**
    * "Chọn giúp tôi" — pick the contiguous run nearest the stage and hold it in one call.
@@ -198,16 +201,22 @@ export default function SeatLayout({
     const heldIds = new Set(
       heldSeats.map((s) => s.showtimeSeatId).filter((id): id is number => id !== undefined),
     );
-    const result = bestSeats(seats, mapMeta.elements, bestCount, heldIds);
+    const result = bestSeats(seats, mapMeta.elements, bestCount, heldIds, mapMeta.orphanRule);
     if (result.seats.length === 0) {
-      setBestError(
+      setBestNotice(
         result.reason === "none_available"
           ? "Suất này hiện không còn ghế trống."
-          : `Không tìm được ${bestCount} ghế trống liền nhau. Giảm số ghế hoặc chọn ghế khác nhé.`,
+          : `Suất này chỉ còn dưới ${bestCount} ghế trống. Giảm số ghế nhé.`,
       );
       return;
     }
-    setBestError(null);
+    // Seats that are NOT together must say so before they are held. Saying nothing is how a buyer
+    // ends up with four seats in four different rows and only finds out at the venue.
+    setBestNotice(
+      result.match === "scattered"
+        ? `Không còn ${bestCount} ghế liền nhau — đây là ${bestCount} ghế trống gần sân khấu nhất, không ngồi cạnh nhau.`
+        : null,
+    );
     onHoldBestSeats(
       result.seats.map((s) => ({
         id: `${s.row}${s.number}`,
@@ -251,16 +260,34 @@ export default function SeatLayout({
   const totalPrice = selectedSeatsList.reduce((sum, seat) => sum + seat.price, 0);
   const tierPrices = [...new Set(seats.map((s) => s.price))].sort((a, b) => a - b);
 
+  /**
+   * A seat's state, drawn so it survives being reduced to greyscale.
+   *
+   * These three used to be `stone-800`, `stone-800/30` and `stone-700/60` — the same grey at three
+   * opacities, which at seat size is no distinction at all, and none whatever for a colourblind
+   * buyer. A comment here even promised diagonal stripes that were never built. Now each state has
+   * a different FORM, and the colour is only reinforcement:
+   *
+   *   sold      — solid, filled in, finished
+   *   held      — hatched, temporarily somebody else's
+   *   blocked   — hollow with a dashed edge, never offered for sale at all
+   *   selected  — solid burgundy, the one colour this app reserves for the buyer's own commitment
+   */
   const seatClasses = (seat: SeatMapSeat): string => {
-    if (heldByMe.has(seat.id)) return "fill-burgundy stroke-burgundy";
-    // Sold and blocked used to share one dark fill, and a buyer could not tell a finished seat from
-    // one the organizer pulled — so a sold-out chart looked the same as a half-retracted one. They
-    // are now two pictures: solid dark for sold, a light outline with diagonal stripes unavailable
-    // anywhere on the map but unmistakably distinct (FR-070, Eventive parity).
-    if (seat.status === "sold") return "fill-stone-800 stroke-stone-800";
-    if (seat.status === "blocked") return "fill-stone-800/30 stroke-stone-600";
-    if (seat.status === "held") return "fill-stone-700/60 stroke-stone-700";
-    return "fill-transparent stroke-beige-kem/40 hover:stroke-burgundy";
+    // The filter pushes everything else back rather than removing it, so the accessible seats read
+    // against the shape of the real room instead of floating in an empty one.
+    const dimmed = accessibleOnly && !seat.isAccessible ? " opacity-25" : "";
+    // Selected and sold were the last pair separated by hue alone: both solid, one burgundy and one
+    // dark grey. The other three states got their own forms and these two did not, which left the
+    // distinction a buyer needs most — "mine" versus "gone" — resting on colour discrimination. The
+    // ring is a LUMINANCE difference, so it survives greyscale, colourblindness and a phone in
+    // sunlight: the buyer's own seat is a dark fill inside a light halo, sold is dark throughout.
+    if (heldByMe.has(seat.id)) return `fill-burgundy stroke-beige-kem${dimmed}`;
+    if (seat.status === "sold") return `fill-stone-800 stroke-stone-900${dimmed}`;
+    if (seat.status === "held") return `stroke-stone-500 [fill:url(#seat-hatch)]${dimmed}`;
+    if (seat.status === "blocked")
+      return `fill-transparent stroke-stone-500 [stroke-dasharray:18]${dimmed}`;
+    return `fill-transparent stroke-beige-kem/40 hover:stroke-burgundy${dimmed}`;
   };
 
   /** What a screen reader announces. Section, row, seat, status, price — enough to choose a seat
@@ -405,8 +432,27 @@ export default function SeatLayout({
                   >
                     Chọn giúp tôi
                   </button>
-                  {bestError && (
-                    <p className="w-full font-meta text-meta text-cam-dat">{bestError}</p>
+                  {/*
+                    Accessible-seat filter. Offered only when the chart actually has some, because a
+                    toggle that finds nothing is worse than no toggle.
+
+                    It DIMS rather than hides, the same decision the section chips make: a buyer who
+                    turns it on is comparing accessible seats against the room, and a map that
+                    deletes most of itself has stopped being a map. Everything stays selectable.
+                  */}
+                  {seats.some((s) => s.isAccessible) && (
+                    <label className="flex items-center gap-2 font-meta text-meta text-beige-kem/80">
+                      <input
+                        type="checkbox"
+                        checked={accessibleOnly}
+                        onChange={(e) => setAccessibleOnly(e.target.checked)}
+                        className="h-4 w-4 accent-burgundy"
+                      />
+                      Chỉ hiện ghế cho người dùng xe lăn
+                    </label>
+                  )}
+                  {bestNotice && (
+                    <p className="w-full font-meta text-meta text-cam-dat">{bestNotice}</p>
                   )}
                 </div>
 
@@ -439,11 +485,20 @@ export default function SeatLayout({
                 Còn trống
               </span>
               <span className="flex items-center gap-2">
-                <span className="h-4 w-4 shrink-0 bg-burgundy" />
+                <span className="h-4 w-4 shrink-0 border-2 border-beige-kem bg-burgundy" />
                 Bạn đang giữ
               </span>
+              {/* Each swatch is drawn the way the seat itself is drawn. A key whose squares are all
+                  the same shape in different greys explains nothing — these have to carry the same
+                  three FORMS the map uses, or the legend is decoration. */}
               <span className="flex items-center gap-2">
-                <span className="h-4 w-4 shrink-0 bg-stone-700/60" />
+                <span
+                  className="h-4 w-4 shrink-0 border border-stone-500"
+                  style={{
+                    backgroundImage:
+                      "repeating-linear-gradient(45deg, rgb(120 113 108) 0 3px, transparent 3px 6px)",
+                  }}
+                />
                 Người khác giữ
               </span>
               <span className="flex items-center gap-2">
@@ -451,9 +506,19 @@ export default function SeatLayout({
                 Đã bán
               </span>
               <span className="flex items-center gap-2">
-                <span className="h-4 w-4 shrink-0 border-2 border-stone-600 bg-stone-800/30" />
+                <span className="h-4 w-4 shrink-0 border-2 border-dashed border-stone-500" />
                 Không mở bán
               </span>
+              {/* The canvas has always drawn a dashed ring around an accessible seat, and nothing on
+                  screen said so — a symbol with no key is a symbol a buyer has to guess at. Shown
+                  only when the chart actually has such seats, so the key never explains a mark that
+                  is not on the map. */}
+              {seats.some((s) => s.isAccessible) && (
+                <span className="flex items-center gap-2">
+                  <span className="h-4 w-4 shrink-0 border-2 border-dashed border-beige-kem/80" />
+                  Ghế cho người dùng xe lăn
+                </span>
+              )}
             </div>
 
             {mapMeta.tierLegend && mapMeta.tierLegend.length > 0 ? (

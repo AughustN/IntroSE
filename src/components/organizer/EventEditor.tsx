@@ -3,12 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { isMaterialEdit } from "@/shared/catalog/material-edit";
-import { MyEvent, MyVenue, organizerApi, studioApi } from "../../services/catalogClient";
+import {
+  type ManageShowtime,
+  MyEvent,
+  MyVenue,
+  organizerApi,
+  studioApi,
+} from "../../services/catalogClient";
 import { useEventCategories } from "../../hooks/useEventCategories";
 import AiListingPanel from "./AiListingPanel";
-import PublishChecklist from "./PublishChecklist";
+import { CancelEventModal } from "./CancelEventModal";
+import EventPreviewOverlay from "./EventPreviewOverlay";
+import EventFlowRail from "./EventFlowRail";
+import { flowSteps, type FlowStep } from "./flowSteps";
 import ShowtimeList from "./ShowtimeList";
 import { Refusal } from "./states";
 
@@ -65,6 +74,12 @@ export default function EventEditor({
    * something this action cannot deliver.
    */
   const onSale = event.status === "on_sale";
+  /** Terminal. The server spells it with two Ls (`events.status = 'cancelled'`); match it exactly
+   *  rather than adding a third spelling to a codebase that already carries two. */
+  const cancelled = event.status === "cancelled";
+
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const submitForReview = async () => {
     setBusy(true);
@@ -92,6 +107,37 @@ export default function EventEditor({
       setNotice("Đã ngừng bán. Sự kiện không còn hiển thị công khai.");
       onRefresh();
     } catch (e) {
+      setRefusal((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Cancel, and settle every ticket sold.
+   *
+   * The dialog is closed on FAILURE as well as success. `CancelEventModal` latches its own
+   * `isSubmitting` and has no path back out of it, so leaving it open after a refusal would strand
+   * the organizer on a permanently disabled "Đang xử lý hủy…" button. Closing hands the refusal to
+   * `Refusal`, which is where every other server no in this screen already appears.
+   */
+  const cancel = async (reason: string) => {
+    setBusy(true);
+    setRefusal(null);
+    setNotice(null);
+    try {
+      const { refundedTickets } = await organizerApi.cancel(event.id, reason);
+      setCancelOpen(false);
+      // The refund count is the receipt. "Đã hủy" alone leaves an organizer wondering whether the
+      // money moved, which is the one question a cancellation has to answer.
+      setNotice(
+        refundedTickets > 0
+          ? `Đã hủy sự kiện. Đã hoàn ${refundedTickets} vé về ví của người mua.`
+          : "Đã hủy sự kiện. Không có vé nào cần hoàn.",
+      );
+      onRefresh();
+    } catch (e) {
+      setCancelOpen(false);
       setRefusal((e as Error).message);
     } finally {
       setBusy(false);
@@ -143,9 +189,59 @@ export default function EventEditor({
     }
   };
 
+  /*
+   * The showtimes, read once here for the rail.
+   *
+   * The rail's steps are derived from server facts, not from what this screen has typed, so it needs
+   * the same payload the seat-map builder reads. Advisory: a failed fetch leaves the rail absent
+   * rather than guessing, and every button below still works.
+   */
+  const [rows, setRows] = useState<ManageShowtime[] | null>(null);
+  const showtimesRef = useRef<HTMLDivElement>(null);
+
+  const loadRows = useCallback(() => {
+    let alive = true;
+    organizerApi
+      .showtimesManage(event.id)
+      .then((r) => alive && setRows(r))
+      .catch(() => alive && setRows(null));
+    return () => {
+      alive = false;
+    };
+  }, [event.id]);
+
+  useEffect(() => loadRows(), [loadRows]);
+
+  const steps = flowSteps(event, rows);
+
+  /**
+   * What a cancellation would cost, for the confirmation dialog.
+   *
+   * Summed from the tiers the rail already loaded rather than fetched again — `sold × list price`,
+   * which is the same arithmetic the event's revenue figure uses. It is an ESTIMATE and the dialog
+   * says so: it knows nothing about refunds already issued. Showing it beats the alternative, which
+   * is the modal's `= 0` default telling an organizer "0 người mua vé" moments before the server
+   * refunds a hundred of them.
+   */
+  const soldTickets = (rows ?? []).reduce(
+    (sum, s) => sum + s.tiers.reduce((n, t) => n + t.sold, 0),
+    0,
+  );
+  const refundEstimate = (rows ?? []).reduce(
+    (sum, s) => sum + s.tiers.reduce((n, t) => n + t.sold * t.price, 0),
+    0,
+  );
+
+  /** Each step points at the tool that fixes it — the rail does no editing of its own. */
+  const runAction = (action: NonNullable<FlowStep["action"]>) => {
+    if (action === "chart" || action === "apply") onOpenSeatMap(event.id);
+    else if (action === "submit") void submitForReview();
+    else showtimesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <button onClick={onBack} className={ghost}>
           ← Danh sách sự kiện
         </button>
@@ -155,16 +251,33 @@ export default function EventEditor({
               Sơ đồ ghế
             </button>
           )}
-          {onSale ? (
-            <button onClick={withdraw} disabled={busy} className={ghost}>
-              Ngừng bán
-            </button>
-          ) : (
-            <button onClick={submitForReview} disabled={busy} className={btn}>
-              Gửi duyệt
+          {/* A cancelled event is finished: nothing here can put it back on sale, so the controls
+              that would imply otherwise are gone rather than merely disabled. */}
+          <button onClick={() => setPreviewOpen(true)} className={ghost}>
+            Xem trước
+          </button>
+          {!cancelled &&
+            (onSale ? (
+              <button onClick={withdraw} disabled={busy} className={ghost}>
+                Ngừng bán
+              </button>
+            ) : (
+              <button onClick={submitForReview} disabled={busy} className={btn}>
+                Gửi duyệt
+              </button>
+            ))}
+          {!cancelled && (
+            <button
+              onClick={() => setCancelOpen(true)}
+              disabled={busy}
+              className={`${ghost} border-burgundy text-burgundy`}
+            >
+              Hủy sự kiện
             </button>
           )}
-          {isLive ? (
+          {cancelled ? (
+            <span className="font-mono text-[10px] text-burgundy">Đã hủy</span>
+          ) : isLive ? (
             <span className="font-mono text-[10px] text-la-co">Đang hiển thị công khai</span>
           ) : (
             onSale && (
@@ -174,6 +287,16 @@ export default function EventEditor({
         </div>
       </div>
 
+      {/*
+        Rail beside the work, not above it: the steps stay legible while the organizer edits, which is
+        the whole point of a rail rather than a banner. It collapses to a scrolling strip under `lg`.
+      */}
+      <div className="grid gap-5 lg:grid-cols-[15rem_minmax(0,1fr)]">
+        <div className="lg:order-1">
+          <EventFlowRail steps={steps} onAction={runAction} />
+        </div>
+
+        <div className="space-y-5 lg:order-2">
       <div className="border-2 border-beige-kem bg-surface-2 p-5">
         <h3 className="mb-3 font-display text-lg font-bold">{event.title}</h3>
 
@@ -232,14 +355,34 @@ export default function EventEditor({
         onAccept={(field, value) => (field === "title" ? setTitle(value) : setDescription(value))}
       />
 
-      {/* What the server's publish gate demands, stated in advance — and, for seated events, the one
-          thing the gate cannot see (a showtime with no map sells nothing). Hidden once live. */}
-      {!isLive && <PublishChecklist event={event} onOpenSeatMap={onOpenSeatMap} />}
-
-      <div className="border-2 border-beige-kem bg-surface-2 p-5">
+      <div ref={showtimesRef} className="border-2 border-beige-kem bg-surface-2 p-5">
         <h3 className="mb-3 font-display text-base font-bold">Suất chiếu</h3>
-        <ShowtimeList eventId={event.id} venues={venues} onChanged={() => onRefresh()} />
+        <ShowtimeList
+          eventId={event.id}
+          venues={venues}
+          onChanged={() => {
+            onRefresh();
+            // The rail reads showtimes, tiers and the chart binding — all of which this list edits.
+            loadRows();
+          }}
+        />
       </div>
+        </div>
+      </div>
+
+      {previewOpen && (
+        <EventPreviewOverlay eventId={event.id} onClose={() => setPreviewOpen(false)} />
+      )}
+
+      {cancelOpen && (
+        <CancelEventModal
+          eventTitle={event.title}
+          soldTicketsCount={soldTickets}
+          totalRefundAmountVnd={refundEstimate}
+          onConfirm={(reason) => void cancel(reason)}
+          onClose={() => setCancelOpen(false)}
+        />
+      )}
     </div>
   );
 }

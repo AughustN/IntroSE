@@ -31,7 +31,6 @@ export type Screen =
   | "admin"
   | "organizer"
   | "organizer-events"
-  | "organizer-event-detail"
   /** The seat map library, and the editor beneath it at `/organizer/seatmaps/:id`. */
   | "seatmaps"
   | "moderation"
@@ -69,7 +68,6 @@ export const SCREEN_ACCESS: Partial<Record<Screen, ScreenAccess>> = {
    */
   organizer: "organizer",
   "organizer-events": "organizer",
-  "organizer-event-detail": "organizer",
   seatmaps: "organizer",
   admin: "admin",
   moderation: "admin",
@@ -158,7 +156,7 @@ export function screenToPath(
       return params.eventSlug ? `/events/${encodeURIComponent(params.eventSlug)}/reviews` : "/";
     case "ticket":
       return params.bookingId ? `/tickets/${encodeURIComponent(params.bookingId)}` : "/bookings";
-    case "organizer-event-detail":
+    case "organizer-events":
       return params.organizerEventId
         ? `/organizer/events/${encodeURIComponent(params.organizerEventId)}`
         : "/organizer/events";
@@ -210,9 +208,14 @@ export function pathToRoute(pathname: string): Route | null {
   if (segments[0] === "organizer") {
     if (segments.length === 1) return { screen: "organizer" };
     if (segments.length === 2 && segments[1] === "events") return { screen: "organizer-events" };
-    if (segments.length === 2) return { screen: "organizer-event-detail", organizerEventId: segments[1] };
+    // One event is a LEVEL of the console, not a screen beside it. `/organizer/events/:id` therefore
+    // resolves to the same screen as the list and carries which event is open — the console opens at
+    // that level. It used to name its own screen, which rendered a second, superseded event editor
+    // with its own status vocabulary; the id in the route is what let that screen be deleted without
+    // taking deep links with it.
+    if (segments.length === 2) return { screen: "organizer-events", organizerEventId: segments[1] };
     if (segments.length === 3 && segments[1] === "events") {
-      return { screen: "organizer-event-detail", organizerEventId: segments[2] };
+      return { screen: "organizer-events", organizerEventId: segments[2] };
     }
   }
 

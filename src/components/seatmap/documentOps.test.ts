@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { CHART_DOCUMENT_SCHEMA, emptyDocument } from "@/shared/catalog/seatmap-document";
 import { letterIndex, projectDocument } from "@/shared/catalog/seatmap-project";
-import { LAYOUT_MAX_SEATS, LAYOUT_SPACE, validateLayout } from "@/shared/catalog/seatmap-validate";
+import {
+  LAYOUT_MAX_SEATS,
+  LAYOUT_SPACE,
+  blockingIssues,
+  validateLayout,
+} from "@/shared/catalog/seatmap-validate";
 import {
   addBlock,
   addCategory,
@@ -247,7 +252,7 @@ describe("sections and categories orphan rather than destroy", () => {
 });
 
 describe("what the editor builds is publishable", () => {
-  it("a section, a category and one block project with no validation issues", () => {
+  it("a section, a category and one block project with nothing that BLOCKS publishing", () => {
     const { doc, sectionId, categoryId } = start();
     const made = addBlock(doc, "seating-block", { x: 1000, y: 1000 }, { sectionId, categoryId });
     const p = projectDocument(made.doc);
@@ -266,7 +271,9 @@ describe("what the editor builds is publishable", () => {
       categories: p.categories.map((c) => ({ id: c.id as number, name: c.name })),
       elements: p.elements.map((e) => ({ kind: e.kind, x: e.x, y: e.y, points: e.points })),
     });
-    expect(issues).toEqual([]);
+    // Blocking only: a chart with no stage raises the advisory `focal_point_unset`, which does not
+    // stop a publish. What `addBlock` has to guarantee is that its output is publishable.
+    expect(blockingIssues(issues)).toEqual([]);
     expect(made.doc.schemaVersion).toBe(CHART_DOCUMENT_SCHEMA);
   });
 

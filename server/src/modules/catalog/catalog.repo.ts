@@ -132,7 +132,25 @@ export async function listFeaturedEvents(db: Db = pool): Promise<EventCard[]> {
 }
 
 /** Public event detail by stable slug (US2). Null if not visible (never leaks drafts). */
-export async function getEventDetail(slug: string, db: Db = pool): Promise<EventDetail | null> {
+/**
+ * The buyer's event page.
+ *
+ * `asOwner` drops the public-visibility predicate so an organizer can see their own draft exactly as
+ * a buyer would, BEFORE submitting it for review — which is the whole point of a preview and is
+ * impossible while `VISIBLE_WHERE` demands `on_sale AND approved`.
+ *
+ * That flag is dangerous by construction, so it is deliberately not reachable from anything public:
+ * `VISIBLE_WHERE` is untouched here and still guards every public read, and the only caller passing
+ * `asOwner` is the organizer route, which sits behind `assertEventOwner`. The alternative —
+ * teaching the public `/events/:slug` route about identity — would put an ownership branch inside
+ * the anti-leak control itself (SC-004), which is the one place in this codebase that should have no
+ * branches at all.
+ */
+export async function getEventDetail(
+  slug: string,
+  db: Db = pool,
+  opts: { asOwner?: boolean } = {},
+): Promise<EventDetail | null> {
   const res = await db.query<Row & {
     description: string;
     age_restriction: string;
@@ -153,7 +171,7 @@ export async function getEventDetail(slug: string, db: Db = pool): Promise<Event
             ${HAS_UPCOMING} AS has_upcoming, ${HAS_AVAILABLE} AS has_available,
             (SELECT v.guide FROM showtimes s JOIN venues v ON v.id = s.venue_id WHERE s.event_id = e.id ORDER BY s.starts_at LIMIT 1) AS venue_guide
        FROM events e ${VISIBLE_JOIN} JOIN event_categories ec ON ec.id = e.category_id
-      WHERE e.slug = $1 AND ${VISIBLE_WHERE}`,
+      WHERE e.slug = $1 AND ${opts.asOwner ? 'TRUE' : VISIBLE_WHERE}`,
     [slug],
   );
   const r = res.rows[0];
@@ -244,6 +262,35 @@ interface SeatMapSnapshot {
   planOffsetY: number;
   planOpacity: number;
   planVisibleToBuyers: boolean;
+  /** Absent on snapshots written before 0037; the buyer's picker falls back to `balanced`. */
+  orphanRule?: 'balanced' | 'strict';
+}
+
+/**
+ * Decoration out of a snapshot, in the shape the buyer's renderer reads.
+ *
+ * Snapshots are frozen at apply time, so rows written by OLD builders survive indefinitely — and
+ * one such builder (since replaced: `generateSeatMap` now defers to `refreshSnapshot`) wrote the
+ * database column names `pos_x`/`pos_y` where the renderer reads `x`/`y`. The renderer got
+ * `undefined`, turned it into `NaN` through the extent maths, and emitted
+ * `viewBox="NaN NaN NaN NaN"` — which blanks the ENTIRE map, seats included. A showtime with 106
+ * sellable seats showed the buyer nothing at all.
+ *
+ * So the legacy key is accepted as a fallback rather than the element being dropped: the position
+ * is right there in the row, and a stage that draws beats a stage that vanishes. Anything still
+ * lacking a finite position after that IS dropped — it cannot be placed, and must never again be
+ * allowed to decide where the map is.
+ *
+ * Re-applying a layout rewrites the snapshot in the current shape and retires the fallback for that
+ * showtime. This exists so a stale row is a cosmetic debt, never a blank map.
+ */
+function readSnapshotElements(raw: SeatMapSnapshot['elements'] | undefined): SeatMapElement[] {
+  return (raw ?? [])
+    .map((e) => {
+      const legacy = e as Partial<SeatMapElement> & { pos_x?: number; pos_y?: number };
+      return { ...e, x: e.x ?? legacy.pos_x, y: e.y ?? legacy.pos_y } as SeatMapElement;
+    })
+    .filter((e) => Number.isFinite(e.x) && Number.isFinite(e.y));
 }
 
 /** Read-only seat map (seated) or tier availability (GA) for a showtime (US3). Null if not visible. */
@@ -339,7 +386,8 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
         shape: r.section ? styleOf.get(r.section)?.seatShape : undefined,
         sizeMultiplier: r.section ? styleOf.get(r.section)?.seatSizeMultiplier : undefined,
       })),
-      elements: s?.elements ?? [],
+      elements: readSnapshotElements(s?.elements),
+      orphanRule: s?.orphanRule ?? 'balanced',
       // Omitted entirely unless the organizer made the plan buyer-visible (FR-026). The toggle governs
       // display; the file itself is unguessable rather than access-controlled (FR-026a).
       floorPlan:

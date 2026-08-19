@@ -62,7 +62,7 @@ function rewrite(
  * share a section — and renaming half of it would split one row into two.
  */
 export function renameRow(doc: ChartDocument, rowId: number, label: string): ChartDocument {
-  const next = label.trim().slice(0, 8);
+  const next = label.trim().slice(0, MAX_ROW_LABEL);
   if (!next) return doc;
   return {
     ...doc,
@@ -134,6 +134,17 @@ export function deleteRow(doc: ChartDocument, ref: RowRef): ChartDocument {
 }
 
 /**
+ * How long a row label may be — `seats.row_label` is `z.string().trim().min(1).max(8)` on the route
+ * (`server/src/modules/seatmap/document.schema.ts`). A label built past it is not merely ugly, it is
+ * a save the server will refuse.
+ */
+const MAX_ROW_LABEL = 8;
+
+/** A label that fits, keeping the suffix and shortening the base — never the other way round. */
+const withSuffix = (base: string, suffix: string) =>
+  base.slice(0, Math.max(0, MAX_ROW_LABEL - suffix.length)) + suffix;
+
+/**
  * Copy a row, offset by one row's spacing, with FRESH seat ids (§42 Rule 4).
  *
  * The copy takes a label that is free in the block, so it can be saved without tripping the seat
@@ -145,9 +156,17 @@ export function duplicateRow(doc: ChartDocument, ref: RowRef, dy = 150): ChartDo
     if (source.length === 0) return b;
 
     const used = new Set(rowLabelsOf(b));
-    let label = `${ref.label}'`;
-    let n = 2;
-    while (used.has(label) || label.length > 8) label = `${ref.label}${n++}`.slice(0, 8);
+    /*
+     * Each candidate keeps its suffix and gives up characters from the BASE instead.
+     *
+     * The old form was `${ref.label}${n++}`.slice(0, MAX) — which, for a source label already at the
+     * 8-character limit, sliced the counter straight back off. Every candidate was then identical to
+     * the source label, `used` had it, and the loop spun forever: duplicating a row named `GHEA1234`
+     * hung the tab. Truncating the base instead means the counter always survives, so each pass
+     * produces a label nobody has yet and the loop is guaranteed to end.
+     */
+    let label = withSuffix(ref.label, "'");
+    for (let n = 2; used.has(label); n += 1) label = withSuffix(ref.label, String(n));
 
     const copies: DocumentSeat[] = source.map((s) => ({
       ...s,

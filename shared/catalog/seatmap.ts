@@ -230,6 +230,9 @@ export interface LayoutReferenceChart {
   opacity: number;
 }
 
+/** See `Layout.orphanRule`. Mirrors the CHECK on `venue_layouts.orphan_rule` (0037). */
+export type OrphanRule = 'balanced' | 'strict';
+
 export interface Layout {
   id: number;
   venueId: number;
@@ -247,6 +250,14 @@ export interface Layout {
   tables: LayoutTable[];
   floorPlan: LayoutFloorPlan;
   referenceChart: LayoutReferenceChart;
+  /**
+   * How hard "best available" refuses to strand a lone seat when this chart is selling (0037).
+   *
+   * A chart-level setting rather than a platform constant: whether a single seat left beside an
+   * aisle is acceptable is a venue's judgement, not one answer for everybody. Reaches buyers through
+   * the snapshot at apply time, so changing it never re-tunes a show already on sale.
+   */
+  orphanRule: OrphanRule;
   /**
    * The authoring document (./seatmap-document.ts) — how the chart was BUILT, as opposed to the
    * collections above, which are what is for sale.

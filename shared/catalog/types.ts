@@ -194,6 +194,13 @@ export interface SeatMap {
   tierLegend?: SeatMapTierLegendEntry[];
   /** Tables the showtime snapshotted, so a seat labelled "Bàn 5 - Ghế 3" is drawn at its table (FR-082). */
   tables?: SeatMapTable[];
+  /**
+   * How hard "best available" refuses to strand a lone seat on this chart (0037).
+   *
+   * Snapshotted with the rest of the map, so the rule a buyer meets is the one the chart carried when
+   * it was applied. Absent on older snapshots, where the picker's own default (`balanced`) stands.
+   */
+  orphanRule?: 'balanced' | 'strict';
 }
 
 export interface SeatMapTierLegendEntry {

@@ -158,6 +158,7 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
     reference_offset_x: number;
     reference_offset_y: number;
     reference_opacity: string;
+    orphan_rule: "balanced" | "strict";
     document: unknown;
   }>(`SELECT * FROM venue_layouts WHERE id = $1`, [layoutId]);
   const l = head.rows[0];
@@ -336,6 +337,7 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
       offsetY: l.reference_offset_y,
       opacity: Math.round(Number(l.reference_opacity) * 100),
     },
+    orphanRule: l.orphan_rule,
     document: null,
   };
 
@@ -1016,6 +1018,25 @@ export async function updatePlanAlignment(
             background_public = $6, updated_at = now()
       WHERE id = $1`,
     [layoutId, p.scale / 1000, p.offsetX, p.offsetY, p.opacity / 100, p.visibleToBuyers],
+  );
+}
+
+/**
+ * Set how hard this chart refuses to strand a lone seat (0037).
+ *
+ * A chart-level setting, written the same way `updatePlanAlignment` writes the background's: one
+ * column, one statement, no version bump. It changes nothing about the geometry, so it does not make
+ * the layout a new draft — and it reaches buyers only through the next apply, which is deliberate.
+ * A show that is already selling keeps the rule it was applied with.
+ */
+export async function updateOrphanRule(
+  layoutId: number,
+  rule: "balanced" | "strict",
+  db: Db = pool,
+): Promise<void> {
+  await db.query(
+    `UPDATE venue_layouts SET orphan_rule = $2, updated_at = now() WHERE id = $1`,
+    [layoutId, rule],
   );
 }
 

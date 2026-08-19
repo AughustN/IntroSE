@@ -158,6 +158,30 @@ describe("duplicating a row", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
+  it("terminates on a row whose label is already at the length limit", () => {
+    // `row_label` is capped at 8 characters. The old candidate was `${label}${n}`.slice(0, 8), which
+    // for an 8-character source sliced the counter back off — every attempt produced the source
+    // label again, `used` always had it, and the loop never ended. This case hung the tab.
+    const c = chart();
+    const renamed = {
+      ...c.doc,
+      blocks: c.doc.blocks.map((b) =>
+        b.key === c.key
+          ? { ...b, seats: b.seats?.map((s) => (s.rowLabel === "A" ? { ...s, rowLabel: "GHEA1234" } : s)) }
+          : b,
+      ),
+    };
+
+    const after = duplicateRow(renamed, { blockKey: c.key, label: "GHEA1234" });
+
+    const labels = rowLabelsOf(block(after, c.key));
+    expect(new Set(labels).size).toBe(labels.length);
+    // The copy exists, is not the source label, and still fits the column.
+    const copy = labels.find((l) => l !== "GHEA1234" && !["B", "C", "D", "E"].includes(l));
+    expect(copy).toBeDefined();
+    expect(copy!.length).toBeLessThanOrEqual(8);
+  });
+
   it("puts the copy beside the original, not on top of it", () => {
     const c = chart();
     const after = duplicateRow(c.doc, { blockKey: c.key, label: "A" });

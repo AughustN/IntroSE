@@ -1,9 +1,9 @@
 /**
  * Organizer Event Management Client & Service Adapter
- * 
+ *
  * Provides API client functions and mock storage state management for the
  * Organizer Event Portfolio Dashboard and Single Event Management Workspace.
- * 
+ *
  * Implements SEC-04 identity scoping, UC-24 A6 material field reversion,
  * UC-26 A3 ticket tier archiving, and UC-25 mandatory cancellation with wallet refunds.
  */
@@ -13,7 +13,6 @@ import {
   OrganizerEventStatus,
   OrganizerPortfolioSummary,
   TicketTier,
-  EventCancellationAuditRecord
 } from "../types";
 import { withAuthRetry } from "./authClient";
 import { organizerApi, studioApi } from "./catalogClient";
@@ -35,7 +34,6 @@ const INITIAL_ORGANIZER_EVENTS: OrganizerEvent[] = [];
 
 // Persistent state holder
 let eventsStore: OrganizerEvent[] = [...INITIAL_ORGANIZER_EVENTS];
-const auditLogsStore: EventCancellationAuditRecord[] = [];
 
 /**
  * Computes the derived event status.
@@ -65,7 +63,7 @@ export function calculateEventMetrics(event: OrganizerEvent): {
   let soldTickets = 0;
   let totalRevenueVnd = 0;
 
-  (event.ticketTiers || []).forEach(t => {
+  (event.ticketTiers || []).forEach((t) => {
     if (t.isArchived) return;
     const cap = Number(t.capacity) || 0;
     const sold = Number(t.soldCount) || 0;
@@ -81,7 +79,7 @@ export function calculateEventMetrics(event: OrganizerEvent): {
     totalCapacity,
     soldTickets,
     remainingTickets,
-    totalRevenueVnd
+    totalRevenueVnd,
   };
 }
 
@@ -89,10 +87,7 @@ export function calculateEventMetrics(event: OrganizerEvent): {
  * List all events owned by the currently authenticated organizer (SEC-04).
  * Fetches from the backend database when signed in, falling back to local session store.
  */
-export async function getOrganizerEvents(params?: {
-  status?: string;
-  search?: string;
-}): Promise<{
+export async function getOrganizerEvents(params?: { status?: string; search?: string }): Promise<{
   data: OrganizerPortfolioSummary[];
   summary: {
     totalEvents: number;
@@ -121,68 +116,80 @@ export async function getOrganizerEvents(params?: {
     });
 
     if (res.ok) {
-        const rawList = await res.json();
-        if (Array.isArray(rawList)) {
-          fetchedDbEvents = rawList.map((item: any) => {
-            const rawStatus = item.status || "draft";
-            const modStatus = item.moderation || "pending_review";
+      const rawList = await res.json();
+      if (Array.isArray(rawList)) {
+        fetchedDbEvents = rawList.map((item: any) => {
+          const rawStatus = item.status || "draft";
+          const modStatus = item.moderation || "pending_review";
 
-            let compStatus: OrganizerEventStatus = "draft";
-            if (rawStatus === "cancelled" || rawStatus === "canceled") compStatus = "canceled";
-            else if (rawStatus === "finished" || rawStatus === "completed") compStatus = "completed";
-            else if (rawStatus === "on_sale" && modStatus === "approved") compStatus = "published";
-            else if (modStatus === "pending_review") compStatus = "pending_review";
-            else if (rawStatus === "draft") compStatus = "draft";
+          let compStatus: OrganizerEventStatus = "draft";
+          if (rawStatus === "cancelled" || rawStatus === "canceled") compStatus = "canceled";
+          else if (rawStatus === "finished" || rawStatus === "completed") compStatus = "completed";
+          else if (rawStatus === "on_sale" && modStatus === "approved") compStatus = "published";
+          else if (modStatus === "pending_review") compStatus = "pending_review";
+          else if (rawStatus === "draft") compStatus = "draft";
 
-            const tiers = Array.isArray(item.ticketTiers) && item.ticketTiers.length > 0
+          const tiers =
+            Array.isArray(item.ticketTiers) && item.ticketTiers.length > 0
               ? item.ticketTiers
               : [
                   {
                     id: `tier-${item.id}-1`,
                     label: "Vé Tiêu Chuẩn",
-                    price: Number(item.soldTickets) > 0 ? Math.round(Number(item.totalRevenueVnd || 0) / Number(item.soldTickets)) : 0,
+                    price:
+                      Number(item.soldTickets) > 0
+                        ? Math.round(Number(item.totalRevenueVnd || 0) / Number(item.soldTickets))
+                        : 0,
                     capacity: Number(item.totalCapacity || 0),
                     soldCount: Number(item.soldTickets || 0),
-                    remaining: Math.max(0, Number(item.totalCapacity || 0) - Number(item.soldTickets || 0)),
-                    isArchived: false
-                  }
+                    remaining: Math.max(
+                      0,
+                      Number(item.totalCapacity || 0) - Number(item.soldTickets || 0),
+                    ),
+                    isArchived: false,
+                  },
                 ];
 
-            return {
-              eventId: String(item.id),
-              organizerId: getCurrentOrganizerId(),
-              title: item.title || "Sự kiện",
-              description: item.description || "",
-              category: item.category || "music",
-              categoryLabel: item.category || "Âm nhạc",
-              bannerUrl: item.imageUrl || item.image_url || "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=1200&q=80",
-              venueName: item.venueName || "Sân Vận Động Quân Khu 7",
-              venueAddress: item.venueAddress || "202 Hoàng Văn Thụ, Tân Bình, TP.HCM",
-              city: (item.city as any) || "TP.HCM",
-              startDatetime: item.startDatetime || item.starts_at || new Date().toISOString(),
-              endDatetime: item.endDatetime || item.ends_at || new Date().toISOString(),
-              salesStartDatetime: item.salesStartDatetime || new Date().toISOString(),
-              salesEndDatetime: item.salesEndDatetime || new Date().toISOString(),
-              status: rawStatus as any,
-              computedStatus: compStatus,
-              rejectionReason: null,
-              cancellationReason: null,
-              createdAt: item.createdAt || new Date().toISOString(),
-              updatedAt: item.updatedAt || new Date().toISOString(),
-              times: ["19:00"],
-              dates: ["2026-09-20"],
-              ticketTiers: tiers
-            };
-          });
-        }
+          return {
+            eventId: String(item.id),
+            organizerId: getCurrentOrganizerId(),
+            title: item.title || "Sự kiện",
+            description: item.description || "",
+            category: item.category || "music",
+            categoryLabel: item.category || "Âm nhạc",
+            bannerUrl:
+              item.imageUrl ||
+              item.image_url ||
+              "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=1200&q=80",
+            venueName: item.venueName || "Sân Vận Động Quân Khu 7",
+            venueAddress: item.venueAddress || "202 Hoàng Văn Thụ, Tân Bình, TP.HCM",
+            city: (item.city as any) || "TP.HCM",
+            startDatetime: item.startDatetime || item.starts_at || new Date().toISOString(),
+            endDatetime: item.endDatetime || item.ends_at || new Date().toISOString(),
+            salesStartDatetime: item.salesStartDatetime || new Date().toISOString(),
+            salesEndDatetime: item.salesEndDatetime || new Date().toISOString(),
+            status: rawStatus as any,
+            computedStatus: compStatus,
+            rejectionReason: null,
+            cancellationReason: null,
+            createdAt: item.createdAt || new Date().toISOString(),
+            updatedAt: item.updatedAt || new Date().toISOString(),
+            times: ["19:00"],
+            dates: ["2026-09-20"],
+            ticketTiers: tiers,
+          };
+        });
       }
-    } catch {
-      // Network error, fallback to session store
     }
+  } catch {
+    // Network error, fallback to session store
+  }
 
   // Combine database events with local session created events
-  const dbIds = new Set(fetchedDbEvents.map(e => e.eventId));
-  const localOnly = eventsStore.filter(e => !dbIds.has(e.eventId) && e.organizerId === getCurrentOrganizerId());
+  const dbIds = new Set(fetchedDbEvents.map((e) => e.eventId));
+  const localOnly = eventsStore.filter(
+    (e) => !dbIds.has(e.eventId) && e.organizerId === getCurrentOrganizerId(),
+  );
   eventsStore = [...fetchedDbEvents, ...localOnly];
   const ownedEvents = eventsStore;
 
@@ -192,7 +199,7 @@ export async function getOrganizerEvents(params?: {
   let canceledCount = 0;
   let completedCount = 0;
 
-  const summaries: OrganizerPortfolioSummary[] = ownedEvents.map(event => {
+  const summaries: OrganizerPortfolioSummary[] = ownedEvents.map((event) => {
     const compStatus = computeEventStatus(event);
     event.computedStatus = compStatus;
 
@@ -216,7 +223,7 @@ export async function getOrganizerEvents(params?: {
       totalCapacity: metrics.totalCapacity,
       soldTickets: metrics.soldTickets,
       remainingTickets: metrics.remainingTickets,
-      totalRevenueVnd: metrics.totalRevenueVnd
+      totalRevenueVnd: metrics.totalRevenueVnd,
     };
   });
 
@@ -224,14 +231,14 @@ export async function getOrganizerEvents(params?: {
 
   // Status Filter
   if (params?.status && params.status !== "all") {
-    filtered = filtered.filter(s => s.status === params.status);
+    filtered = filtered.filter((s) => s.status === params.status);
   }
 
   // Keyword Search
   if (params?.search && params.search.trim() !== "") {
     const q = params.search.trim().toLowerCase();
     filtered = filtered.filter(
-      s => s.title.toLowerCase().includes(q) || s.locationName.toLowerCase().includes(q)
+      (s) => s.title.toLowerCase().includes(q) || s.locationName.toLowerCase().includes(q),
     );
   }
 
@@ -243,8 +250,8 @@ export async function getOrganizerEvents(params?: {
       pendingCount,
       publishedCount,
       canceledCount,
-      completedCount
-    }
+      completedCount,
+    },
   };
 }
 
@@ -262,11 +269,11 @@ export async function getOrganizerEventDetail(eventId: string): Promise<{
   };
 }> {
   const organizerId = getCurrentOrganizerId();
-  let event = eventsStore.find(e => e.eventId === String(eventId));
+  let event = eventsStore.find((e) => e.eventId === String(eventId));
 
   if (!event) {
     await getOrganizerEvents();
-    event = eventsStore.find(e => e.eventId === String(eventId));
+    event = eventsStore.find((e) => e.eventId === String(eventId));
   }
 
   if (!event) {
@@ -284,15 +291,18 @@ export async function getOrganizerEventDetail(eventId: string): Promise<{
   return {
     data: {
       ...event,
-      metrics
-    }
+      metrics,
+    },
   };
 }
 
 /**
  * Validates completeness of mandatory event fields before publication request.
  */
-export function validateEventCompleteness(event: OrganizerEvent): { valid: boolean; errors: string[] } {
+export function validateEventCompleteness(event: OrganizerEvent): {
+  valid: boolean;
+  errors: string[];
+} {
   const errors: string[] = [];
 
   if (!event.title || event.title.trim().length < 3) {
@@ -310,7 +320,7 @@ export function validateEventCompleteness(event: OrganizerEvent): { valid: boole
   if (!event.ticketTiers || event.ticketTiers.length === 0) {
     errors.push("Sự kiện phải có ít nhất 1 hạng vé.");
   } else {
-    const validTier = event.ticketTiers.some(t => (t.price || 0) >= 0 && (t.capacity || 0) > 0);
+    const validTier = event.ticketTiers.some((t) => (t.price || 0) >= 0 && (t.capacity || 0) > 0);
     if (!validTier) {
       errors.push("Ít nhất một hạng vé phải có giá VND và sức chứa hợp lệ.");
     }
@@ -318,7 +328,7 @@ export function validateEventCompleteness(event: OrganizerEvent): { valid: boole
 
   return {
     valid: errors.length === 0,
-    errors
+    errors,
   };
 }
 
@@ -327,7 +337,7 @@ export function validateEventCompleteness(event: OrganizerEvent): { valid: boole
  */
 export async function requestPublication(eventId: string): Promise<OrganizerEvent> {
   const organizerId = getCurrentOrganizerId();
-  const event = eventsStore.find(e => e.eventId === eventId);
+  const event = eventsStore.find((e) => e.eventId === eventId);
 
   if (!event) throw new Error("NOT_FOUND: Event not found.");
   if (event.organizerId !== organizerId) throw new Error("FORBIDDEN: You do not own this event.");
@@ -340,27 +350,30 @@ export async function requestPublication(eventId: string): Promise<OrganizerEven
   // The legacy organizer workspace used browser memory for drafts. Persist it before publishing so
   // `pending_review` reaches the backend queue rather than only changing the local badge.
   if (!Number.isSafeInteger(Number(event.eventId))) {
-    Object.assign(event, await persistEvent({
-      title: event.title,
-      description: event.description,
-      category: event.category,
-      categoryLabel: event.categoryLabel,
-      bannerUrl: event.bannerUrl,
-      videoUrl: event.videoUrl,
-      venueName: event.venueName,
-      venueAddress: event.venueAddress,
-      city: event.city,
-      startDatetime: event.startDatetime,
-      endDatetime: event.endDatetime,
-      salesStartDatetime: event.salesStartDatetime,
-      salesEndDatetime: event.salesEndDatetime,
-      ticketTiers: event.ticketTiers.map((tier) => ({
-        label: tier.label,
-        price: tier.price,
-        capacity: tier.capacity ?? 1,
-        description: tier.description,
-      })),
-    }));
+    Object.assign(
+      event,
+      await persistEvent({
+        title: event.title,
+        description: event.description,
+        category: event.category,
+        categoryLabel: event.categoryLabel,
+        bannerUrl: event.bannerUrl,
+        videoUrl: event.videoUrl,
+        venueName: event.venueName,
+        venueAddress: event.venueAddress,
+        city: event.city,
+        startDatetime: event.startDatetime,
+        endDatetime: event.endDatetime,
+        salesStartDatetime: event.salesStartDatetime,
+        salesEndDatetime: event.salesEndDatetime,
+        ticketTiers: event.ticketTiers.map((tier) => ({
+          label: tier.label,
+          price: tier.price,
+          capacity: tier.capacity ?? 1,
+          description: tier.description,
+        })),
+      }),
+    );
   }
 
   await organizerApi.publish(Number(event.eventId));
@@ -374,7 +387,10 @@ export async function requestPublication(eventId: string): Promise<OrganizerEven
 /**
  * Check whether updated fields are material (triggering status reversion to pending_review per UC-24 A6).
  */
-export function isMaterialChange(original: OrganizerEvent, updates: Partial<OrganizerEvent>): boolean {
+export function isMaterialChange(
+  original: OrganizerEvent,
+  updates: Partial<OrganizerEvent>,
+): boolean {
   if (updates.title && updates.title !== original.title) return true;
   if (updates.description && updates.description !== original.description) return true;
   if (updates.startDatetime && updates.startDatetime !== original.startDatetime) return true;
@@ -391,10 +407,10 @@ export function isMaterialChange(original: OrganizerEvent, updates: Partial<Orga
  */
 export async function updateEventDetails(
   eventId: string,
-  updates: Partial<OrganizerEvent>
+  updates: Partial<OrganizerEvent>,
 ): Promise<{ event: OrganizerEvent; statusRevertedToPending: boolean }> {
   const organizerId = getCurrentOrganizerId();
-  const event = eventsStore.find(e => e.eventId === eventId);
+  const event = eventsStore.find((e) => e.eventId === eventId);
 
   if (!event) throw new Error("NOT_FOUND: Event not found.");
   if (event.organizerId !== organizerId) throw new Error("FORBIDDEN: You do not own this event.");
@@ -420,15 +436,15 @@ export async function updateEventDetails(
  */
 export async function deleteOrArchiveTier(
   eventId: string,
-  tierId: string
+  tierId: string,
 ): Promise<{ tierId: string; actionTaken: "deleted" | "archived"; isArchived: boolean }> {
   const organizerId = getCurrentOrganizerId();
-  const event = eventsStore.find(e => e.eventId === eventId);
+  const event = eventsStore.find((e) => e.eventId === eventId);
 
   if (!event) throw new Error("NOT_FOUND: Event not found.");
   if (event.organizerId !== organizerId) throw new Error("FORBIDDEN: You do not own this event.");
 
-  const tierIndex = event.ticketTiers.findIndex(t => t.id === tierId);
+  const tierIndex = event.ticketTiers.findIndex((t) => t.id === tierId);
   if (tierIndex === -1) throw new Error("NOT_FOUND: Ticket tier not found.");
 
   const tier = event.ticketTiers[tierIndex];
@@ -452,23 +468,28 @@ export async function deleteOrArchiveTier(
  */
 export async function saveTicketTier(
   eventId: string,
-  tierData: Partial<TicketTier> & { id?: string; label: string; price: number; capacity: number }
+  tierData: Partial<TicketTier> & { id?: string; label: string; price: number; capacity: number },
 ): Promise<TicketTier> {
   const organizerId = getCurrentOrganizerId();
-  const event = eventsStore.find(e => e.eventId === eventId);
+  const event = eventsStore.find((e) => e.eventId === eventId);
 
   if (!event) throw new Error("NOT_FOUND: Event not found.");
   if (event.organizerId !== organizerId) throw new Error("FORBIDDEN: You do not own this event.");
 
   if (tierData.id) {
-    const existingTier = event.ticketTiers.find(t => t.id === tierData.id);
+    const existingTier = event.ticketTiers.find((t) => t.id === tierData.id);
     if (existingTier) {
       const soldCount = existingTier.soldCount || 0;
       if (tierData.capacity < soldCount) {
-        throw new Error(`VALIDATION_ERROR: Sức chứa mới (${tierData.capacity}) không thể nhỏ hơn số vé đã bán (${soldCount}).`);
+        throw new Error(
+          `VALIDATION_ERROR: Sức chứa mới (${tierData.capacity}) không thể nhỏ hơn số vé đã bán (${soldCount}).`,
+        );
       }
       Object.assign(existingTier, tierData);
-      existingTier.remaining = Math.max(0, (existingTier.capacity || 0) - (existingTier.soldCount || 0));
+      existingTier.remaining = Math.max(
+        0,
+        (existingTier.capacity || 0) - (existingTier.soldCount || 0),
+      );
       event.updatedAt = new Date().toISOString();
       return existingTier;
     }
@@ -483,62 +504,12 @@ export async function saveTicketTier(
     capacity: tierData.capacity,
     soldCount: 0,
     remaining: tierData.capacity,
-    isArchived: false
+    isArchived: false,
   };
 
   event.ticketTiers.push(newTier);
   event.updatedAt = new Date().toISOString();
   return newTier;
-}
-
-/**
- * Cancel Event with mandatory cancellation reason and dispatch store-credit refunds (UC-25 / FR-010..012).
- */
-export async function cancelEvent(
-  eventId: string,
-  reason: string
-): Promise<{
-  event: OrganizerEvent;
-  auditRecord: EventCancellationAuditRecord;
-}> {
-  const organizerId = getCurrentOrganizerId();
-  const event = eventsStore.find(e => e.eventId === eventId);
-
-  if (!event) throw new Error("NOT_FOUND: Event not found.");
-  if (event.organizerId !== organizerId) throw new Error("FORBIDDEN: You do not own this event.");
-
-  const compStatus = computeEventStatus(event);
-  if (compStatus === "completed") {
-    throw new Error("VALIDATION_ERROR: Không thể hủy sự kiện đã kết thúc.");
-  }
-
-  if (!reason || reason.trim().length < 5) {
-    throw new Error("VALIDATION_ERROR: Vui lòng nhập lý do hủy sự kiện (tối thiểu 5 ký tự).");
-  }
-
-  event.status = "canceled";
-  event.computedStatus = "canceled";
-  event.cancellationReason = reason.trim();
-  event.updatedAt = new Date().toISOString();
-
-  const metrics = calculateEventMetrics(event);
-
-  const auditRecord: EventCancellationAuditRecord = {
-    cancellationId: `canc-${Date.now()}`,
-    eventId: event.eventId,
-    organizerId: event.organizerId,
-    canceledAt: new Date().toISOString(),
-    reason: reason.trim(),
-    ticketsAffectedCount: metrics.soldTickets,
-    totalRefundAmountVnd: metrics.totalRevenueVnd
-  };
-
-  auditLogsStore.push(auditRecord);
-
-  return {
-    event,
-    auditRecord
-  };
 }
 
 /**
@@ -549,39 +520,37 @@ export async function cancelEvent(
  * The DB 'finished' status locks further edits and ticket sales.
  *
  * Also updates the in-memory store so the UI reflects the new state immediately
- * without a full reload, consistent with how cancelEvent handles local state.
+ * without a full reload, consistent with how the other local-state helpers here behave.
  */
-export async function completeEvent(
-  eventId: string
-): Promise<{ event: OrganizerEvent }> {
+export async function completeEvent(eventId: string): Promise<{ event: OrganizerEvent }> {
   const organizerId = getCurrentOrganizerId();
-  const event = eventsStore.find(e => e.eventId === eventId);
+  const event = eventsStore.find((e) => e.eventId === eventId);
 
-  if (!event) throw new Error('NOT_FOUND: Event not found.');
-  if (event.organizerId !== organizerId) throw new Error('FORBIDDEN: You do not own this event.');
+  if (!event) throw new Error("NOT_FOUND: Event not found.");
+  if (event.organizerId !== organizerId) throw new Error("FORBIDDEN: You do not own this event.");
 
   const compStatus = computeEventStatus(event);
-  if (compStatus === 'canceled') {
-    throw new Error('VALIDATION_ERROR: Không thể hoàn tất sự kiện đã hủy.');
+  if (compStatus === "canceled") {
+    throw new Error("VALIDATION_ERROR: Không thể hoàn tất sự kiện đã hủy.");
   }
-  if (compStatus === 'completed') {
+  if (compStatus === "completed") {
     // Already finished — treat as success (idempotent)
     return { event };
   }
-  if (compStatus !== 'published') {
-    throw new Error('VALIDATION_ERROR: Chỉ có thể hoàn tất sự kiện đang được đăng bán (đã duyệt).');
+  if (compStatus !== "published") {
+    throw new Error("VALIDATION_ERROR: Chỉ có thể hoàn tất sự kiện đang được đăng bán (đã duyệt).");
   }
 
   // Call the real server endpoint
   try {
     await organizerApi.completeEvent(eventId);
   } catch (err: any) {
-    throw new Error(err.message || 'Lỗi server khi hoàn tất sự kiện');
+    throw new Error(err.message || "Lỗi server khi hoàn tất sự kiện");
   }
 
   // Update local store
-  event.status = 'completed';
-  event.computedStatus = 'completed';
+  event.status = "completed";
+  event.computedStatus = "completed";
   event.updatedAt = new Date().toISOString();
 
   return { event };
@@ -605,7 +574,14 @@ export interface CreateEventInput {
   endDatetime: string;
   salesStartDatetime?: string;
   salesEndDatetime?: string;
-  ticketTiers: Array<{
+  /**
+   * Seated events run the 6-step flow (draft → tickets → map → customize → assign → publish), so
+   * their draft is born WITHOUT tiers or a showtime — those belong to step 2. General admission
+   * defaults still ship them bundled (the old contract), which is why tiers stay optional here:
+   * absent means "none yet", not "default tier".
+   */
+  eventType?: "seated" | "general_admission";
+  ticketTiers?: Array<{
     label: string;
     price: number;
     capacity: number;
@@ -628,7 +604,9 @@ async function persistEvent(input: CreateEventInput): Promise<OrganizerEvent> {
     title: input.title.trim(),
     categoryCode: input.category || "music",
     description: input.description.trim(),
-    eventType: "general_admission",
+    // Explicit rather than hardcoded: the old value forced every event to general admission, so a
+    // seated event could never be created from this form (the 6-step flow's step 1 needs it).
+    eventType: input.eventType ?? "general_admission",
     imageUrl: input.bannerUrl.trim(),
   });
   const venue = await organizerApi.createVenue({
@@ -639,7 +617,7 @@ async function persistEvent(input: CreateEventInput): Promise<OrganizerEvent> {
   await organizerApi.addShowtime(event.id, {
     venueId: venue.id,
     startsAt: input.startDatetime,
-    tiers: input.ticketTiers.map((tier) => ({
+    tiers: (input.ticketTiers ?? []).map((tier) => ({
       label: tier.label,
       price: tier.price,
       totalQuantity: tier.capacity,
@@ -678,8 +656,8 @@ async function persistEvent(input: CreateEventInput): Promise<OrganizerEvent> {
       soldCount: 0,
       remaining: t.capacity,
       description: t.description || "",
-      isArchived: false
-    }))
+      isArchived: false,
+    })),
   };
 }
 
@@ -687,6 +665,52 @@ export async function createOrganizerEvent(input: CreateEventInput): Promise<Org
   const newEvent = await persistEvent(input);
   eventsStore.unshift(newEvent);
   return newEvent;
+}
+
+/**
+ * Step 1 of the 6-step seated flow: create ONLY the event draft and the venue (organizer.routes.ts
+ * accepts a draft with no showtime). Tickets become step 2, the map steps 3–5 — bundling them here
+ * (the way `persistEvent` does for general admission) would skip the whole point of the flow.
+ *
+ * Returns the ids rather than a full `OrganizerEvent`: the console fetches the authoritative object
+ * itself on the reload this triggers, so there is no local copy to drift from the server's row.
+ */
+export async function createDraftEvent(
+  input: Pick<
+    CreateEventInput,
+    "title" | "description" | "category" | "bannerUrl" | "venueName" | "venueAddress" | "city"
+  > & {
+    /**
+     * Which kind of event this draft becomes. Both kinds take the same first step — an event and a
+     * venue, nothing sellable yet — and then meet the same rail, which already knows to stop a
+     * general-admission event at four steps and walk a seated one through the chart.
+     */
+    eventType?: "seated" | "general_admission";
+  },
+): Promise<{ eventId: number; venueId: number }> {
+  if (!input.title || input.title.trim().length < 3) {
+    throw new Error("VALIDATION_ERROR: Tên sự kiện phải từ 3 ký tự trở lên.");
+  }
+  if (!input.bannerUrl || input.bannerUrl.trim() === "") {
+    throw new Error("VALIDATION_ERROR: Hình ảnh sự kiện (Picture) là bắt buộc.");
+  }
+  if (!input.venueName || !input.venueAddress) {
+    throw new Error("VALIDATION_ERROR: Vui lòng nhập địa điểm và địa chỉ sự kiện.");
+  }
+
+  const event = await organizerApi.createEvent({
+    title: input.title.trim(),
+    categoryCode: input.category || "music",
+    description: input.description.trim(),
+    eventType: input.eventType ?? "seated",
+    imageUrl: input.bannerUrl.trim(),
+  });
+  const venue = await organizerApi.createVenue({
+    name: input.venueName.trim(),
+    city: input.city,
+    rawAddress: input.venueAddress.trim(),
+  });
+  return { eventId: event.id, venueId: venue.id };
 }
 
 /**
@@ -713,7 +737,10 @@ export async function uploadEventBannerFile(eventId: string | number, file: File
 /**
  * Upload event trailer video directly to Cloudinary via server-mediated endpoint (012-cloudinary-media-upload).
  */
-export async function uploadEventTrailerFile(eventId: string | number, file: File): Promise<string> {
+export async function uploadEventTrailerFile(
+  eventId: string | number,
+  file: File,
+): Promise<string> {
   const numericId = Number(eventId);
   if (Number.isSafeInteger(numericId)) {
     const res = await studioApi.uploadTrailer(numericId, file);
@@ -731,4 +758,3 @@ export async function deleteEventTrailerFile(eventId: string | number): Promise<
     await studioApi.removeTrailer(numericId);
   }
 }
-

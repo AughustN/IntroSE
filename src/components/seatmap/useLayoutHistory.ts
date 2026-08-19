@@ -39,19 +39,31 @@ export interface LayoutDraft {
  */
 export function useLayoutHistory<T>(initial: T) {
   const [present, setPresent] = useState<T>(initial);
+  /** The committed value, readable outside an updater — see `commit`. */
+  const presentRef = useRef<T>(initial);
   const past = useRef<T[]>([]);
   const future = useRef<T[]>([]);
   const [, force] = useState(0);
   const rerender = () => force((n) => n + 1);
 
-  /** Commit a new state as ONE undoable step. */
+  /**
+   * Commit a new state as ONE undoable step.
+   *
+   * The stacks are pushed OUTSIDE the updater. React may call an updater more than once for a single
+   * update — it does so deliberately under `<StrictMode>`, which this app runs (`src/main.tsx`) — and
+   * an updater that mutates refs is not a pure function of its argument. Pushing from inside meant a
+   * single edit could record two undo steps, so the first Ctrl+Z appeared to do nothing.
+   *
+   * `presentRef` is what makes moving it out possible: the updater's `current` is not available here,
+   * so the ref carries the value the stack needs to remember.
+   */
   const commit = useCallback((next: T | ((current: T) => T)) => {
-    setPresent((current) => {
-      const value = typeof next === "function" ? (next as (c: T) => T)(current) : next;
-      past.current = [...past.current, current].slice(-UNDO_DEPTH);
-      future.current = [];
-      return value;
-    });
+    const current = presentRef.current;
+    const value = typeof next === "function" ? (next as (c: T) => T)(current) : next;
+    past.current = [...past.current, current].slice(-UNDO_DEPTH);
+    future.current = [];
+    presentRef.current = value;
+    setPresent(value);
     rerender();
   }, []);
 
@@ -60,29 +72,28 @@ export function useLayoutHistory<T>(initial: T) {
   const reset = useCallback((next: T) => {
     past.current = [];
     future.current = [];
+    presentRef.current = next;
     setPresent(next);
     rerender();
   }, []);
 
   const undo = useCallback(() => {
-    setPresent((current) => {
-      const previous = past.current.at(-1);
-      if (!previous) return current;
-      past.current = past.current.slice(0, -1);
-      future.current = [current, ...future.current].slice(0, UNDO_DEPTH);
-      return previous;
-    });
+    const previous = past.current.at(-1);
+    if (!previous) return;
+    past.current = past.current.slice(0, -1);
+    future.current = [presentRef.current, ...future.current].slice(0, UNDO_DEPTH);
+    presentRef.current = previous;
+    setPresent(previous);
     rerender();
   }, []);
 
   const redo = useCallback(() => {
-    setPresent((current) => {
-      const next = future.current[0];
-      if (!next) return current;
-      future.current = future.current.slice(1);
-      past.current = [...past.current, current].slice(-UNDO_DEPTH);
-      return next;
-    });
+    const next = future.current[0];
+    if (!next) return;
+    future.current = future.current.slice(1);
+    past.current = [...past.current, presentRef.current].slice(-UNDO_DEPTH);
+    presentRef.current = next;
+    setPresent(next);
     rerender();
   }, []);
 

@@ -14,6 +14,14 @@ interface MediaDropzoneProps {
   required?: boolean;
   helpText?: string;
   aspectRatio?: 'square' | 'video' | 'banner' | 'auto';
+  /**
+   * Cap the drop target's height.
+   *
+   * A 16:9 zone at full form width is ~375px tall, and two of them ate about a third of the
+   * create-event form's scroll for two upload targets. Opt-in rather than the default, because the
+   * chart editor's panels want the large preview — there the image IS the work.
+   */
+  compact?: boolean;
 }
 
 export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
@@ -28,6 +36,7 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
   required = false,
   helpText,
   aspectRatio = 'auto',
+  compact = false,
 }) => {
   const [stagedFile, setStagedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -115,25 +124,28 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
   const activeDisplayUrl = previewUrl || currentUrl;
 
   const getAspectClass = () => {
+    // `max-h` with the aspect ratio still set: wide containers stop growing taller, narrow ones
+    // (a phone) keep the ratio and never end up a letterbox slot too short to drop a file into.
+    const cap = compact ? ' max-h-[180px]' : '';
     switch (aspectRatio) {
       case 'square':
         return 'aspect-square max-w-[200px]';
       case 'video':
-        return 'aspect-video w-full';
+        return 'aspect-video w-full' + cap;
       case 'banner':
-        return 'aspect-[16/9] w-full';
+        return 'aspect-[16/9] w-full' + cap;
       default:
-        return isVideo ? 'aspect-video w-full' : 'min-h-[160px] w-full';
+        return (isVideo ? 'aspect-video w-full' : 'min-h-[160px] w-full') + cap;
     }
   };
 
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
-        <label className="text-xs font-semibold text-stone-300 uppercase tracking-wider">
-          {label} {required && <span className="text-red-400">*</span>}
+        <label className="font-meta text-xs font-semibold uppercase tracking-wider text-beige-kem">
+          {label} {required && <span className="text-burgundy">*</span>}
         </label>
-        {helpText && <span className="text-[11px] text-stone-500">{helpText}</span>}
+        {helpText && <span className="font-meta text-[11px] text-ink-soft">{helpText}</span>}
       </div>
 
       <div
@@ -146,10 +158,10 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
         onClick={() => !disabled && fileInputRef.current?.click()}
         className={`relative overflow-hidden rounded-xl border transition-all cursor-pointer flex flex-col items-center justify-center p-4 text-center ${getAspectClass()} ${
           isDragOver
-            ? 'border-amber-500 bg-amber-500/10 scale-[1.01]'
+            ? 'border-burgundy bg-burgundy/10 scale-[1.01]'
             : activeDisplayUrl
-            ? 'border-stone-700 bg-stone-900/90 hover:border-stone-500'
-            : 'border-dashed border-stone-700 bg-stone-900/40 hover:bg-stone-900/70 hover:border-amber-500/60'
+            ? 'border-beige-kem/30 bg-surface-1 hover:border-beige-kem/60'
+            : 'border-dashed border-beige-kem/35 bg-surface-1 hover:border-burgundy/60 hover:bg-surface-1/70'
         } ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
       >
         <input
@@ -190,14 +202,14 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
                     e.stopPropagation();
                     fileInputRef.current?.click();
                   }}
-                  className="px-3 py-1.5 text-xs font-medium bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-lg border border-stone-600 transition-colors"
+                  className="rounded-lg border border-beige-kem/40 bg-surface-2 px-3 py-1.5 text-xs font-medium text-beige-kem transition-colors hover:bg-beige-kem/10"
                 >
                   Thay đổi
                 </button>
                 <button
                   type="button"
                   onClick={handleClear}
-                  className="p-1.5 text-red-400 hover:text-red-300 bg-red-950/60 hover:bg-red-900/60 rounded-lg border border-red-800 transition-colors"
+                  className="rounded-lg border border-burgundy/60 bg-burgundy/15 p-1.5 text-burgundy transition-colors hover:bg-burgundy/25"
                   title="Xóa tệp"
                 >
                   <X className="w-4 h-4" />
@@ -206,21 +218,21 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
             )}
 
             {stagedFile && (
-              <div className="absolute top-2 left-2 bg-amber-500/90 text-stone-950 font-bold text-[10px] px-2 py-0.5 rounded shadow">
+              <div className="absolute left-2 top-2 rounded bg-cam-dat px-2 py-0.5 text-[10px] font-bold text-on-tint shadow">
                 Chưa tải lên
               </div>
             )}
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center space-y-2 text-stone-400">
-            <div className="p-3 bg-stone-800/80 rounded-full text-stone-300 border border-stone-700">
-              {isVideo ? <Film className="w-6 h-6 text-amber-400" /> : <Upload className="w-6 h-6 text-amber-400" />}
+          <div className="flex flex-col items-center justify-center space-y-2 text-ink-soft">
+            <div className="rounded-full border border-beige-kem/30 bg-surface-2 p-3 text-beige-kem">
+              {isVideo ? <Film className="h-6 w-6 text-burgundy" /> : <Upload className="h-6 w-6 text-burgundy" />}
             </div>
             <div className="space-y-0.5">
-              <p className="text-xs font-medium text-stone-200">
-                <span className="text-amber-400 font-semibold">Nhấn để tải lên</span> hoặc kéo thả vào đây
+              <p className="font-meta text-xs font-medium text-beige-kem">
+                <span className="font-semibold text-burgundy">Nhấn để tải lên</span> hoặc kéo thả vào đây
               </p>
-              <p className="text-[11px] text-stone-500">
+              <p className="font-meta text-[11px] text-ink-soft">
                 {isVideo ? 'MP4, WebM' : 'PNG, JPG, WebP, SVG'} (Tối đa {effectiveMaxSize}MB)
               </p>
             </div>
@@ -229,7 +241,7 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
       </div>
 
       {errorMessage && (
-        <div className="flex items-center gap-1.5 text-xs text-red-400 mt-1">
+        <div className="mt-1 flex items-center gap-1.5 font-meta text-xs text-burgundy">
           <AlertCircle className="w-3.5 h-3.5 shrink-0" />
           <span>{errorMessage}</span>
         </div>

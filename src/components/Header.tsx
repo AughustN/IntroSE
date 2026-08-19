@@ -326,6 +326,16 @@ interface HeaderProps {
    * plain page the bar would have nothing to float on and would sit over the first paragraph.
    */
   overlay?: boolean;
+  /**
+   * Let the header scroll away instead of following the page down.
+   *
+   * For the organizer workspace. The floats carry their own surfaces and no bar behind them, which
+   * reads well over a short page and badly over a long form: sticky, they ride over whatever is
+   * beneath, and on the create-event screen that was the description textarea — site chrome sitting
+   * on a field somebody is typing into. A workspace does not need the marketing nav following it
+   * down, so here it simply leaves.
+   */
+  unpinned?: boolean;
   theme: "dark" | "light";
   onToggleTheme: () => void;
 }
@@ -358,6 +368,7 @@ export default function Header({
   userEmail,
   avatarUrl,
   overlay = false,
+  unpinned = false,
   theme,
   onToggleTheme,
 }: HeaderProps) {
@@ -485,7 +496,9 @@ export default function Header({
      * page does not start underneath the floats.
      */
     <header
-      className={`${overlay ? "fixed" : "sticky"} inset-x-0 top-0 z-40 ${overHero ? "nav-over-hero" : ""}`}
+      className={`${overlay ? "fixed" : unpinned ? "relative" : "sticky"} inset-x-0 top-0 z-40 ${
+        overHero ? "nav-over-hero" : ""
+      }`}
     >
       {/*
        * Three free-standing groups rather than one bar of controls. A 1fr / auto / 1fr grid is what

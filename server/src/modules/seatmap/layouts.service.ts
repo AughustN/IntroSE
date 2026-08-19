@@ -2,7 +2,7 @@ import type { Request } from 'express';
 import type { LayoutLibraryEntry, LayoutRevision, SaveLayoutRequest } from '@shared/catalog/seatmap.js';
 import { projectDocument } from '@shared/catalog/seatmap-project.js';
 import { type ChartDocument, reviveDocument } from '@shared/catalog/seatmap-document.js';
-import { validateLayout, type ValidationIssue } from '@shared/catalog/seatmap-validate.js';
+import { blockingIssues, validateLayout, type ValidationIssue } from '@shared/catalog/seatmap-validate.js';
 import { LAYOUT_MAX_ELEMENTS, LAYOUT_MAX_SEATS, VENUE_MAX_LAYOUTS } from '../../config.js';
 import { pool } from '../../db/pool.js';
 import { err } from '../../http.js';
@@ -314,7 +314,10 @@ export async function validateForShowtime(layoutId: number, showtimeId: number):
 export async function publish(req: Request, layoutId: number) {
   await assertLayoutOwner(req, layoutId);
   const issues = await validate(layoutId);
-  if (issues.length > 0) {
+  // Only the BLOCKING ones refuse. A warning describes something the organizer should know about the
+  // chart they are publishing, not a reason to stop them publishing it (see `ValidationIssue`).
+  const blocking = blockingIssues(issues);
+  if (blocking.length > 0) {
     // Carries the issue list so the organizer sees what to fix, not a generic failure (FR-031).
     // Audited as a refusal too: a chart that repeatedly fails the gate is a support question, and
     // without this the only record of it is the organizer's memory.
@@ -324,9 +327,11 @@ export async function publish(req: Request, layoutId: number) {
       targetType: 'venue_layout',
       targetId: layoutId,
       outcome: 'rejected',
-      detail: { issues: issues.map((i) => i.code) },
+      detail: { issues: blocking.map((i) => i.code) },
     });
-    throw err.refused(422, 'layout_invalid', 'Sơ đồ chưa hợp lệ, không thể phát hành.', { issues });
+    throw err.refused(422, 'layout_invalid', 'Sơ đồ chưa hợp lệ, không thể phát hành.', {
+      issues: blocking,
+    });
   }
   await repo.setLayoutStatus(layoutId, 'ready');
   const layout = await repo.getLayout(layoutId);

@@ -61,6 +61,18 @@ function freeSlot(tables: LayoutTable[], w: number, h: number): { x: number; y: 
   return { x: 5000, y: 5000 };
 }
 
+/**
+ * A typed count as a whole positive number, or null when it is not one.
+ *
+ * Null rather than a silent fallback, so each caller says what an unusable value should become —
+ * a table falls back to its default of 10, a standing area to 0, and neither pretends the organizer
+ * typed something they did not.
+ */
+function wholeCount(raw: string): number | null {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
 export default function TablePalette({
   sections,
   tables,
@@ -87,7 +99,10 @@ export default function TablePalette({
   const suggested = `Bàn ${tables.length + 1}`;
 
   const addTable = () => {
-    const count = Number(seatCount);
+    // `Number("")` is 0 and `Number.isFinite(0)` is true, so an empty box used to create a table with
+    // no seats — and `Number("150.5")` is finite too, so a fractional seat count went through as
+    // well. A table's seat count is a whole number of chairs or it is not a seat count.
+    const count = wholeCount(seatCount);
     onAddTable({
       sectionId: sectionId === "" ? null : Number(sectionId),
       name: name.trim() || suggested,
@@ -101,7 +116,7 @@ export default function TablePalette({
       width: shape === "round" ? 700 : 1400,
       height: shape === "round" ? 700 : 700,
       rotation: 0,
-      seatCount: Number.isFinite(count) ? count : 10,
+      seatCount: count ?? 10,
       sideCounts: null,
       bookingMode: wholeTable ? "whole_table" : "per_seat",
     });
@@ -227,7 +242,9 @@ export default function TablePalette({
             onAddStandingArea({
               sectionId: Number(sectionId),
               rowLabel: "ĐỨNG",
-              count: Number(standing) || 0,
+              // Same rule as a table's: a standing area holds a whole number of people. `|| 0` used
+              // to turn both "" and "abc" into a zero-capacity zone that publishes and sells nothing.
+              count: wholeCount(standing) ?? 0,
               // A square dropped at the centre; the organizer reshapes it like any other polygon.
               points: [
                 { x: 3000, y: 3000 },

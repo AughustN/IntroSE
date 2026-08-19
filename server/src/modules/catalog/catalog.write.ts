@@ -93,38 +93,40 @@ export async function listMyEvents(userId: number, db: Db = pool) {
                 JOIN orders o2 ON o2.reservation_id = r2.id AND o2.payment_status IN ('paid', 'completed', 'refunded', 'partially_refunded')
                 JOIN tickets t2 ON t2.order_id = o2.id
                WHERE s2.event_id = e.id
-            ), 0)::bigint AS "totalRevenueVnd"
-       FROM events e 
-       JOIN organizers o ON o.id = e.organizer_id 
+            ), 0)::bigint AS "totalRevenueVnd",
+            -- The showtime the row leads with. NEXT UPCOMING first, and only when there is none does
+            -- it fall back to the latest past one: an organizer scanning the list is looking ahead,
+            -- but a finished event that printed no date at all would read as an event with no dates
+            -- rather than one that has already happened.
+            --
+            -- Ordered so both cases come out of one scan: future showtimes sort ahead of past ones,
+            -- then future ascends (soonest) while past descends (most recent).
+            (
+              SELECT s3.starts_at
+                FROM showtimes s3
+               WHERE s3.event_id = e.id AND s3.status <> 'cancelled'
+               ORDER BY (s3.starts_at < now()),
+                        CASE WHEN s3.starts_at >= now() THEN s3.starts_at END ASC,
+                        s3.starts_at DESC
+               LIMIT 1
+            ) AS "nextShowtimeAt",
+            (
+              SELECT v3.name
+                FROM showtimes s3
+                JOIN venues v3 ON v3.id = s3.venue_id
+               WHERE s3.event_id = e.id AND s3.status <> 'cancelled'
+               ORDER BY (s3.starts_at < now()),
+                        CASE WHEN s3.starts_at >= now() THEN s3.starts_at END ASC,
+                        s3.starts_at DESC
+               LIMIT 1
+            ) AS "venueName"
+       FROM events e
+       JOIN organizers o ON o.id = e.organizer_id
        JOIN event_categories ec ON ec.id = e.category_id
-      WHERE o.user_id = $1 
+      WHERE o.user_id = $1
       ORDER BY e.created_at DESC`,
     [userId],
   );
-
-  for (const event of rows) {
-    const tierRes = await db.query(
-      `SELECT tt.id::text, tt.label, tt.price_amount AS price, tt.total_quantity AS capacity,
-              COALESCE(COUNT(t.id), 0)::int AS "soldCount"
-         FROM showtimes s
-         JOIN ticket_tiers tt ON tt.showtime_id = s.id
-         LEFT JOIN reservation_items ri ON ri.ticket_tier_id = tt.id
-         LEFT JOIN tickets t ON t.reservation_item_id = ri.id AND t.qr_status != 'void'
-         LEFT JOIN orders o ON o.id = t.order_id AND o.payment_status IN ('paid', 'completed')
-        WHERE s.event_id = $1
-        GROUP BY tt.id, tt.label, tt.price_amount, tt.total_quantity`,
-      [event.id],
-    );
-    event.ticketTiers = tierRes.rows.map((r) => ({
-      id: String(r.id),
-      label: String(r.label),
-      price: Number(r.price || 0),
-      capacity: Number(r.capacity || 0),
-      soldCount: Number(r.soldCount || 0),
-      remaining: Math.max(0, Number(r.capacity || 0) - Number(r.soldCount || 0)),
-      isArchived: false,
-    }));
-  }
 
   return rows;
 }
@@ -469,6 +471,16 @@ export async function eventShowtimesManage(eventId: number, db: Db = pool) {
     );
     st.layoutId = chart[0]?.id ?? null;
     st.layoutStatus = chart[0]?.status ?? null;
+    /*
+     * Which classes actually hold inventory — the SAME answer `generate-seat-map` gates on.
+     *
+     * `seatCount` alone cannot be that answer: a class drawn as a capacity ZONE has no seats, so it
+     * reads as empty here while `categoriesWithInventory` (seats UNION zones) still demands a price
+     * for it. The console then showed the chart ready to apply and the apply refused
+     * `category_without_tier`. One predicate, computed once on the server, rather than two that
+     * drift (Principle VI).
+     */
+    const stocked = chart[0] ? new Set(await categoriesWithInventory(chart[0].id, db)) : new Set();
     st.categories = chart[0]
       ? (
           await db.query(
@@ -481,7 +493,7 @@ export async function eventShowtimesManage(eventId: number, db: Db = pool) {
                FROM layout_categories c WHERE c.layout_id = $1 ORDER BY c.name`,
             [chart[0].id],
           )
-        ).rows
+        ).rows.map((c) => ({ ...c, hasInventory: stocked.has(c.id) }))
       : [];
   }
   return showtimes;

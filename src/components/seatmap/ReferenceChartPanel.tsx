@@ -21,6 +21,7 @@ import { layoutApi } from "../../services/catalogClient";
  */
 
 import { MediaDropzone } from "../common/MediaDropzone";
+import ConfirmDialog from "../ConfirmDialog";
 
 const btn =
   " border-2 border-beige-kem px-2.5 py-1.5 text-eyebrow font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
@@ -34,6 +35,7 @@ export default function ReferenceChartPanel({
   reference: LayoutReferenceChart;
   onChange: (reference: LayoutReferenceChart) => void;
 }) {
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,12 +77,10 @@ export default function ReferenceChartPanel({
         mediaType="reference"
         currentUrl={reference.url}
         onFileSelected={(file) => file && void run(() => layoutApi.uploadReference(layoutId, file))}
-        onRemove={() =>
-          void run(async () => {
-            await layoutApi.removeReference(layoutId);
-            return { ...reference, url: null };
-          })
-        }
+        // Asked first. Deleting the file is not undoable and the organizer may have spent a while
+        // aligning it — every other destructive action in this editor confirms, and this one being
+        // one click was an inconsistency waiting to cost somebody their upload.
+        onRemove={() => setConfirmRemove(true)}
         helpText="JPG, PNG, WEBP hoặc SVG tối đa 5MB"
         aspectRatio="banner"
         disabled={busy}
@@ -146,16 +146,29 @@ export default function ReferenceChartPanel({
           <button
             className={`${btn} mt-3`}
             disabled={busy}
-            onClick={() =>
-              run(async () => {
-                await layoutApi.removeReference(layoutId);
-                return { ...reference, url: null };
-              })
-            }
+            onClick={() => setConfirmRemove(true)}
           >
             Xoá bản vẽ tham chiếu
           </button>
         </>
+      )}
+
+      {confirmRemove && (
+        <ConfirmDialog
+          title="Xoá bản vẽ tham chiếu?"
+          message="Tệp sẽ bị xoá khỏi máy chủ và không khôi phục được. Căn chỉnh đã lưu cũng mất theo."
+          confirmLabel="Xoá"
+          cancelLabel="Giữ lại"
+          tone="danger"
+          onConfirm={() => {
+            setConfirmRemove(false);
+            void run(async () => {
+              await layoutApi.removeReference(layoutId);
+              return { ...reference, url: null };
+            });
+          }}
+          onCancel={() => setConfirmRemove(false)}
+        />
       )}
     </div>
   );

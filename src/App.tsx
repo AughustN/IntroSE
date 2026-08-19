@@ -11,7 +11,6 @@ import AdminConsole from "./components/admin/AdminConsole";
 import AuthModal from "./components/AuthModal";
 import AccountPage from "./components/account/AccountPage";
 import { OrganizerEventsPage } from "./pages/organizer/OrganizerEventsPage";
-import { SingleEventPage } from "./pages/organizer/SingleEventPage";
 import SeatMapLibrary from "./components/seatmap/SeatMapLibrary";
 import ChartEditor from "./components/seatmap/ChartEditor";
 import ResetPassword from "./components/ResetPassword";
@@ -437,6 +436,16 @@ export default function App() {
     [location.pathname],
   );
 
+  /**
+   * Which event the console has open, if any — read from the URL for the same reason as the chart
+   * above: one source of truth, so a deep link, a Back and a click all arrive the same way.
+   */
+  const organizerEventId = useMemo(() => {
+    const raw = pathToRoute(location.pathname)?.organizerEventId;
+    const id = raw === undefined ? NaN : Number(raw);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  }, [location.pathname]);
+
   const activeScreenRef = useLatest(activeScreen);
   const selectedMovieRef = useLatest(selectedMovie);
   const bookingShowtimeIdRef = useLatest(bookingShowtimeId);
@@ -660,9 +669,17 @@ export default function App() {
 
   const holdRemainingMs = useHoldCountdown(hold?.expiresAt ?? null, handleHoldExpired);
 
-  // A reload or a closed tab is also an exit from the flow — warn before the hold is dropped.
+  /*
+   * A reload or a closed tab is also an exit from the flow — warn before the hold is dropped.
+   *
+   * Gated on the hold actually HOLDING something. `loadHoldSession` refuses an empty restored
+   * session, but three of the four `setHold` paths build one straight from a reservation without the
+   * `items.length === 0` check the fourth makes, so an active reservation with nothing in it became a
+   * truthy hold. The result was "Leave site?" on a seat page reading "Chưa chọn ghế nào" — a warning
+   * about losing nothing, which is the fastest way to teach someone to dismiss these unread.
+   */
   useEffect(() => {
-    if (!hold) return;
+    if (!hold || hold.seats.length === 0) return;
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
@@ -2034,6 +2051,12 @@ export default function App() {
         userEmail={userEmail}
         avatarUrl={avatarUrl}
         overlay={activeScreen === "home"}
+        /* The organizer workspace is long-form work; the nav scrolls away rather than over it. */
+        unpinned={
+          visibleScreen === "organizer" ||
+          visibleScreen === "organizer-events" ||
+          visibleScreen === "seatmaps"
+        }
         theme={theme}
         onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
       />
@@ -2419,9 +2442,8 @@ export default function App() {
             </div>
           ))}
         {(visibleScreen === "organizer" || visibleScreen === "organizer-events") && (
-          <OrganizerEventsPage />
+          <OrganizerEventsPage openEventId={organizerEventId} />
         )}
-        {visibleScreen === "organizer-event-detail" && <SingleEventPage />}
         {visibleScreen === "seatmaps" &&
           (seatmapLayoutId !== null ? (
             <ChartEditor

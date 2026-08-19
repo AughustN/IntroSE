@@ -11,6 +11,7 @@ import {
   SEAT_SIZE_MAX_PCT,
   SEAT_SIZE_MIN_PCT,
 } from '../../config.js';
+import { blockingIssues } from '@shared/catalog/seatmap-validate.js';
 import { ImageRejected, deleteFloorPlan, processFloorPlan, saveFloorPlan } from './floorplan.js';
 import { uploadRateLimit, withUploadSlot } from './upload.throttle.js';
 import { createTable, deleteTable, tableLayoutId, updateTable } from './tables.js';
@@ -311,7 +312,9 @@ seatmapRouter.post(
     const id = Number(req.params.id);
     await service.assertLayoutOwner(req, id, 'read');
     const issues = await service.validate(id);
-    res.json({ valid: issues.length === 0, issues });
+    // `valid` answers "would publish succeed?", so it turns on the BLOCKING issues only. The warnings
+    // still travel in `issues` — the editor shows them, the gate ignores them.
+    res.json({ valid: blockingIssues(issues).length === 0, issues });
   }),
 );
 
@@ -377,6 +380,26 @@ seatmapRouter.patch(
     // Alignment only — no seat moves when the background does (FR-024).
     await repo.updatePlanAlignment(id, req.body as z.infer<typeof planAlignSchema>);
     res.json((await repo.getLayout(id))?.floorPlan);
+  }),
+);
+
+/**
+ * How hard "best available" refuses to strand a lone seat on this chart (0037).
+ *
+ * `design` permission, like the alignment above: it changes how the chart SELLS, not what it holds,
+ * and no seat moves.
+ */
+const orphanRuleSchema = z.object({ orphanRule: z.enum(['balanced', 'strict']) });
+
+seatmapRouter.patch(
+  '/layouts/:id/orphan-rule',
+  validateBody(orphanRuleSchema),
+  asyncH(async (req, res) => {
+    const id = Number(req.params.id);
+    await service.assertLayoutOwner(req, id, 'design');
+    const { orphanRule } = req.body as z.infer<typeof orphanRuleSchema>;
+    await repo.updateOrphanRule(id, orphanRule);
+    res.json({ orphanRule });
   }),
 );
 
@@ -546,9 +569,11 @@ seatmapRouter.post(
     // showtime, because the section-without-tier rule needs its tiers (T050, FR-030).
     const layoutId = await service.showtimeLayoutId(showtimeId);
     if (layoutId) {
-      const issues = await service.validateForShowtime(layoutId, showtimeId);
-      if (issues.length > 0) {
-        throw err.refused(422, 'layout_invalid', 'Sơ đồ nguồn chưa hợp lệ, không thể áp dụng lại.', { issues });
+      const blocking = blockingIssues(await service.validateForShowtime(layoutId, showtimeId));
+      if (blocking.length > 0) {
+        throw err.refused(422, 'layout_invalid', 'Sơ đồ nguồn chưa hợp lệ, không thể áp dụng lại.', {
+          issues: blocking,
+        });
       }
     }
 

@@ -336,7 +336,11 @@ export async function refreshSnapshot(showtimeId: number, layoutId: number, db: 
               'planOffsetX', l.background_offset_x,
               'planOffsetY', l.background_offset_y,
               'planOpacity', round(l.background_opacity * 100),
-              'planVisibleToBuyers', l.background_public
+              'planVisibleToBuyers', l.background_public,
+              -- Snapshotted like everything else here: the rule the buyer's picker obeys is the one
+              -- that was in force when the map was applied, so retuning a venue cannot change how a
+              -- show already selling answers "chọn giúp tôi" halfway through its on-sale.
+              'orphanRule', l.orphan_rule
             )
        FROM venue_layouts l
       WHERE st.id = $1 AND l.id = $2`,

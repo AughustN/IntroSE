@@ -70,7 +70,15 @@ export default function ChartEditorCoachmarks({ onDone }: { onDone: () => void }
         aria-modal="true"
         aria-labelledby="coachmarks-title"
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg border-2 border-beige-kem bg-xanh-pho p-6 text-beige-kem"
+        /*
+         * Capped to the viewport, with the list — not the panel — taking the scroll.
+         *
+         * At a 656px-tall window the five steps pushed "Bắt đầu vẽ" below the bottom edge, so the
+         * only visible way out of a first-run dialog was off screen. Escape worked, but nothing said
+         * so, and this is the very first thing an organizer meets in the editor. Keeping the heading
+         * and the button pinned while the steps scroll means the way out is always on screen.
+         */
+        className="flex max-h-[calc(100vh-2rem)] w-full max-w-lg flex-col border-2 border-beige-kem bg-xanh-pho p-6 text-beige-kem"
       >
         <p className="font-meta text-meta uppercase tracking-widest text-burgundy-ink">
           Làm quen nhanh
@@ -79,7 +87,7 @@ export default function ChartEditorCoachmarks({ onDone }: { onDone: () => void }
           5 điều cần biết trước khi vẽ
         </h2>
 
-        <ol className="mt-4 space-y-3">
+        <ol className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto">
           {STEPS.map((step, i) => (
             <li key={step.title} className="flex gap-3 border border-beige-kem/25 bg-surface-2 p-3">
               <span aria-hidden="true" className="text-lg leading-none">
@@ -95,7 +103,7 @@ export default function ChartEditorCoachmarks({ onDone }: { onDone: () => void }
           ))}
         </ol>
 
-        <div className="mt-5 flex items-center justify-between gap-3">
+        <div className="mt-5 flex shrink-0 items-center justify-between gap-3">
           <p className="font-meta text-meta text-beige-kem/50">Bảng này chỉ hiện một lần.</p>
           <button
             ref={firstBtn}

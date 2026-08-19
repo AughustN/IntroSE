@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { ValidationIssue } from "@/shared/catalog/seatmap-validate";
+import { blockingIssues, type ValidationIssue } from "@/shared/catalog/seatmap-validate";
 
 /**
  * The pre-publish checks, each naming the seats or sections at fault rather than reporting one
@@ -23,6 +23,7 @@ export default function ValidationPanel({
   labelOfSeat,
   onFocusSeat,
   onRenumberSection,
+  onAddStage,
 }: {
   issues: ValidationIssue[];
   /** Seat id → "Khu A · B12". Falls back to the id when a seat is not in the current projection. */
@@ -38,14 +39,34 @@ export default function ValidationPanel({
    * nothing.
    */
   onRenumberSection?: (sectionId: number) => void;
+  /**
+   * Drop a stage on the chart, for `focal_point_unset` — the same "fix it from here" affordance
+   * `onRenumberSection` gives the numbering conflict.
+   *
+   * A warning that only names the problem makes the organizer go and find the tool; and this one is
+   * easy to read as pedantry rather than as the thing that decides which seats get offered first.
+   * The button is what turns it into a decision they can act on without leaving the panel.
+   */
+  onAddStage?: () => void;
 }) {
-  if (issues.length === 0) {
+  /*
+   * Split by severity, because the panel's heading is a VERDICT and a warning does not change it.
+   * Counting warnings into "N vấn đề — chưa thể phát hành" would tell an organizer with a perfectly
+   * publishable chart that they cannot publish, which the server would then contradict.
+   */
+  const blocking = blockingIssues(issues);
+  const warnings = issues.filter((i) => i.severity === "warning");
+
+  if (blocking.length === 0) {
     return (
       <div className="border-2 border-la-co bg-surface-2 p-4">
         <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-la-co">
           Hợp lệ
         </h3>
         <p className="mt-1 text-eyebrow text-beige-kem/70">Sơ đồ có thể phát hành.</p>
+        {warnings.map((issue, i) => (
+          <Warning key={`${issue.code}-${i}`} issue={issue} onAddStage={onAddStage} />
+        ))}
       </div>
     );
   }
@@ -53,10 +74,10 @@ export default function ValidationPanel({
   return (
     <div className="border-2 border-bubblegum bg-surface-2 p-4">
       <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-bubblegum">
-        {issues.length} vấn đề — chưa thể phát hành
+        {blocking.length} vấn đề — chưa thể phát hành
       </h3>
       <ul className="mt-2 space-y-2">
-        {issues.map((issue, i) => (
+        {blocking.map((issue, i) => (
           <li key={`${issue.code}-${i}`} className="text-eyebrow leading-5 text-beige-kem/80">
             {/* Message is plain text from the shared validator — React escapes it (SEC-07). */}
             <span className="font-bold">{issue.message}</span>
@@ -104,6 +125,39 @@ export default function ValidationPanel({
           </li>
         ))}
       </ul>
+      {warnings.length > 0 && (
+        <div className="mt-3 space-y-1 border-t border-beige-kem/20 pt-2">
+          {warnings.map((issue, i) => (
+            <Warning key={`${issue.code}-${i}`} issue={issue} onAddStage={onAddStage} />
+          ))}
+        </div>
+      )}
     </div>
+  );
+}
+
+/**
+ * One advisory, in the same shape whether the chart is otherwise clean or not.
+ *
+ * Extracted because the panel returns early for a publishable chart and so renders warnings twice;
+ * before this, the fix button would have had to be written into both branches, which is how the two
+ * copies drift.
+ */
+function Warning({ issue, onAddStage }: { issue: ValidationIssue; onAddStage?: () => void }) {
+  return (
+    <p className="mt-2 border-l-2 border-cam-dat pl-2 text-eyebrow leading-5 text-beige-kem/70">
+      {/* Message is plain text from the shared validator — React escapes it (SEC-07). */}
+      <span className="font-bold text-cam-dat">Lưu ý</span> · {issue.message}
+      {issue.code === "focal_point_unset" && onAddStage && (
+        <button
+          type="button"
+          onClick={onAddStage}
+          title="Đặt một sân khấu vào giữa khung nhìn — kéo tới đúng chỗ sau"
+          className="ml-1 border border-cam-dat px-1.5 py-0.5 font-meta text-[10px] text-cam-dat transition hover:bg-cam-dat/10"
+        >
+          Thêm sân khấu
+        </button>
+      )}
+    </p>
   );
 }
