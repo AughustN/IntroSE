@@ -47,10 +47,38 @@ export interface Tier {
   remaining: number | null; // GA remaining = capacity − sold − reserved; null = seated/unlimited
 }
 
+/**
+ * The city string a venue carries when its address does not name a province.
+ *
+ * A real value in `venues.city`, not a null stand-in: `npm run db:cities` derives the province from
+ * the address where it can and leaves this where it cannot, so "Chưa xác định" is a true statement
+ * about a venue whose address is "Online" or "DreamS". Shared because both sides key off it — the
+ * server writes it, and the browser's city filter sorts it last instead of treating it as a place.
+ */
+export const UNKNOWN_CITY = 'Chưa xác định';
+
+/**
+ * The cinema chain ("cụm rạp") a venue is operated by, or null.
+ *
+ * Null is the normal state, not a gap: most venues in the catalogue are concert halls, stadiums and
+ * auditoriums that no chain operates. Only cinemas carry one.
+ */
+export interface VenueChain {
+  id: number;
+  code: string;
+  name: string;
+}
+
 export interface Showtime {
   id: number;
   startsAt: string;
-  venue: { name: string; city: string };
+  /**
+   * `chain` rides on the venue because a buyer picks a cinema the way the estate is actually
+   * organised — city, then operator, then room. Before it was here the detail page's place filter
+   * had to guess the chain by prefix-matching the venue's NAME, which is inference where a link now
+   * exists: `venues.chain_id` (migration 0036).
+   */
+  venue: { name: string; city: string; chain: VenueChain | null };
   availability: ShowtimeAvailability;
 }
 

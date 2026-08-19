@@ -215,11 +215,34 @@ async function main(): Promise<void> {
 
   /* ── 2. The estate ────────────────────────────────────────────────────────────────────────── */
 
+  /*
+   * Chains ("cụm rạp") are rows, not prose — see migration 0036. That migration seeds the eight
+   * operators, so this only has to look them up; the insert below is the safety net for a database
+   * that somehow has the column but not the reference data, and keeps the seed runnable on its own.
+   */
+  const chainIdOf = new Map<string, number>();
+  for (const name of new Set(CINEMAS.map((c) => c.chain))) {
+    const code = name.toLowerCase().replace(/\s+/g, "-");
+    const found = await pool.query<{ id: number }>(`SELECT id FROM cinema_chains WHERE code = $1`, [code]);
+    const id =
+      found.rows[0]?.id ??
+      (
+        await pool.query<{ id: number }>(
+          `INSERT INTO cinema_chains (code, name) VALUES ($1, $2)
+           ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
+          [code, name],
+        )
+      ).rows[0]!.id;
+    chainIdOf.set(name, id);
+  }
+  console.log(`chains: ${chainIdOf.size} cụm rạp`);
+
   const venueIds: number[] = [];
   /** Which auditorium each cinema sells against — a showtime has to name one. */
   const layoutOf = new Map<number, number>();
   let newVenues = 0;
   for (const cinema of CINEMAS) {
+    const chainId = chainIdOf.get(cinema.chain)!;
     const existing = await pool.query<{ id: number }>(
       `SELECT id FROM venues WHERE name = $1 AND city = $2`,
       [cinema.name, cinema.city],
@@ -227,12 +250,19 @@ async function main(): Promise<void> {
     let venueId = existing.rows[0]?.id;
     if (!venueId) {
       const inserted = await pool.query<{ id: number }>(
-        `INSERT INTO venues (created_by, name, city, raw_address, address_line, guide)
-         VALUES ($1, $2, $3, $4, $4, $5) RETURNING id`,
-        [ownerId, cinema.name, cinema.city, `${cinema.address}, ${cinema.city}`, `Hệ thống ${cinema.chain}`],
+        `INSERT INTO venues (created_by, name, city, raw_address, address_line, guide, chain_id)
+         VALUES ($1, $2, $3, $4, $4, $5, $6) RETURNING id`,
+        [ownerId, cinema.name, cinema.city, `${cinema.address}, ${cinema.city}`, `Hệ thống ${cinema.chain}`, chainId],
       );
       venueId = inserted.rows[0]!.id;
       newVenues++;
+    } else {
+      // A cinema seeded before 0036 existed has the chain in its `guide` text and nothing in the
+      // column. Claim it, so re-running the seed is what backfills the estate.
+      await pool.query(`UPDATE venues SET chain_id = $2 WHERE id = $1 AND chain_id IS DISTINCT FROM $2`, [
+        venueId,
+        chainId,
+      ]);
     }
     venueIds.push(venueId);
 

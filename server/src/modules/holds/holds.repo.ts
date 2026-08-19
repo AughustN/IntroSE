@@ -20,6 +20,19 @@ export interface SeatRow {
   hold_expires_at: Date | null;
   price_amount: number;
   seat_label: string;
+  /**
+   * Whether this seat may be taken now, and whether the caller already holds it — both decided BY
+   * THE DATABASE, in the same statement that locks the row.
+   *
+   * These used to be computed in TypeScript from `hold_expires_at` against `new Date()`. That is a
+   * different clock from the one that wrote the column and from the one every other predicate over
+   * it uses, and the gap is real: this project's database measured ~1.1s behind its API host. A host
+   * running ahead would call a rival's live hold expired and hand out a seat that was not free — the
+   * one thing the row lock exists to prevent. Deciding it in SQL closes that window and costs
+   * nothing: the row is already being selected and locked.
+   */
+  holdable: boolean;
+  held_by_me: boolean;
 }
 
 export interface TierRow {
@@ -41,6 +54,17 @@ export interface ReservationRow {
   expires_at: Date;
   created_at: Date;
   extended_once: boolean;
+  /**
+   * Whether the window has passed, decided BY THE DATABASE on the same clock that wrote
+   * `expires_at`.
+   *
+   * Carried on the row rather than recomputed as `expires_at < Date.now()` because those are two
+   * different clocks and the difference is not academic — this project's database measured ~1.1s
+   * behind its API host. A caller comparing them judges a hold dead while SQL still counts it alive
+   * (or the reverse), and the callers here are the ones that decide whether a seat may be handed to
+   * somebody else. Free to compute: it rides along on a query already being made.
+   */
+  expired: boolean;
 }
 
 export interface ShowtimeInfo {
@@ -77,53 +101,52 @@ export async function lockSeats(
   client: pg.PoolClient,
   showtimeId: number,
   seatIds: number[],
+  userId: number,
 ): Promise<SeatRow[]> {
   if (seatIds.length === 0) return [];
   const { rows } = await client.query<SeatRow>(
+    // A `held` row whose window has already passed counts as available — the sweep is a mechanism,
+    // not the definition of expiry, so a hold placed a moment after lapse must still succeed.
     `SELECT ss.id, ss.showtime_id, ss.ticket_tier_id, ss.status, ss.hold_owner_id, ss.hold_expires_at,
-            tt.price_amount, (se.row_label || se.seat_number::text) AS seat_label
+            tt.price_amount, (se.row_label || se.seat_number::text) AS seat_label,
+            (ss.status = 'available'
+             OR (ss.status = 'held' AND ss.hold_expires_at IS NOT NULL
+                 AND ss.hold_expires_at <= now())) AS holdable,
+            (ss.status = 'held' AND ss.hold_owner_id = $3 AND ss.hold_expires_at IS NOT NULL
+             AND ss.hold_expires_at > now()) AS held_by_me
        FROM showtime_seats ss
        JOIN ticket_tiers tt ON tt.id = ss.ticket_tier_id
        JOIN seats se ON se.id = ss.seat_id
       WHERE ss.id = ANY($1::bigint[]) AND ss.showtime_id = $2
       ORDER BY ss.id
         FOR UPDATE OF ss`,
-    [seatIds, showtimeId],
+    [seatIds, showtimeId, userId],
   );
   return rows;
 }
 
 /**
- * A `held` row whose window has already passed counts as available — the sweep is a mechanism, not
- * the definition of expiry, so a hold placed a moment after lapse must still succeed (edge case).
+ * Claim seats for a reservation, copying its deadline straight off the reservation row.
+ *
+ * The expiry is read here rather than passed in so that a seat's clock cannot be set from anywhere
+ * but the reservation that owns it — the two are compared against each other (FR-006) and both are
+ * tested against SQL `now()` by every authoritative reader, so a caller supplying its own `Date`
+ * would reintroduce exactly the host-clock dependency `createReservation` exists to remove.
  */
-export function isHoldable(seat: SeatRow, now = new Date()): boolean {
-  if (seat.status === 'available') return true;
-  if (seat.status !== 'held') return false; // sold / blocked are terminal here
-  return seat.hold_expires_at !== null && seat.hold_expires_at.getTime() <= now.getTime();
-}
-
-export function isHeldBy(seat: SeatRow, userId: number, now = new Date()): boolean {
-  return (
-    seat.status === 'held' &&
-    seat.hold_owner_id === userId &&
-    seat.hold_expires_at !== null &&
-    seat.hold_expires_at.getTime() > now.getTime()
-  );
-}
-
 export async function holdSeats(
   client: pg.PoolClient,
   seatIds: number[],
   userId: number,
-  expiresAt: Date,
+  reservationId: number,
 ): Promise<void> {
   if (seatIds.length === 0) return;
   await client.query(
     `UPDATE showtime_seats
-        SET status = 'held', hold_owner_id = $2, hold_expires_at = $3
+        SET status = 'held',
+            hold_owner_id = $2,
+            hold_expires_at = (SELECT r.expires_at FROM reservations r WHERE r.id = $3)
       WHERE id = ANY($1::bigint[])`,
-    [seatIds, userId, expiresAt],
+    [seatIds, userId, reservationId],
   );
 }
 
@@ -138,18 +161,20 @@ export async function releaseSeats(client: pg.PoolClient, seatIds: number[]): Pr
   );
 }
 
-/** Mirror the reservation's clock onto its seats, so both agree at all times (FR-006). */
-export async function syncSeatExpiry(
-  client: pg.PoolClient,
-  reservationId: number,
-  expiresAt: Date,
-): Promise<void> {
+/**
+ * Mirror the reservation's clock onto its seats, so both agree at all times (FR-006).
+ *
+ * Reads the deadline off the reservation for the same reason `holdSeats` does — one row is the
+ * authority for when this hold ends, and nothing outside the database gets to name that instant.
+ */
+export async function syncSeatExpiry(client: pg.PoolClient, reservationId: number): Promise<void> {
   await client.query(
     `UPDATE showtime_seats ss
-        SET hold_expires_at = $2
-       FROM reservation_items ri
-      WHERE ri.reservation_id = $1 AND ri.showtime_seat_id = ss.id AND ss.status = 'held'`,
-    [reservationId, expiresAt],
+        SET hold_expires_at = r.expires_at
+       FROM reservation_items ri, reservations r
+      WHERE ri.reservation_id = $1 AND ri.showtime_seat_id = ss.id AND ss.status = 'held'
+        AND r.id = ri.reservation_id`,
+    [reservationId],
   );
 }
 
@@ -218,7 +243,8 @@ export async function findActiveReservation(
   forUpdate = false,
 ): Promise<ReservationRow | null> {
   const { rows } = await db.query<ReservationRow>(
-    `SELECT id, user_id, showtime_id, status, expires_at, created_at, extended_once
+    `SELECT id, user_id, showtime_id, status, expires_at, created_at, extended_once,
+            expires_at <= now() AS expired
        FROM reservations
       WHERE user_id = $1 AND showtime_id = $2 AND status = 'active'
       ${forUpdate ? 'FOR UPDATE' : ''}`,
@@ -229,24 +255,42 @@ export async function findActiveReservation(
 
 export async function findReservation(db: Db, id: number, forUpdate = false): Promise<ReservationRow | null> {
   const { rows } = await db.query<ReservationRow>(
-    `SELECT id, user_id, showtime_id, status, expires_at, created_at, extended_once
+    `SELECT id, user_id, showtime_id, status, expires_at, created_at, extended_once,
+            expires_at <= now() AS expired
        FROM reservations WHERE id = $1 ${forUpdate ? 'FOR UPDATE' : ''}`,
     [id],
   );
   return rows[0] ?? null;
 }
 
+/**
+ * Open a hold window. The DEADLINE IS COMPUTED BY THE DATABASE, from `ttlMs` — never handed in as a
+ * `Date` built on the API host's clock.
+ *
+ * Which clock owns `expires_at` is not a detail: every authoritative reader of this column is SQL
+ * comparing it against `now()` — the sweeper (`findExpiredActive`), the checkout seat claim
+ * (`wallet.service`), the live-hold predicates in `apply`/`standing`/`tables`. Written from the
+ * application clock, all of them were off by whatever the two machines disagreed by, which against a
+ * hosted database is not zero: this project's Neon instance measured ~1.1s behind its dev host.
+ *
+ * The direction that bites is a database running AHEAD: the countdown on screen still shows time
+ * left while SQL has already retired the hold, so the buyer reaches checkout and the claim refuses a
+ * seat the UI says is theirs. Letting `now()` set the deadline makes the column and every predicate
+ * over it share one clock, so the guarantee holds no matter how far the hosts drift. `created_at`
+ * (DEFAULT now()) and the grace ceiling in `extendReservationOnce` already live on that clock.
+ */
 export async function createReservation(
   client: pg.PoolClient,
   userId: number,
   showtimeId: number,
-  expiresAt: Date,
+  ttlMs: number,
 ): Promise<ReservationRow> {
   const { rows } = await client.query<ReservationRow>(
     `INSERT INTO reservations (user_id, showtime_id, expires_at, status)
-     VALUES ($1, $2, $3, 'active')
-     RETURNING id, user_id, showtime_id, status, expires_at, created_at, extended_once`,
-    [userId, showtimeId, expiresAt],
+     VALUES ($1, $2, now() + ($3::bigint * interval '1 millisecond'), 'active')
+     RETURNING id, user_id, showtime_id, status, expires_at, created_at, extended_once,
+               expires_at <= now() AS expired`,
+    [userId, showtimeId, ttlMs],
   );
   return rows[0];
 }
@@ -263,6 +307,16 @@ export async function setReservationStatus(
  * The one-time top-up grace (FR-010): +HOLD_GRACE_MS, never past `created_at + HOLD_ABSOLUTE_MS`,
  * and only while `extended_once` is false. The guard is in the WHERE clause, so two concurrent
  * top-ups cannot both extend.
+ *
+ * Both operands are COLUMNS of the row, never `now()`. A hold's `expires_at` is written from the
+ * application clock (`ttlFrom` in holds.service) while this ran on the database clock, so the two
+ * were only comparable while the machines agreed — and against a hosted database they do not. With
+ * Postgres ~1.1s behind the API host, `now() + grace` landed *before* the expiry it was meant to
+ * push out, and the grace SHORTENED the window instead of extending it. The buyer paid that
+ * difference: `extended_once` is spent either way, so there is no second chance to get it right.
+ *
+ * Adding to the stored expiry makes the arithmetic monotonic by construction — the window can only
+ * ever move forward — and it is what "+7 minutes" in FR-010 says on its face.
  */
 export async function extendReservationOnce(
   client: pg.PoolClient,
@@ -272,11 +326,12 @@ export async function extendReservationOnce(
 ): Promise<ReservationRow | null> {
   const { rows } = await client.query<ReservationRow>(
     `UPDATE reservations
-        SET expires_at = LEAST(now() + ($2::bigint * interval '1 millisecond'),
+        SET expires_at = LEAST(expires_at + ($2::bigint * interval '1 millisecond'),
                                created_at + ($3::bigint * interval '1 millisecond')),
             extended_once = true
       WHERE id = $1 AND status = 'active' AND extended_once = false
-      RETURNING id, user_id, showtime_id, status, expires_at, created_at, extended_once`,
+      RETURNING id, user_id, showtime_id, status, expires_at, created_at, extended_once,
+               expires_at <= now() AS expired`,
     [id, graceMs, absoluteMs],
   );
   return rows[0] ?? null;
@@ -462,7 +517,8 @@ export function toReservationView(row: ReservationRow, items: ItemRow[]): Reserv
 /** Active reservations whose window has passed — the sweep's work list (REL-02, R-3). */
 export async function findExpiredActive(db: Db = pool, limit = 200): Promise<ReservationRow[]> {
   const { rows } = await db.query<ReservationRow>(
-    `SELECT id, user_id, showtime_id, status, expires_at, created_at, extended_once
+    `SELECT id, user_id, showtime_id, status, expires_at, created_at, extended_once,
+            expires_at <= now() AS expired
        FROM reservations
       WHERE status = 'active' AND expires_at <= now()
       ORDER BY expires_at

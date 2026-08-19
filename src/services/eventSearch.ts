@@ -64,7 +64,7 @@ export function searchEvents(events: MovieEvent[], query: string, limit: number)
   const needle = fold(query.trim());
   if (!needle) return [];
 
-  const bookable = (event: MovieEvent) => event.status === "available" || event.status === "low";
+  const bookable = (event: MovieEvent) => event.status === "available";
 
   return events
     .filter((event) => matchesQuery(event, query))

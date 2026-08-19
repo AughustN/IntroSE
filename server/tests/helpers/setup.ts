@@ -5,6 +5,8 @@ import { activityTest } from "../../src/modules/admin/activity.js";
 import { settingServiceTest } from "../../src/modules/admin/settings.service.js";
 import { resetAuthThrottle } from "../../src/modules/auth/throttle.js";
 import { resetHoldRateLimit } from "../../src/modules/holds/holds.throttle.js";
+import { resetAiThrottle } from "../../src/modules/studio/ai/ai.throttle.js";
+import { setListingModelForTest } from "../../src/modules/studio/ai/listing.model.js";
 
 // Which database this suite truncates is decided in config.ts: under vitest, `config.databaseUrl`
 // resolves from TEST_DATABASE_URL and never falls back to DATABASE_URL. The guard below is the
@@ -45,6 +47,20 @@ beforeEach(async () => {
   // Same for the settings cache: tests that update system settings or truncate the table must not
   // see stale cached values in the next case.
   settingServiceTest.resetCache();
+  // And the listing assistant's three process-local bounds (006 SEC-08/SCAL-02/SCAL-03). Its reset
+  // seam shipped with the feature but was never wired in here, so `exhaustQuotaForTest()` in the
+  // quota case leaked into every later test in the process: the two price cases that follow it read
+  // `{ available: false, reason: 'quota_exhausted' }`, which carries no `suggestion`, and died on
+  // `res.body.suggestion.price`. They failed for their POSITION in the file, not for what they
+  // assert — moving them above the quota case would have "fixed" them. The per-user buckets and the
+  // suggestion cache leaked the same way and were passing only by luck of ordering.
+  resetAiThrottle();
+  // The injected model is the SECOND process-global the listing tests leave behind, and clearing the
+  // throttle alone did not fix them: the degradation cases swap in a `FakeListingModel("throw" |
+  // "hang" | "malformed")` and none of them puts it back, so every later request in the process kept
+  // throwing and kept answering `{ available: false, reason: 'error' }` — the same shape, missing
+  // `suggestion`, as the exhausted-quota branch. Null restores the default fake ("ok") under vitest.
+  setListingModelForTest(null);
 });
 
 afterAll(async () => {

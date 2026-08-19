@@ -16,7 +16,7 @@ import SeatMapLibrary from "./components/seatmap/SeatMapLibrary";
 import ChartEditor from "./components/seatmap/ChartEditor";
 import ResetPassword from "./components/ResetPassword";
 import type { Me } from "@/shared/auth/types";
-import type { EventDetail as CatalogEventDetail, Showtime } from "@/shared/catalog/types";
+import { UNKNOWN_CITY, type EventDetail as CatalogEventDetail, type Showtime } from "@/shared/catalog/types";
 import { authClient } from "./services/authClient";
 import { catalogClient } from "./services/catalogClient";
 import { aiClient } from "./services/aiClient";
@@ -1297,6 +1297,37 @@ export default function App() {
       .map(({ id, label }) => ({ id, label }));
   }, [events]);
 
+  /*
+   * The cities the catalogue actually sits in, most populous first.
+   *
+   * The third list that had to be derived rather than fixed, and the one that failed hardest. The
+   * hardcoded trio was `["TP.HCM", "Hà Nội", "Đà Nẵng"]`, matched against `movie.city` with
+   * `includes` — an exact string compare. `venues.city` had been filled by several importers that
+   * spelled the same place three ways, so "TP.HCM" selected the 12 events under that exact spelling
+   * and hid the 160 under "Hồ Chí Minh" and "Tp. Hồ Chí Minh". `npm run db:cities` has since
+   * collapsed those to one province name each, which is precisely what makes a fixed list
+   * indefensible: the canonical spelling is now "Tp. Hồ Chí Minh", so the old button would match
+   * nothing at all.
+   *
+   * "Chưa xác định" sorts last for the same reason "Khác" does above — it is the catch-all, it names
+   * no place, and a reader scanning for their city can skip it.
+   */
+  const cityOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const event of events) {
+      if (!event.city) continue;
+      counts.set(event.city, (counts.get(event.city) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort(([cityA, nA], [cityB, nB]) => {
+        const unknownA = cityA === UNKNOWN_CITY;
+        const unknownB = cityB === UNKNOWN_CITY;
+        if (unknownA !== unknownB) return unknownA ? 1 : -1;
+        return nB - nA || cityA.localeCompare(cityB, "vi");
+      })
+      .map(([city]) => city);
+  }, [events]);
+
   const relatedEvents = useMemo(() => {
     return events
       .filter((event) => {
@@ -2101,6 +2132,7 @@ export default function App() {
                 activeDate={activeDate}
                 dateOptions={dateOptions}
                 categoryOptions={categoryOptions}
+                cityOptions={cityOptions}
                 onDateChange={(value) => void goCatalogAfterFilter(() => setActiveDate(value))}
                 activeCities={activeCities}
                 onCityChange={(value) =>

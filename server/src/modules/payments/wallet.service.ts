@@ -337,8 +337,13 @@ export async function checkout(userId: number, reservationId: number): Promise<O
         showtime_id: number;
         status: string;
         expires_at: Date;
+        expired: boolean;
       }>(
-        `SELECT id, user_id, showtime_id, status, expires_at
+        // `expired` is decided by the database, on the clock that wrote `expires_at` — never by
+        // comparing it to this host's `Date.now()`. This is the last gate before the money moves,
+        // and the two clocks do not agree (~1.1s apart against Neon): judged here, a buyer inside
+        // their window could be refused the seats they are holding, or one just lapsed could be sold.
+        `SELECT id, user_id, showtime_id, status, expires_at, expires_at <= now() AS expired
            FROM reservations WHERE id = $1 FOR UPDATE`,
         [reservationId],
       )
@@ -356,7 +361,7 @@ export async function checkout(userId: number, reservationId: number): Promise<O
       };
     if (reservation.status !== "active")
       throw err.conflict("reservation_closed", "Đơn giữ chỗ đã kết thúc.");
-    if (reservation.expires_at.getTime() <= Date.now()) {
+    if (reservation.expired) {
       throw err.conflict("reservation_expired", "Đơn giữ chỗ đã hết hạn.");
     }
 

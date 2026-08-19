@@ -98,12 +98,17 @@ export async function getSeat(showtimeSeatId: number): Promise<{
 /**
  * Push a reservation's window (and its seats') into the past, as if the TTL had elapsed.
  *
- * The offset must clear the clock skew between the app process and the database, not just be
- * "in the past". Expiry is evaluated in BOTH places — Postgres `now()` in the sweep/predicates
- * and JS `Date.now()` in `isHoldable`/`requireOwnedActive` — while `now()` here is the DB clock.
- * Against a hosted Postgres (Neon) the two clocks differ by over a second, so a 1s backdate wrote
- * a timestamp that was past for the DB but still future for JS, and the "already expired" cases
- * failed intermittently. 60s is far beyond any plausible skew and still well inside the TTL.
+ * This once had to clear the clock skew between the app process and the database: expiry was judged
+ * in BOTH places — Postgres `now()` in the sweep and the seat predicates, JS `Date.now()` in the
+ * service — and against Neon the two differ by over a second, so a 1s backdate wrote an instant that
+ * was past for the database and still future for JS. The "already expired" cases failed
+ * intermittently, and the workaround was to backdate far enough that no plausible skew mattered.
+ *
+ * The skew is gone from the product now: `expires_at` is written by the database and every reader of
+ * it — sweep, seat claim, `holdable` / `held_by_me`, `ReservationRow.expired` — is SQL comparing it
+ * against the same `now()`. Nothing outside the database judges when a hold ends. The generous
+ * default stays because it costs nothing and keeps this helper honest about what it promises: a
+ * window that is unambiguously over, not one a millisecond past.
  */
 export async function expireReservation(reservationId: number, agoMs = 60_000): Promise<void> {
   await pool.query(

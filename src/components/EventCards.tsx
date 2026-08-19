@@ -35,7 +35,6 @@ export const statusMeta: Record<
   { label: string; className: string; onImage: string }
 > = {
   available: { label: "Còn vé", className: "text-ink-soft", onImage: "text-white/75" },
-  low: { label: "Còn vé", className: "text-ink-soft", onImage: "text-white/75" },
   sold_out: { label: "Hết vé", className: "text-burgundy-ink", onImage: "text-cam-dat" },
   // Quiet, not alarming: a finished event is not a disappointment the way a sold-out one is. It is
   // simply the archive, so it takes the same soft ink "Còn vé" does rather than the warning red.

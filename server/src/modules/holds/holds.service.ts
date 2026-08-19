@@ -23,8 +23,14 @@ export interface HoldResult {
   created: boolean;
 }
 
-const ttlFrom = (createdAt: Date, minutes: number): Date =>
-  new Date(createdAt.getTime() + minutes * 60 * 1000);
+/**
+ * The hold window as a DURATION, for the database to add to its own `now()`.
+ *
+ * Deliberately not a `Date`: `expires_at` is judged by SQL — the sweeper, the checkout seat claim,
+ * every live-hold predicate — so an instant computed here would be measured against a clock this
+ * process does not share. See `repo.createReservation`.
+ */
+const ttlMs = (minutes: number): number => minutes * 60 * 1000;
 
 /** Load the caller's reservation as the API returns it. */
 async function view(reservationId: number): Promise<Reservation> {
@@ -84,10 +90,9 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
   // against the tier, once it is locked: does anything seat-shaped back it?
 
   const outcome = await withTransaction(async (client) => {
-    const now = new Date();
     let reservation = await repo.findActiveReservation(client, userId, body.showtimeId, true);
     // An active row whose window already passed is spent — the sweep just has not reached it yet.
-    if (reservation && reservation.expires_at.getTime() <= now.getTime()) {
+    if (reservation && reservation.expired) {
       await repo.setReservationStatus(client, reservation.id, "expired");
       await repo.releaseSeats(client, await repo.listSeatIds(client, reservation.id));
       for (const line of await repo.listGaLines(client, reservation.id)) {
@@ -99,14 +104,14 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
     const held = reservation ? await repo.countHeldTickets(client, reservation.id) : 0;
 
     if (selection.kind === "seated") {
-      const seats = await repo.lockSeats(client, body.showtimeId, selection.seatIds);
+      const seats = await repo.lockSeats(client, body.showtimeId, selection.seatIds, userId);
       if (seats.length !== selection.seatIds.length) {
         // A seat id that is not on this showtime (or does not exist) — refuse the whole request.
         throw err.unprocessable("invalid_selection", "Ghế không thuộc suất diễn này.");
       }
 
-      const mine = seats.filter((s) => repo.isHeldBy(s, userId, now));
-      const fresh = seats.filter((s) => !repo.isHeldBy(s, userId, now));
+      const mine = seats.filter((s) => s.held_by_me);
+      const fresh = seats.filter((s) => !s.held_by_me);
 
       // Re-holding what the caller already holds is an idempotent success (FR-005).
       if (fresh.length === 0 && reservation) {
@@ -114,7 +119,7 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
       }
 
       for (const seat of fresh) {
-        if (!repo.isHoldable(seat, now)) {
+        if (!seat.holdable) {
           throw err.conflict("seat_taken", "Ghế vừa được người khác giữ.");
         }
       }
@@ -131,12 +136,12 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
           client,
           userId,
           body.showtimeId,
-          ttlFrom(now, settings.seat_hold_ttl_minutes),
+          ttlMs(settings.seat_hold_ttl_minutes),
         );
       }
 
       const freshIds = fresh.map((s) => s.id);
-      await repo.holdSeats(client, freshIds, userId, reservation.expires_at);
+      await repo.holdSeats(client, freshIds, userId, reservation.id);
       await repo.addSeatItems(client, reservation.id, [...fresh, ...mine]);
 
       return {
@@ -195,7 +200,7 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
         client,
         userId,
         body.showtimeId,
-        ttlFrom(now, settings.seat_hold_ttl_minutes),
+        ttlMs(settings.seat_hold_ttl_minutes),
       );
     }
     await repo.bumpReserved(client, tier.id, selection.quantity);
@@ -250,7 +255,7 @@ export async function removeQuantity(
       !lockedReservation ||
       lockedReservation.user_id !== userId ||
       lockedReservation.status !== "active" ||
-      lockedReservation.expires_at.getTime() <= Date.now()
+      lockedReservation.expired
     ) {
       throw err.notFound("not_found", "Đơn giữ chỗ đã hết hạn hoặc đã kết thúc.");
     }
@@ -296,15 +301,14 @@ export async function removeSeats(
       !lockedReservation ||
       lockedReservation.user_id !== userId ||
       lockedReservation.status !== "active" ||
-      lockedReservation.expires_at.getTime() <= Date.now()
+      lockedReservation.expired
     ) {
       throw err.notFound("not_found", "Đơn giữ chỗ đã hết hạn hoặc đã kết thúc.");
     }
-    const seats = await repo.lockSeats(client, lockedReservation.showtime_id, seatIds);
-    const now = new Date();
+    const seats = await repo.lockSeats(client, lockedReservation.showtime_id, seatIds, userId);
     // Releasing a seat the caller does not own is refused; one that already lapsed is a no-op
     // success — it is free either way (FR-004, edge case).
-    const owned = seats.filter((s) => repo.isHeldBy(s, userId, now));
+    const owned = seats.filter((s) => s.held_by_me);
     const foreign = seats.filter((s) => s.status === "held" && s.hold_owner_id !== userId);
     if (foreign.length > 0) throw err.forbidden("not_owner", "Bạn không giữ ghế này.");
 
@@ -397,7 +401,7 @@ export async function extendOnce(userId: number, reservationId: number): Promise
       settings.topup_grace_minutes * 60 * 1000,
       settings.absolute_ceiling_minutes * 60 * 1000,
     );
-    if (row) await repo.syncSeatExpiry(client, row.id, row.expires_at);
+    if (row) await repo.syncSeatExpiry(client, row.id);
     return row;
   });
 
@@ -423,7 +427,7 @@ export async function getActiveForShowtime(
   showtimeId: number,
 ): Promise<Reservation | null> {
   const row = await repo.findActiveReservation(pool, userId, showtimeId);
-  if (!row || row.expires_at.getTime() <= Date.now()) return null;
+  if (!row || row.expired) return null;
   return repo.toReservationView(row, await repo.listItems(pool, row.id));
 }
 
@@ -436,7 +440,7 @@ async function requireOwnedActive(
   if (row.user_id !== userId)
     throw err.forbidden("not_owner", "Đơn giữ chỗ này không phải của bạn.");
   // Expired / cancelled / converted are all closed to changes (FR-013).
-  if (row.status !== "active" || row.expires_at.getTime() <= Date.now()) {
+  if (row.status !== "active" || row.expired) {
     throw err.notFound("not_found", "Đơn giữ chỗ đã hết hạn hoặc đã kết thúc.");
   }
   return row;

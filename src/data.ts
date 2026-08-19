@@ -45,7 +45,6 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
     venueGuide: "Gửi xe tại hầm trung tâm, vào cổng A và quét QR tại line ưu tiên trước giờ chiếu 15 phút.",
     refundPolicy: "Đổi vé trước giờ chiếu 24 giờ. Không hoàn vé sau khi QR đã được quét.",
     status: "available",
-    ticketsLeft: 148,
     isFeatured: true,
     comboOffer: "Combo bắp nước 2 người giảm 20% khi mua cùng vé đôi.",
     affiliateCode: "LMT7-FAN"
@@ -86,8 +85,7 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
     venueMapUrl: "https://maps.google.com/?q=Nha+hat+Thanh+pho+Ho+Chi+Minh",
     venueGuide: "Không mang đồ ăn vào khán phòng. Vé VIP vào cửa số 2, vé thường vào cửa số 4.",
     refundPolicy: "Đổi ngày diễn một lần trước 48 giờ nếu còn ghế cùng hạng.",
-    status: "low",
-    ticketsLeft: 21,
+    status: "available",
     isFeatured: true,
     comboOffer: "Gói couple tặng postcard và nước suối tại quầy.",
     affiliateCode: "MATBIEC-STAGE"
@@ -128,8 +126,7 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
     venueMapUrl: "https://maps.google.com/?q=SECC+Ho+Chi+Minh",
     venueGuide: "Cổng check-in mở từ 15:30. Khán giả Fanpit đi line B để nhận vòng tay.",
     refundPolicy: "Không hoàn vé sau khi mua. Hỗ trợ đổi thông tin người nhận trước ngày diễn 72 giờ.",
-    status: "low",
-    ticketsLeft: 37,
+    status: "available",
     isFeatured: true,
     comboOffer: "Combo nhóm 4 vé GA giảm thêm 8%.",
     affiliateCode: "NTPMM2026"
@@ -171,7 +168,6 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
     venueGuide: "Vào cửa qua sảnh B2. Suất Sing-Along nhận vòng tay tại quầy chăm sóc khách hàng.",
     refundPolicy: "Đổi suất trước 12 giờ nếu chưa dùng mã QR.",
     status: "available",
-    ticketsLeft: 184,
     isFeatured: false,
     comboOffer: "Mua 2 vé Sing-Along tặng 1 poster mini.",
     affiliateCode: "ERAS-HN"
@@ -213,7 +209,6 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
     venueGuide: "Khán giả T18 cần xuất trình giấy tờ tùy thân khi soát vé.",
     refundPolicy: "Vé T18 không hỗ trợ đổi người nhận sau khi thanh toán.",
     status: "sold_out",
-    ticketsLeft: 0,
     isFeatured: false,
     comboOffer: "Chờ mở thêm suất khuya, có thể bấm nhắc lịch.",
     affiliateCode: "HORROR-NIGHT"
@@ -261,7 +256,6 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
     venueGuide: "Cửa soát vé mở trước giờ diễn 45 phút. Khán giả vào muộn chờ hết chương đầu.",
     refundPolicy: "Đêm diễn bị hủy: hoàn 100% về ví TixHub trong vòng 5 ngày làm việc.",
     status: "cancelled",
-    ticketsLeft: 0,
     isFeatured: false,
     affiliateCode: "SYM-HN-2026"
   }

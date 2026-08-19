@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import type { Showtime } from "@/shared/catalog/types";
+import { UNKNOWN_CITY, type Showtime } from "@/shared/catalog/types";
 import { MovieEvent, TicketTier } from "../types";
 import ReviewPreview from "./reviews/ReviewPreview";
 import { catalogClient } from "../services/catalogClient";
@@ -24,7 +24,7 @@ import {
   type SummaryHighlight,
   type SummaryLine,
 } from "./booking/BookingChrome";
-import { chainLabel } from "../services/cinema";
+import { chainLabel, OTHER_VENUES } from "../services/cinema";
 import { formatVnd } from "../services/currency";
 import { aiClient } from "../services/aiClient";
 import { WaitlistError, waitlistClient, type WaitlistEntry } from "../services/waitlistClient";
@@ -89,7 +89,6 @@ interface EventDetailProps {
 
 const statusLabels: Record<MovieEvent["status"], string> = {
   available: "Còn vé",
-  low: "Sắp hết vé",
   sold_out: "Hết vé",
   finished: "Đã diễn",
   cancelled: "Đã hủy",
@@ -191,7 +190,10 @@ export default function EventDetail({
         startsAt: s.startsAt,
         venue: s.venue.name,
         city: s.venue.city,
-        chain: chainLabel(s.venue.name),
+        // The chain the venue is actually linked to (migration 0036), not one guessed from its
+        // name. `chainLabel` still names the bucket for a venue no chain operates, which is most of
+        // the estate — a concert hall belongs in the filter, just not under a brand.
+        chain: s.venue.chain?.name ?? OTHER_VENUES,
         soldOut: s.availability !== "available",
       }));
     }
@@ -240,12 +242,23 @@ export default function EventDetail({
     [byChain, placeFilter.venue],
   );
 
-  /** Options for each tier, each drawn from what the tier above it has already allowed. */
+  /**
+   * Options for each tier, each drawn from what the tier above it has already allowed.
+   *
+   * `last` sinks the two catch-alls — the venues no chain operates, and the venues whose address
+   * never named a province — to the bottom of their list however many showtimes they hold. Neither
+   * names a place, so a reader scanning for theirs can stop before them; the same rule the category
+   * filter applies to "Khác".
+   */
   const options = useMemo(() => {
-    const uniq = (values: string[]) => [...new Set(values)].filter(Boolean).sort();
+    const uniq = (values: string[], last?: string) =>
+      [...new Set(values)].filter(Boolean).sort((a, b) => {
+        if (last && (a === last) !== (b === last)) return a === last ? 1 : -1;
+        return a.localeCompare(b, "vi");
+      });
     return {
-      cities: uniq(slots.map((slot) => slot.city)),
-      chains: uniq(byCity.map((slot) => slot.chain)),
+      cities: uniq(slots.map((slot) => slot.city), UNKNOWN_CITY),
+      chains: uniq(byCity.map((slot) => slot.chain), OTHER_VENUES),
       venues: uniq(byChain.map((slot) => slot.venue)),
     };
   }, [slots, byCity, byChain]);
@@ -670,7 +683,6 @@ export default function EventDetail({
     { icon: Tag, label: event.genre[0] ?? "" },
     // "P" on its own is not a fact anyone can read. The graded ratings say what they mean already.
     { icon: Users, label: event.ageRating === "P" ? "Mọi lứa tuổi" : event.ageRating },
-    { icon: Ticket, label: event.ticketsLeft > 0 ? `Còn ${event.ticketsLeft} vé` : "" },
   ].filter((h) => h.label);
 
   const details: SummaryDetail[] = [

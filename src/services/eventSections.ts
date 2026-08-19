@@ -120,7 +120,7 @@ const BANDS: ReadonlyArray<Pick<LandingSection, "id" | "title" | "eyebrow" | "em
  * still appear — the catalogue is honest about them — but never ahead of one that can be bought.
  */
 const bookable = (event: MovieEvent): boolean =>
-  event.status === "available" || event.status === "low";
+  event.status === "available";
 
 /** Soonest first, and undated last: a band of four is a shortlist, so the nearest dates earn it. */
 function byRelevance(a: MovieEvent, b: MovieEvent): number {

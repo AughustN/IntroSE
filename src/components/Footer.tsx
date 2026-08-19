@@ -3,17 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from "react";
 import type { Screen } from "../routes";
 
 interface FooterProps {
   onNavigate: (screen: Screen) => void;
-  /**
-   * Absent until a subscribe endpoint exists. The form renders either way, but without a handler
-   * it stays disabled rather than swallowing an address and returning nothing — a newsletter box
-   * that accepts an email and does not subscribe anyone is worse than a visibly unfinished one.
-   */
-  onSubscribe?: (email: string) => void;
   /** Opens the account page on its "Nhà tổ chức" section, where the application form lives. */
   onApplyAsOrganizer: () => void;
   /** If the currently authenticated user has the ORGANIZER role, hide the registration CTA. */
@@ -76,8 +69,7 @@ function NavColumn({
   );
 }
 
-export default function Footer({ onNavigate, onSubscribe, onApplyAsOrganizer, isOrganizer = false }: FooterProps) {
-  const [email, setEmail] = useState("");
+export default function Footer({ onNavigate, onApplyAsOrganizer, isOrganizer = false }: FooterProps) {
 
   return (
     <footer className="border-t border-beige-kem/25 bg-xanh-pho">
@@ -86,11 +78,17 @@ export default function Footer({ onNavigate, onSubscribe, onApplyAsOrganizer, is
 
         <div className="mt-10 grid gap-10 md:grid-cols-2 lg:grid-cols-4">
           {/*
-           * The wordmark sits in the first cell, directly over the first column, rather than
-           * spanning the footer as a banner. Broken by hand into three lines: at forty characters it
-           * would otherwise break wherever the column happened to run out, which lands mid-phrase.
-           * `text-balance` is no help — it evens out ragged lines, it does not know where the sense
-           * of a sentence divides.
+           * The wordmark takes the first cell on its own, and the three nav columns take the rest.
+           *
+           * It used to share the cell with "Khám phá" stacked under it, because a newsletter box
+           * held the fourth. That box is gone — it promised early access and discount codes, and
+           * nothing in the system sends either, while the waitlist and its notifications already do
+           * the job it was miming. Promoting "Khám phá" into the freed slot keeps the row at four
+           * and gives every column one heading, which is what the other three always had.
+           *
+           * Broken by hand into three lines: at forty characters it would otherwise break wherever
+           * the column happened to run out, which lands mid-phrase. `text-balance` is no help — it
+           * evens out ragged lines, it does not know where the sense of a sentence divides.
            */}
           <div>
             <p className="font-display text-title-m font-black leading-[1.05] tracking-tight text-beige-kem sm:text-title-m">
@@ -100,51 +98,12 @@ export default function Footer({ onNavigate, onSubscribe, onApplyAsOrganizer, is
                 </span>
               ))}
             </p>
-
-            <NavColumn column={COLUMNS[0]} onNavigate={onNavigate} className="mt-9" />
           </div>
 
-          {COLUMNS.slice(1).map((column) => (
+          {COLUMNS.map((column) => (
             <NavColumn key={column.title} column={column} onNavigate={onNavigate} />
           ))}
 
-          <div>
-            <p className="label-eyebrow text-ink-soft">Giữ liên lạc</p>
-            <p className="mt-4 text-body leading-6 text-beige-kem/70">
-              Nhận vé mở bán sớm, mã giảm giá và lịch diễn mới trước khi hết chỗ.
-            </p>
-
-            <form
-              className="mt-4"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!onSubscribe || !email) return;
-                onSubscribe(email);
-                setEmail("");
-              }}
-            >
-              <div className="flex items-center border-b border-beige-kem/40 focus-within:border-beige-kem">
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  disabled={!onSubscribe}
-                  placeholder="email@cua-ban.com"
-                  aria-label="Email nhận bản tin"
-                  className="w-full bg-transparent py-2 font-meta text-body text-beige-kem outline-none placeholder:text-beige-kem/35 disabled:cursor-not-allowed"
-                />
-                <button
-                  type="submit"
-                  disabled={!onSubscribe}
-                  className="label-eyebrow shrink-0 py-2 pl-3 text-beige-kem transition hover:text-burgundy-ink disabled:cursor-not-allowed disabled:text-ink-soft"
-                >
-                  Đăng ký &gt;
-                </button>
-              </div>
-            </form>
-
-            {!onSubscribe && <p className="mt-2 font-meta text-meta text-ink-soft">Sắp mở.</p>}
-          </div>
         </div>
 
         {/*

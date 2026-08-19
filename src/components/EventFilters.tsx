@@ -59,13 +59,20 @@ interface EventFiltersProps {
    * adapter relabelled everything it did not recognise as music.
    */
   categoryOptions: ReadonlyArray<{ id: string; label: string }>;
+  /**
+   * The cities the catalogue actually sits in, derived from it — not a fixed list.
+   *
+   * The third list to need this and the one that failed worst. `["TP.HCM", "Hà Nội", "Đà Nẵng"]`,
+   * compared verbatim against `movie.city`, matched the 12 events spelled exactly "TP.HCM" and hid
+   * the 160 filed under "Hồ Chí Minh" and "Tp. Hồ Chí Minh". `npm run db:cities` has since settled
+   * on one province name per place, which is exactly why the list cannot be hardcoded: the
+   * canonical spelling is "Tp. Hồ Chí Minh" now, so the old buttons would match nothing at all.
+   */
+  cityOptions: string[];
 }
-
-const cityOptions = ["TP.HCM", "Hà Nội", "Đà Nẵng"];
 
 const availabilityOptions = [
   ["available", "Còn vé"],
-  ["low", "Sắp hết"],
   ["sold_out", "Hết vé"],
   ["finished", "Đã diễn"],
   ["cancelled", "Đã hủy"],
@@ -142,6 +149,7 @@ export default function EventFilters({
   dateOptions,
   resultCount = 0,
   categoryOptions,
+  cityOptions,
 }: EventFiltersProps) {
   /*
    * Whether there is anything to undo. Drives whether the reset appears at all: a permanently

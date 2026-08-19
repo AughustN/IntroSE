@@ -50,7 +50,6 @@ export function cardToMovie(c: EventCard): MovieEvent {
     // showtime is behind it reports `soldOut: false` — read the wrong way round, a finished event
     // renders as freely bookable with a "Mua vé" button that leads nowhere.
     status: !c.hasUpcoming ? 'finished' : c.soldOut ? 'sold_out' : 'available',
-    ticketsLeft: c.hasUpcoming && !c.soldOut ? 50 : 0,
     isFeatured: false,
   };
 }

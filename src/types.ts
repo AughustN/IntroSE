@@ -58,8 +58,14 @@ export interface MovieEvent {
   // `finished` is not a degree of "sold out": the event happened. It keeps its card, its tag, and
   // its detail page, but nothing about it is buyable, so every booking control reads it the same
   // way it reads `cancelled`.
-  status: "available" | "low" | "sold_out" | "finished" | "cancelled";
-  ticketsLeft: number;
+  //
+  // There is no `low` ("sắp hết"). Nothing could ever produce it: the catalog adapter derives this
+  // field from `hasUpcoming` and `soldOut`, neither of which carries a degree, so the only rows that
+  // ever said `low` were the sample fixtures. The filter offering it matched zero events by
+  // construction. An event-wide "nearly gone" is not recoverable either — an event now spans ~125
+  // showtimes across 44 cinemas, and a threshold over that total describes nothing a buyer can act
+  // on. Scarcity belongs where it is true and known: the per-tier "Còn N vé" on a chosen showtime.
+  status: "available" | "sold_out" | "finished" | "cancelled";
   isFeatured: boolean;
   comboOffer?: string;
   affiliateCode?: string;

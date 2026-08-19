@@ -211,21 +211,46 @@ export async function getEventDetail(slug: string, db: Db = pool): Promise<Event
 
 /** Upcoming showtimes with availability (US3). Empty if the event is not visible. */
 export async function getShowtimes(eventId: number, db: Db = pool): Promise<Showtime[]> {
-  const res = await db.query<{ id: number; starts_at: string; name: string; city: string; has_available: boolean }>(
+  const res = await db.query<{
+    id: number;
+    starts_at: string;
+    name: string;
+    city: string;
+    chain_id: number | null;
+    chain_code: string | null;
+    chain_name: string | null;
+    has_available: boolean;
+  }>(
+    /*
+     * LEFT JOIN on the chain, never INNER: a chain is a property of cinemas only, and the concert
+     * halls and stadiums that make up most of the estate have none. An inner join here would drop
+     * every non-cinema showtime from the detail page.
+     *
+     * Ordered by place before time. The detail page narrows city → chain → venue before it shows a
+     * day or a session, so handing it rows already grouped that way means its filter lists come out
+     * in a stable order. `starts_at` stays the last key, so within one cinema the sessions still
+     * read as a day's schedule.
+     */
     `SELECT s.id, s.starts_at, v.name, v.city,
+            ch.id AS chain_id, ch.code AS chain_code, ch.name AS chain_name,
             ${SHOWTIME_HAS_AVAILABILITY} AS has_available
        FROM showtimes s
        JOIN events e ON e.id = s.event_id ${VISIBLE_JOIN}
        JOIN venues v ON v.id = s.venue_id
+       LEFT JOIN cinema_chains ch ON ch.id = v.chain_id
       WHERE s.event_id = $1 AND ${VISIBLE_WHERE}
         AND s.starts_at > now() AND s.status NOT IN ('cancelled', 'finished')
-      ORDER BY s.starts_at`,
+      ORDER BY v.city, ch.display_order NULLS FIRST, ch.name, v.name, s.starts_at`,
     [eventId],
   );
   return res.rows.map((r) => ({
     id: r.id,
     startsAt: r.starts_at,
-    venue: { name: r.name, city: r.city },
+    venue: {
+      name: r.name,
+      city: r.city,
+      chain: r.chain_id === null ? null : { id: r.chain_id, code: r.chain_code!, name: r.chain_name! },
+    },
     availability: r.has_available ? 'available' : 'sold_out',
   }));
 }
