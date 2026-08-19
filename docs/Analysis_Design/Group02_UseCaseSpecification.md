@@ -20,12 +20,41 @@ Group 02 · SoE
 >
 > **Prototype:** Each use case ends with a **Prototype** block listing the screens in its flows plus a screenshot placeholder. The team generates the UI images in Google Stitch and pastes them under the matching use case before submission.
 >
-> **Implementation trace (2026-07-24).** Use cases are delivered by the SpecKit features under
-> `src/specs/`: **`001-account-auth`** (UC-01 to UC-06, UC-37) — *built*; **`002-event-catalog`**
-> (UC-07 to UC-09, UC-20, UC-21, UC-23, UC-24, UC-26, UC-34) — *built*; **`003-seat-holds`**
-> (UC-11, and the hold invariants UC-12 and UC-40 rely on) — *specified, in build*. Each feature's
-> spec is authoritative for the detail of its flows; where this document and a shipped feature spec
-> disagree, the feature spec wins and this document is amended.
+> **Implementation trace (2026-08-19).** The 41 use cases are mapped to the current SpecKit
+> feature directories under `src/specs/` in the trace table below. UC numbering is intentionally
+> non-sequential in the document because UC-37 to UC-41 are interleaved with the earlier domains.
+> **Primary UC ownership** identifies the feature whose scope directly implements the use-case
+> behavior. **Supporting / extended UCs** identify infrastructure, sub-flows, read-side integration,
+> or data dependencies; they do not transfer ownership of the whole use case.
+>
+> The status below is a documentation trace, not a claim that every task in a feature is complete.
+> `built (trace carried forward)` preserves the statuses previously recorded here for
+> **`001-account-auth`**, **`002-event-catalog`**, and **`003-seat-holds`**. Later feature directories
+> are marked *specified / implementation status not certified* unless this document has an explicit,
+> verified implementation status. `004-static-info-pages` and `012-cloudinary-media-upload` are
+> cross-cutting features with no direct UC ownership stated. Full directory slugs are used because
+> both `011-waitlist` and `011-organizer-business-analytics` exist.
+>
+> Feature specifications remain authoritative for the detailed behavior they explicitly own. A
+> known disagreement must be recorded in the trace note and resolved in the relevant UC section; it
+> must not silently change this document's requirements.
+>
+> | Feature | Status as of 2026-08-19 | Primary UC ownership | Supporting / extended UCs | Authority or deviation note |
+> |---|---|---|---|---|
+> | `001-account-auth` | *built (trace carried forward)* | UC-01–UC-06, UC-37 | — | Account/authentication scope from the feature spec. |
+> | `002-event-catalog` | *built (trace carried forward)* | UC-07–UC-09 | UC-20, UC-21 (read-side), UC-23, UC-24, UC-26, UC-34 | Catalog foundation; later organizer/studio features extend the organizer and moderation areas. |
+> | `003-seat-holds` | *specified, in build (trace carried forward)* | UC-11 | UC-12, UC-40 hold/reservation invariants | Owns reservations and holds, not checkout or wallet payment. |
+> | `004-admin-organizer-moderation` | *specified / implementation status not certified* | UC-33, UC-34 | UC-39; UC-16 and UC-25 moderation/removal refund effects | Has plan/data-model/tasks but no `spec.md`; status is not certified as fully built. |
+> | `004-static-info-pages` | *cross-cutting / no direct UC mapping* | — | — | Public footer and legal/information pages; no direct UCS use case is stated. |
+> | `005-seatmap-designer` | *specified / implementation status not certified* | UC-21 | UC-20 seat-map generation; UC-23 live-map editing rules | Extends the seat-map portion of event creation and editing. |
+> | `006-organizer-studio` | *specified / implementation status not certified* | UC-22, UC-26 | UC-23 integrity guards; UC-24 A6 re-moderation | Owns studio/tier/AI listing rules; overlaps with `010-organizer-event-management` by design. |
+> | `007-admin-catalog-settings` | *specified / implementation status not certified* | UC-35, UC-36 | — | Admin categories, featured content, and bounded operating settings. |
+> | `008-ai-chatbot` | *specified / implementation status not certified* | UC-10 | UC-22 shared AI plumbing | Provider/vendor alignment is tracked for the later UC-content update phase. |
+> | `009-event-reviews` | *specified / implementation status not certified* | UC-18, UC-39 | UC-09 rating display | Review-eligibility deviation is tracked for the later UC-content update phase. |
+> | `010-organizer-event-management` | *specified / implementation status not certified* | UC-23–UC-26 | UC-37 organizer-workspace visibility | Owns organizer workspace lifecycle; `006-organizer-studio` owns studio/tier/AI rules. |
+> | `011-organizer-business-analytics` | *specified / implementation status not certified* | UC-31 | UC-25 refund/cancellation audit data | Full slug disambiguates this feature from `011-waitlist`. |
+> | `011-waitlist` | *specified / implementation status not certified* | UC-17 | UC-09 A2, UC-16 inventory release, UC-19 notification delivery | Full slug disambiguates this feature from `011-organizer-business-analytics`. |
+> | `012-cloudinary-media-upload` | *cross-cutting / no direct UC mapping* | — | UC-06, UC-20, UC-21, UC-23, UC-37 media paths | Media storage/transport infrastructure; it does not own the domain workflows. |
 
 ---
 
@@ -1645,6 +1674,35 @@ Group 02 · SoE
 
 **Prototype.** Screens: *System settings page*, *Bounds validation error*, *Save confirmation*.
 `![UC-36 prototype](../prototypes/uc-36-settings.png)`
+
+---
+
+## Appendix: Feature-to-UC Trace Legend
+
+> **How to read this legend.** A **primary UC** is directly owned by the feature's stated scope.
+> A **supporting / dependency UC** receives a sub-flow, integration, infrastructure, or data input from
+> the feature but remains owned by its primary feature. **No direct mapping** means that the feature is
+> cross-cutting and must not be assigned an invented UC owner. Likewise, **no dedicated feature owner
+> identified** means only that no primary directory was found under `src/specs/`; it does **not** claim
+> that the use case has no code implementation.
+
+| Feature directory | Primary UC(s) | Supporting / dependency UC(s) | Ownership note |
+|---|---|---|---|
+| `001-account-auth` | UC-01–UC-06, UC-37 | — | Account, authentication, profile, and organizer application. |
+| `002-event-catalog` | UC-07–UC-09 | UC-20, UC-21 (read-side), UC-23, UC-24, UC-26, UC-34 | Public catalog foundation; organizer and moderation areas are extended elsewhere. |
+| `003-seat-holds` | UC-11 | UC-12, UC-40 | Reservation and hold lifecycle only; not checkout or wallet payment ownership. |
+| `004-admin-organizer-moderation` | UC-33, UC-34 | UC-39; UC-16 and UC-25 moderation/removal refund effects | Admin approval and moderation domain; directory has no `spec.md`. |
+| `004-static-info-pages` | — | — | **No direct mapping:** cross-site public/legal navigation and content. |
+| `005-seatmap-designer` | UC-21 | UC-20, UC-23 | Seat-map authoring and live-map editing constraints. |
+| `006-organizer-studio` | UC-22, UC-26 | UC-23, UC-24 A6 | Studio/tier lifecycle and AI listing assistance. |
+| `007-admin-catalog-settings` | UC-35, UC-36 | — | Categories, featured content, and bounded system settings. |
+| `008-ai-chatbot` | UC-10 | UC-22 | Attendee chatbot; shared AI plumbing for listing assistance. |
+| `009-event-reviews` | UC-18, UC-39 | UC-09 | Reviews/reporting domain and rating display integration. |
+| `010-organizer-event-management` | UC-23–UC-26 | UC-37 | Organizer workspace lifecycle; overlaps intentionally with `006-organizer-studio`. |
+| `011-organizer-business-analytics` | UC-31 | UC-25 | Organizer analytics consumes cancellation/refund audit data. |
+| `011-waitlist` | UC-17 | UC-09 A2, UC-16, UC-19 | Sold-out queue, inventory-release, and notification integration. |
+| `012-cloudinary-media-upload` | — | UC-06, UC-20, UC-21, UC-23, UC-37 | **No direct mapping:** cross-cutting media storage and transport. |
+| *No dedicated feature owner identified in `src/specs/`* | UC-12–UC-16, UC-19; UC-27–UC-30; UC-32; UC-38; UC-41 | — | Registry gap only; not a claim that these UCs have no code implementation. |
 
 ---
 
