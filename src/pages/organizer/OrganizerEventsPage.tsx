@@ -1,37 +1,63 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Calendar, BarChart3, Armchair, Megaphone } from "lucide-react";
+import { Calendar, BarChart3, Armchair, Megaphone, Plus } from "lucide-react";
 import AdPackagesPanel from "../../components/organizer/AdPackagesPanel";
-import { EventCard } from "../../components/organizer/EventCard";
-import { PortfolioSummaryHeader } from "../../components/organizer/PortfolioSummaryHeader";
+import OrganizerConsole from "../../components/organizer/OrganizerConsole";
+import SeatMapBuilder from "../../components/SeatMapBuilder";
 import {
-  getOrganizerEvents,
-  createOrganizerEvent,
-  CreateEventInput,
+  createDraftEvent,
   uploadEventBannerFile,
   uploadEventTrailerFile,
 } from "../../services/organizerClient";
 import { aiClient, type ListingSuggestion } from "../../services/aiClient";
-import { OrganizerPortfolioSummary } from "../../types";
 import { OrganizerBusinessAnalytics } from "../../components/account/OrganizerBusinessAnalytics";
 import { MediaDropzone } from "../../components/common/MediaDropzone";
+import { useEventCategories } from "../../hooks/useEventCategories";
+import { Refusal } from "../../components/organizer/states";
+import { organizerApi } from "../../services/catalogClient";
+import { formatVnd } from "../../services/currency";
+import { fetchOrganizerAnalytics } from "../../services/organizerAnalyticsClient";
+import type { OrganizerAnalyticsOverview } from "@/shared/types/analytics";
+import {
+  clearDraft,
+  isWorthSaving,
+  loadDraft,
+  saveDraft,
+  type CreateEventDraft,
+} from "./createEventDraft";
 
-export const OrganizerEventsPage: React.FC = () => {
+export const OrganizerEventsPage: React.FC<{
+  /** From `/organizer/events/:id` — which event the console should open at, if the URL names one. */
+  openEventId?: number | null;
+}> = ({ openEventId = null }) => {
   const navigate = useNavigate();
 
   // Top-Level Workspace Section:"analytics"(Thống kê kinh doanh),"events"(Quản lý sự kiện) or
   //"ads"(Gói quảng cáo).
-  type Section = "events" | "analytics" | "ads";
+  /**
+   * Creating is its own section, not a mode of the events list.
+   *
+   * It used to be an `activeTab` inside "events", so pressing "Tạo sự kiện" left the nav highlighting
+   * "Sự kiện" — the section that lists what you have ALREADY made — while showing a blank form. Two
+   * different destinations wearing one label. A section of its own gives it its own URL, its own
+   * highlight, and a Back press that means what it looks like.
+   */
+  type Section = "events" | "analytics" | "ads" | "create";
 
   // Read once, here, so the initial render and a Back press cannot disagree about which section the
   // URL names. Anything unrecognised falls back to"analytics", which is the section with no param.
   const sectionFromUrl = (): Section => {
     if (typeof window === "undefined") return "analytics";
     const value = new URLSearchParams(window.location.search).get("section");
-    return value === "events" || value === "ads" ? value : "analytics";
+    return value === "events" || value === "ads" || value === "create" ? value : "analytics";
   };
 
-  const [activeSection, setActiveSection] = useState<Section>(sectionFromUrl);
+  // A URL that names an event is asking for the events section, whatever `?section=` says (a deep
+  // link to `/organizer/events/7` carries no query at all, and would otherwise open on analytics
+  // with the console it just asked for nowhere on screen).
+  const [activeSection, setActiveSection] = useState<Section>(() =>
+    openEventId !== null ? "events" : sectionFromUrl(),
+  );
 
   useEffect(() => {
     const handlePopState = () => setActiveSection(sectionFromUrl());
@@ -46,31 +72,76 @@ export const OrganizerEventsPage: React.FC = () => {
     window.history.replaceState(null, "", url.toString());
   };
 
-  // Active Part / Tab:"manage"(Quản lý sự kiện) or"create"(Tạo sự kiện mới)
-  const [activeTab, setActiveTab] = useState<"manage" | "create">("manage");
 
-  // Portfolio State
-  const [events, setEvents] = useState<OrganizerPortfolioSummary[]>([]);
-  const [activeFilter, setActiveFilter] = useState<string>("all");
-  const [searchTerm, setSearchTerm] = useState<string>("");
-  const [loading, setLoading] = useState<boolean>(true);
-  const [toastMsg, setToastMsg] = useState<{ type: "success" | "error"; text: string } | null>(
-    null,
-  );
+  // The server-backed console (feature 006) owns the event list and its drill-down — event →
+  // editor → showtimes → tiers — while this page keeps the shell (analytics / ads) and the create
+  // form around it. State below is therefore console plumbing, not its own copy of the portfolio.
 
-  const [summary, setSummary] = useState({
-    totalEvents: 0,
-    draftCount: 0,
-    pendingCount: 0,
-    publishedCount: 0,
-    canceledCount: 0,
-    completedCount: 0,
-  });
+  // Which event is open in the console (level 2+), or null for the list. Seeded from the URL so
+  // `/organizer/events/:id` is a real deep link — that address used to render a separate, superseded
+  // event screen, and this is what replaced it rather than dropping the link on the floor.
+  const [selectedEventId, setSelectedEventId] = useState<number | null>(openEventId);
+
+  /*
+   * A later navigation to a different `/organizer/events/:id` has to move the console too.
+   *
+   * Adjusted during render against the previous URL value rather than synced in an effect: React
+   * re-runs this pass before committing anything to the DOM, so the console never paints the old
+   * event first and corrects itself afterwards — which is both the visible flicker and what
+   * `react-hooks/set-state-in-effect` is warning about.
+   *
+   * Only a non-null id follows the URL. Returning to the bare list is the console's own business
+   * (its Back button sets null), and mirroring that here would slam it shut again on every render.
+   */
+  const [urlEventSeen, setUrlEventSeen] = useState<number | null>(openEventId);
+  if (openEventId !== null && openEventId !== urlEventSeen) {
+    setUrlEventSeen(openEventId);
+    setSelectedEventId(openEventId);
+  }
+
+  /**
+   * The other direction: opening or closing an event moves the address bar to match.
+   *
+   * `pushState`, not `replaceState` — drilling into an event is a step a Back press should undo,
+   * which is also what makes the console's own "← Danh sách sự kiện" and the browser's Back agree
+   * instead of doing two different things.
+   */
+  const setUrlEvent = (id: number | null) => {
+    const next = id === null ? "/organizer/events" : `/organizer/events/${id}`;
+    if (window.location.pathname !== next) window.history.pushState(null, "", next);
+  };
+  /** Bumped after a create (or a seat-map apply) so the console refetches. */
+  const [reloadKey, setReloadKey] = useState(0);
+  /** The overlay `SeatMapBuilder` runs for this event, or null if closed. */
+  const [seatMapEventId, setSeatMapEventId] = useState<number | null>(null);
 
   // Create Event Form State
   const [createTitle, setCreateTitle] = useState("");
+  /**
+   * Which kind of event this becomes.
+   *
+   * Both kinds now submit the same way — a draft plus its venue — and finish in the console's rail.
+   * The difference is only what the rail then asks for: general admission needs a showtime and its
+   * tiers, a seated show needs a chart applied on top of that.
+   */
+  const [createEventType, setCreateEventType] = useState<"seated" | "general_admission">("seated");
+  const categories = useEventCategories();
   const [createCategory, setCreateCategory] = useState("music");
-  const [createCategoryLabel, setCreateCategoryLabel] = useState("Âm nhạc");
+  /*
+   * Keep the selection on a code that actually exists.
+   *
+   * `music` is a real code and a safe initial value, but it is not guaranteed to survive an Admin
+   * editing the category list. Snapping once the list arrives — during render, so the select never
+   * paints a value the server would reject — is what stops this form from ever again submitting a
+   * category that does not exist.
+   */
+  const [categoriesSeen, setCategoriesSeen] = useState(0);
+  if (categories.length !== categoriesSeen) {
+    setCategoriesSeen(categories.length);
+    if (categories.length > 0 && !categories.some((c) => c.code === createCategory)) {
+      setCreateCategory(categories[0].code);
+    }
+  }
   const [createPictureUrl, setCreatePictureUrl] = useState("");
   const [createVideoUrl, setCreateVideoUrl] = useState("");
   const [stagedBannerFile, setStagedBannerFile] = useState<File | null>(null);
@@ -79,72 +150,91 @@ export const OrganizerEventsPage: React.FC = () => {
   const [createVenueName, setCreateVenueName] = useState("");
   const [createVenueAddress, setCreateVenueAddress] = useState("");
   const [createCity, setCreateCity] = useState<"TP.HCM" | "Hà Nội" | "Đà Nẵng">("TP.HCM");
-  const [createStartDatetime, setCreateStartDatetime] = useState("2026-09-20T19:30");
-  const [createEndDatetime, setCreateEndDatetime] = useState("2026-09-20T22:30");
   const [createDescription, setCreateDescription] = useState("");
 
-  // Multi Ticket Tier State for Event Creation
-  const [createTicketTiers, setCreateTicketTiers] = useState<
-    Array<{
-      id: string;
-      preset: "Vé Tiêu Chuẩn" | "Miễn Phí" | "VIP" | "custom";
-      customLabel: string;
-      price: number;
-      capacity: number;
-      description?: string;
-    }>
-  >([
-    {
-      id: "tier-init-1",
-      preset: "Vé Tiêu Chuẩn",
-      customLabel: "",
-      price: 200000,
-      capacity: 100,
-      description: "Hạng vé tiêu chuẩn mặc định",
-    },
-  ]);
+  const [toastMsg, setToastMsg] = useState<{ type: "success" | "error"; text: string } | null>(
+    null,
+  );
+  /** The one required field checked in JS rather than by the browser — see `handleCreateEventSubmit`. */
+  const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
 
-  const getTierResolvedLabel = (tier: (typeof createTicketTiers)[0]): string => {
-    if (tier.preset === "custom") {
-      return tier.customLabel.trim() || "Hạng vé tùy chỉnh";
-    }
-    return tier.preset;
-  };
+  /*
+   * Account-wide sales for the header strip.
+   *
+   * Called with no filters, which is what makes it account-level rather than the filtered view the
+   * analytics section shows. Failure leaves it null and the strip shows dashes: a header that cannot
+   * reach the numbers must not stop the organizer reaching their events.
+   */
+  const [overview, setOverview] = useState<OrganizerAnalyticsOverview | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetchOrganizerAnalytics({})
+      .then((d) => alive && setOverview(d.overview ?? null))
+      .catch(() => alive && setOverview(null));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  /** How many events are actually on sale — the third figure, and the one the list cannot show. */
+  const [liveEventCount, setLiveEventCount] = useState<number | null>(null);
+  useEffect(() => {
+    let alive = true;
+    organizerApi
+      .myEvents()
+      .then(
+        (rows) =>
+          alive &&
+          setLiveEventCount(
+            rows.filter((e) => e.status === "on_sale" && e.moderation === "approved").length,
+          ),
+      )
+      .catch(() => alive && setLiveEventCount(null));
+    return () => {
+      alive = false;
+    };
+  }, [reloadKey]);
 
-  const handleAddTierItem = () => {
-    setCreateTicketTiers((prev) => [
-      ...prev,
-      {
-        id: `tier-${Date.now()}-${prev.length + 1}`,
-        preset: "Vé Tiêu Chuẩn",
-        customLabel: "",
-        price: 200000,
-        capacity: 100,
-        description: "",
-      },
-    ]);
-  };
+  /*
+   * Unsaved-work protection for the create form.
+   *
+   * `recoverable` is read ONCE at mount, before anything is typed, so the offer reflects what was
+   * left behind on a previous visit rather than what is being typed now. Dismissing it — by
+   * restoring or discarding — is the only thing that clears it.
+   */
+  const [recoverable, setRecoverable] = useState<CreateEventDraft | null>(() => loadDraft());
 
-  const handleRemoveTierItem = (id: string) => {
-    if (createTicketTiers.length <= 1) {
-      showToast("error", "Sự kiện phải có ít nhất 1 hạng vé.");
-      return;
-    }
-    setCreateTicketTiers((prev) => prev.filter((t) => t.id !== id));
+  const draftNow = {
+    title: createTitle,
+    description: createDescription,
+    category: createCategory,
+    eventType: createEventType,
+    venueName: createVenueName,
+    venueAddress: createVenueAddress,
+    city: createCity,
   };
+  const dirty = isWorthSaving(draftNow);
 
-  const handleUpdateTierItem = (id: string, updates: Partial<(typeof createTicketTiers)[0]>) => {
-    setCreateTicketTiers((prev) =>
-      prev.map((t) => {
-        if (t.id !== id) return t;
-        const updated = { ...t, ...updates };
-        if (updated.preset === "Miễn Phí") {
-          updated.price = 0;
-        }
-        return updated;
-      }),
-    );
-  };
+  // Debounced so typing does not hit storage on every keystroke.
+  useEffect(() => {
+    const id = window.setTimeout(() => saveDraft(draftNow), 500);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createTitle, createDescription, createCategory, createEventType, createVenueName, createVenueAddress, createCity]);
+
+  /*
+   * The browser's own "leave site?" prompt, and ONLY while there is something to lose.
+   *
+   * Deliberately gated on `dirty`. The seat-selection screen fires its guard even with nothing
+   * selected, which teaches people to dismiss the dialog without reading it — the opposite of what a
+   * warning is for.
+   */
+  useEffect(() => {
+    if (!dirty || activeSection !== "create") return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty, activeSection]);
+
 
   // AI Description Assistant State
   const [aiBrief, setAiBrief] = useState("");
@@ -181,156 +271,94 @@ export const OrganizerEventsPage: React.FC = () => {
     if (!aiSuggestion) return;
     if (aiSuggestion.title) setCreateTitle(aiSuggestion.title);
     if (aiSuggestion.description) setCreateDescription(aiSuggestion.description);
-    if (aiSuggestion.ticketPriceSuggestions && aiSuggestion.ticketPriceSuggestions.length > 0) {
-      setCreateTicketTiers(
-        aiSuggestion.ticketPriceSuggestions.map((item, idx) => {
-          let preset: "Vé Tiêu Chuẩn" | "Miễn Phí" | "VIP" | "custom" = "custom";
-          const lowerName = item.name.toLowerCase();
-          if (lowerName.includes("tiêu chuẩn") || lowerName.includes("standard")) {
-            preset = "Vé Tiêu Chuẩn";
-          } else if (
-            item.price === 0 ||
-            lowerName.includes("miễn phí") ||
-            lowerName.includes("free")
-          ) {
-            preset = "Miễn Phí";
-          } else if (lowerName.includes("vip")) {
-            preset = "VIP";
-          }
-          return {
-            id: `ai-tier-${Date.now()}-${idx}`,
-            preset,
-            customLabel: preset === "custom" ? item.name : "",
-            price: item.price,
-            capacity: 100,
-            description: "Gợi ý bởi AI",
-          };
-        }),
-      );
-    }
-    showToast("success", "Đã áp dụng thông tin & hạng vé từ AI vào biểu mẫu!");
+    // The AI also proposes ticket tiers, but tiers are no longer set on this form — they belong to
+    // the showtime that sells them, one step later. Saying so beats applying nothing and letting the
+    // organizer wonder where the prices went.
+    const hasTierIdeas = (aiSuggestion.ticketPriceSuggestions?.length ?? 0) > 0;
+    showToast(
+      "success",
+      hasTierIdeas
+        ? "Đã áp dụng tiêu đề & mô tả. Giá vé sẽ đặt ở bước hạng vé."
+        : "Đã áp dụng tiêu đề & mô tả từ AI.",
+    );
   };
 
-  const loadPortfolio = async () => {
-    setLoading(true);
-    try {
-      const res = await getOrganizerEvents({ status: activeFilter, search: searchTerm });
-      setEvents(res.data);
-      setSummary(res.summary);
-    } catch (err) {
-      console.error("Failed to load organizer events portfolio:", err);
-    } finally {
-      setLoading(false);
-    }
+  /**
+   * Empty the create form.
+   *
+   * One reset, not two. The seated and general-admission paths each used to clear their own subset,
+   * and they disagreed — the seated one left `createVideoUrl` and the staged trailer behind, so a
+   * trailer chosen for one event could be uploaded to the next.
+   */
+  const clearCreateForm = () => {
+    setCreateTitle("");
+    setCreateDescription("");
+    setCreatePictureUrl("");
+    setCreateVideoUrl("");
+    setStagedBannerFile(null);
+    setStagedTrailerFile(null);
+    setCreateVenueName("");
+    setCreateVenueAddress("");
   };
 
-  useEffect(() => {
-    if (activeTab === "manage") {
-      loadPortfolio();
-    }
-  }, [activeFilter, searchTerm, activeTab]);
-
-  const handleSelectEvent = (eventId: string) => {
-    window.scrollTo(0, 0);
-    navigate(`/organizer/${eventId}`);
-  };
-
-  // Submit Create Event Form
+  /**
+   * Create the event.
+   *
+   * ONE path, whichever kind of event this is. Both now produce the same thing — an event and its
+   * venue, nothing sellable yet — and hand off to the console's rail, which already knows the rest:
+   * four steps for general admission, the chart steps as well for a seated show.
+   *
+   * General admission used to submit venue + showtime + tiers in a single bundled call from this
+   * form, which is why the form had grown to eleven fields across three screens and kept growing by
+   * three per ticket tier. Dates and tiers live in `ShowtimeList`/`TierPanel` in the console, where a
+   * seated organizer has always set them; collecting them here as well was a second source for the
+   * same facts, and the longer of the two.
+   */
   const handleCreateEventSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Attached to the control, not floated in the corner. The banner field can be a screen away
+    // from the submit button, and a toast at the top-right leaves the organizer looking for what to
+    // fix. Every other required field gets the browser's own field-anchored message; this one is
+    // checked in JS, so it has to place its own.
     if (!createPictureUrl && !stagedBannerFile) {
-      showToast("error", "Hình ảnh sự kiện (Picture) là bắt buộc!");
+      setMediaRefusal("Cần tải lên hình ảnh sự kiện trước khi tạo bản nháp.");
+      document.getElementById("create-media")?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
-
-    // Process & validate all ticket tiers
-    const processedTiers = createTicketTiers.map((t) => {
-      const label = getTierResolvedLabel(t);
-      const isFree =
-        t.preset === "Miễn Phí" ||
-        label.trim().toLowerCase() === "miễn phí" ||
-        label.trim().toLowerCase() === "free";
-      return {
-        label,
-        price: isFree ? 0 : Number(t.price) || 0,
-        capacity: Number(t.capacity) || 1,
-        description: t.description || undefined,
-      };
-    });
-
-    for (const tier of processedTiers) {
-      if (!tier.label.trim()) {
-        showToast("error", "Tất cả các hạng vé đều phải có tên (hoặc chọn tên mặc định).");
-        return;
-      }
-      if (tier.capacity < 1) {
-        showToast("error", "Sức chứa của từng hạng vé phải tối thiểu từ 1 trở lên.");
-        return;
-      }
-    }
+    setMediaRefusal(null);
 
     setIsCreating(true);
     try {
-      let bannerUrlToSave = createPictureUrl;
-      let videoUrlToSave = createVideoUrl;
-
-      const input: CreateEventInput = {
+      const draft = await createDraftEvent({
         title: createTitle,
+        // The server requires at least one character; the editor can refine it later.
+        description: createDescription.trim() || createTitle,
         category: createCategory,
-        categoryLabel: createCategoryLabel,
-        bannerUrl: bannerUrlToSave || "https://res.cloudinary.com/tixhub/image/upload/placeholder.webp",
-        videoUrl: videoUrlToSave || undefined,
+        eventType: createEventType,
+        bannerUrl:
+          createPictureUrl || "https://res.cloudinary.com/tixhub/image/upload/placeholder.webp",
         venueName: createVenueName,
         venueAddress: createVenueAddress,
         city: createCity,
-        startDatetime: createStartDatetime.includes("Z")
-          ? createStartDatetime
-          : `${createStartDatetime}:00Z`,
-        endDatetime: createEndDatetime.includes("Z")
-          ? createEndDatetime
-          : `${createEndDatetime}:00Z`,
-        description: createDescription,
-        ticketTiers: processedTiers,
-      };
+      });
 
-      const newEvt = await createOrganizerEvent(input);
+      if (stagedBannerFile) await uploadEventBannerFile(draft.eventId, stagedBannerFile);
+      if (stagedTrailerFile) await uploadEventTrailerFile(draft.eventId, stagedTrailerFile);
 
-      if (stagedBannerFile) {
-        bannerUrlToSave = await uploadEventBannerFile(newEvt.eventId, stagedBannerFile);
-        newEvt.bannerUrl = bannerUrlToSave;
-      }
-      if (stagedTrailerFile) {
-        videoUrlToSave = await uploadEventTrailerFile(newEvt.eventId, stagedTrailerFile);
-        newEvt.videoUrl = videoUrlToSave;
-      }
+      showToast("success", "Đã tạo bản nháp. Tiếp tục: thêm suất chiếu và hạng vé.");
+      // The server row is the draft now; the local copy has done its job.
+      clearDraft();
+      setRecoverable(null);
+      clearCreateForm();
 
-      showToast("success", "Tạo sự kiện mới thành công! Dữ liệu đã được lưu vào hệ thống.");
-
-      // Reset Form
-      setCreateTitle("");
-      setCreatePictureUrl("");
-      setCreateVideoUrl("");
-      setStagedBannerFile(null);
-      setStagedTrailerFile(null);
-      setCreateVenueName("");
-      setCreateVenueAddress("");
-      setCreateDescription("");
-      setCreateTicketTiers([
-        {
-          id: "tier-init-1",
-          preset: "Vé Tiêu Chuẩn",
-          customLabel: "",
-          price: 200000,
-          capacity: 100,
-          description: "Hạng vé tiêu chuẩn mặc định",
-        },
-      ]);
-
-      // Switch to Management view & navigate to newly created event
-      setActiveTab("manage");
-      navigate(`/organizer/${newEvt.eventId}`);
-    } catch (err: any) {
-      showToast("error", err.message || "Tạo sự kiện thất bại.");
+      // Stay on this page: open the new event inside the console (level 2), where the rail says what
+      // is still missing before it can go on sale.
+      handleSectionSwitch("events");
+      setSelectedEventId(draft.eventId);
+      setUrlEvent(draft.eventId);
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      showToast("error", (err as Error).message || "Tạo sự kiện thất bại.");
     } finally {
       setIsCreating(false);
     }
@@ -352,179 +380,238 @@ export const OrganizerEventsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Main Workspace Header & Top-Level Section Navigation */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-surface-1 border border-beige-kem/20 p-5">
-        <div>
-          <h1 className="font-display text-2xl sm:text-3xl font-black tracking-tight text-beige-kem">
-            Trang quản lí của Nhà tổ chức sự kiện
-          </h1>
+      {/*
+        The workspace header.
+
+        Three things were wrong with what this replaced, all of them visible the moment you looked at
+        it. The row was a `justify-between` flex holding THREE children, so the "Sơ đồ ghế" button was
+        stranded in the middle belonging to neither the title nor the tabs. A second tab bar sat
+        directly underneath in a different visual language, giving two competing hierarchies with
+        nothing to say which outranked the other. And the events section carried no numbers at all —
+        which is the finding Universe's dashboard redesign turned on: organizers barely used theirs
+        because it was an index of links rather than a report, and moving account-level sales above
+        the event list is what fixed it.
+
+        So: identity, then the numbers, then ONE row of sections. Creating an event is a primary
+        action rather than a tab, which is how every platform surveyed treats it — and which is what
+        lets the second bar disappear entirely.
+      */}
+      <header className="space-y-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="font-meta text-meta uppercase tracking-widest text-ink-soft">
+              Nhà tổ chức sự kiện
+            </p>
+            <h1 className="font-display text-2xl font-black tracking-tight text-beige-kem sm:text-3xl">
+              Bảng điều khiển
+            </h1>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => handleSectionSwitch("create")}
+            className="inline-flex shrink-0 items-center gap-2 bg-burgundy px-4 py-2.5 text-xs font-bold text-white transition hover:brightness-110"
+          >
+            <span aria-hidden>+</span> Tạo sự kiện
+          </button>
         </div>
 
-        <button
-          type="button"
-          onClick={() => navigate("/organizer/seatmaps")}
-          className="inline-flex items-center gap-2 border border-beige-kem/30 bg-surface-2 px-4 py-2 text-xs font-bold text-beige-kem transition-colors hover:border-beige-kem hover:bg-burgundy"
+        {/*
+          Account-level, not per-event: the question an organizer opens this page with is "how is it
+          selling", and until now the only answer lived one tab away. Absent while loading rather than
+          showing zeroes — a dash reads as "not known yet", a 0 reads as "you have sold nothing".
+        */}
+        {/* Monitoring, not creation: while filling the form these three numbers answer a question
+            nobody is asking, and push the first field further down. */}
+        <dl
+          className={`grid grid-cols-2 gap-3 sm:grid-cols-3 ${
+            activeSection === "create" ? "hidden" : ""
+          }`}
         >
-          <Armchair className="h-4 w-4" />
-          <span>Sơ đồ ghế</span>
-        </button>
+          {[
+            { label: "Doanh thu", value: overview ? formatVnd(overview.gross_revenue_vnd) : "—" },
+            {
+              label: "Vé đã bán",
+              value: overview ? overview.total_tickets_sold.toLocaleString("vi-VN") : "—",
+            },
+            { label: "Sự kiện đang mở bán", value: liveEventCount ?? "—" },
+          ].map((k) => (
+            <div key={k.label} className="border border-beige-kem/20 bg-surface-1 p-4">
+              <dt className="font-meta text-meta uppercase tracking-widest text-ink-soft">
+                {k.label}
+              </dt>
+              <dd className="mt-1 font-display text-title-s font-black tabular-nums text-beige-kem">
+                {k.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
 
-        {/* 2 Top-Level Workspace Section Switcher Tabs */}
-        <div className="flex items-center p-1.5 bg-xanh-pho/90 border border-beige-kem/20 space-x-1">
-          <button
-            type="button"
-            onClick={() => handleSectionSwitch("analytics")}
-            className={`flex items-center space-x-2 px-4 py-2 font-bold text-xs sm:text-sm transition-all ${
-              activeSection === "analytics"
-                ? "bg-burgundy text-white"
-                : "text-ink-soft hover:text-beige-kem hover:bg-surface-2"
-            }`}
-          >
-            <BarChart3 className="w-4 h-4" />
-            <span>Thống kê kinh doanh</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleSectionSwitch("events")}
-            className={`flex items-center space-x-2 px-4 py-2 font-bold text-xs sm:text-sm transition-all ${
-              activeSection === "events"
-                ? "bg-burgundy text-white"
-                : "text-ink-soft hover:text-beige-kem hover:bg-surface-2"
-            }`}
-          >
-            <Calendar className="w-4 h-4" />
-            <span>Quản lý sự kiện</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleSectionSwitch("ads")}
-            className={`flex items-center space-x-2 px-4 py-2 font-bold text-xs sm:text-sm transition-all ${
-              activeSection === "ads"
-                ? "bg-burgundy text-white"
-                : "text-ink-soft hover:text-beige-kem hover:bg-surface-2"
-            }`}
-          >
-            <Megaphone className="w-4 h-4" />
-            <span>Gói quảng cáo</span>
-          </button>
-        </div>
-      </div>
+        {/* One level of navigation. "Sơ đồ ghế" is a peer section, not a button floating beside the
+            title — a chart belongs to a venue and backs many events, exactly like the others here. */}
+        <nav
+          aria-label="Khu vực quản lý"
+          className="flex flex-wrap items-center gap-1 border-b border-beige-kem/20"
+        >
+          {(
+            [
+              { key: "analytics", label: "Thống kê kinh doanh", Icon: BarChart3 },
+              { key: "events", label: "Sự kiện", Icon: Calendar },
+              { key: "create", label: "Tạo sự kiện", Icon: Plus },
+              { key: "seatmaps", label: "Sơ đồ ghế", Icon: Armchair },
+              { key: "ads", label: "Gói quảng cáo", Icon: Megaphone },
+            ] as const
+          ).map(({ key, label, Icon }) => {
+            const active = key !== "seatmaps" && activeSection === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-current={active ? "page" : undefined}
+                onClick={() =>
+                  key === "seatmaps"
+                    ? navigate("/organizer/seatmaps")
+                    : handleSectionSwitch(key as Section)
+                }
+                className={`-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-bold transition-colors sm:text-sm ${
+                  active
+                    ? "border-burgundy text-beige-kem"
+                    : "border-transparent text-ink-soft hover:text-beige-kem"
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                <span>{label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </header>
 
       {activeSection === "analytics" ? (
         <OrganizerBusinessAnalytics />
       ) : activeSection === "ads" ? (
         <AdPackagesPanel />
-      ) : (
+      ) : activeSection === "events" ? (
         <div className="space-y-6">
-          {/* 2-Part Section Selector Tabs for Event Management */}
-          <div className="flex items-center space-x-2 border-b border-beige-kem/20 pb-3">
-            <button
-              onClick={() => setActiveTab("manage")}
-              className={`px-5 py-2.5 text-xs font-bold transition-all duration-200 flex items-center space-x-2 ${
-                activeTab === "manage"
-                  ? "bg-burgundy text-white"
-                  : "bg-surface-2 text-ink-soft border border-beige-kem/20 hover:text-beige-kem"
-              }`}
-            >
-              <span>📋 Phần 1: Quản Lý Sự Kiện Hiện Có</span>
-              <span className="px-1.5 py-0.5 bg-beige-kem/15 text-[10px]">
-                {summary.totalEvents}
-              </span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("create")}
-              className={`px-5 py-2.5 text-xs font-bold transition-all duration-200 flex items-center space-x-2 ${
-                activeTab === "create"
-                  ? "bg-burgundy text-white"
-                  : "bg-surface-2 text-ink-soft border border-beige-kem/20 hover:text-beige-kem"
-              }`}
-            >
-              <span>➕ Phần 2: Tạo Sự Kiện Mới</span>
-            </button>
-          </div>
-
-          {/* PART 1: MANAGE CURRENT EVENTS */}
-          {activeTab === "manage" && (
-            <div className="space-y-6">
-              <PortfolioSummaryHeader
-                summary={summary}
-                activeFilter={activeFilter}
-                onFilterChange={setActiveFilter}
-                onSearchChange={setSearchTerm}
-                searchTerm={searchTerm}
-                onCreateEvent={() => setActiveTab("create")}
-              />
-
-              {loading ? (
-                <div className="flex items-center justify-center py-20">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-burgundy"></div>
-                </div>
-              ) : events.length === 0 ? (
-                /* Empty State */
-                <div className="bg-surface-2 border border-beige-kem/20 p-12 text-center space-y-4 max-w-md mx-auto my-12">
-                  <div className="w-16 h-16 bg-cam-dat/20 text-burgundy flex items-center justify-center mx-auto text-2xl font-bold">
-                    📅
-                  </div>
-                  <h3 className="font-display text-lg font-bold text-beige-kem">
-                    Chưa có sự kiện nào
-                  </h3>
-                  <p className="font-meta text-xs text-ink-soft">
-                    {searchTerm || activeFilter !== "all"
-                      ? "Không tìm thấy sự kiện khớp với bộ lọc hoặc từ khóa tìm kiếm của bạn."
-                      : "Bạn chưa tạo sự kiện nào trên TixHub. Chuyển sang Phần 2 để tạo sự kiện đầu tiên!"}
-                  </p>
-                  {searchTerm || activeFilter !== "all" ? (
-                    <button
-                      onClick={() => {
-                        setActiveFilter("all");
-                        setSearchTerm("");
-                      }}
-                      className="font-meta text-xs text-burgundy-ink hover:underline font-bold"
-                    >
-                      Xóa bộ lọc tìm kiếm
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => setActiveTab("create")}
-                      className="inline-flex items-center px-4 py-2 text-xs font-bold bg-burgundy hover:brightness-110 text-white transition-colors"
-                    >
-                      + Sang Phần Tạo Sự Kiện Mới
-                    </button>
-                  )}
-                </div>
-              ) : (
-                /* Event Cards Grid with Background Image Overlay Layout */
-                <div className="grid grid-cols-1 gap-6">
-                  {events.map((event) => (
-                    <EventCard key={event.eventId} event={event} onSelect={handleSelectEvent} />
-                  ))}
-                </div>
-              )}
-            </div>
+          {/* The server-backed 006 console: events → editor → showtimes → tiers. */}
+          {(
+            <OrganizerConsole
+              selectedEventId={selectedEventId}
+              onSelectEvent={(id) => {
+                setSelectedEventId(id);
+                // Keep the address bar honest, the way the chart editor does: opening an event is a
+                // place you can link to, and Back out of, not a state hidden inside the page.
+                setUrlEvent(id);
+              }}
+              onCreateRequested={() => handleSectionSwitch("create")}
+              onOpenSeatMap={(eventId) => setSeatMapEventId(eventId)}
+              reloadKey={reloadKey}
+            />
           )}
 
-          {/* PART 2: CREATE NEW EVENT FORM */}
-          {activeTab === "create" && (
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {(
             <div className="bg-surface-2 border border-beige-kem/25 p-6 sm:p-8 max-w-3xl mx-auto space-y-6 transition-colors">
-              <div className="border-b border-beige-kem/20 pb-4">
-                <h2 className="font-display text-xl font-bold text-beige-kem flex items-center gap-2">
-                  <span>✨</span> Tạo Sự Kiện Mới
-                </h2>
-                <p className="font-meta text-xs text-ink-soft mt-1">
-                  Nhập thông tin chi tiết sự kiện, tải lên hình ảnh (bắt buộc) và video giới thiệu
-                  (tùy chọn).
-                </p>
-              </div>
+              {/*
+                Offered, never applied automatically. Someone who walked away from an event on
+                purpose should not find it typed back in for them — and the banner is named as NOT
+                recovered, because a `File` cannot be stored and quietly losing it would be the one
+                thing this feature is supposed to prevent.
+              */}
+              {recoverable && (
+                <div className="flex flex-col gap-3 border border-cam-dat/60 bg-cam-dat/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-meta text-xs font-bold text-beige-kem">
+                      Có một bản nháp chưa lưu
+                      {recoverable.title.trim() ? `: “${recoverable.title.trim()}”` : "."}
+                    </p>
+                    <p className="mt-0.5 font-meta text-[11px] text-ink-soft">
+                      Khôi phục phần đã nhập lần trước. Ảnh và video cần chọn lại.
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCreateTitle(recoverable.title);
+                        setCreateDescription(recoverable.description);
+                        setCreateCategory(recoverable.category);
+                        setCreateEventType(recoverable.eventType);
+                        setCreateVenueName(recoverable.venueName);
+                        setCreateVenueAddress(recoverable.venueAddress);
+                        setCreateCity(recoverable.city as "TP.HCM" | "Hà Nội" | "Đà Nẵng");
+                        setRecoverable(null);
+                      }}
+                      className="border border-la-co bg-la-co/25 px-3 py-1.5 text-xs font-bold text-beige-kem"
+                    >
+                      Khôi phục
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        clearDraft();
+                        setRecoverable(null);
+                      }}
+                      className="border border-beige-kem/40 px-3 py-1.5 text-xs font-bold text-beige-kem/80"
+                    >
+                      Bỏ qua
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <form onSubmit={handleCreateEventSubmit} className="space-y-5 text-xs">
-                {/* Title & Category */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="sm:col-span-2">
+                {/* Event type — decides which flow the submit follows (see `createEventType`). */}
+                <div>
+                  <label className="block font-meta text-beige-kem font-semibold mb-1">
+                    Hình thức bán vé
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setCreateEventType("seated")}
+                      aria-pressed={createEventType === "seated"}
+                      className={`border p-3 text-left transition-colors ${
+                        createEventType === "seated"
+                          ? "border-burgundy bg-burgundy/15"
+                          : "border-beige-kem/30 hover:border-burgundy/50"
+                      }`}
+                    >
+                      <span className="block font-bold text-beige-kem">
+                        🪑 Có sơ đồ ghế — khách chọn chỗ
+                      </span>
+                      <span className="mt-1 block text-[11px] text-ink-soft">
+                        Tạo bản nháp, rồi thêm suất chiếu, vẽ sơ đồ và gán hạng vé ở màn quản lý.
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCreateEventType("general_admission")}
+                      aria-pressed={createEventType === "general_admission"}
+                      className={`border p-3 text-left transition-colors ${
+                        createEventType === "general_admission"
+                          ? "border-burgundy bg-burgundy/15"
+                          : "border-beige-kem/30 hover:border-burgundy/50"
+                      }`}
+                    >
+                      <span className="block font-bold text-beige-kem">
+                        🎫 Vé đại trà — không chọn chỗ
+                      </span>
+                      <span className="mt-1 block text-[11px] text-ink-soft">
+                        Bán theo số lượng từng hạng vé, không cần sơ đồ. Tạo bản nháp, rồi thêm
+                        suất chiếu và hạng vé ở màn quản lý.
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Title, then category — one field per row (NN/g: single column completes fastest). */}
+                <div className="space-y-5">
+                  <div>
                     <label className="block font-meta text-beige-kem font-semibold mb-1">
-                      Tên Sự Kiện
+                      Tên sự kiện
                     </label>
                     <input
                       type="text"
@@ -537,46 +624,58 @@ export const OrganizerEventsPage: React.FC = () => {
                   </div>
                   <div>
                     <label className="block font-meta text-beige-kem font-semibold mb-1">
-                      Thể Loại
+                      Thể loại
                     </label>
+                    {/*
+                      Categories come from the database, not from a list typed here.
+
+                      The four options this replaced were `music / art / conference / concert`, of
+                      which only `music` is a real code — the other three failed the create outright
+                      with `400 Danh mục không hợp lệ`, after the organizer had filled the whole form
+                      and uploaded a banner. There are fourteen real categories, and an Admin can add
+                      more (UC-35); any list compiled into the bundle is a stale second opinion, which
+                      is exactly why `useEventCategories` exists.
+                    */}
                     <select
                       value={createCategory}
-                      onChange={(e) => {
-                        setCreateCategory(e.target.value);
-                        const labels: Record<string, string> = {
-                          music: "Âm nhạc",
-                          art: "Triển lãm",
-                          conference: "Hội thảo",
-                          concert: "Concert",
-                        };
-                        setCreateCategoryLabel(labels[e.target.value] || "Khác");
-                      }}
+                      onChange={(e) => setCreateCategory(e.target.value)}
                       className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none transition-colors"
                     >
-                      <option value="music">Âm nhạc</option>
-                      <option value="art">Triển lãm</option>
-                      <option value="conference">Hội thảo</option>
-                      <option value="concert">Concert</option>
+                      {categories.map((c) => (
+                        <option key={c.code} value={c.code} className="bg-xanh-pho">
+                          {c.labelVi}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
 
                 {/* Media Upload Section: Picture (Required) & Video (Optional) */}
-                <div className="bg-xanh-pho p-4 border border-beige-kem/25 space-y-4">
-                  <h3 className="font-meta text-xs font-bold text-burgundy uppercase tracking-wider">
-                    🖼️ Hình Ảnh & Video Sự Kiện
+                <div
+                  id="create-media"
+                  className="scroll-mt-24 space-y-4 border border-beige-kem/25 bg-xanh-pho p-4"
+                >
+                  <h3 className="font-meta text-xs font-bold uppercase tracking-wider text-burgundy">
+                    Hình ảnh & video
                   </h3>
+                  <Refusal message={mediaRefusal} />
 
-                  {/* Required Picture Upload */}
+                  {/*
+                    No `required` marker. On this form everything is required unless it says
+                    "(tùy chọn)" — mark the few optional fields rather than the many required ones.
+                    The prop only ever drew an asterisk (no `aria-required`, no input validation), so
+                    dropping it costs nothing: the real check is in `handleCreateEventSubmit`, and it
+                    reports through the `Refusal` above.
+                  */}
                   <div>
                     <MediaDropzone
-                      label="Hình Ảnh Sự Kiện (Picture / Banner Cover)"
+                      label="Hình ảnh sự kiện"
                       mediaType="banner"
                       currentUrl={createPictureUrl}
                       onFileSelected={(file) => setStagedBannerFile(file)}
-                      required
-                      helpText="PNG, JPG, WebP tối đa 5MB (Tỷ lệ 16:9)"
+                      helpText="Tỷ lệ 16:9"
                       aspectRatio="banner"
+                      compact
                       disabled={isCreating}
                     />
                   </div>
@@ -584,7 +683,7 @@ export const OrganizerEventsPage: React.FC = () => {
                   {/* Optional Video Upload */}
                   <div>
                     <MediaDropzone
-                      label="Video Giới Thiệu / Trailer (Tùy chọn)"
+                      label="Video giới thiệu (tùy chọn)"
                       mediaType="trailer"
                       currentUrl={createVideoUrl}
                       onFileSelected={(file) => setStagedTrailerFile(file)}
@@ -592,18 +691,20 @@ export const OrganizerEventsPage: React.FC = () => {
                         setStagedTrailerFile(null);
                         setCreateVideoUrl("");
                       }}
-                      helpText="MP4, WebM tối đa 50MB"
+                      helpText="Tỷ lệ 16:9"
                       aspectRatio="video"
+                      compact
                       disabled={isCreating}
                     />
                   </div>
                 </div>
 
-                {/* Location & City */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {/* Venue and city stay side by side — the short, related pair NN/g exempts from the
+                    single-column rule, and splitting them would only make the form taller. */}
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <div className="sm:col-span-2">
                     <label className="block font-meta text-beige-kem font-semibold mb-1">
-                      Tên Địa Điểm / Nhà Hát
+                      Tên địa điểm / nhà hát
                     </label>
                     <input
                       type="text"
@@ -616,7 +717,7 @@ export const OrganizerEventsPage: React.FC = () => {
                   </div>
                   <div>
                     <label className="block font-meta text-beige-kem font-semibold mb-1">
-                      Thành Phố *
+                      Thành phố
                     </label>
                     <select
                       value={createCity}
@@ -633,7 +734,7 @@ export const OrganizerEventsPage: React.FC = () => {
                 {/* Address */}
                 <div>
                   <label className="block font-meta text-beige-kem font-semibold mb-1">
-                    Địa Chỉ Chi Tiết
+                    Địa chỉ chi tiết
                   </label>
                   <input
                     type="text"
@@ -643,34 +744,6 @@ export const OrganizerEventsPage: React.FC = () => {
                     required
                     className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none"
                   />
-                </div>
-
-                {/* Schedule */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block font-meta text-beige-kem font-semibold mb-1">
-                      Thời Gian Bắt Đầu
-                    </label>
-                    <input
-                      type="datetime-local"
-                      value={createStartDatetime}
-                      onChange={(e) => setCreateStartDatetime(e.target.value)}
-                      required
-                      className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none font-meta"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-meta text-beige-kem font-semibold mb-1">
-                      Thời Gian Kết Thúc *
-                    </label>
-                    <input
-                      type="datetime-local"
-                      value={createEndDatetime}
-                      onChange={(e) => setCreateEndDatetime(e.target.value)}
-                      required
-                      className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none font-meta"
-                    />
-                  </div>
                 </div>
 
                 {/* AI Assistant for Recommended Description */}
@@ -735,7 +808,7 @@ export const OrganizerEventsPage: React.FC = () => {
                 {/* Description */}
                 <div>
                   <label className="block font-meta text-beige-kem font-semibold mb-1">
-                    Mô Tả Chi Tiết Sự Kiện
+                    Mô tả chi tiết
                   </label>
                   <textarea
                     rows={4}
@@ -747,157 +820,22 @@ export const OrganizerEventsPage: React.FC = () => {
                   />
                 </div>
 
-                {/* Multi Ticket Tier Setup Section */}
-                <div className="bg-xanh-pho p-5 border border-beige-kem/25 space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-beige-kem/20 pb-3">
-                    <div>
-                      <h3 className="font-meta text-xs font-bold text-burgundy uppercase tracking-wider flex items-center gap-1.5">
-                        <span>🎟️</span> Danh Sách Hạng Vé & Sức Chứa (Ticket Tiers)
-                      </h3>
-                      <p className="text-[11px] text-ink-soft mt-0.5">
-                        Khởi tạo nhiều hạng vé cùng lúc. Lựa chọn nhanh mẫu tên (Vé Tiêu Chuẩn, Miễn
-                        Phí, VIP) hoặc tự nhập tùy chỉnh. Giá vé & sức chứa do bạn tự nhập.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleAddTierItem}
-                      className="px-3.5 py-2 bg-la-co/20 hover:bg-la-co/30 text-on-tint border border-la-co/50 text-xs font-bold transition-all shrink-0 flex items-center gap-1 self-start sm:self-auto"
-                    >
-                      <span>+</span> Thêm Hạng Vé
-                    </button>
-                  </div>
-
-                  <div className="space-y-4">
-                    {createTicketTiers.map((tier, index) => {
-                      const resolvedName = getTierResolvedLabel(tier);
-                      return (
-                        <div
-                          key={tier.id}
-                          className="bg-surface-2 border border-beige-kem/30 p-4 space-y-3 relative transition-all"
-                        >
-                          <div className="flex items-center justify-between border-b border-beige-kem/15 pb-2">
-                            <span className="font-bold text-beige-kem text-xs flex items-center gap-2">
-                              <span className="w-5 h-5 bg-burgundy/30 border border-burgundy/50 flex items-center justify-center text-[10px] text-burgundy-ink font-bold">
-                                {index + 1}
-                              </span>
-                              Hạng Vé #{index + 1}:{" "}
-                              <span className="text-burgundy font-black">{resolvedName}</span>
-                            </span>
-
-                            {createTicketTiers.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveTierItem(tier.id)}
-                                className="border border-burgundy/40 bg-bubblegum/25 px-2 py-1 text-xs font-bold text-burgundy-ink transition-colors hover:bg-bubblegum/40"
-                              >
-                                🗑️ Xóa hạng vé
-                              </button>
-                            )}
-                          </div>
-
-                          {/* Name Preset Selection Chips */}
-                          <div>
-                            <label className="block text-ink-soft mb-1.5 font-semibold text-[11px]">
-                              Tên Hạng Vé
-                            </label>
-                            <div className="flex flex-wrap gap-2 mb-2">
-                              {[
-                                { key: "Vé Tiêu Chuẩn", label: "Vé Tiêu Chuẩn" },
-                                { key: "Miễn Phí", label: "Miễn Phí" },
-                                { key: "VIP", label: "Vé VIP" },
-                                { key: "custom", label: "Tùy Chỉnh" },
-                              ].map((opt) => (
-                                <button
-                                  key={opt.key}
-                                  type="button"
-                                  onClick={() =>
-                                    handleUpdateTierItem(tier.id, { preset: opt.key as any })
-                                  }
-                                  className={`px-3 py-1.5 text-xs font-semibold border transition-all ${
-                                    tier.preset === opt.key
-                                      ? "bg-burgundy text-white border-burgundy"
-                                      : "bg-xanh-pho text-beige-kem border-beige-kem/25 hover:border-burgundy/50"
-                                  }`}
-                                >
-                                  {opt.label}
-                                </button>
-                              ))}
-                            </div>
-
-                            {/* If Custom selected, show free-text input */}
-                            {tier.preset === "custom" && (
-                              <div className="mt-2">
-                                <input
-                                  type="text"
-                                  value={tier.customLabel}
-                                  onChange={(e) =>
-                                    handleUpdateTierItem(tier.id, { customLabel: e.target.value })
-                                  }
-                                  placeholder="Nhập tên hạng vé tùy chỉnh (Vd: Vé Early Bird, Vé Student, Vé VVIP...)"
-                                  required
-                                  className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-2.5 text-beige-kem outline-none text-xs"
-                                />
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Price & Capacity Inputs */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div>
-                              <label className="block text-ink-soft mb-1 font-semibold text-[11px]">
-                                Giá Vé (VND) {tier.preset === "Miễn Phí"}
-                              </label>
-                              <input
-                                type="number"
-                                value={tier.preset === "Miễn Phí" ? 0 : tier.price}
-                                onChange={(e) =>
-                                  handleUpdateTierItem(tier.id, { price: Number(e.target.value) })
-                                }
-                                step={10000}
-                                min={0}
-                                disabled={tier.preset === "Miễn Phí"}
-                                required
-                                className={`w-full border p-2.5 outline-none font-meta text-xs ${
-                                  tier.preset === "Miễn Phí"
-                                    ? "bg-xanh-pho/50 border-la-co/40 text-beige-kem cursor-not-allowed opacity-80 font-bold"
-                                    : "bg-xanh-pho border-beige-kem/30 text-beige-kem focus:border-burgundy"
-                                }`}
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-ink-soft mb-1 font-semibold text-[11px]">
-                                Tổng số vé
-                              </label>
-                              <input
-                                type="number"
-                                value={tier.capacity}
-                                onChange={(e) =>
-                                  handleUpdateTierItem(tier.id, {
-                                    capacity: Number(e.target.value),
-                                  })
-                                }
-                                min={1}
-                                required
-                                className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-2.5 text-beige-kem outline-none font-meta text-xs"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Form Actions */}
-                <div className="flex items-center justify-end space-x-3 pt-4 border-t border-beige-kem/20">
+                {/*
+                  Pinned to the bottom of the viewport while the form scrolls.
+                  The commit action sat at the end of a two-screen form, so it was off screen for
+                  most of the time somebody spends filling it in. `-mx` and its own surface let it
+                  span the card's full width and stay opaque — a translucent bar here would put the
+                  buttons on top of the field underneath, which is the problem this page already had
+                  with the site header.
+                */}
+                <div className="sticky bottom-0 -mx-6 flex items-center justify-end gap-3 border-t border-beige-kem/20 bg-surface-2 px-6 pb-1 pt-4 sm:-mx-8 sm:px-8">
                   <button
                     type="button"
-                    onClick={() => setActiveTab("manage")}
+                    onClick={() => handleSectionSwitch("events")}
                     disabled={isCreating}
                     className="px-5 py-2.5 bg-surface-2 hover:bg-beige-kem/10 text-beige-kem font-semibold transition-colors border border-beige-kem/30 disabled:opacity-50"
                   >
-                    Hủy & Quay Lại Danh Sách
+                    Hủy
                   </button>
                   <button
                     type="submit"
@@ -907,10 +845,10 @@ export const OrganizerEventsPage: React.FC = () => {
                     {isCreating ? (
                       <>
                         <span className="inline-block animate-spin">⏳</span>
-                        <span>Đang tải lên Cloudinary & Tạo sự kiện...</span>
+                        <span>Đang tải lên & tạo bản nháp…</span>
                       </>
                     ) : (
-                      "+ Hoàn Tất Tạo Sự Kiện"
+                      "Tạo bản nháp & tiếp tục"
                     )}
                   </button>
                 </div>
@@ -918,6 +856,19 @@ export const OrganizerEventsPage: React.FC = () => {
             </div>
           )}
         </div>
+      )}
+
+      {/* The overlay `SeatMapBuilder` opens for one event — design the venue chart, then apply it
+          to each showtime with a tier per class. Closing it refetches the console, so a new map
+          shows up in the list beneath without leaving the page. */}
+      {seatMapEventId !== null && (
+        <SeatMapBuilder
+          eventId={seatMapEventId}
+          onClose={() => {
+            setSeatMapEventId(null);
+            setReloadKey((k) => k + 1);
+          }}
+        />
       )}
     </div>
   );

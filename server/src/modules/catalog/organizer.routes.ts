@@ -3,6 +3,7 @@ import { z } from "zod";
 import { err } from "../../http.js";
 import { pool } from "../../db/pool.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
+import { getEventDetail } from "./catalog.repo.js";
 import { requireOrganizer } from "../../middleware/authz.js";
 import { validate } from "../../middleware/validate.js";
 import {
@@ -180,12 +181,42 @@ organizerRouter.post(
   }),
 );
 
-organizerRouter.post(
-  "/events/:id/cancel",
+/** Mandatory and length-checked HERE as well as in the dialog: the audit row is only worth keeping
+ *  if the reason in it is one somebody actually wrote. */
+const cancelEventSchema = z.object({ reason: z.string().trim().min(5).max(500) });
+
+/**
+ * The organizer's own event, as a buyer would see it — before it is submitted for review.
+ *
+ * Keyed by event ID rather than slug so `assertEventOwner` guards it exactly like every other write
+ * here. That guard is what makes the `asOwner` read safe: the public `/events/:slug` route is
+ * untouched and still 404s on anything not on sale and approved.
+ */
+organizerRouter.get(
+  "/events/:id/preview",
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
     await assertEventOwner(req, id);
-    res.json(await cancelEvent(id));
+    const { rows } = await pool.query<{ slug: string }>(
+      `SELECT slug FROM events WHERE id = $1`,
+      [id],
+    );
+    const slug = rows[0]?.slug;
+    if (!slug) throw err.notFound("not_found", "Không tìm thấy sự kiện.");
+    const detail = await getEventDetail(slug, pool, { asOwner: true });
+    if (!detail) throw err.notFound("not_found", "Không tìm thấy sự kiện.");
+    res.json(detail);
+  }),
+);
+
+organizerRouter.post(
+  "/events/:id/cancel",
+  validate(cancelEventSchema),
+  asyncH(async (req, res) => {
+    const id = Number(req.params.id);
+    await assertEventOwner(req, id);
+    const { reason } = req.body as z.infer<typeof cancelEventSchema>;
+    res.json(await cancelEvent(id, reason, req.auth!.userId));
   }),
 );
 

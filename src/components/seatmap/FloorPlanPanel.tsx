@@ -8,6 +8,7 @@ import type { LayoutFloorPlan } from "@/shared/catalog/seatmap";
 import { layoutApi } from "../../services/catalogClient";
 
 import { MediaDropzone } from "../common/MediaDropzone";
+import ConfirmDialog from "../ConfirmDialog";
 
 /**
  * Floor-plan upload and alignment (FR-020..FR-026a).
@@ -29,6 +30,7 @@ export default function FloorPlanPanel({
   plan: LayoutFloorPlan;
   onChange: (plan: LayoutFloorPlan) => void;
 }) {
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,12 +74,10 @@ export default function FloorPlanPanel({
         onFileSelected={(file) => {
           if (file) void run(() => layoutApi.uploadPlan(layoutId, file));
         }}
-        onRemove={() =>
-          void run(async () => {
-            await layoutApi.removePlan(layoutId);
-            return { ...plan, url: null };
-          })
-        }
+        // Asked first. Deleting the file is not undoable and the organizer may have spent a while
+        // aligning it — every other destructive action in this editor confirms, and this one being
+        // one click was an inconsistency waiting to cost somebody their upload.
+        onRemove={() => setConfirmRemove(true)}
         helpText="JPG, PNG, WEBP hoặc SVG tối đa 5MB"
         aspectRatio="banner"
         disabled={busy}
@@ -160,16 +160,29 @@ export default function FloorPlanPanel({
           <button
             className={`${btn} mt-3`}
             disabled={busy}
-            onClick={() =>
-              run(async () => {
-                await layoutApi.removePlan(layoutId);
-                return { ...plan, url: null };
-              })
-            }
+            onClick={() => setConfirmRemove(true)}
           >
             Xoá bản vẽ
           </button>
         </>
+      )}
+
+      {confirmRemove && (
+        <ConfirmDialog
+          title="Xoá bản vẽ mặt bằng?"
+          message="Tệp sẽ bị xoá khỏi máy chủ và không khôi phục được. Căn chỉnh đã lưu cũng mất theo."
+          confirmLabel="Xoá"
+          cancelLabel="Giữ lại"
+          tone="danger"
+          onConfirm={() => {
+            setConfirmRemove(false);
+            void run(async () => {
+              await layoutApi.removePlan(layoutId);
+              return { ...plan, url: null };
+            });
+          }}
+          onCancel={() => setConfirmRemove(false)}
+        />
       )}
     </div>
   );

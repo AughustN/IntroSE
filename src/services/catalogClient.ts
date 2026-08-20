@@ -12,6 +12,7 @@ import type {
   Layout,
   LayoutTable,
   LayoutFloorPlan,
+  OrphanRule,
   LayoutReferenceChart,
   LayoutLibraryEntry,
   LayoutRevision,
@@ -62,17 +63,43 @@ async function authed<T>(path: string, opts: { method?: string; body?: unknown }
   return (res.status === 204 ? undefined : await res.json()) as T;
 }
 
+/**
+ * The four states `events.status` may hold, and the four `events.moderation_status` may.
+ *
+ * Unions rather than `string`, because `flowSteps`' whole premise is mirroring the server's publish
+ * predicates exactly — and while these were bare strings every one of those comparisons was
+ * unchecked. `=== "onsale"` typechecked identically to `=== "on_sale"`, and a state nobody had
+ * written a branch for (a cancelled event, a finished one) failed silently rather than at the
+ * compiler. Mirrors the CHECK constraints in 0002_catalog.sql:83,85.
+ */
+export type EventStatus = "draft" | "on_sale" | "finished" | "cancelled";
+export type EventModeration = "pending_review" | "approved" | "flagged" | "removed";
+
 export interface MyEvent {
   id: number;
   slug: string;
   title: string;
-  status: string;
-  moderation: string;
+  status: EventStatus;
+  moderation: EventModeration;
   reviewNote: string | null;
   imageUrl: string | null;
   eventType: "general_admission" | "seated";
   category: string;
   isHighDemand?: boolean;
+  /**
+   * How the event is selling. `listMyEvents` has always computed and sent these three; the interface
+   * stopped declaring them when the components that read them were removed, so they crossed the wire
+   * on every dashboard load and were dropped on the floor.
+   */
+  totalCapacity: number;
+  soldTickets: number;
+  totalRevenueVnd: number;
+  /**
+   * The showtime the row leads with — next upcoming, else the most recent past one. Null for an event
+   * that has no showtime yet, which is every event between being created and being scheduled.
+   */
+  nextShowtimeAt: string | null;
+  venueName: string | null;
 }
 export interface MyVenue {
   id: number;
@@ -133,7 +160,19 @@ export interface ManageShowtime {
   layoutId: number | null;
   layoutStatus: "draft" | "ready" | "archived" | null;
   /** That chart's price classes — what a tier is bound TO. */
-  categories: { id: number; name: string; color: string; seatCount: number }[];
+  categories: {
+    id: number;
+    name: string;
+    color: string;
+    seatCount: number;
+    /**
+     * Whether this class holds inventory the apply gate will demand a price for — seats OR a
+     * capacity zone. `seatCount > 0` is NOT the same test: a zone-only class has no seats and still
+     * has to be priced, so reading `seatCount` here is what let the console show a chart ready to
+     * apply that the server then refused with `category_without_tier`.
+     */
+    hasInventory: boolean;
+  }[];
 }
 
 export const organizerApi = {
@@ -166,6 +205,26 @@ export const organizerApi = {
     authed<{ ok: true }>(`/organizer/events/${id}/publish`, { method: "POST" }),
   unpublish: (id: number) =>
     authed<{ ok: true }>(`/organizer/events/${id}/unpublish`, { method: "POST" }),
+  /**
+   * The organizer's own event as a buyer would see it, before it is on sale.
+   *
+   * The public `/events/:slug` read 404s on anything unapproved (SC-004), so a draft cannot be
+   * previewed through the buyer's own URL. This is the owner-side door to the same payload.
+   */
+  preview: (id: number) => authed<EventDetail>(`/organizer/events/${id}/preview`),
+  /**
+   * Cancel the event and settle every ticket sold for it.
+   *
+   * Distinct from `unpublish`, which only hides a show that can still come back. This one is
+   * terminal and it MOVES MONEY: the server runs the cancellation in one transaction, refunds each
+   * ticket to its buyer's wallet, and returns how many it settled. That count is the receipt — show
+   * it, because "đã hủy" alone does not tell an organizer whether the refunds ran.
+   */
+  cancel: (id: number, reason: string) =>
+    authed<{ refundedTickets: number }>(`/organizer/events/${id}/cancel`, {
+      method: "POST",
+      body: { reason },
+    }),
   myVenues: () => authed<MyVenue[]>("/organizer/venues"),
   createVenue: (b: { name: string; city: string; rawAddress: string; guide?: string }) =>
     authed<{ id: number }>("/organizer/venues", { method: "POST", body: b }),
@@ -278,6 +337,12 @@ export const layoutApi = {
   },
   alignPlan: (id: number, b: Omit<LayoutFloorPlan, "url">) =>
     authed<LayoutFloorPlan>(`/organizer/layouts/${id}/floorplan`, { method: "PATCH", body: b }),
+  /** How hard "best available" avoids stranding a lone seat on this chart (0037). */
+  setOrphanRule: (id: number, orphanRule: OrphanRule) =>
+    authed<{ orphanRule: OrphanRule }>(`/organizer/layouts/${id}/orphan-rule`, {
+      method: "PATCH",
+      body: { orphanRule },
+    }),
   /** The tracing layer. Same upload pipeline as the plan; the server never lets it reach a buyer. */
   uploadReference: async (id: number, file: File): Promise<LayoutReferenceChart> => {
     const form = new FormData();

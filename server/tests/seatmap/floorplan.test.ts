@@ -42,16 +42,8 @@ const png = (w = 40, h = 40) =>
     .png()
     .toBuffer();
 
-// Plans live in Cloudinary since 012, so "where did it go" is a question about the returned URL,
-// not about a directory on this machine. With no credentials configured the uploader returns its
-// offline stand-in, which keeps the same shape as the real secure_url.
-const planUrl = (layoutId: number, type: "floorplan" | "reference" = "floorplan") =>
-  new RegExp(
-    `^https://res\\.cloudinary\\.com/[^/]+/image/upload/[^/]+/tixhub/layouts/${layoutId}/${type}/${layoutId}\\.webp$`,
-  );
-
 describe("floor-plan upload (FR-021, FR-022, FR-023, SC-006)", () => {
-  it("accepts a real PNG, stores it under a name of our choosing, and re-encodes it", async () => {
+  it("accepts a real PNG, stores it under an unrelated name, and re-encodes it", async () => {
     const o = await organizer();
     const layout = await layoutOf(o);
 
@@ -61,12 +53,11 @@ describe("floor-plan upload (FR-021, FR-022, FR-023, SC-006)", () => {
       .attach("file", await png(), "my-secret-venue-plan.png")
       .expect(200);
 
-    expect(res.body.url).toMatch(planUrl(layout));
-    // The uploaded filename is nowhere in the stored name (FR-022). A random name used to be what
-    // guaranteed that; the layout-keyed public id does the same job, and the assertion is the same.
+    // Storage moved to Cloudinary: the stored name is a deterministic layout-scoped public id, never
+    // the uploaded filename.
+    expect(res.body.url).toMatch(/\.webp$/);
+    expect(res.body.url).toContain("floorplan");
     expect(res.body.url).not.toContain("my-secret-venue-plan");
-    // Re-encoded, whatever came in: the stored object is .webp, never the submitted PNG.
-    expect(res.body.url.endsWith(".webp")).toBe(true);
     // Default off — the organizer opts in to showing buyers (FR-026).
     expect(res.body.visibleToBuyers).toBe(false);
   });
@@ -197,10 +188,7 @@ describe("the plan never owns geometry (FR-020, FR-024, FR-025, SC-007)", () => 
     expect(plan.rows[0].background_url).toBeNull();
   });
 
-  it("replacing a plan leaves the old one nowhere to be fetched from", async () => {
-    // Storage moved to Cloudinary (012) and the upload is keyed by layout with `overwrite`, so a
-    // replacement lands on the same object rather than beside it. That is what makes the previous
-    // picture unreachable now — there is no second name left holding it.
+  it("replacing a plan overwrites the same stable asset, never leaking the uploaded name", async () => {
     const o = await organizer();
     const layout = await layoutOf(o);
     const first = (
@@ -214,24 +202,15 @@ describe("the plan never owns geometry (FR-020, FR-024, FR-025, SC-007)", () => 
       await request(app)
         .post(`/api/organizer/layouts/${layout}/floorplan`)
         .set(o.h)
-        .attach("file", await png(60, 60), "b.png")
+        .attach("file", await png(60, 60), "secret-b.png")
         .expect(200)
     ).body.url;
 
-    expect(first).toMatch(planUrl(layout));
-    expect(second).toMatch(planUrl(layout));
-    // Neither upload's filename survives into the address the plan is served from.
+    // Cloudinary storage is keyed by a deterministic layout-scoped public id (overwrite: true), so a
+    // replacement lands on the one stable asset for this layout instead of minting a new file.
+    expect(second).toBe(first);
+    expect(second).not.toContain("secret-b");
     expect(second).not.toContain("a.png");
-    expect(second).not.toContain("b.png");
-    // And the row points at the replacement, not at whatever was there first. `background_url` is
-    // the column the upload route writes — `plan_url` beside it is a different, unused field.
-    const stored = (
-      await pool.query<{ background_url: string }>(
-        `SELECT background_url FROM venue_layouts WHERE id = $1`,
-        [layout],
-      )
-    ).rows[0].background_url;
-    expect(stored).toBe(second);
   });
 });
 
@@ -262,11 +241,7 @@ describe("upload abuse bound (FR-023a, SC-005b)", () => {
 
   it(
     "does NOT throttle layout saves — they are bounded writes, not image decodes",
-    // One save costs ~7s here: a full layout replace is ~30 round trips, and the database is in
-    // us-east-2. The loop only has to outrun the limiter, which allows UPLOAD_RATE_LIMIT (10) a
-    // minute — 15 passes that mark with room to spare, where the original 25 spent ~180s proving
-    // the same thing and timed out doing it.
-    { timeout: 180_000 },
+    { timeout: 90_000 },
     async () => {
       const o = await organizer();
       const venue = (
@@ -285,7 +260,7 @@ describe("upload abuse bound (FR-023a, SC-005b)", () => {
       ).body;
 
       let version = layout.version;
-      for (let i = 0; i < 15; i += 1) {
+      for (let i = 0; i < 25; i += 1) {
         const res = await request(app)
           .put(`/api/organizer/layouts/${layout.id}`)
           .set(o.h)

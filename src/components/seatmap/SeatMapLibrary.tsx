@@ -61,6 +61,27 @@ export default function SeatMapLibrary({
   const [venueId, setVenueId] = useState("");
   const [newLayoutName, setNewLayoutName] = useState("");
   const [creating, setCreating] = useState(false);
+
+  /**
+   * Template-first creation (§32, §33).
+   *
+   * `null` = chooser closed. `"chooser"` = the three-way "how do you want to start" modal. The other
+   * three are the second step of each path, each one a different shape of "pick a venue, then pick
+   * the source it comes from" — kept as separate states rather than one polymorphic blob so the modal
+   * renders one simple form at a time.
+   *
+   * Why template first: an organizer who has never drawn a chart has nothing to copy, and the blank
+   * canvas was the only door this screen offered. Most real charts are one of ~4 shapes, so starting
+   * from a template and adjusting is the path with the most reuse — the blank path is still there,
+   * but it is no longer the path every first-timer has to walk.
+   */
+  const [createMode, setCreateMode] = useState<
+    null | "chooser" | "template" | "duplicate" | "blank"
+  >(null);
+  /** The chart a duplicate starts from, once picked. */
+  const [duplicateSourceId, setDuplicateSourceId] = useState("");
+  /** The template a new chart starts from, once picked. */
+  const [templateSourceId, setTemplateSourceId] = useState("");
   const [confirm, setConfirm] = useState<(ConfirmRequest & { onConfirm: () => void }) | null>(null);
   /** Which chart's history is open, and what it holds. Loaded on demand — most charts never need it. */
   const [history, setHistory] = useState<{ layoutId: number; rows: LayoutRevision[] } | null>(null);
@@ -187,19 +208,11 @@ export default function SeatMapLibrary({
       return made;
     });
 
-  const loadVenues = async () => {
-    if (venues !== null) return;
-    setCreating(true);
-    setError(null);
-    try {
-      setVenues(await organizerApi.myVenues());
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setCreating(false);
-    }
-  };
-
+  /**
+   * The BLANK path: create an empty chart on the selected venue and hand it straight to the editor.
+   * Still here — it is the right choice for a venue whose shape matches none of the organizer's old
+   * charts — but it no longer crowds the door: the chooser offers it third, after template and copy.
+   */
   const createLayout = async () => {
     const selectedVenueId = Number(venueId);
     const name = newLayoutName.trim();
@@ -216,7 +229,96 @@ export default function SeatMapLibrary({
     setError(null);
     try {
       const created = await layoutApi.create(selectedVenueId, name);
+      setCreateMode(null);
       onOpen(created.id);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  /**
+   * Open the three-way "how do you want to start" chooser (§32, §33).
+   *
+   * Also the single place that loads the venue list — every path needs it, so loading it up front
+   * (rather than per-path) means the chooser's blank option can create the moment it is picked.
+   */
+  const openCreateChooser = async () => {
+    if (venues === null) {
+      setCreating(true);
+      setError(null);
+      try {
+        setVenues(await organizerApi.myVenues());
+      } catch (e) {
+        setError((e as Error).message);
+        return;
+      } finally {
+        setCreating(false);
+      }
+    }
+    setError(null);
+    setCreateMode("chooser");
+  };
+
+  const closeCreateChooser = () => {
+    setCreateMode(null);
+    setDuplicateSourceId("");
+    setTemplateSourceId("");
+    setError(null);
+  };
+
+  /** Start a real chart from a chosen template and open it in one move (§33). */
+  const createFromTemplate = async () => {
+    const selectedVenueId = Number(venueId);
+    const sourceId = Number(templateSourceId);
+    if (!selectedVenueId) {
+      setError("Vui lòng chọn địa điểm để đặt sơ đồ mới.");
+      return;
+    }
+    if (!sourceId) {
+      setError("Vui lòng chọn một mẫu.");
+      return;
+    }
+    setCreating(true);
+    setError(null);
+    try {
+      const source = (rows ?? []).find((l) => l.id === sourceId);
+      const made = await layoutApi.clone(sourceId, {
+        targetVenueId: selectedVenueId,
+        name: `${source?.name ?? "Mẫu"} (từ mẫu)`,
+      });
+      setCreateMode(null);
+      onOpen(made.id);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  /** Duplicate one of the organizer's own charts into a (possibly different) venue. */
+  const duplicateIntoVenue = async () => {
+    const selectedVenueId = Number(venueId);
+    const sourceId = Number(duplicateSourceId);
+    if (!selectedVenueId) {
+      setError("Vui lòng chọn địa điểm để đặt bản sao.");
+      return;
+    }
+    if (!sourceId) {
+      setError("Vui lòng chọn sơ đồ nguồn để nhân bản.");
+      return;
+    }
+    setCreating(true);
+    setError(null);
+    try {
+      const source = (rows ?? []).find((l) => l.id === sourceId);
+      const made = await layoutApi.clone(sourceId, {
+        targetVenueId: selectedVenueId,
+        name: `${source?.name ?? "Sơ đồ"} (bản sao)`,
+      });
+      setCreateMode(null);
+      onOpen(made.id);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -268,69 +370,18 @@ export default function SeatMapLibrary({
                 Tạo sơ đồ mới
               </h3>
               <p className="mt-1 font-meta text-meta text-beige-kem/55">
-                Chọn một địa điểm rồi mở trình thiết kế để bắt đầu đặt ghế.
+                Bắt đầu từ một mẫu có sẵn, nhân bản một sơ đồ đã có, hoặc vẽ từ trang trắng.
               </p>
             </div>
-            {venues === null && (
-              <button
-                type="button"
-                onClick={() => void loadVenues()}
-                disabled={creating}
-                className={primary}
-              >
-                {creating ? "Đang tải…" : "Bắt đầu thiết kế"}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => void openCreateChooser()}
+              disabled={creating}
+              className={primary}
+            >
+              {creating ? "Đang tải…" : "Bắt đầu thiết kế"}
+            </button>
           </div>
-
-          {venues !== null && (
-            <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-              <label className="sr-only" htmlFor="seatmap-venue">
-                Địa điểm
-              </label>
-              <select
-                id="seatmap-venue"
-                value={venueId}
-                onChange={(e) => setVenueId(e.target.value)}
-                disabled={creating}
-                className="h-10 rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow text-beige-kem"
-              >
-                <option value="" className="bg-xanh-pho">
-                  Chọn địa điểm
-                </option>
-                {venues.map((venue) => (
-                  <option key={venue.id} value={venue.id} className="bg-xanh-pho">
-                    {venue.name} · {venue.city}
-                  </option>
-                ))}
-              </select>
-              <label className="sr-only" htmlFor="seatmap-name">
-                Tên sơ đồ
-              </label>
-              <input
-                id="seatmap-name"
-                value={newLayoutName}
-                onChange={(e) => setNewLayoutName(e.target.value)}
-                maxLength={120}
-                disabled={creating}
-                placeholder="Tên sơ đồ, ví dụ: Khán phòng chính"
-                className="h-10 rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow text-beige-kem outline-none focus:border-burgundy"
-              />
-              <button
-                type="button"
-                onClick={() => void createLayout()}
-                disabled={creating}
-                className={primary}
-              >
-                {creating ? "Đang tạo…" : "Tạo và mở"}
-              </button>
-            </div>
-          )}
-          {venues !== null && venues.length === 0 && (
-            <p className="mt-3 font-meta text-meta text-cam-dat">
-              Bạn chưa có địa điểm nào. Hãy tạo địa điểm trước khi thiết kế sơ đồ.
-            </p>
-          )}
         </section>
 
         {error && (
@@ -622,6 +673,206 @@ export default function SeatMapLibrary({
           ))}
         </div>
       </div>
+
+      {/* Template-first creation (§32, §33). A chooser first — start from a template, duplicate an
+          existing chart, or go blank — instead of the bare venue/name form. Templates are the path
+          most first-time charts should take, so it is offered first; the blank path is still one
+          click away. Each sub-mode is its own simple form, rendered from the `createMode` state. */}
+      {createMode !== null && venues !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={closeCreateChooser}
+        >
+          <div
+            className="max-h-[85vh] w-full max-w-lg overflow-y-auto border-2 border-beige-kem bg-xanh-pho p-6 text-beige-kem"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="font-display text-title-m font-black">
+                {createMode === "chooser"
+                  ? "Tạo sơ đồ mới"
+                  : createMode === "template"
+                    ? "Bắt đầu từ mẫu"
+                    : createMode === "duplicate"
+                      ? "Nhân bản sơ đồ có sẵn"
+                      : "Vẽ từ trang trắng"}
+              </h3>
+              <button onClick={closeCreateChooser} className={ghost}>
+                Đóng
+              </button>
+            </div>
+
+            {venues.length === 0 ? (
+              <p className="mt-4 text-body text-cam-dat">
+                Bạn chưa có địa điểm nào. Hãy tạo địa điểm (bằng cách tạo một sự kiện) trước khi
+                thiết kế sơ đồ.
+              </p>
+            ) : createMode === "chooser" ? (
+              <div className="mt-4 space-y-3">
+                <button
+                  className="block w-full border-2 border-beige-kem bg-surface-2 p-4 text-left transition hover:border-burgundy"
+                  onClick={() => setCreateMode("template")}
+                  disabled={busy}
+                >
+                  <p className="font-display text-base font-bold">Bắt đầu từ một mẫu</p>
+                  <p className="mt-1 font-meta text-meta text-beige-kem/55">
+                    Lấy một mẫu có sẵn, rồi chỉnh lại cho đúng. Nhanh nhất cho lần đầu.
+                  </p>
+                </button>
+                <button
+                  className="block w-full border-2 border-beige-kem bg-surface-2 p-4 text-left transition hover:border-burgundy"
+                  onClick={() => setCreateMode("duplicate")}
+                  disabled={busy}
+                >
+                  <p className="font-display text-base font-bold">Nhân bản một sơ đồ đã có</p>
+                  <p className="mt-1 font-meta text-meta text-beige-kem/55">
+                    Sao chép một sơ đồ bạn đã vẽ, rồi sửa lại.
+                  </p>
+                </button>
+                <button
+                  className="block w-full border-2 border-beige-kem bg-surface-2 p-4 text-left transition hover:border-burgundy"
+                  onClick={() => setCreateMode("blank")}
+                  disabled={busy}
+                >
+                  <p className="font-display text-base font-bold">Vẽ từ trang trắng</p>
+                  <p className="mt-1 font-meta text-meta text-beige-kem/55">
+                    Mở trình thiết kế với một sơ đồ trống.
+                  </p>
+                </button>
+              </div>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {/* Shared: which venue the new chart belongs to. */}
+                <label className="block">
+                  <span className="mb-1 block font-meta text-[11px] text-beige-kem/70">
+                    Địa điểm
+                  </span>
+                  <select
+                    value={venueId}
+                    onChange={(e) => setVenueId(e.target.value)}
+                    disabled={creating}
+                    className="h-10 w-full border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow text-beige-kem outline-none focus:border-burgundy"
+                  >
+                    <option value="" className="bg-xanh-pho">
+                      Chọn địa điểm
+                    </option>
+                    {venues.map((venue) => (
+                      <option key={venue.id} value={venue.id} className="bg-xanh-pho">
+                        {venue.name} · {venue.city}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {createMode === "template" && (
+                  <label className="block">
+                    <span className="mb-1 block font-meta text-[11px] text-beige-kem/70">Mẫu</span>
+                    <select
+                      value={templateSourceId}
+                      onChange={(e) => setTemplateSourceId(e.target.value)}
+                      disabled={creating}
+                      className="h-10 w-full border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow text-beige-kem outline-none focus:border-burgundy"
+                    >
+                      <option value="" className="bg-xanh-pho">
+                        Chọn mẫu
+                      </option>
+                      {(rows ?? [])
+                        .filter((l) => l.isTemplate)
+                        .map((t) => (
+                          <option key={t.id} value={t.id} className="bg-xanh-pho">
+                            {t.name} · {t.seatCount} ghế
+                          </option>
+                        ))}
+                    </select>
+                    {(rows ?? []).filter((l) => l.isTemplate).length === 0 && (
+                      <p className="mt-2 font-meta text-meta text-cam-dat">
+                        Chưa có mẫu nào. Mở một sơ đồ, rồi dùng "Lưu thành mẫu" để tạo.
+                      </p>
+                    )}
+                  </label>
+                )}
+
+                {createMode === "duplicate" && (
+                  <label className="block">
+                    <span className="mb-1 block font-meta text-[11px] text-beige-kem/70">
+                      Sơ đồ nguồn
+                    </span>
+                    <select
+                      value={duplicateSourceId}
+                      onChange={(e) => setDuplicateSourceId(e.target.value)}
+                      disabled={creating}
+                      className="h-10 w-full border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow text-beige-kem outline-none focus:border-burgundy"
+                    >
+                      <option value="" className="bg-xanh-pho">
+                        Chọn sơ đồ
+                      </option>
+                      {(rows ?? [])
+                        .filter((l) => l.status !== "archived")
+                        .map((l) => (
+                          <option key={l.id} value={l.id} className="bg-xanh-pho">
+                            {l.name} · {l.venueName} · {l.seatCount} ghế
+                          </option>
+                        ))}
+                    </select>
+                    {(rows ?? []).filter((l) => l.status !== "archived").length === 0 && (
+                      <p className="mt-2 font-meta text-meta text-cam-dat">
+                        Chưa có sơ đồ nào để nhân bản.
+                      </p>
+                    )}
+                  </label>
+                )}
+
+                {createMode === "blank" && (
+                  <label className="block">
+                    <span className="mb-1 block font-meta text-[11px] text-beige-kem/70">
+                      Tên sơ đồ
+                    </span>
+                    <input
+                      value={newLayoutName}
+                      onChange={(e) => setNewLayoutName(e.target.value)}
+                      maxLength={120}
+                      disabled={creating}
+                      placeholder="Tên sơ đồ, ví dụ: Khán phòng chính"
+                      className="h-10 w-full border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow text-beige-kem outline-none focus:border-burgundy"
+                    />
+                  </label>
+                )}
+
+                {error && (
+                  <p className="border-2 border-bubblegum bg-surface-2 px-3 py-2 text-eyebrow text-on-tint">
+                    {error}
+                  </p>
+                )}
+
+                <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
+                  <button onClick={closeCreateChooser} disabled={creating} className={ghost}>
+                    Huỷ
+                  </button>
+                  <button
+                    disabled={creating}
+                    className={primary}
+                    onClick={() =>
+                      createMode === "template"
+                        ? void createFromTemplate()
+                        : createMode === "duplicate"
+                          ? void duplicateIntoVenue()
+                          : void createLayout()
+                    }
+                  >
+                    {creating
+                      ? "Đang tạo…"
+                      : createMode === "template"
+                        ? "Dùng mẫu này"
+                        : createMode === "duplicate"
+                          ? "Nhân bản"
+                          : "Tạo và mở"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {confirm && (
         <ConfirmDialog

@@ -11,7 +11,6 @@ import AdminConsole from "./components/admin/AdminConsole";
 import AuthModal from "./components/AuthModal";
 import AccountPage from "./components/account/AccountPage";
 import { OrganizerEventsPage } from "./pages/organizer/OrganizerEventsPage";
-import { SingleEventPage } from "./pages/organizer/SingleEventPage";
 import SeatMapLibrary from "./components/seatmap/SeatMapLibrary";
 import ChartEditor from "./components/seatmap/ChartEditor";
 import ResetPassword from "./components/ResetPassword";
@@ -495,6 +494,16 @@ export default function App() {
     [location.pathname],
   );
 
+  /**
+   * Which event the console has open, if any — read from the URL for the same reason as the chart
+   * above: one source of truth, so a deep link, a Back and a click all arrive the same way.
+   */
+  const organizerEventId = useMemo(() => {
+    const raw = pathToRoute(location.pathname)?.organizerEventId;
+    const id = raw === undefined ? NaN : Number(raw);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  }, [location.pathname]);
+
   const activeScreenRef = useLatest(activeScreen);
   const selectedMovieRef = useLatest(selectedMovie);
   const bookingShowtimeIdRef = useLatest(bookingShowtimeId);
@@ -718,9 +727,17 @@ export default function App() {
 
   const holdRemainingMs = useHoldCountdown(hold?.expiresAt ?? null, handleHoldExpired);
 
-  // A reload or a closed tab is also an exit from the flow — warn before the hold is dropped.
+  /*
+   * A reload or a closed tab is also an exit from the flow — warn before the hold is dropped.
+   *
+   * Gated on the hold actually HOLDING something. `loadHoldSession` refuses an empty restored
+   * session, but three of the four `setHold` paths build one straight from a reservation without the
+   * `items.length === 0` check the fourth makes, so an active reservation with nothing in it became a
+   * truthy hold. The result was "Leave site?" on a seat page reading "Chưa chọn ghế nào" — a warning
+   * about losing nothing, which is the fastest way to teach someone to dismiss these unread.
+   */
   useEffect(() => {
-    if (!hold) return;
+    if (!hold || hold.seats.length === 0) return;
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
@@ -1765,6 +1782,45 @@ export default function App() {
   };
 
   /**
+   * Hold several seats in ONE round trip — what the "chọn giúp tôi" button on the seat map calls
+   * with its chosen contiguous run (feature 005, FR-072).
+   *
+   * A single `hold`/`add` with the whole `seatIds` array, rather than N toggles: N toggles are N
+   * racing claims, and two buyers could each grab half of the run between presses. One call holds
+   * the entire run or none of it, which is the only atomicity a "best seats" promise can keep —
+   * a run that arrives half-filled is not the thing that was offered.
+   */
+  const handleHoldBestSeats = async (seats: Seat[]) => {
+    const seatIds = seats
+      .map((s) => s.showtimeSeatId)
+      .filter((id): id is number => id !== undefined);
+    if (bookingShowtimeId === null || seatIds.length === 0 || holdBusy) return;
+
+    const context = {
+      eventId: selectedMovie.id,
+      eventTitle: selectedMovie.title,
+      selectedDate: bookingDate,
+      selectedTime: bookingTime,
+      mode: "seated" as const,
+    };
+    setHoldBusy(true);
+    try {
+      const updated = hold
+        ? await holdsClient.add(hold.reservationId, { seatIds })
+        : await holdsClient.hold({ showtimeId: bookingShowtimeId, seatIds });
+      setHold(sessionFromReservation(updated, context));
+    } catch (e) {
+      pushToast(
+        "error",
+        e instanceof HoldError ? e.message : "Không giữ được ghế. Vui lòng thử lại.",
+      );
+      if (e instanceof HoldError && e.status === 404) setHold(null);
+    } finally {
+      setHoldBusy(false);
+    }
+  };
+
+  /**
    * A general-admission stepper press, straight through to the server.
    *
    * The quantity is not local state any more. It used to be picked on the event page and only
@@ -2103,6 +2159,10 @@ export default function App() {
             goTo("organizer");
           })
         }
+        /* Same target and same sign-in gate as the footer's organiser banner. */
+        onApplyAsOrganizer={() =>
+          void leaveFlow(() => runSignedIn(() => navigate(`${ACCOUNT_PATH}?section=organizer`)))
+        }
         onAdminClick={() =>
           leaveFlow(() => {
             goTo("admin");
@@ -2118,6 +2178,12 @@ export default function App() {
         userEmail={userEmail}
         avatarUrl={avatarUrl}
         overlay={activeScreen === "home"}
+        /* The organizer workspace is long-form work; the nav scrolls away rather than over it. */
+        unpinned={
+          visibleScreen === "organizer" ||
+          visibleScreen === "organizer-events" ||
+          visibleScreen === "seatmaps"
+        }
         theme={theme}
         onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
       />
@@ -2320,6 +2386,7 @@ export default function App() {
             remainingMs={holdRemainingMs}
             busy={holdBusy}
             onToggleSeat={(seat) => void handleToggleSeat(seat)}
+            onHoldBestSeats={(seats) => void handleHoldBestSeats(seats)}
             // Backward is a cancel, here and everywhere else in the flow.
             onBack={() => void cancelBookingFlow()}
             onGoToStep={() => void cancelBookingFlow()}
@@ -2503,9 +2570,8 @@ export default function App() {
             </div>
           ))}
         {(visibleScreen === "organizer" || visibleScreen === "organizer-events") && (
-          <OrganizerEventsPage />
+          <OrganizerEventsPage openEventId={organizerEventId} />
         )}
-        {visibleScreen === "organizer-event-detail" && <SingleEventPage />}
         {visibleScreen === "seatmaps" &&
           (seatmapLayoutId !== null ? (
             <ChartEditor

@@ -7,6 +7,7 @@ import {
   queueEventNotification,
   closeWaitlistsForEvent,
 } from "../notifications/notifications.service.js";
+import { insertAudit } from "../admin/audit.js";
 
 type RefundRow = {
   ticket_id: number;
@@ -141,8 +142,41 @@ export async function settleEventCancellation(
   };
 }
 
-export async function cancelEvent(eventId: number): Promise<{ refundedTickets: number }> {
-  const result = await withTransaction(async (db) => settleEventCancellation(db, eventId));
+/**
+ * Cancel an event: refund every unused ticket, then record WHY.
+ *
+ * The reason is not decoration. The organizer console asks for it as a mandatory field and tells the
+ * organizer it will be kept in an immutable log — so it has to actually land in one, or the dialog
+ * is making a promise the system does not keep. `audit_logs` is already append-only (an
+ * `audit_logs_immutable` trigger rejects UPDATE and DELETE, migration 0013), which is exactly the
+ * guarantee being offered.
+ *
+ * The write is INSIDE the transaction that moves the money: a refund that happened with no record of
+ * why is the state this exists to prevent, and rolling both back together is the only way to keep
+ * them from diverging. `refundedTickets` rides along in `detail` so the log says what the
+ * cancellation actually cost, not merely that it was requested.
+ */
+export async function cancelEvent(
+  eventId: number,
+  reason: string,
+  actorUserId: number,
+): Promise<{ refundedTickets: number }> {
+  const result = await withTransaction(async (db) => {
+    const settled = await settleEventCancellation(db, eventId);
+    await insertAudit(db, {
+      actorUserId,
+      action: "event.cancel",
+      targetType: "event",
+      targetId: eventId,
+      outcome: "applied",
+      detail: {
+        reason,
+        refundedTickets: settled.refundedTickets,
+        refundedAmount: settled.refundedAmount,
+      },
+    });
+    return settled;
+  });
   kickNotificationWorker();
   return { refundedTickets: result.refundedTickets };
 }

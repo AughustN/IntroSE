@@ -8,21 +8,31 @@ import type {
   LayoutSummary,
   SaveLayoutRequest,
   ShowtimeMap,
-} from '@shared/catalog/seatmap.js';
-import type { SeatMapElement, SeatMapTable } from '@shared/catalog/types.js';
-import type { ChartDocument } from '@shared/catalog/seatmap-document.js';
-import { adoptLayout, remapDocument, upgradeDocument } from '@shared/catalog/seatmap-document.js';
-import { projectDocument, stitchRows, stitchSeatIds } from '@shared/catalog/seatmap-project.js';
-import { clampCoord, normaliseRotation } from '@shared/catalog/seatmap-validate.js';
-import { buildTierLegend } from '@shared/catalog/tier-palette.js';
-import { LAYOUT_SPACE, SEAT_DIAMETER } from '../../config.js';
-import { type Db, pool, withTransaction } from '../../db/pool.js';
+} from "@shared/catalog/seatmap.js";
+import type { SeatMapElement, SeatMapTable } from "@shared/catalog/types.js";
+import type { ChartDocument } from "@shared/catalog/seatmap-document.js";
+import { adoptLayout, remapDocument, upgradeDocument } from "@shared/catalog/seatmap-document.js";
+import { projectDocument, stitchRows, stitchSeatIds } from "@shared/catalog/seatmap-project.js";
+import { clampCoord, normaliseRotation } from "@shared/catalog/seatmap-validate.js";
+import { buildTierLegend, CATEGORY_COLORS } from "@shared/catalog/tier-palette.js";
+import { LAYOUT_SPACE, SEAT_DIAMETER } from "../../config.js";
+import { type Db, pool, withTransaction } from "../../db/pool.js";
 
 // Layout reads and the versioned full-document save (research R-5).
 //
 // This module NEVER consults inventory: a showtime's generated map is a snapshot, so editing a
 // layout cannot disturb a show that is on sale (FR-005, FR-027). Everything inventory-aware lives in
 // apply.ts.
+
+/**
+ * The shared colour-blind-safe palette, rendered as a Postgres ARRAY literal for the INSERTs that
+ * hand a new section/category its default colour by position. Values are constants from
+ * `shared/catalog/tier-palette.ts` — never user input — so interpolating them into SQL is not an
+ * injection vector; it is how the database and the editor hand out byte-identical colours
+ * (Principle VI) instead of two copies that can drift apart.
+ */
+const PALETTE_SQL = `ARRAY[${CATEGORY_COLORS.map((c) => `'${c}'`).join(",")}]`;
+const PALETTE_LEN = CATEGORY_COLORS.length;
 
 export async function layoutOwnerUserId(layoutId: number, db: Db = pool): Promise<number | null> {
   const { rows } = await db.query<{ created_by: number }>(
@@ -33,17 +43,26 @@ export async function layoutOwnerUserId(layoutId: number, db: Db = pool): Promis
 }
 
 export async function layoutVenueId(layoutId: number, db: Db = pool): Promise<number | null> {
-  const { rows } = await db.query<{ venue_id: number }>(`SELECT venue_id FROM venue_layouts WHERE id = $1`, [layoutId]);
+  const { rows } = await db.query<{ venue_id: number }>(
+    `SELECT venue_id FROM venue_layouts WHERE id = $1`,
+    [layoutId],
+  );
   return rows[0]?.venue_id ?? null;
 }
 
 export async function countLayouts(venueId: number, db: Db = pool): Promise<number> {
-  const { rows } = await db.query<{ n: string }>(`SELECT count(*) AS n FROM venue_layouts WHERE venue_id = $1`, [venueId]);
+  const { rows } = await db.query<{ n: string }>(
+    `SELECT count(*) AS n FROM venue_layouts WHERE venue_id = $1`,
+    [venueId],
+  );
   return Number(rows[0].n);
 }
 
 export async function countSeats(layoutId: number, db: Db = pool): Promise<number> {
-  const { rows } = await db.query<{ n: string }>(`SELECT count(*) AS n FROM seats WHERE layout_id = $1`, [layoutId]);
+  const { rows } = await db.query<{ n: string }>(
+    `SELECT count(*) AS n FROM seats WHERE layout_id = $1`,
+    [layoutId],
+  );
   return Number(rows[0].n);
 }
 
@@ -64,7 +83,7 @@ export async function listAllLayouts(userId: number, db: Db = pool): Promise<Lay
     venue_id: number;
     venue_name: string;
     name: string;
-    status: 'draft' | 'ready' | 'archived';
+    status: "draft" | "ready" | "archived";
     is_template: boolean;
     seat_count: string;
     usage_count: string;
@@ -98,7 +117,7 @@ export async function listLayouts(venueId: number, db: Db = pool): Promise<Layou
     id: number;
     venue_id: number;
     name: string;
-    status: 'draft' | 'ready' | 'archived';
+    status: "draft" | "ready" | "archived";
     is_template: boolean;
     seat_count: string;
   }>(
@@ -122,7 +141,7 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
     id: number;
     venue_id: number;
     name: string;
-    status: 'draft' | 'ready' | 'archived';
+    status: "draft" | "ready" | "archived";
     is_template: boolean;
     version: number;
     background_url: string | null;
@@ -139,6 +158,7 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
     reference_offset_x: number;
     reference_offset_y: number;
     reference_opacity: string;
+    orphan_rule: "balanced" | "strict";
     document: unknown;
   }>(`SELECT * FROM venue_layouts WHERE id = $1`, [layoutId]);
   const l = head.rows[0];
@@ -150,7 +170,7 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
       name: string;
       description: string | null;
       color: string | null;
-      seat_shape: 'circle' | 'square';
+      seat_shape: "circle" | "square";
       seat_size_multiplier: string;
     }>(
       `SELECT id, name, description, color, seat_shape, seat_size_multiplier
@@ -174,7 +194,7 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
       category_id: number | null;
       row_label: string;
       seat_number: number;
-      seat_type: 'single' | 'double' | 'standing';
+      seat_type: "single" | "double" | "standing";
       pos_x: number;
       pos_y: number;
       rotation: number;
@@ -193,7 +213,7 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
     ),
     db.query<{
       id: number;
-      kind: LayoutElement['kind'];
+      kind: LayoutElement["kind"];
       pos_x: number;
       pos_y: number;
       width: number;
@@ -216,7 +236,7 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
       section_id: number | null;
       category_id: number | null;
       name: string;
-      shape: 'round' | 'rect';
+      shape: "round" | "rect";
       pos_x: number;
       pos_y: number;
       width: number;
@@ -224,7 +244,7 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
       rotation: number;
       seat_count: number;
       side_counts: number[] | null;
-      booking_mode: 'per_seat' | 'whole_table';
+      booking_mode: "per_seat" | "whole_table";
     }>(
       `SELECT id, section_id, category_id, name, shape, pos_x, pos_y, width, height, rotation,
               seat_count, side_counts, booking_mode
@@ -317,6 +337,7 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
       offsetY: l.reference_offset_y,
       opacity: Math.round(Number(l.reference_opacity) * 100),
     },
+    orphanRule: l.orphan_rule,
     document: null,
   };
 
@@ -415,18 +436,27 @@ export async function createLayout(venueId: number, name: string, db: Db = pool)
 }
 
 export async function renameLayout(layoutId: number, name: string, db: Db = pool): Promise<void> {
-  await db.query(`UPDATE venue_layouts SET name = $2, updated_at = now() WHERE id = $1`, [layoutId, name]);
+  await db.query(`UPDATE venue_layouts SET name = $2, updated_at = now() WHERE id = $1`, [
+    layoutId,
+    name,
+  ]);
 }
 
 /** Mark (or unmark) a chart as a template. Not part of `saveLayout`: it changes no geometry, so it
  *  has no business taking a version. */
 /** The seat ids this layout currently has — what an old revision has to be reconciled against. */
 export async function liveSeatIds(layoutId: number, db: Db = pool): Promise<Set<number>> {
-  const { rows } = await db.query<{ id: number }>(`SELECT id FROM seats WHERE layout_id = $1`, [layoutId]);
+  const { rows } = await db.query<{ id: number }>(`SELECT id FROM seats WHERE layout_id = $1`, [
+    layoutId,
+  ]);
   return new Set(rows.map((r) => r.id));
 }
 
-export async function setTemplate(layoutId: number, isTemplate: boolean, db: Db = pool): Promise<void> {
+export async function setTemplate(
+  layoutId: number,
+  isTemplate: boolean,
+  db: Db = pool,
+): Promise<void> {
   await db.query(`UPDATE venue_layouts SET is_template = $2, updated_at = now() WHERE id = $1`, [
     layoutId,
     isTemplate,
@@ -447,8 +477,15 @@ export async function layoutInUse(layoutId: number, db: Db = pool): Promise<bool
   return rows.length > 0;
 }
 
-export async function setLayoutStatus(layoutId: number, status: 'draft' | 'ready' | 'archived', db: Db = pool): Promise<void> {
-  await db.query(`UPDATE venue_layouts SET status = $2, updated_at = now() WHERE id = $1`, [layoutId, status]);
+export async function setLayoutStatus(
+  layoutId: number,
+  status: "draft" | "ready" | "archived",
+  db: Db = pool,
+): Promise<void> {
+  await db.query(`UPDATE venue_layouts SET status = $2, updated_at = now() WHERE id = $1`, [
+    layoutId,
+    status,
+  ]);
 }
 
 /**
@@ -458,7 +495,10 @@ export async function setLayoutStatus(layoutId: number, status: 'draft' | 'ready
  * Positions are clamped into the space and rotations normalised before write, so a stored value is
  * always in range regardless of what the client sent (FR-014).
  */
-export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Promise<Layout | null> {
+export async function saveLayout(
+  layoutId: number,
+  body: SaveLayoutRequest,
+): Promise<Layout | null> {
   return withTransaction(async (client) => {
     const locked = await client.query<{ version: number }>(
       `SELECT version FROM venue_layouts WHERE id = $1 FOR UPDATE`,
@@ -520,7 +560,7 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
           // was explicitly cleared.
           `INSERT INTO sections (layout_id, name, description, color, seat_shape, seat_size_multiplier)
            VALUES ($1, $2, $3,
-                   COALESCE($4, (ARRAY['#4C9A6B','#3E7CB1','#C9762F','#9B4D8E','#B3453C'])[(SELECT count(*) FROM sections WHERE layout_id = $1)::int % 5 + 1]),
+                   COALESCE($4, (${PALETTE_SQL})[(SELECT count(*) FROM sections WHERE layout_id = $1)::int % ${PALETTE_LEN} + 1]),
                    COALESCE($5, 'circle'), COALESCE($6, 1.0)) RETURNING id`,
           [
             layoutId,
@@ -551,12 +591,10 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
     const categoryIdMap = new Map<number, number>();
     for (const c of inCategories) {
       if (c.id && c.id > 0) {
-        await client.query(`UPDATE layout_categories SET name = $2, color = $3 WHERE id = $1 AND layout_id = $4`, [
-          c.id,
-          c.name,
-          c.color,
-          layoutId,
-        ]);
+        await client.query(
+          `UPDATE layout_categories SET name = $2, color = $3 WHERE id = $1 AND layout_id = $4`,
+          [c.id, c.name, c.color, layoutId],
+        );
         keptCategories.push(c.id);
         categoryIdMap.set(c.id, c.id);
       } else {
@@ -569,10 +607,10 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
         if (c.id) categoryIdMap.set(c.id, rows[0].id);
       }
     }
-    await client.query(`DELETE FROM layout_categories WHERE layout_id = $1 AND NOT (id = ANY($2::bigint[]))`, [
-      layoutId,
-      keptCategories,
-    ]);
+    await client.query(
+      `DELETE FROM layout_categories WHERE layout_id = $1 AND NOT (id = ANY($2::bigint[]))`,
+      [layoutId, keptCategories],
+    );
 
     /*
      * --- rows (0032): upsert by id, delete the rest.
@@ -599,10 +637,10 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
     const keptRows: number[] = inRows.filter((r) => r.id > 0).map((r) => r.id);
     // Deleting a row does NOT delete its seats: `seats.row_id` is ON DELETE SET NULL, so a seat whose
     // row is gone stays sellable and simply stops naming one. The seat's own delete rule is unchanged.
-    await client.query(`DELETE FROM layout_rows WHERE layout_id = $1 AND NOT (id = ANY($2::bigint[]))`, [
-      layoutId,
-      keptRows,
-    ]);
+    await client.query(
+      `DELETE FROM layout_rows WHERE layout_id = $1 AND NOT (id = ANY($2::bigint[]))`,
+      [layoutId, keptRows],
+    );
 
     const rowIdMap = new Map<number, number>();
     for (const r of inRows) {
@@ -650,6 +688,25 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
     const keptSeats: number[] = inSeats.filter((s) => s.id).map((s) => s.id as number);
 
     /*
+     * The same ids again, but POSITIONALLY — one entry per `inSeats` slot, in `inSeats` order.
+     *
+     * `keptSeats` cannot serve both jobs, and using it for the second is a bug that corrupts the
+     * stored document. It is a SET: the archive and delete statements below read it as
+     * `= ANY($2)`, where order is meaningless, and it is built by FILTERING OUT the seats that have
+     * no id yet — so its indices no longer line up with `inSeats`. New ids are then appended as each
+     * INSERT returns, which puts every new seat after every kept one.
+     *
+     * `stitchSeatIds` addresses seats through `projected.seatOrigin`, which IS parallel to
+     * `projected.seats` (= `inSeats` here). The two agree only when the document happens to carry
+     * its new seats last. The editor's own path does the opposite: growing `seatsPerRow` through
+     * `setBlockParams` → `regenerateBlock` re-emits the block row-major, so a widened 2×3 comes back
+     * as A1 A2 A3 A4 B1 B2 B3 B4 with the new seats INTERLEAVED at index 3 and 7. Stitching that
+     * against the set wrote B1's row id onto seat A4, and the next save then moved labels and
+     * positions across the wrong physical rows.
+     */
+    const savedIds: number[] = [];
+
+    /*
      * A seat a showtime has generated from is ARCHIVED rather than deleted (§18, §42 Rule 7).
      *
      * `showtime_seats.seat_id` is a plain `REFERENCES seats(id)` with no ON DELETE clause, so removing
@@ -680,6 +737,27 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
       [layoutId, keptSeats],
     );
 
+    /*
+     * The third statement, and the counterpart of the first: a seat the document names again is
+     * BACK on the chart, so it stops being archived.
+     *
+     * Without this, re-adding a row that was archived leaves a seat the document points at while
+     * every read still filters it out — drawn in the editor, absent from the projection, and not
+     * generated from. `restoreRevision` reaches exactly that state whenever an older revision names
+     * a seat that has since been archived.
+     *
+     * This is also why `liveSeatIds` does NOT filter archived seats. Reusing the archived id is what
+     * makes this an UPDATE; filtering there would re-mint the seat instead, and the INSERT would
+     * collide with the archived row still holding that label under
+     * `seats_section_row_number_key (section_id, row_label, seat_number)` — which has no archived
+     * predicate — turning a legitimate restore into a 409.
+     */
+    await client.query(
+      `UPDATE seats SET archived_at = NULL
+         WHERE layout_id = $1 AND id = ANY($2::bigint[]) AND archived_at IS NOT NULL`,
+      [layoutId, keptSeats],
+    );
+
     for (const seat of inSeats) {
       const x = clampCoord(seat.x);
       const y = clampCoord(seat.y);
@@ -693,18 +771,43 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
                             pos_x = $6, pos_y = $7, rotation = $8, category_id = $10,
                             is_accessible = $11, row_id = $12
              WHERE id = $1 AND layout_id = $9`,
-          [seat.id, sectionId, seat.rowLabel, seat.seatNumber, seat.seatType, x, y, rot, layoutId, categoryId,
-           seat.isAccessible ?? false, rowId],
+          [
+            seat.id,
+            sectionId,
+            seat.rowLabel,
+            seat.seatNumber,
+            seat.seatType,
+            x,
+            y,
+            rot,
+            layoutId,
+            categoryId,
+            seat.isAccessible ?? false,
+            rowId,
+          ],
         );
+        savedIds.push(seat.id);
       } else {
         const { rows } = await client.query<{ id: number }>(
           `INSERT INTO seats (layout_id, section_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation,
                               category_id, is_accessible, row_id)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
-          [layoutId, sectionId, seat.rowLabel, seat.seatNumber, seat.seatType, x, y, rot, categoryId,
-           seat.isAccessible ?? false, rowId],
+          [
+            layoutId,
+            sectionId,
+            seat.rowLabel,
+            seat.seatNumber,
+            seat.seatType,
+            x,
+            y,
+            rot,
+            categoryId,
+            seat.isAccessible ?? false,
+            rowId,
+          ],
         );
         keptSeats.push(rows[0].id);
+        savedIds.push(rows[0].id);
       }
     }
 
@@ -724,11 +827,13 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
           normaliseRotation(e.rotation),
           e.label,
           // Shapes carry an ordered point list; every other kind stores null (FR-058).
-          e.points ? JSON.stringify(e.points.map((pt) => ({ x: clampCoord(pt.x), y: clampCoord(pt.y) }))) : null,
+          e.points
+            ? JSON.stringify(e.points.map((pt) => ({ x: clampCoord(pt.x), y: clampCoord(pt.y) })))
+            : null,
           e.capacity ?? null,
           // A zone's price class survives the save; anything that is not an area carries neither,
           // which the 0027 CHECK enforces independently of this writer.
-          e.kind === 'area' ? (categoryIdMap.get(e.categoryId ?? 0) ?? e.categoryId ?? null) : null,
+          e.kind === "area" ? (categoryIdMap.get(e.categoryId ?? 0) ?? e.categoryId ?? null) : null,
           e.color ?? null,
           e.geometry ?? null,
           // Through the same remap as a seat's: the client may name a section it has just created,
@@ -757,7 +862,8 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
         // real ids. Without it the stored document keeps the placeholders and the NEXT save tries to
         // insert the same rows again, which `layout_rows_label_idx` refuses.
         stitchRows(
-          stitchSeatIds(body.document, projected.seatOrigin, keptSeats),
+          // `savedIds`, NOT `keptSeats`: this is the one caller that needs the ids POSITIONALLY.
+          stitchSeatIds(body.document, projected.seatOrigin, savedIds),
           projected,
           (id) => rowIdMap.get(id) ?? id,
         ),
@@ -769,7 +875,7 @@ export async function saveLayout(layoutId: number, body: SaveLayoutRequest): Pro
           tables: new Map(
             body.document.blocks
               .map((b) => b.tableId)
-              .filter((id): id is number => typeof id === 'number' && id > 0)
+              .filter((id): id is number => typeof id === "number" && id > 0)
               .map((id) => [id, id]),
           ),
           // Seat ids are already real after `stitchSeatIds`, so map each to itself.
@@ -820,10 +926,12 @@ export async function defaultCategoryId(layoutId: number, db: Db = pool): Promis
   );
   if (found.rows[0]) return found.rows[0].id;
   const { rows } = await db.query<{ id: number }>(
-    `INSERT INTO layout_categories (layout_id, name, color) VALUES ($1, 'Hạng thường', '#4C9A6B')
+    // The default class takes the palette's first colour, drawn from the SAME shared constant the
+    // editor and buyer legend read, so a minted "Hạng thường" matches what the chart shows (Principle VI).
+    `INSERT INTO layout_categories (layout_id, name, color) VALUES ($1, 'Hạng thường', $2)
      ON CONFLICT (layout_id, name) DO UPDATE SET name = EXCLUDED.name
      RETURNING id`,
-    [layoutId],
+    [layoutId, CATEGORY_COLORS[0]],
   );
   return rows[0].id;
 }
@@ -841,11 +949,10 @@ export async function generateSeatRow(
 ): Promise<number> {
   return withTransaction(async (client) => {
     if (replaceExisting) {
-      await client.query(`DELETE FROM seats WHERE layout_id = $1 AND section_id = $2 AND row_label = $3`, [
-        layoutId,
-        sectionId,
-        rowLabel,
-      ]);
+      await client.query(
+        `DELETE FROM seats WHERE layout_id = $1 AND section_id = $2 AND row_label = $3`,
+        [layoutId, sectionId, rowLabel],
+      );
     }
     // Stack each generated row below the ones already there, centred horizontally — the same grid the
     // migration seeds legacy seats onto, so generated and migrated layouts look alike.
@@ -863,7 +970,16 @@ export async function generateSeatRow(
               LEAST(10000, $4::int + (gs - 1) * $5::int), $6, 0
          FROM generate_series(1, $7) AS gs
        ON CONFLICT (section_id, row_label, seat_number) DO NOTHING`,
-      [layoutId, sectionId, rowLabel, startX, spacing, y, count, await defaultCategoryId(layoutId, client)],
+      [
+        layoutId,
+        sectionId,
+        rowLabel,
+        startX,
+        spacing,
+        y,
+        count,
+        await defaultCategoryId(layoutId, client),
+      ],
     );
     return res.rowCount ?? 0;
   });
@@ -871,7 +987,11 @@ export async function generateSeatRow(
 
 // ---- Floor plan (background layer only — it never owns geometry, FR-020) ----
 
-export async function setPlanUrl(layoutId: number, url: string | null, db: Db = pool): Promise<string | null> {
+export async function setPlanUrl(
+  layoutId: number,
+  url: string | null,
+  db: Db = pool,
+): Promise<string | null> {
   const { rows } = await db.query<{ background_url: string | null }>(
     `UPDATE venue_layouts SET background_url = $2, updated_at = now() WHERE id = $1 RETURNING (SELECT background_url FROM venue_layouts WHERE id = $1) AS background_url`,
     [layoutId, url],
@@ -880,7 +1000,10 @@ export async function setPlanUrl(layoutId: number, url: string | null, db: Db = 
 }
 
 export async function currentPlanUrl(layoutId: number, db: Db = pool): Promise<string | null> {
-  const { rows } = await db.query<{ background_url: string | null }>(`SELECT background_url FROM venue_layouts WHERE id = $1`, [layoutId]);
+  const { rows } = await db.query<{ background_url: string | null }>(
+    `SELECT background_url FROM venue_layouts WHERE id = $1`,
+    [layoutId],
+  );
   return rows[0]?.background_url ?? null;
 }
 
@@ -898,6 +1021,25 @@ export async function updatePlanAlignment(
   );
 }
 
+/**
+ * Set how hard this chart refuses to strand a lone seat (0037).
+ *
+ * A chart-level setting, written the same way `updatePlanAlignment` writes the background's: one
+ * column, one statement, no version bump. It changes nothing about the geometry, so it does not make
+ * the layout a new draft — and it reaches buyers only through the next apply, which is deliberate.
+ * A show that is already selling keeps the rule it was applied with.
+ */
+export async function updateOrphanRule(
+  layoutId: number,
+  rule: "balanced" | "strict",
+  db: Db = pool,
+): Promise<void> {
+  await db.query(
+    `UPDATE venue_layouts SET orphan_rule = $2, updated_at = now() WHERE id = $1`,
+    [layoutId, rule],
+  );
+}
+
 /** The reference chart's current file, so a replacement can unlink the old one. */
 export async function currentReferenceUrl(layoutId: number, db: Db = pool): Promise<string | null> {
   const { rows } = await db.query<{ reference_url: string | null }>(
@@ -907,8 +1049,15 @@ export async function currentReferenceUrl(layoutId: number, db: Db = pool): Prom
   return rows[0]?.reference_url ?? null;
 }
 
-export async function setReferenceUrl(layoutId: number, url: string | null, db: Db = pool): Promise<void> {
-  await db.query(`UPDATE venue_layouts SET reference_url = $2, updated_at = now() WHERE id = $1`, [layoutId, url]);
+export async function setReferenceUrl(
+  layoutId: number,
+  url: string | null,
+  db: Db = pool,
+): Promise<void> {
+  await db.query(`UPDATE venue_layouts SET reference_url = $2, updated_at = now() WHERE id = $1`, [
+    layoutId,
+    url,
+  ]);
 }
 
 /** Alignment only. Like the buyer-facing plan, the reference never owns a seat's position (FR-024). */
@@ -928,7 +1077,11 @@ export async function updateReferenceAlignment(
 
 /** Deep-copy into another venue the caller owns. Independent: carries no sales, holds or blocks,
  *  and starts as a draft (FR-036). */
-export async function cloneLayout(sourceId: number, targetVenueId: number, name: string): Promise<number> {
+export async function cloneLayout(
+  sourceId: number,
+  targetVenueId: number,
+  name: string,
+): Promise<number> {
   return withTransaction(async (client) => {
     const { rows: created } = await client.query<{ id: number }>(
       `INSERT INTO venue_layouts (venue_id, name, status, background_url, background_scale, background_offset_x, background_offset_y,
@@ -1033,7 +1186,12 @@ export async function cloneLayout(sourceId: number, targetVenueId: number, name:
       const { rows } = await client.query<{ id: number }>(
         `INSERT INTO layout_rows (layout_id, section_id, label, display_order)
          VALUES ($1, $2, $3, $4) RETURNING id`,
-        [newId, r.section_id === null ? null : (map.get(r.section_id) ?? null), r.label, r.display_order],
+        [
+          newId,
+          r.section_id === null ? null : (map.get(r.section_id) ?? null),
+          r.label,
+          r.display_order,
+        ],
       );
       rowMap.set(r.id, rows[0].id);
     }
@@ -1152,7 +1310,7 @@ export async function getShowtimeMap(showtimeId: number, db: Db = pool): Promise
     ticket_tier_id: number;
     label: string;
     price: string;
-    status: 'available' | 'held' | 'sold' | 'blocked';
+    status: "available" | "held" | "sold" | "blocked";
     pos_x: number | null;
     pos_y: number | null;
     rotation: number;
@@ -1170,7 +1328,11 @@ export async function getShowtimeMap(showtimeId: number, db: Db = pool): Promise
     layout_snapshot: {
       elements?: SeatMapElement[];
       tables?: SeatMapTable[];
-      sectionStyles?: { name: string; seatShape: 'circle' | 'square'; seatSizeMultiplier: number }[];
+      sectionStyles?: {
+        name: string;
+        seatShape: "circle" | "square";
+        seatSizeMultiplier: number;
+      }[];
     } | null;
   }>(`SELECT layout_snapshot FROM showtimes WHERE id = $1`, [showtimeId]);
   const snapshot = snap.rows[0]?.layout_snapshot ?? null;
@@ -1192,14 +1354,14 @@ export async function getShowtimeMap(showtimeId: number, db: Db = pool): Promise
   return {
     showtimeId,
     space: { width: LAYOUT_SPACE, height: LAYOUT_SPACE, seatDiameter: SEAT_DIAMETER },
-    elements: (snapshot?.elements ?? []) as unknown as ShowtimeMap['elements'],
+    elements: (snapshot?.elements ?? []) as unknown as ShowtimeMap["elements"],
     tables: snapshot?.tables ?? [],
     tierLegend: buildTierLegend(
       tiers.rows.map((t) => ({ id: t.id, label: t.label, price: Number(t.price), color: t.color })),
     ),
     seats: seats.rows.map((r) => ({
       id: r.id,
-      row: r.row_label ?? '',
+      row: r.row_label ?? "",
       number: r.seat_number ?? 0,
       section: r.section_name,
       category: r.category_name,
@@ -1262,7 +1424,10 @@ export async function boundSeatsMissingFrom(
 }
 
 /** Section ids of this layout that have at least one seat — used by the bind-time tier check. */
-export async function sectionsWithSeatsInLayout(layoutId: number, db: Db = pool): Promise<number[]> {
+export async function sectionsWithSeatsInLayout(
+  layoutId: number,
+  db: Db = pool,
+): Promise<number[]> {
   const { rows } = await db.query<{ section_id: number }>(
     `SELECT DISTINCT section_id FROM seats WHERE layout_id = $1 AND section_id IS NOT NULL`,
     [layoutId],

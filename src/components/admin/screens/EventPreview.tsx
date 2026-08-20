@@ -18,6 +18,7 @@ import {
 } from "../adminUi";
 import DecisionPanel, { type DecisionOption } from "../DecisionPanel";
 import { useAsync } from "../useAsync";
+import { ageRestrictionLabel } from "@/shared/catalog/age-restriction";
 
 /**
  * The same page, fetched by id and framed with a way back — what the moderation queues open.
@@ -176,7 +177,7 @@ export default function EventBody({ event }: { event: ReportedEvent }) {
             </Pill>
             <Pill tone="neutral">{event.status}</Pill>
             <Pill tone="neutral">{event.category}</Pill>
-            <Pill tone="neutral">{event.ageRestriction}</Pill>
+            <Pill tone="neutral">{ageRestrictionLabel(event.ageRestriction)}</Pill>
           </div>
           <h3 className="font-display text-title-m font-black uppercase tracking-[0.03em] text-beige-kem">
             {event.title}

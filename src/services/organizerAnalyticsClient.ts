@@ -47,7 +47,19 @@ export async function fetchOrganizerAnalytics(
   }
 
 
-  const json = await res.json();
-  return json.data;
+  /*
+   * The envelope is checked rather than assumed.
+   *
+   * `return json.data` handed back `undefined` whenever the response was not the shape expected — a
+   * proxy's HTML error page, an envelope rename, a 200 carrying `{ error }`. The dashboard then read
+   * `overview` off nothing and rendered zeroes, so a broken endpoint looked exactly like an organizer
+   * who had sold no tickets. A thrown error is the honest answer: the caller already shows one.
+   */
+  const json: unknown = await res.json();
+  const data = (json as { data?: unknown } | null)?.data;
+  if (!data || typeof data !== "object") {
+    throw new Error("Dữ liệu báo cáo trả về không đúng định dạng.");
+  }
+  return data as OrganizerAnalyticsDashboardResponse;
 }
 

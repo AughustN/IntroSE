@@ -14,6 +14,7 @@ import type {
 } from "@/shared/catalog/seatmap-document";
 import { isSeatBearing } from "@/shared/catalog/seatmap-document";
 import { type BlockGeometry, BLOCK_LABEL } from "./documentOps";
+import { MAX_ARC_ANGLE } from "@/shared/catalog/seatmap-document";
 
 /**
  * The block inspector — the reason the editor moved to a document at all.
@@ -304,7 +305,7 @@ export default function BlockInspector({
                 <input
                   type="range"
                   min={30}
-                  max={180}
+                  max={MAX_ARC_ANGLE}
                   step={5}
                   value={p.arcAngle ?? 90}
                   onChange={(e) => onParams({ arcAngle: Number(e.target.value) })}

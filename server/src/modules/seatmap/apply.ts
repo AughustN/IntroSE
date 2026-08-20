@@ -264,9 +264,14 @@ export async function desiredFromLayout(showtimeId: number, db: Db = pool): Prom
        -- A brand-new seat needs a tier: fall back to the cheapest tier of this showtime, which the
        -- organizer can then change by marquee (FR-034) rather than being blocked here.
        LEFT JOIN LATERAL (
-         SELECT id FROM ticket_tiers WHERE showtime_id = $1 ORDER BY price_amount LIMIT 1
+         -- Archived filtered here for the same reason every other tier read filters it (see
+         -- catalog.write.ts and layouts.repo.ts): a retired class is not a price a new seat may be
+         -- bound to.
+         SELECT id FROM ticket_tiers
+          WHERE showtime_id = $1 AND archived_at IS NULL ORDER BY price_amount LIMIT 1
        ) AS tier ON true
-      WHERE se.layout_id = $2`,
+      -- An archived seat has left the chart; re-applying must not resurrect it as new inventory.
+      WHERE se.layout_id = $2 AND se.archived_at IS NULL`,
     [showtimeId, layoutId],
   );
 
@@ -331,7 +336,11 @@ export async function refreshSnapshot(showtimeId: number, layoutId: number, db: 
               'planOffsetX', l.background_offset_x,
               'planOffsetY', l.background_offset_y,
               'planOpacity', round(l.background_opacity * 100),
-              'planVisibleToBuyers', l.background_public
+              'planVisibleToBuyers', l.background_public,
+              -- Snapshotted like everything else here: the rule the buyer's picker obeys is the one
+              -- that was in force when the map was applied, so retuning a venue cannot change how a
+              -- show already selling answers "chọn giúp tôi" halfway through its on-sale.
+              'orphanRule', l.orphan_rule
             )
        FROM venue_layouts l
       WHERE st.id = $1 AND l.id = $2`,

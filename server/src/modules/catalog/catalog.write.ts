@@ -5,6 +5,7 @@ import { queueEventNotification } from "../notifications/notifications.service.j
 import { refreshSnapshot } from "../seatmap/apply.js";
 import { defaultCategoryId } from "../seatmap/layouts.repo.js";
 import { err } from "../../http.js";
+import { CATEGORY_COLORS } from "@shared/catalog/tier-palette.js";
 
 /** The caller's approved organizer row id, or null (events bind to this — D-E). */
 export async function getApprovedOrganizerId(
@@ -94,38 +95,40 @@ export async function listMyEvents(userId: number, db: Db = pool) {
                 JOIN orders o2 ON o2.reservation_id = r2.id AND o2.payment_status IN ('paid', 'completed', 'refunded', 'partially_refunded')
                 JOIN tickets t2 ON t2.order_id = o2.id
                WHERE s2.event_id = e.id
-            ), 0)::bigint AS "totalRevenueVnd"
-       FROM events e 
-       JOIN organizers o ON o.id = e.organizer_id 
+            ), 0)::bigint AS "totalRevenueVnd",
+            -- The showtime the row leads with. NEXT UPCOMING first, and only when there is none does
+            -- it fall back to the latest past one: an organizer scanning the list is looking ahead,
+            -- but a finished event that printed no date at all would read as an event with no dates
+            -- rather than one that has already happened.
+            --
+            -- Ordered so both cases come out of one scan: future showtimes sort ahead of past ones,
+            -- then future ascends (soonest) while past descends (most recent).
+            (
+              SELECT s3.starts_at
+                FROM showtimes s3
+               WHERE s3.event_id = e.id AND s3.status <> 'cancelled'
+               ORDER BY (s3.starts_at < now()),
+                        CASE WHEN s3.starts_at >= now() THEN s3.starts_at END ASC,
+                        s3.starts_at DESC
+               LIMIT 1
+            ) AS "nextShowtimeAt",
+            (
+              SELECT v3.name
+                FROM showtimes s3
+                JOIN venues v3 ON v3.id = s3.venue_id
+               WHERE s3.event_id = e.id AND s3.status <> 'cancelled'
+               ORDER BY (s3.starts_at < now()),
+                        CASE WHEN s3.starts_at >= now() THEN s3.starts_at END ASC,
+                        s3.starts_at DESC
+               LIMIT 1
+            ) AS "venueName"
+       FROM events e
+       JOIN organizers o ON o.id = e.organizer_id
        JOIN event_categories ec ON ec.id = e.category_id
-      WHERE o.user_id = $1 
+      WHERE o.user_id = $1
       ORDER BY e.created_at DESC`,
     [userId],
   );
-
-  for (const event of rows) {
-    const tierRes = await db.query(
-      `SELECT tt.id::text, tt.label, tt.price_amount AS price, tt.total_quantity AS capacity,
-              COALESCE(COUNT(t.id), 0)::int AS "soldCount"
-         FROM showtimes s
-         JOIN ticket_tiers tt ON tt.showtime_id = s.id
-         LEFT JOIN reservation_items ri ON ri.ticket_tier_id = tt.id
-         LEFT JOIN tickets t ON t.reservation_item_id = ri.id AND t.qr_status != 'void'
-         LEFT JOIN orders o ON o.id = t.order_id AND o.payment_status IN ('paid', 'completed')
-        WHERE s.event_id = $1
-        GROUP BY tt.id, tt.label, tt.price_amount, tt.total_quantity`,
-      [event.id],
-    );
-    event.ticketTiers = tierRes.rows.map((r) => ({
-      id: String(r.id),
-      label: String(r.label),
-      price: Number(r.price || 0),
-      capacity: Number(r.capacity || 0),
-      soldCount: Number(r.soldCount || 0),
-      remaining: Math.max(0, Number(r.capacity || 0) - Number(r.soldCount || 0)),
-      isArchived: false,
-    }));
-  }
 
   return rows;
 }
@@ -141,7 +144,9 @@ export async function updateEvent(
     isHighDemand?: boolean;
     is_high_demand?: boolean;
   },
-  db: Db = pool,
+  // Unused: `withTransaction` draws its client from the pool; the parameter stays for signature
+  // symmetry with the read helpers above.
+  _db: Db = pool,
 ) {
   const isHighDemandProvided = f.isHighDemand !== undefined || f.is_high_demand !== undefined;
   const isHighDemandValue = f.isHighDemand ?? f.is_high_demand ?? false;
@@ -189,10 +194,22 @@ export async function updateEvent(
   });
 }
 
-/** Publish requires ≥1 upcoming showtime with ≥1 tier (FR-017); → on_sale + pending_review (D-C). */
+/**
+ * Publish requires ≥1 upcoming showtime with ≥1 ACTIVE tier (FR-017); → on_sale + pending_review (D-C).
+ *
+ * `tt.archived_at IS NULL` is the load-bearing half. Without it this gate and the catalog's
+ * `SHOWTIME_HAS_AVAILABILITY` (visibility.ts) disagree about what a sellable tier is, and the gap
+ * between them is reachable: the `tier_last_active` guard in `removeTier` only fires while the event
+ * is `on_sale`, so unpublishing (which sets `status = 'draft'`) lets the last tier be archived, and a
+ * republish then matched the archived row. The event went back on sale carrying nothing anyone could
+ * buy — visible as "đang bán" to the organizer and the admin, and absent from the catalog, because
+ * visibility filters what this did not.
+ */
 export async function publishEvent(eventId: number, db: Db = pool): Promise<boolean> {
   const ready = await db.query(
-    `SELECT 1 FROM showtimes s JOIN ticket_tiers tt ON tt.showtime_id = s.id WHERE s.event_id = $1 AND s.starts_at > now() LIMIT 1`,
+    `SELECT 1 FROM showtimes s
+        JOIN ticket_tiers tt ON tt.showtime_id = s.id AND tt.archived_at IS NULL
+       WHERE s.event_id = $1 AND s.starts_at > now() LIMIT 1`,
     [eventId],
   );
   if (ready.rows.length === 0) return false;
@@ -217,22 +234,20 @@ export async function unpublishEvent(eventId: number, db: Db = pool): Promise<vo
  * 'finished' is the correct value (not 'completed', which is a frontend alias).
  */
 export async function finishEvent(eventId: number, db: Db = pool): Promise<void> {
-  const { rows } = await db.query<{ status: string }>(
-    `SELECT status FROM events WHERE id = $1`,
-    [eventId],
-  );
-  if (!rows[0]) throw err.notFound('not_found', 'Không tìm thấy sự kiện.');
-  if (rows[0].status === 'finished') return; // idempotent
-  if (rows[0].status === 'cancelled') {
-    throw err.conflict('already_cancelled', 'Sự kiện đã bị hủy, không thể hoàn tất.');
+  const { rows } = await db.query<{ status: string }>(`SELECT status FROM events WHERE id = $1`, [
+    eventId,
+  ]);
+  if (!rows[0]) throw err.notFound("not_found", "Không tìm thấy sự kiện.");
+  if (rows[0].status === "finished") return; // idempotent
+  if (rows[0].status === "cancelled") {
+    throw err.conflict("already_cancelled", "Sự kiện đã bị hủy, không thể hoàn tất.");
   }
-  if (rows[0].status === 'draft') {
-    throw err.conflict('not_published', 'Chỉ có thể hoàn tất sự kiện đang đăng bán.');
+  if (rows[0].status === "draft") {
+    throw err.conflict("not_published", "Chỉ có thể hoàn tất sự kiện đang đăng bán.");
   }
-  await db.query(
-    `UPDATE events SET status = 'finished', updated_at = now() WHERE id = $1`,
-    [eventId],
-  );
+  await db.query(`UPDATE events SET status = 'finished', updated_at = now() WHERE id = $1`, [
+    eventId,
+  ]);
   // Mark all future showtimes (if any remain) as finished too.
   await db.query(
     `UPDATE showtimes SET status = 'finished' WHERE event_id = $1 AND status NOT IN ('cancelled', 'finished')`,
@@ -331,9 +346,11 @@ export async function createSection(venueId: number, name: string, db: Db = pool
   const layoutId = await defaultLayoutId(venueId, db);
   const { rows } = await db.query(
     // Default the colour by position: FR-066 blocks publishing without one, and this path predates
-    // the colour picker, so a section created here must not be born unpublishable.
+    // the colour picker, so a section created here must not be born unpublishable. The ARRAY is
+    // built from the SHARED palette — the same constant the editor and buyer legend read — so the
+    // database and the chart can never hand out different defaults (Principle VI).
     `INSERT INTO sections (layout_id, name, color)
-     VALUES ($1, $2, (ARRAY['#4C9A6B','#3E7CB1','#C9762F','#9B4D8E','#B3453C'])[(SELECT count(*) FROM sections WHERE layout_id = $1)::int % 5 + 1])
+     VALUES ($1, $2, (ARRAY[${CATEGORY_COLORS.map((c) => `'${c}'`).join(",")}])[(SELECT count(*) FROM sections WHERE layout_id = $1)::int % ${CATEGORY_COLORS.length} + 1])
      RETURNING id`,
     [layoutId, name],
   );
@@ -411,7 +428,9 @@ export async function listSections(venueId: number, db: Db = pool) {
       `SELECT s.id, s.name, count(se.id)::int AS "seatCount"
          FROM sections s
          JOIN venue_layouts l ON l.id = s.layout_id
-         LEFT JOIN seats se ON se.section_id = s.id
+         -- Archived seats have left the chart, so they must not be counted in what the organizer
+         -- is shown as the section's size (§18, §42 Rule 7).
+         LEFT JOIN seats se ON se.section_id = s.id AND se.archived_at IS NULL
         WHERE l.venue_id = $1 GROUP BY s.id ORDER BY s.id`,
       [venueId],
     )
@@ -468,15 +487,29 @@ export async function eventShowtimesManage(eventId: number, db: Db = pool) {
     );
     st.layoutId = chart[0]?.id ?? null;
     st.layoutStatus = chart[0]?.status ?? null;
+    /*
+     * Which classes actually hold inventory — the SAME answer `generate-seat-map` gates on.
+     *
+     * `seatCount` alone cannot be that answer: a class drawn as a capacity ZONE has no seats, so it
+     * reads as empty here while `categoriesWithInventory` (seats UNION zones) still demands a price
+     * for it. The console then showed the chart ready to apply and the apply refused
+     * `category_without_tier`. One predicate, computed once on the server, rather than two that
+     * drift (Principle VI).
+     */
+    const stocked = chart[0] ? new Set(await categoriesWithInventory(chart[0].id, db)) : new Set();
     st.categories = chart[0]
       ? (
           await db.query(
             `SELECT c.id, c.name, c.color,
-                    (SELECT count(*)::int FROM seats s WHERE s.category_id = c.id) AS "seatCount"
+                    -- Without \`archived_at IS NULL\` a class whose seats have all left the chart
+                    -- still reports inventory, and the seat map builder then requires a price for a
+                    -- class that can sell nothing before it will apply the chart.
+                    (SELECT count(*)::int FROM seats s
+                      WHERE s.category_id = c.id AND s.archived_at IS NULL) AS "seatCount"
                FROM layout_categories c WHERE c.layout_id = $1 ORDER BY c.name`,
             [chart[0].id],
           )
-        ).rows
+        ).rows.map((c) => ({ ...c, hasInventory: stocked.has(c.id) }))
       : [];
   }
   return showtimes;
@@ -530,7 +563,10 @@ export async function generateSeatMap(showtimeId: number, layoutId: number): Pro
                 (SELECT c.name FROM layout_categories c WHERE c.id = s.category_id),
                 s.is_accessible, s.table_id,
                 (SELECT t.booking_mode FROM layout_tables t WHERE t.id = s.table_id)
-           FROM seats s WHERE s.layout_id = $3 AND s.category_id = $4`,
+           -- The invariant archiving rests on: a seat kept only because an EARLIER showtime sold it
+           -- must not become bookable inventory on the next one bound to this chart.
+           FROM seats s
+          WHERE s.layout_id = $3 AND s.category_id = $4 AND s.archived_at IS NULL`,
         [showtimeId, tier.id, layoutId, tier.category_id],
       );
       total += res.rowCount ?? 0;
@@ -548,7 +584,11 @@ export async function generateSeatMap(showtimeId: number, layoutId: number): Pro
      * class, because silently keeping the old capacity would leave the organizer believing an edit
      * took effect.
      */
-    const { rows: zones } = await client.query<{ category_id: number; capacity: string; name: string }>(
+    const { rows: zones } = await client.query<{
+      category_id: number;
+      capacity: string;
+      name: string;
+    }>(
       `SELECT e.category_id, sum(e.capacity)::bigint AS capacity, c.name
          FROM layout_elements e
          JOIN layout_categories c ON c.id = e.category_id
@@ -572,11 +612,14 @@ export async function generateSeatMap(showtimeId: number, layoutId: number): Pro
       const taken = Number(committed[0]?.taken ?? 0);
       if (capacity < taken) {
         throw err.conflict(
-          'zone_capacity_below_sold',
+          "zone_capacity_below_sold",
           `Khu "${zone.name}" chỉ còn ${capacity} chỗ nhưng đã bán hoặc giữ ${taken}.`,
         );
       }
-      await client.query(`UPDATE ticket_tiers SET total_quantity = $2 WHERE id = $1`, [tier.id, capacity]);
+      await client.query(`UPDATE ticket_tiers SET total_quantity = $2 WHERE id = $1`, [
+        tier.id,
+        capacity,
+      ]);
       total += capacity;
     }
 
@@ -599,7 +642,10 @@ export async function generateSeatMap(showtimeId: number, layoutId: number): Pro
  */
 export async function categoriesWithInventory(layoutId: number, db: Db = pool): Promise<number[]> {
   const { rows } = await db.query<{ category_id: number }>(
-    `SELECT DISTINCT category_id FROM seats WHERE layout_id = $1 AND category_id IS NOT NULL
+    // Archived seats are not inventory, so a class holding nothing but archived ones must not
+    // report itself as stocked — this answer gates validation and publish.
+    `SELECT DISTINCT category_id FROM seats
+       WHERE layout_id = $1 AND category_id IS NOT NULL AND archived_at IS NULL
      UNION
      SELECT DISTINCT category_id FROM layout_elements
        WHERE layout_id = $1 AND kind = 'area' AND capacity IS NOT NULL AND category_id IS NOT NULL`,

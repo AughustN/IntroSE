@@ -31,10 +31,25 @@ export type ValidationCode =
   // Capacity zones (0027). A zone is an `area` that carries a capacity AND a price class, and is sold
   // by count against that class's tier rather than as seat rows.
   | 'zone_without_category'
-  | 'category_mixed_inventory';
+  | 'category_mixed_inventory'
+  // Advisory, NOT a publish blocker — see `severity` below.
+  | 'focal_point_unset';
 
 export interface ValidationIssue {
   code: ValidationCode;
+  /**
+   * Whether this issue REFUSES the publish, or merely tells the organizer something they cannot
+   * otherwise see.
+   *
+   * Absent means `'error'`. Every check written before this field was a blocker, and an issue
+   * constructed without a thought about severity should keep blocking — the safe direction is to
+   * refuse a publish that should have gone through, not to allow one that should not have.
+   *
+   * `'warning'` exists for a specific shape of problem: the layout is publishable and will sell
+   * tickets, but something about it will behave in a way the organizer did not choose and cannot
+   * observe. `focal_point_unset` is the first of those.
+   */
+  severity?: 'error' | 'warning';
   /** Vietnamese, user-facing. */
   message: string;
   /** For `overlapping_seats` this is the PAIR (FR-031). */
@@ -319,8 +334,38 @@ export function validateLayout(layout: ValidatableLayout): ValidationIssue[] {
     }
   }
 
+  /**
+   * No stage, so nothing says where the event happens.
+   *
+   * `bestSeats` ranks every candidate by distance to a focal point, and `focalPoint()` takes the
+   * stage's centre when there is a stage and THE CENTROID OF ALL SEATS when there is not. That
+   * fallback keeps best-available working, which is why this is a warning and not a refusal — but it
+   * quietly changes what "best" means. In a hall whose stage is at one end, ranking outward from the
+   * middle of the seating offers a buyer the centre of the block over the front rows, and nothing
+   * anywhere tells the organizer that is what they published.
+   *
+   * Not a blocker, because a stage-less chart is a legitimate thing: a standing-only room, a
+   * conference hall, a stadium drawn without its pitch. Refusing those to protect a ranking would
+   * break publishing for venues that never needed it.
+   *
+   * Only when there are seats. Best-available ranks seats; a zone-only standing chart has nothing to
+   * rank and so nothing to get wrong.
+   */
+  if (seats.length > 0 && !(elements ?? []).some((el) => el.kind === 'stage')) {
+    issues.push({
+      code: 'focal_point_unset',
+      severity: 'warning',
+      message:
+        'Sơ đồ chưa có sân khấu. Gợi ý "ghế tốt nhất" sẽ tính từ giữa khu ghế thay vì từ sân khấu.',
+    });
+  }
+
   return issues;
 }
+
+/** Issues that REFUSE the publish. `severity` omitted means blocking — see `ValidationIssue`. */
+export const blockingIssues = (issues: ValidationIssue[]): ValidationIssue[] =>
+  issues.filter((i) => i.severity !== 'warning');
 
 /** Clamp a coordinate into the space; a stored position is always in range (FR-014). */
 export const clampCoord = (v: number): number => Math.max(0, Math.min(LAYOUT_SPACE, Math.round(v)));

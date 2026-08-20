@@ -227,6 +227,13 @@ export interface SeatMap {
   isHighDemand?: boolean;
   timingTicket?: string;
   viewTimestamp?: number;
+  /**
+   * How hard "best available" refuses to strand a lone seat on this chart (0037).
+   *
+   * Snapshotted with the rest of the map, so the rule a buyer meets is the one the chart carried when
+   * it was applied. Absent on older snapshots, where the picker's own default (`balanced`) stands.
+   */
+  orphanRule?: 'balanced' | 'strict';
 }
 
 export interface SeatMapTierLegendEntry {

@@ -7,7 +7,7 @@ import { pool } from '../../src/db/pool.js';
 import { app } from '../helpers/app.js';
 import { bearer, makeApprovedOrganizer, registerUser } from '../helpers/authFixture.js';
 import { seedEvent, seedShowtime, seedTier } from '../helpers/catalogSeed.js';
-import { addBlock, addCategory, addSection, removeBlocks, repackRowLabels, setSeatType } from '@/src/components/seatmap/documentOps.js';
+import { addBlock, addCategory, addSection, removeBlocks, repackRowLabels, setBlockParams, setSeatType } from '@/src/components/seatmap/documentOps.js';
 
 // Saving a chart as an authoring DOCUMENT (`venue_layouts.document`), projected one way into the
 // normalized rows.
@@ -119,6 +119,46 @@ describe('a chart saved as a document', () => {
     // The two new ones are new rows.
     expect(after.get('A4')).toBeGreaterThan(0);
     expect(before.has('A4')).toBe(false);
+  });
+
+  /*
+   * The case above grows the block by HAND-APPENDING the two new seats, which happens to leave the
+   * document with every new seat last. That ordering is what the repo's keep-list also produces, so
+   * the two agree by accident and the stitch cannot go wrong.
+   *
+   * The editor never produces that ordering. `setBlockParams` re-emits the block through
+   * `regenerateBlock`, row-major, so a widened 2 × 3 comes back A1 A2 A3 A4 B1 B2 B3 B4 with the new
+   * seats INTERLEAVED. Stitched against a list that carries every insert at the end, seat A4 took
+   * B1's row id — and the next save then wrote A4's label and position onto B1's physical row.
+   */
+  it('keeps the stored document aligned when new seats are INTERLEAVED, not appended', async () => {
+    const o = await organizer();
+    const { layout } = await freshLayout(o);
+    const first = (await save(o, layout.id, { version: layout.version, document: doc() }).expect(200)).body;
+
+    // Widen through the editor's own operation rather than a hand-written payload — the interleaving
+    // is the whole point of the case, and only the real op produces it.
+    const grown = setBlockParams(first.document as ChartDocument, 'b1', { seatsPerRow: 4 });
+    const newAt = grown.blocks[0].seats!.findIndex((s) => s.seatId < 0);
+    expect(newAt).toBeLessThan(grown.blocks[0].seats!.length - 1); // guard: genuinely interleaved
+
+    const second = (await save(o, layout.id, { version: first.version, document: grown }).expect(200)).body;
+    expect(second.seats).toHaveLength(8);
+
+    // The property: every seat id in the STORED document names the row carrying that same label.
+    const { rows } = await pool.query<{ document: ChartDocument }>(
+      `SELECT document FROM venue_layouts WHERE id = $1`,
+      [layout.id],
+    );
+    const truth = new Map(
+      (second.seats as { id: number; rowLabel: string; seatNumber: number }[]).map((s) => [
+        `${s.rowLabel}${s.seatNumber}`,
+        s.id,
+      ]),
+    );
+    for (const s of rows[0].document.blocks[0].seats!) {
+      expect(s.seatId).toBe(truth.get(`${s.rowLabel}${s.seatNumber}`));
+    }
   });
 
   it('saving the same document twice changes nothing but the version', async () => {

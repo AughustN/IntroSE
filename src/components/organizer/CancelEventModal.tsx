@@ -62,13 +62,13 @@ export const CancelEventModal: React.FC<CancelEventModalProps> = ({
           <div className="space-y-2 border border-burgundy/40 bg-bubblegum/25 p-4 text-beige-kem">
             <p className="font-bold text-burgundy-ink">Hành động này không thể hoàn tác:</p>
             <ul className="list-inside list-disc space-y-1 font-meta text-meta text-beige-kem">
-              <li>Mọi hoạt động bán vé và giữ chỗ sẽ ngừng lập tức (0ms latency).</li>
+              <li>Mọi hoạt động bán vé và giữ chỗ sẽ ngừng ngay lập tức.</li>
               <li>
                 Hệ thống tự động kích hoạt hoàn tiền 100% (tổng{" "}
                 <strong>{formatVND(totalRefundAmountVnd)}</strong>) vào ví tích điểm store-credit
                 cho <strong>{soldTicketsCount} người mua vé</strong>.
               </li>
-              <li>Lý do hủy sẽ được ghi lại trong nhật ký kiểm toán bất biến (Audit Log).</li>
+              <li>Lý do hủy sẽ được ghi lại vĩnh viễn trong nhật ký kiểm toán.</li>
             </ul>
           </div>
         </div>

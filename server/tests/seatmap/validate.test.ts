@@ -135,6 +135,11 @@ describe('the other four checks (FR-030)', () => {
       sections,
       categories,
       categoriesWithTier: [1],
+      // A stage, or the layout is clean-but-warned: without one, `focal_point_unset` fires because
+      // best-available would rank from the centroid of the seats instead. That warning does not block
+      // a publish (see `shared/catalog/seatmap-validate.test.ts`), but "no issues at all" is a
+      // stronger claim and this case is the one making it.
+      elements: [{ kind: 'stage', x: 1000, y: 200 }],
     });
     expect(issues).toEqual([]);
   });

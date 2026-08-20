@@ -17,14 +17,30 @@
  * exposes its tier to assistive technology (FR-071).
  */
 
-/** Ordered cheapest → most expensive. Repeats if a showtime has more tiers than colours. */
+/**
+ * Ordered cheapest → most expensive. Repeats if a showtime has more tiers than colours.
+ *
+ * The values are the Okabe–Ito colour-blind-safe set (minus black, which would vanish against the
+ * dark canvas): every pair stays distinguishable under deuteranopia, protanopia and tritanopia —
+ * which is the point, because about 8% of men see the old green/red set as two near-identical
+ * browns, and on a seat map that is the difference between reading a price and guessing it. colour
+ * is never the only carrier of price (FR-071), but the carrier that exists should work for everyone.
+ */
 export const TIER_COLORS = [
-  "#4C9A6B", // green — cheapest
-  "#3E7CB1", // blue
-  "#C9762F", // amber
-  "#9B4D8E", // violet
-  "#B3453C", // red — most expensive of the first cycle
+  "#E69F00", // orange — cheapest
+  "#56B4E9", // sky blue
+  "#009E73", // blue-green
+  "#F0E442", // yellow
+  "#0072B2", // blue — most expensive of the first cycle
 ] as const;
+
+/**
+ * The same five, under the name the EDITOR knows them by. One list, two readers (Principle VI): the
+ * buyer's legend and the organizer's class swatches cannot drift apart, because the colour an
+ * organizer paints "VIP" on the chart is the colour the buyer must later read as a price. Server
+ * INSERTs that mint a section or class colour build their ARRAY from this same export.
+ */
+export const CATEGORY_COLORS = TIER_COLORS;
 
 export interface TierForPalette {
   id: number;

@@ -191,6 +191,16 @@ export interface SeatCanvasProps<T extends CanvasSeat> {
    * `editable` rather than always live.
    */
   selectedElementIndex?: number | null;
+  /**
+   * Elements to draw nothing for, BY INDEX.
+   *
+   * Hiding has to happen here rather than by handing this component a shorter array, because an
+   * element's index IS its identity across the boundary: `selectedElementIndex` comes in as one and
+   * `onElementPointerDown` / `onResize` / `onVertexDrag` go back out as one. A caller that filters
+   * first shifts every index past the first hidden element, and the editor then resolves a click to
+   * whichever block happens to sit at that position instead.
+   */
+  hiddenElementIndices?: ReadonlySet<number>;
   onElementPointerDown?: (index: number, additive: boolean) => void;
   /**
    * Drag one vertex of the selected polygon (the Nodes tool).
@@ -311,6 +321,7 @@ function SeatCanvasInner<T extends CanvasSeat>(
     onSeatPointerDown,
     onSeatDrag,
     selectedElementIndex = null,
+    hiddenElementIndices,
     onElementPointerDown,
     onVertexDrag,
     onResize,
@@ -334,6 +345,24 @@ function SeatCanvasInner<T extends CanvasSeat>(
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [marquee, setMarquee] = useState<Rect | null>(null);
   const [hover, setHover] = useState<{ seat: T; left: number; top: number } | null>(null);
+
+  /**
+   * Whether this is a touch device, which decides where the tooltip goes.
+   *
+   * A card anchored to the pointer works on a mouse, where the cursor sits beside what it describes.
+   * Under a fingertip it covers the very seat just tapped — and on touch the card never appeared at
+   * all, because it was only ever raised by `pointerenter`. So on coarse pointers the card is raised
+   * by the tap itself and pinned to the bottom edge instead, clear of the hand.
+   */
+  const [coarsePointer, setCoarsePointer] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(pointer: coarse)");
+    const sync = () => setCoarsePointer(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
   /** Drives the cursor only. Mirrors the live gesture, as state rather than as a ref read, because a
    *  cursor is something the render decides and a ref is not. */
   const [panning, setPanning] = useState(false);
@@ -349,7 +378,12 @@ function SeatCanvasInner<T extends CanvasSeat>(
         { x: e.x - e.width / 2, y: e.y - e.height / 2 },
         { x: e.x + e.width / 2, y: e.y + e.height / 2 },
       ]),
-    ];
+      // A point whose coordinates are not finite is DROPPED rather than allowed into the extent
+      // maths. `Math.min` propagates a single NaN through every bound, which reaches the DOM as
+      // `viewBox="NaN NaN NaN NaN"` — and that blanks the entire map, seats included. One
+      // positionless decoration element is never worth a showtime's whole seating chart, so the
+      // rule here is: a thing that cannot say where it is does not get a vote on where the map is.
+    ].filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
     if (pts.length === 0) return { x: 0, y: 0, w: space.width, h: space.height };
     const pad = space.seatDiameter * 2;
     const minX = Math.min(...pts.map((p) => p.x)) - pad;
@@ -365,7 +399,19 @@ function SeatCanvasInner<T extends CanvasSeat>(
     [fitContent, contentBounds, space.width, space.height],
   );
 
-  const view = useMemo(() => viewOf(bounds, zoom, pan), [bounds, zoom, pan]);
+  /**
+   * The visible rectangle — and the last line of defence for the `viewBox` attribute.
+   *
+   * `contentBounds` already drops non-finite points, so this should never fire. It stays because
+   * the failure it guards is total: a NaN anywhere in the viewBox blanks the map, and a buyer
+   * looking at an empty chart cannot tell that from a sold-out show. Falling back to the whole
+   * coordinate space shows the seats; showing nothing shows nothing.
+   */
+  const view = useMemo(() => {
+    const v = viewOf(bounds, zoom, pan);
+    const finite = Number.isFinite(v.x) && Number.isFinite(v.y) && v.w > 0 && v.h > 0;
+    return finite ? v : { x: 0, y: 0, w: space.width, h: space.height };
+  }, [bounds, zoom, pan, space.width, space.height]);
 
   /**
    * Only draw the seats the viewport can actually show.
@@ -724,7 +770,14 @@ function SeatCanvasInner<T extends CanvasSeat>(
     } else if (g.kind === "pan") {
       // A pan that never left the slop is a tap. For a viewer every press is a pan (there is nothing to
       // drag), so this is where a buyer's seat selection is actually completed.
-      if (!g.moved && tap) onSeatActivate?.(tap);
+      if (!g.moved && tap) {
+        onSeatActivate?.(tap);
+        // And where a touch device shows the seat's details. It has to happen HERE rather than on the
+        // press: `beginGesture` clears the card on the way down (so it cannot trail a drag), and a
+        // finger raises no `pointerenter` to bring it back. Resolving it with the tap also means a
+        // drag across the map never raises a card for a seat the buyer was only scrolling past.
+        if (coarsePointer && seatTooltip) setHover({ seat: tap, left: 0, top: 0 });
+      }
     } else if (p && (g.kind === "seat" || g.kind === "element" || g.kind === "table")) {
       // A drag that never left the slop is a plain click; committing it would push a no-op onto the
       // undo stack, so pressing Ctrl+Z after clicking around would appear to do nothing.
@@ -754,8 +807,46 @@ function SeatCanvasInner<T extends CanvasSeat>(
     (seatNumbers === "auto" && space.seatDiameter / view.w > NUMBER_VISIBILITY_THRESHOLD);
   const strokeScale = Math.max(1.5, 6 / Math.sqrt(zoom)); // hairlines stay visible when zoomed in
 
+  /**
+   * Whether to draw the orientation inset.
+   *
+   * Only once zoomed IN, and only when the venue is big enough to get lost in — seats.io's rule, and
+   * the right one: at full view the minimap would be a smaller copy of what is already on screen.
+   * Zoomed into one corner of a bowl with no overview is the failure it exists to prevent.
+   */
+  const showMinimap = !editable && zoom > 1.2 && (blocks?.length ?? 0) > 1;
+
   return (
     <div className={`relative ${className}`}>
+      {showMinimap && (
+        <div
+          className="pointer-events-none absolute bottom-2 left-2 z-10 border border-beige-kem/40 bg-surface-2/90 p-1"
+          aria-hidden="true"
+        >
+          <svg width={96} height={72} viewBox={`${bounds.x} ${bounds.y} ${bounds.w} ${bounds.h}`}>
+            {/* Every seat as a plain dot: the inset answers "where am I", not "which seat". */}
+            {seats.map((s) => (
+              <circle
+                key={s.id}
+                cx={s.x}
+                cy={s.y}
+                r={space.seatDiameter}
+                className="fill-beige-kem/35"
+              />
+            ))}
+            {/* The slice currently on screen. */}
+            <rect
+              x={view.x}
+              y={view.y}
+              width={view.w}
+              height={view.h}
+              className="fill-burgundy/15 stroke-burgundy"
+              strokeWidth={Math.max(bounds.w, bounds.h) / 120}
+            />
+          </svg>
+        </div>
+      )}
+
       {/* Zoom and pan are reachable from the keyboard, not only by pointer gesture (FR-039a). */}
       <div className="absolute right-2 top-2 z-10 flex gap-1 font-mono text-xs">
         <button
@@ -825,6 +916,31 @@ function SeatCanvasInner<T extends CanvasSeat>(
           onViewReport?.({ zoom, x: null, y: null });
         }}
       >
+        {/*
+          Hatching, so a seat's STATE survives losing its colour.
+
+          Sold, held and withheld were three shades of the same grey, separated by opacity alone.
+          At the size a seat is drawn — single-digit pixels at the default zoom — that is no
+          separation at all, and for a colourblind buyer, or anyone outdoors, it is none whatever.
+          Category colour already carries price; state has to carry itself some other way, so it
+          gets a texture.
+
+          `userSpaceOnUse` in layout units: the stripes then scale with the map instead of with the
+          screen, so they stay the same size relative to a seat at every zoom level.
+        */}
+        <defs>
+          <pattern
+            id="seat-hatch"
+            patternUnits="userSpaceOnUse"
+            width={40}
+            height={40}
+            patternTransform="rotate(45)"
+          >
+            <rect width={40} height={40} className="fill-stone-800/40" />
+            <line x1={0} y1={0} x2={0} y2={40} className="stroke-stone-500" strokeWidth={14} />
+          </pattern>
+        </defs>
+
         {/* Background layer only. Drawn behind everything, never interactive, and it can never
             determine a seat's status — the database decides (Principle I, FR-020). */}
         {floorPlan && (
@@ -935,6 +1051,11 @@ function SeatCanvasInner<T extends CanvasSeat>(
         {/* Non-sellable decoration. Excluded from the seat tab order (FR-040), and inert for a
             buyer — a stage that swallows the tap meant for the front row is a real misclick. */}
         {elements.map((el, i) => {
+          // Skipped IN PLACE rather than filtered out: `i` is this element's identity for
+          // `selectedElementIndex`, `onElementPointerDown`, `onResize` and `onVertexDrag`, so
+          // removing entries would silently re-point the editor's selection at its neighbour.
+          if (hiddenElementIndices?.has(i)) return null;
+          if (!Number.isFinite(el.x) || !Number.isFinite(el.y)) return null;
           const grabbable = editable && !!onElementPointerDown;
           return (
           <g
@@ -1190,8 +1311,11 @@ function SeatCanvasInner<T extends CanvasSeat>(
               }
               onPointerLeave={
                 // Leaving seat A for seat B fires this before B's enter, so the card never blinks
-                // out between neighbours — it just moves.
-                seatTooltip ? () => setHover((h) => (h?.seat.id === seat.id ? null : h)) : undefined
+                // out between neighbours — it just moves. Skipped on touch, where lifting the finger
+                // fires it and would snatch the card away the instant the tap produced it.
+                seatTooltip && !coarsePointer
+                  ? () => setHover((h) => (h?.seat.id === seat.id ? null : h))
+                  : undefined
               }
               onKeyDown={
                 interactive
@@ -1318,11 +1442,16 @@ function SeatCanvasInner<T extends CanvasSeat>(
         {overlay}
       </svg>
 
-      {/* Hover card. Pointer-transparent, so it can never eat the click it is describing. */}
+      {/* Seat card. Pointer-transparent, so it can never eat the click it is describing. On touch it
+          is pinned to the bottom edge rather than to the finger — see `coarsePointer`. */}
       {hover && seatTooltip && (
         <div
-          className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-[calc(100%+12px)] whitespace-nowrap border-2 border-beige-kem bg-surface-2 px-2.5 py-1.5 font-mono text-xs text-beige-kem shadow-lg"
-          style={{ left: hover.left, top: hover.top }}
+          className={
+            coarsePointer
+              ? "pointer-events-none absolute inset-x-2 bottom-2 z-20 border-2 border-beige-kem bg-surface-2 px-2.5 py-2 text-center font-mono text-xs text-beige-kem shadow-lg"
+              : "pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-[calc(100%+12px)] whitespace-nowrap border-2 border-beige-kem bg-surface-2 px-2.5 py-1.5 font-mono text-xs text-beige-kem shadow-lg"
+          }
+          style={coarsePointer ? undefined : { left: hover.left, top: hover.top }}
           role="presentation"
         >
           {seatTooltip(hover.seat)}

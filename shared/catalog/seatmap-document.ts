@@ -170,6 +170,21 @@ export interface DocumentRow {
  * The re-editable intent. Absent means the block is NOT parametric — a free group of seats the
  * organizer positions individually, which is what an adopted pre-document layout becomes.
  */
+/**
+ * The widest a curved row may sweep.
+ *
+ * 180 is not a taste decision. A curved row generates at `dx = rr * sin(a)` with `a` spanning
+ * `±arcAngle/2` (seatmap-project.ts), so at 180 the sweep is exactly ±90° — the limit of `sin`'s
+ * monotonicity. Past it the arms fold back over the same x range, and `bestAvailable`'s
+ * `sortAlongRow`, which orders a row by its dominant cartesian axis, would interleave them and start
+ * offering buyers "adjacent" pairs from opposite ends of the room.
+ *
+ * The editor's slider reads its `max` from here so raising the cap cannot be a one-character edit in
+ * the UI. Anything above 180 needs `sortAlongRow` to order by angle about the arc's centre, or by
+ * cumulative distance along it, first.
+ */
+export const MAX_ARC_ANGLE = 180;
+
 export interface BlockParams {
   rowsCount?: number;
   seatsPerRow?: number;
@@ -178,6 +193,7 @@ export interface BlockParams {
   rowSpacing?: number;
   /** Curved rows only. */
   radius?: number;
+  /** Total sweep in degrees. Capped at `MAX_ARC_ANGLE` — see that constant before widening it. */
   arcAngle?: number;
   rowLabelScheme?: RowLabelScheme;
   seatLabelScheme?: SeatLabelScheme;

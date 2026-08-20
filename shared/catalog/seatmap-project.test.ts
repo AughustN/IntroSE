@@ -21,7 +21,7 @@ import {
   seatNumberFor,
   stitchSeatIds,
 } from './seatmap-project.js';
-import { LAYOUT_MAX_SEATS, validateLayout } from './seatmap-validate.js';
+import { LAYOUT_MAX_SEATS, blockingIssues, validateLayout } from './seatmap-validate.js';
 
 // The document → rows projection, tested where it lives. Every assertion is either a database
 // constraint (`pos_x`/`pos_y` 0–10000, `rotation` 0–359, `UNIQUE (section, row, number)`) or the rule
@@ -198,7 +198,7 @@ describe('projection produces storable, uniquely-labelled seats', () => {
     expect(new Set(labelsOf(p.seats)).size).toBe(18);
   });
 
-  it('reports no validation issues for a well-formed document', () => {
+  it('reports nothing that BLOCKS publishing for a well-formed document', () => {
     const p = projectDocument(doc([regenerateBlock(block(), mint)]));
     const issues = validateLayout({
       seats: p.seats.map((s, i) => ({
@@ -214,7 +214,10 @@ describe('projection produces storable, uniquely-labelled seats', () => {
       categories: p.categories.map((c) => ({ id: c.id as number, name: c.name })),
       elements: p.elements.map((e) => ({ kind: e.kind, x: e.x, y: e.y, points: e.points })),
     });
-    expect(issues).toEqual([]);
+    // Blocking only. This document draws seats and no stage, which is legitimate and publishable, but
+    // raises the advisory `focal_point_unset` — best-available will rank from the seat centroid. The
+    // claim here is that the projection is PUBLISHABLE, not that it is silent.
+    expect(blockingIssues(issues)).toEqual([]);
   });
 
   it('turns decoration into elements and never into seats', () => {
@@ -250,6 +253,7 @@ describe('adopting a layout that has no document', () => {
     name: 'Sơ đồ mặc định',
     status: 'draft',
     isTemplate: false,
+    orphanRule: 'balanced',
     version: 3,
     sections: [{ id: 1, name: 'Khu A', seatShape: 'circle', seatSizeMultiplier: 1 }],
     rows: [],
