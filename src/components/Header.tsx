@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { MoonStar, MoreHorizontal, Search, Sun, Ticket, X } from "lucide-react";
+import { LayoutDashboard, MoonStar, Search, Store, Sun, Ticket, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { DEFAULT_AVATAR_FG, avatarColor } from "../services/defaultAvatar";
 import { useDismiss } from "../hooks/useDismiss";
@@ -132,19 +132,6 @@ function PillCell({
     >
       <Icon className="h-[17px] w-[17px] shrink-0" />
       <span className="label-eyebrow hidden whitespace-nowrap sm:inline">{label}</span>
-    </button>
-  );
-}
-
-/** A row in the overflow menu under the centre pill. */
-function MenuRow({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="label-eyebrow block w-full px-4 py-2.5 text-left text-beige-kem transition hover:bg-bubblegum/40"
-    >
-      {label}
     </button>
   );
 }
@@ -298,6 +285,12 @@ interface HeaderProps {
   onLoginClick: () => void;
   /** The organiser's own event list, `/organizer`. */
   onOrganizerClick: () => void;
+  /**
+   * The application form, `/account?section=organizer` — for a reader who is *not* an organizer
+   * yet. It is deliberately not `/organizer`, which would hand them an empty event list and no way
+   * to find out what to do about it.
+   */
+  onApplyAsOrganizer: () => void;
   /** The moderation and settings console, `/admin`. */
   onAdminClick: () => void;
   /**
@@ -357,6 +350,7 @@ export default function Header({
   onHomeClick,
   onLoginClick,
   onOrganizerClick,
+  onApplyAsOrganizer,
   onAdminClick,
   isOrganizer,
   isAdmin,
@@ -384,7 +378,6 @@ export default function Header({
   const overHero = overlay && !pastHero;
 
   const [searchOpen, setSearchOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
   const centerRef = useRef<HTMLDivElement>(null);
@@ -398,7 +391,6 @@ export default function Header({
    * is in force, so the filter is still visible on `/events` and still undoable from the ×.
    */
   useDismiss(centerRef, searchOpen, () => setSearchOpen(false));
-  useDismiss(centerRef, moreOpen, () => setMoreOpen(false));
   useDismiss(menuRef, menuOpen, () => setMenuOpen(false));
 
   useEffect(() => {
@@ -478,11 +470,6 @@ export default function Header({
   /** Every menu entry closes the surface behind it; nothing should stay hanging. */
   const run = (action: () => void) => () => {
     setMenuOpen(false);
-    action();
-  };
-
-  const runCentre = (action: () => void) => () => {
-    setMoreOpen(false);
     action();
   };
 
@@ -580,16 +567,28 @@ export default function Header({
             )}
 
             <div className="nav-pill-cell">
-              <PillCell
-                icon={MoreHorizontal}
-                label="Thêm"
-                active={moreOpen}
-                onClick={() => setMoreOpen((open) => !open)}
-              />
+              <PillCell icon={Ticket} label="Sự kiện" onClick={onBrowse} />
             </div>
 
+            {/*
+              The third cell used to be "Thêm", an overflow menu of three links — about, terms,
+              refunds — that the footer's "Hỗ trợ" column already carries verbatim. A duplicate is
+              not worth a cell on the page's centre line, and the links have moved into the account
+              panel, where the rest of the site's small print now sits.
+
+              What replaces it is the one destination that had no way in at all: the organiser
+              pitch, which lived only in a banner at the foot of the home page. Selling is the other
+              half of a ticketing site and it was the half you had to scroll to the bottom to find.
+
+              One cell, two states, the way the stub's own cells already work: an approved organizer
+              gets their console, everyone else gets the form that leads there.
+            */}
             <div className="nav-pill-cell">
-              <PillCell icon={Ticket} label="Sự kiện" onClick={runCentre(onBrowse)} />
+              {isOrganizer ? (
+                <PillCell icon={LayoutDashboard} label="Quản lý" onClick={onOrganizerClick} />
+              ) : (
+                <PillCell icon={Store} label="Bán vé" onClick={onApplyAsOrganizer} />
+              )}
             </div>
           </div>
 
@@ -676,16 +675,6 @@ export default function Header({
               )}
             </div>
           </div>
-
-          {moreOpen && (
-            <div className="absolute left-1/2 top-[calc(100%+12px)] w-52 -translate-x-1/2">
-              <div role="menu" className="nav-surface nav-menu-card ticket-corners py-1">
-                <MenuRow label="Về chúng tôi" onClick={runCentre(onViewGuide)} />
-                <MenuRow label="Điều khoản" onClick={runCentre(onViewAbout)} />
-                <MenuRow label="Hoàn vé" onClick={runCentre(onViewPolicy)} />
-              </div>
-            </div>
-          )}
         </div>
 
         <div className="pointer-events-auto flex items-center justify-self-end">
@@ -814,6 +803,12 @@ export default function Header({
                     keeps "Đăng xuất" from sitting in the same run as the destinations, where a
                     reader aiming for the row above it can hit it by mistake.
 
+                    The site's small print — about, terms, refunds — joins the lower group, having
+                    come out of the centre pill's overflow menu. It belongs with "what this account
+                    is" rather than "where it goes", and unlike the rows around it, it is there for
+                    a signed-out reader too, which is why the lower group no longer disappears with
+                    the session.
+
                     `index` runs across both groups, because it drives the reveal stagger and the
                     rows arrive in one sequence however they are grouped.
                   */}
@@ -832,19 +827,21 @@ export default function Header({
                             onClick: onViewNotifications,
                           },
                           { label: "Đã lưu", onClick: onViewSaved },
-                          // Only an approved organizer has an event list to manage.
-                          ...(isOrganizer
-                            ? [{ label: "Trang quản lý", onClick: onOrganizerClick }]
-                            : []),
+                          // "Trang quản lý" is gone from here: the centre pill's third cell is the
+                          // organizer's console once the account is approved, and a second row to
+                          // the same page is the duplication that cell was built to remove.
                         ]
                       : [{ label: "Đăng nhập", onClick: onLoginClick }];
 
-                    const sessionRows = userName
-                      ? [
-                          ...(isAdmin ? [{ label: "Trang quản trị", onClick: onAdminClick }] : []),
-                          { label: "Đăng xuất", onClick: onLogout },
-                        ]
-                      : [];
+                    const secondaryRows = [
+                      { label: "Về chúng tôi", onClick: onViewGuide },
+                      { label: "Điều khoản", onClick: onViewAbout },
+                      { label: "Hoàn vé", onClick: onViewPolicy },
+                      ...(userName && isAdmin
+                        ? [{ label: "Trang quản trị", onClick: onAdminClick }]
+                        : []),
+                      ...(userName ? [{ label: "Đăng xuất", onClick: onLogout }] : []),
+                    ];
 
                     return (
                       <>
@@ -860,26 +857,22 @@ export default function Header({
                           ))}
                         </div>
 
-                        {sessionRows.length > 0 && (
-                          <>
-                            <div className="mx-4 mt-3">
-                              <div
-                                className="menu-rule"
-                                style={rowDelay(LINK_DELAY(destinations.length))}
-                              />
-                            </div>
-                            <div className="mt-3 flex flex-col items-start px-4">
-                              {sessionRows.map((row, i) => (
-                                <PanelLink
-                                  key={row.label}
-                                  label={row.label}
-                                  index={destinations.length + 1 + i}
-                                  onClick={run(row.onClick)}
-                                />
-                              ))}
-                            </div>
-                          </>
-                        )}
+                        <div className="mx-4 mt-3">
+                          <div
+                            className="menu-rule"
+                            style={rowDelay(LINK_DELAY(destinations.length))}
+                          />
+                        </div>
+                        <div className="mt-3 flex flex-col items-start px-4">
+                          {secondaryRows.map((row, i) => (
+                            <PanelLink
+                              key={row.label}
+                              label={row.label}
+                              index={destinations.length + 1 + i}
+                              onClick={run(row.onClick)}
+                            />
+                          ))}
+                        </div>
                       </>
                     );
                   })()}

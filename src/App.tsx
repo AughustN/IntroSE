@@ -2036,6 +2036,10 @@ export default function App() {
             goTo("organizer");
           })
         }
+        /* Same target and same sign-in gate as the footer's organiser banner. */
+        onApplyAsOrganizer={() =>
+          void leaveFlow(() => runSignedIn(() => navigate(`${ACCOUNT_PATH}?section=organizer`)))
+        }
         onAdminClick={() =>
           leaveFlow(() => {
             goTo("admin");
