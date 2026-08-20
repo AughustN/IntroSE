@@ -25,6 +25,10 @@ const MESSAGES: Record<string, string> = {
   not_owner: "Đơn giữ chỗ này không phải của bạn.",
   rate_limited: "Bạn thao tác quá nhanh, vui lòng thử lại sau giây lát.",
   unauthenticated: "Vui lòng đăng nhập để giữ ghế.",
+  inhuman_interaction_speed: "Thao tác quá nhanh. Vui lòng tương tác bình thường để giữ vé.",
+  queue_token_required: "Sự kiện đang mở bán vé hot. Vui lòng tham gia phòng chờ để nhận lượt giữ vé.",
+  queue_token_expired: "Lượt phòng chờ đã hết hạn (quá 3 phút). Vui lòng xếp hàng lại.",
+  captcha_failed: "Xác thực CAPTCHA thất bại, vui lòng thử lại.",
 };
 
 async function call<T>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {

@@ -786,6 +786,13 @@ export default function EventDetail({
             <p className="mt-2 font-meta text-lede text-ink-soft">{event.originalTitle}</p>
           )}
 
+          {event.isHighDemand && (
+            <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-950/60 border border-indigo-500/40 text-indigo-300 text-xs font-semibold">
+              <span className="text-sm">🛡️</span>
+              <span>Sự kiện mở bán vé Hot — Tự động xếp hàng qua Phòng chờ ảo (Anti-Bot)</span>
+            </div>
+          )}
+
           <figure className="relative mt-6 aspect-[3/2] overflow-hidden bg-beige-kem/[0.07]">
             <img
               src={event.imageUrl}

@@ -165,6 +165,7 @@ export async function getOrganizerEvents(params?: {
               salesEndDatetime: item.salesEndDatetime || new Date().toISOString(),
               status: rawStatus as any,
               computedStatus: compStatus,
+              isHighDemand: Boolean(item.isHighDemand ?? item.is_high_demand ?? false),
               rejectionReason: null,
               cancellationReason: null,
               createdAt: item.createdAt || new Date().toISOString(),
@@ -262,12 +263,8 @@ export async function getOrganizerEventDetail(eventId: string): Promise<{
   };
 }> {
   const organizerId = getCurrentOrganizerId();
+  await getOrganizerEvents();
   let event = eventsStore.find(e => e.eventId === String(eventId));
-
-  if (!event) {
-    await getOrganizerEvents();
-    event = eventsStore.find(e => e.eventId === String(eventId));
-  }
 
   if (!event) {
     throw new Error("NOT_FOUND: Event not found.");
@@ -394,7 +391,12 @@ export async function updateEventDetails(
   updates: Partial<OrganizerEvent>
 ): Promise<{ event: OrganizerEvent; statusRevertedToPending: boolean }> {
   const organizerId = getCurrentOrganizerId();
-  const event = eventsStore.find(e => e.eventId === eventId);
+  let event = eventsStore.find(e => e.eventId === eventId);
+
+  if (!event) {
+    await getOrganizerEvents();
+    event = eventsStore.find(e => e.eventId === eventId);
+  }
 
   if (!event) throw new Error("NOT_FOUND: Event not found.");
   if (event.organizerId !== organizerId) throw new Error("FORBIDDEN: You do not own this event.");
@@ -405,6 +407,27 @@ export async function updateEventDetails(
     event.status = "pending_review";
     event.computedStatus = "pending_review";
     statusRevertedToPending = true;
+  }
+
+  const numericId = Number(eventId);
+  if (Number.isSafeInteger(numericId)) {
+    try {
+      const res = await studioApi.updateEvent(numericId, {
+        title: updates.title,
+        description: updates.description,
+        imageUrl: updates.bannerUrl,
+        categoryCode: updates.category,
+        isHighDemand: updates.isHighDemand,
+      });
+      if (res.returnedToReview || res.moderation === "pending_review") {
+        statusRevertedToPending = true;
+        event.status = "pending_review";
+        event.computedStatus = "pending_review";
+      }
+    } catch (err: any) {
+      console.warn("Could not persist event update to studioApi:", err);
+      throw err;
+    }
   }
 
   Object.assign(event, updates);

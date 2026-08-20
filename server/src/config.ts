@@ -96,6 +96,12 @@ export const config = {
   vnpayReturnUrl:
     process.env.VNPAY_RETURN_URL ??
     `${process.env.APP_URL ?? "http://localhost:3000"}/vnpay-return`,
+
+  // Cloudflare Turnstile & Anti-Bot Protection
+  turnstileSiteKey: process.env.TURNSTILE_SITE_KEY ?? "",
+  turnstileSecretKey: process.env.TURNSTILE_SECRET_KEY ?? "",
+  turnstileFailOpen: process.env.TURNSTILE_FAIL_OPEN === "true",
+  serverTimingSecret: process.env.SERVER_TIMING_SECRET ?? process.env.JWT_SECRET ?? "dev-timing-secret-key-32-chars",
 } as const;
 
 // ---- Auth constants (decisions from research/ADRs) ----

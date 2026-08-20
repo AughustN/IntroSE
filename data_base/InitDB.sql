@@ -463,6 +463,7 @@ CREATE TABLE IF NOT EXISTS "public"."events" (
   "trailer_url" text COLLATE "pg_catalog"."default",
   "refund_policy" text COLLATE "pg_catalog"."default",
   "is_featured" bool NOT NULL DEFAULT false,
+  "is_high_demand" bool NOT NULL DEFAULT false,
   "event_type" text COLLATE "pg_catalog"."default" NOT NULL DEFAULT 'general_admission'::text,
   "status" text COLLATE "pg_catalog"."default" NOT NULL DEFAULT 'draft'::text,
   "moderation_status" text COLLATE "pg_catalog"."default" NOT NULL DEFAULT 'pending_review'::text,
@@ -5725,6 +5726,9 @@ CREATE INDEX IF NOT EXISTS "idx_events_search_doc" ON "public"."events" USING gi
 CREATE INDEX IF NOT EXISTS "idx_events_status" ON "public"."events" USING btree (
   "status" COLLATE "pg_catalog"."default" "pg_catalog"."text_ops" ASC NULLS LAST
 );
+CREATE INDEX IF NOT EXISTS "idx_events_is_high_demand" ON "public"."events" USING btree (
+  "is_high_demand" "pg_catalog"."bool_ops" ASC NULLS LAST
+) WHERE is_high_demand = true;
 CREATE INDEX IF NOT EXISTS "idx_events_title_trgm" ON "public"."events" USING gin (
   immutable_unaccent(title) COLLATE "pg_catalog"."default" "public"."gin_trgm_ops"
 );

@@ -18,6 +18,8 @@ import {
 import { buildPaymentUrl, hasValidVnpaySignature, type VnpayParams } from "./vnpay.js";
 import { queueTicketResend } from "../notifications/notifications.service.js";
 import { cancelTicket } from "./tickets.service.js";
+import { pool } from "../../db/pool.js";
+import { checkSlidingLimit } from "../../middleware/rateLimit.js";
 
 export const walletRouter = Router();
 
@@ -104,8 +106,31 @@ walletRouter.post(
     if (!config.vnpayTmnCode || !config.vnpayHashSecret) {
       throw new HttpError(503, "payment_not_configured", "Thanh toán VNPay chưa được cấu hình.");
     }
+    const userId = req.auth!.userId;
+
+    // 1. Rate Limit: max 5 top-up creations per 10 minutes per user (FR-016)
+    const userKey = `user:${userId}`;
+    const rateCheck = checkSlidingLimit("wallet:topup", userKey, 5, 10 * 60 * 1000);
+    if (!rateCheck.allowed) {
+      throw err.tooMany("rate_limited", "Bạn đã tạo quá nhiều yêu cầu nạp ví. Vui lòng chờ 10 phút trước khi thử lại.");
+    }
+
+    // 2. Concurrency Limit: max 2 pending (initiated) top-ups per user (FR-017)
+    const pendingCountRes = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM payment_transactions
+       WHERE user_id = $1 AND status = 'initiated'`,
+      [userId],
+    );
+    const pendingCount = Number(pendingCountRes.rows[0]?.count ?? 0);
+    if (pendingCount >= 2) {
+      throw err.conflict(
+        "pending_topups_limit",
+        "Bạn đang có 2 giao dịch nạp ví đang chờ xử lý. Vui lòng hoàn tất hoặc chờ giao dịch hết hạn trước khi tạo thêm.",
+      );
+    }
+
     const { amount, reservationId } = req.body as z.infer<typeof topupSchema>;
-    const topup = await createTopup(req.auth!.userId, amount, reservationId ?? null);
+    const topup = await createTopup(userId, amount, reservationId ?? null);
 
     // The one-time grace (UC-40 step 4, FR-010): a VNPay detour takes longer than the ordinary hold
     // window allows, so the hold that sent the buyer here gets one bounded extension. Only once, and

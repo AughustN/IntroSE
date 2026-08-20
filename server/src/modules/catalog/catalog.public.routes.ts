@@ -6,9 +6,20 @@ import { validate } from '../../middleware/validate.js';
 import { listCategories } from '../admin/admin.repo.js';
 import { getEventDetail, getSeatMap, getShowtimes, listEvents, listFeaturedEvents } from './catalog.repo.js';
 import { reportEvent } from './report.service.js';
+import { generateTimingTicket } from '../../services/timingTicket.js';
+import { createSlidingRateLimiter } from '../../middleware/rateLimit.js';
 
 // Public catalog reads — no auth. Every query composes the live visibility predicate (R-1).
 export const catalogPublicRouter = Router();
+
+const catalogRateLimit = createSlidingRateLimiter('catalog:ip', {
+  windowMs: 60 * 1000,
+  max: 60,
+  errorMessage: 'Quá nhiều yêu cầu tải danh mục. Vui lòng thử lại sau giây lát.',
+  headers: true,
+});
+
+catalogPublicRouter.use(catalogRateLimit);
 
 const asyncH =
   (fn: (req: Request, res: Response) => Promise<void>) => (req: Request, res: Response, next: NextFunction) =>
@@ -52,6 +63,7 @@ catalogPublicRouter.get(
       page: num(q.page),
       pageSize: num(q.pageSize),
     });
+    res.setHeader('Cache-Control', 'public, max-age=5, s-maxage=5');
     res.json(result);
   }),
 );
@@ -62,6 +74,7 @@ catalogPublicRouter.get(
   asyncH(async (req, res) => {
     const detail = await getEventDetail(req.params.slug);
     if (!detail) throw err.notFound('not_found', 'Không tìm thấy sự kiện.');
+    res.setHeader('Cache-Control', 'public, max-age=5, s-maxage=5');
     res.json(detail);
   }),
 );
@@ -72,6 +85,7 @@ catalogPublicRouter.get(
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) throw err.notFound('not_found');
+    res.setHeader('Cache-Control', 'public, max-age=5, s-maxage=5');
     res.json(await getShowtimes(id));
   }),
 );
@@ -84,7 +98,13 @@ catalogPublicRouter.get(
     if (!Number.isInteger(id)) throw err.notFound('not_found');
     const map = await getSeatMap(id);
     if (!map) throw err.notFound('not_found', 'Không tìm thấy suất chiếu.');
-    res.json(map);
+    const timing = generateTimingTicket(id);
+    res.setHeader('Cache-Control', 'public, max-age=5, s-maxage=5');
+    res.json({
+      ...map,
+      timingTicket: timing.ticket,
+      viewTimestamp: timing.viewTimestamp,
+    });
   }),
 );
 

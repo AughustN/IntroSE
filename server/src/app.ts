@@ -16,6 +16,7 @@ import { notificationRouter } from "./modules/notifications/notifications.routes
 import { aiRouter } from "./modules/ai/ai.routes.js";
 import { reviewsRouter } from "./modules/reviews/reviews.routes.js";
 import { adsOrganizerRouter, adsPublicRouter } from "./modules/ads/ads.routes.js";
+import { waitingRoomRouter } from "./modules/waitingRoom/waitingRoom.routes.js";
 
 /** Build the Express app (no listen) so tests can drive it with supertest. */
 export function createApp(): Express {
@@ -65,6 +66,7 @@ export function createApp(): Express {
   app.use("/api", reviewsRouter);
   app.use("/api", walletRouter);
   app.use("/api", notificationRouter);
+  app.use("/api/waiting-room", waitingRoomRouter);
   app.use("/api/ai", aiRouter);
   // `reservationsRouter` has a router-wide auth guard. Mount wallet first so the
   // public, signature-verified VNPay IPN callback can reach its handler.

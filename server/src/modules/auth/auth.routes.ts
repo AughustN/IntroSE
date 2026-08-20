@@ -38,6 +38,9 @@ import {
   rotateSession,
 } from './sessions.js';
 import { allow, applyIdentifierDelay, ipKey } from './throttle.js';
+import { isDisposableEmail } from '../../middleware/emailFilter.js';
+import { verifyTurnstile } from '../../services/turnstile.js';
+import { checkSlidingLimit, normalizeIpKey } from '../../middleware/rateLimit.js';
 
 // Mounted at /api → auth endpoints live under /api/auth/*, profile at /api/me.
 export const authRouter = Router();
@@ -84,11 +87,13 @@ const registerSchema = z.object({
   passwordConfirm: z.string(),
   nickname: z.string().trim().min(1).max(50),
   phone: z.string().trim().min(1).optional().nullable(),
+  turnstileToken: z.string().optional(),
 }); // unknown keys stripped → privilege fields ignored (FR-008/035)
 
 const loginSchema = z.object({
   identifier: z.string().min(1),
   password: z.string().min(1),
+  turnstileToken: z.string().optional(),
 });
 
 const googleSchema = z.object({ credential: z.string().min(1) });
@@ -123,6 +128,30 @@ authRouter.post(
     if (!allow(`reg:${ipKey(req.ip)}`, 30, 60_000))
       throw err.tooMany('rate_limited', 'Bạn thao tác quá nhanh, thử lại sau.');
     const body = req.body as z.infer<typeof registerSchema>;
+
+    if (isDisposableEmail(body.email)) {
+      throw err.badRequest(
+        'disposable_email_rejected',
+        'Địa chỉ email tạm thời / rác không được chấp nhận. Vui lòng sử dụng email chính thức.',
+      );
+    }
+
+    const ipNorm = normalizeIpKey(req.ip || '127.0.0.1');
+    const ipCheck = checkSlidingLimit('register:ip', ipNorm, 6, 60 * 60 * 1000);
+    if (!ipCheck.allowed && !body.turnstileToken) {
+      return res.status(403).json({
+        error: 'captcha_required',
+        message: 'Nhiều tài khoản vừa được tạo từ địa chỉ IP này. Vui lòng hoàn tất xác thực CAPTCHA.',
+        requireCaptcha: true,
+      });
+    }
+
+    if (body.turnstileToken) {
+      const captchaRes = await verifyTurnstile(body.turnstileToken, req.ip);
+      if (!captchaRes.success) {
+        throw err.badRequest('captcha_failed', 'Xác thực CAPTCHA thất bại, vui lòng thử lại.');
+      }
+    }
 
     if (body.password !== body.passwordConfirm) throw err.badRequest('password_mismatch', 'Mật khẩu nhập lại không khớp.');
     const weak = passwordStrengthError(body.password);
@@ -173,11 +202,41 @@ authRouter.post(
   validate(loginSchema),
   asyncH(async (req, res) => {
     const body = req.body as z.infer<typeof loginSchema>;
-    if (!allow(`login:${ipKey(req.ip)}`, 100, 60_000))
-      throw err.tooMany('rate_limited', 'Bạn thử quá nhiều lần, hãy chờ một lát.');
+
+    const ipNorm = normalizeIpKey(req.ip || '127.0.0.1');
+    const ipCheck = checkSlidingLimit('login:ip', ipNorm, 15, 15 * 60 * 1000);
+    if (!ipCheck.allowed) {
+      throw err.tooMany('rate_limited', 'Bạn đã thử đăng nhập quá nhiều lần. Vui lòng chờ 15 phút.');
+    }
 
     const classified = classifyIdentifier(body.identifier);
     const idHash = classified.kind === 'unknown' ? hashIdentifier(body.identifier) : hashIdentifier(classified.value);
+    const failCount = await recentIdentifierFailures(idHash, 15 * 60_000);
+    const MAX_LOGIN_ATTEMPTS = 10;
+
+    // Temporary lockout after 10 failed attempts in 15 minutes
+    if (failCount >= MAX_LOGIN_ATTEMPTS) {
+      throw err.tooMany(
+        'account_locked_temporarily',
+        'Tài khoản đã bị tạm khóa do nhập sai mật khẩu quá 10 lần. Vui lòng thử lại sau 15 phút hoặc sử dụng Quên mật khẩu.',
+      );
+    }
+
+    // Adaptive Turnstile challenge on >= 3 consecutive failed logins
+    if (failCount >= 3) {
+      if (!body.turnstileToken) {
+        return res.status(403).json({
+          error: 'captcha_required',
+          message: 'Tài khoản đã đăng nhập sai nhiều lần. Vui lòng hoàn tất xác thực CAPTCHA để tiếp tục.',
+          requireCaptcha: true,
+        });
+      }
+      const captchaRes = await verifyTurnstile(body.turnstileToken, req.ip);
+      if (!captchaRes.success) {
+        throw err.badRequest('captcha_failed', 'Xác thực CAPTCHA thất bại, vui lòng thử lại.');
+      }
+    }
+
     const user =
       classified.kind === 'email'
         ? await findByEmail(classified.value)
@@ -194,10 +253,19 @@ authRouter.post(
       ? await verifyPassword(body.password, user.password_hash)
       : await dummyVerify(body.password);
     if (!ok || !user) {
-      // Progressive per-identifier delay (equal for unknown identifiers, FR-048/049); never a lockout.
-      await applyIdentifierDelay(await recentIdentifierFailures(idHash, 15 * 60_000));
+      // Progressive per-identifier delay (equal for unknown identifiers, FR-048/049).
+      await applyIdentifierDelay(failCount);
       await recordAuthEvent({ event: 'login_failure', userId: user?.id ?? null, identifierHash: idHash, sourceIp: req.ip });
-      throw err.unauthorized('invalid_credentials', 'Thông tin đăng nhập không đúng.');
+
+      const newFailCount = failCount + 1;
+      const remainingAttempts = Math.max(0, MAX_LOGIN_ATTEMPTS - newFailCount);
+
+      const message =
+        remainingAttempts > 0
+          ? `Mật khẩu không chính xác. Bạn còn ${remainingAttempts} lần thử trước khi tài khoản bị tạm khóa 15 phút.`
+          : `Bạn đã nhập sai mật khẩu 10 lần. Tài khoản đã bị tạm khóa trong 15 phút để bảo vệ an toàn.`;
+
+      throw err.unauthorized('invalid_credentials', message);
     }
 
     // Suspension is checked only AFTER the password is verified (FR-013).

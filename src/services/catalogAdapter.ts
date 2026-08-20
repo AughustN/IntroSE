@@ -80,5 +80,6 @@ export function detailToMovie(d: EventDetail, showtimes: Showtime[]): MovieEvent
       description: '',
       remaining: t.remaining,
     })),
+    isHighDemand: Boolean(d.isHighDemand),
   };
 }
