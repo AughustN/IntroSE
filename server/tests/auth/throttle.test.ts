@@ -22,11 +22,21 @@ describe('abuse resistance (US7)', () => {
     await loginFrom('9.9.9.2', creds.email, creds.password).expect(200);
   });
 
-  it('never locks out: correct password accepted after many failures (SC-013)', async () => {
+  it('never locks the account out: a stranger’s failures do not reach the owner (SC-013)', async () => {
     await request(app).post('/api/auth/register').send(creds).expect(201);
+
+    // A third party grinds on the identifier from its own source.
     await Promise.all(Array.from({ length: 50 }, () => loginFrom('9.9.9.3', creds.email, 'wrongpass9')));
-    // 51st, correct → accepted (no lockout state exists)
-    await loginFrom('9.9.9.3', creds.email, creds.password).expect(200);
+
+    // That source is now spent — 15 sign-ins per 15 minutes — and the right password does not buy
+    // its way out of the window. This is the defence working, and it says nothing about the account.
+    const attacker = await loginFrom('9.9.9.3', creds.email, creds.password);
+    expect(attacker.status).toBe(429);
+
+    // The owner, from their own source, walks in: no lockout to clear, no CAPTCHA to solve. This is
+    // the assertion the criterion is actually about, and it fails the moment the failure counter is
+    // read per identifier rather than per source.
+    await loginFrom('9.9.9.5', creds.email, creds.password).expect(200);
   });
 
   it('throttle fires identically for an unknown identifier (FR-040, no enumeration)', async () => {

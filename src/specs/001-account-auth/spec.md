@@ -480,9 +480,19 @@ is throttled while the same account still signs in successfully from a different
 - **SC-008**: An organizer suspension takes effect on the next request, with no sign-out required.
 - **SC-009**: A single source attempting 100 sign-ins per minute is throttled, while the rightful
   owner of a targeted account signs in successfully from another source during the same window.
-- **SC-013**: No sequence of failed attempts by a third party prevents an account owner from signing
-  in with the correct password — verified by a test that fails 50 times against one identifier and
-  then succeeds with the right password.
+- **SC-013**: No sequence of failed attempts by a third party puts an account into a state — a
+  lockout, a CAPTCHA requirement, or anything else — that its owner has to clear before signing in
+  with the correct password. Verified by a test that fails 50 times against one identifier from one
+  source and then signs in from another.
+
+  The check moved across sources when the anti-bot work landed. It used to fail and then succeed on
+  a *single* source, which tested the same claim only while nothing counted per source: the new
+  sliding window admits 15 sign-ins per source per 15 minutes, so a source that has just spent 50 is
+  throttled whatever password it now offers — correctly, and with nothing to say about whether the
+  ACCOUNT is reachable. Reading the counter per identifier instead of per source is the failure this
+  criterion exists to catch, and it is the one the first version of the anti-bot login did: three
+  failures from a stranger abroad put a CAPTCHA in front of the owner at home, and ten locked them
+  out for fifteen minutes, renewably, to anyone who knew their email address.
 - **SC-010**: Every acceptance scenario above that describes a refusal has an automated test
   asserting the refusal, not only its happy-path counterpart.
 - **SC-011**: A security scan of the finished feature reports zero high-severity findings.

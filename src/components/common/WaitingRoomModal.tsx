@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { Users, Clock, Loader2, Sparkles, ShieldCheck } from 'lucide-react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
+import { Users, Clock, ShieldCheck } from 'lucide-react';
 import { joinWaitingRoom, getWaitingRoomStatus } from '../../services/waitingRoomClient.js';
 import { TurnstileWidget } from './TurnstileWidget.js';
 
@@ -17,12 +17,56 @@ export const WaitingRoomModal: React.FC<WaitingRoomModalProps> = ({
   onClose,
 }) => {
   const [queuePosition, setQueuePosition] = useState<number | null>(null);
-  const [estimatedWaitSeconds, setEstimatedWaitSeconds] = useState<number | null>(null);
   const [displayWaitSeconds, setDisplayWaitSeconds] = useState<number | null>(null);
-  const [turnstileToken, setTurnstileToken] = useState<string>('mock-turnstile-token');
-  const turnstileTokenRef = useRef<string>('mock-turnstile-token');
+  /*
+   * Null until Cloudflare hands one over — never a stand-in string.
+   *
+   * Both of these opened on the literal `'mock-turnstile-token'`, and admission fires the moment
+   * the queue lets the buyer through, which on a short queue beats the widget: the script has to
+   * download, render and solve, and that is seconds, while `joinWaitingRoom` is one round trip. The
+   * placeholder therefore went to the server as if it were a solved challenge. It passed only
+   * because `verifyTurnstile` waves through anything starting with `mock-` while NODE_ENV is
+   * development — so the gate looked fine on every laptop and would have failed 100% of hot-event
+   * purchases on the VPS, where the string goes to Cloudflare and comes back invalid.
+   *
+   * `TurnstileWidget` still emits `mock-turnstile-token` itself when no site key is configured.
+   * That is the deliberate no-credentials path and the server matches it; the difference is that it
+   * now comes from the widget saying so, not from a field that was never filled in.
+   */
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const turnstileTokenRef = useRef<string | null>(null);
+  /** An admission that arrived before the challenge did, replayed by the effect below. */
+  const pendingAdmitRef = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  /*
+   * Leave the room only with both halves in hand.
+   *
+   * The queue decides WHEN you may buy; the challenge decides WHETHER you are a person. They finish
+   * in whichever order the network allows, and the server rejects the purchase if either is
+   * missing, so an admission that lands first waits here rather than being spent on a request that
+   * cannot succeed. `useRef` and not state: this runs inside a polling callback that closes over
+   * the render it was created in, and a stale `useState` value would read `null` forever.
+   */
+  const admit = useCallback(
+    (queueToken: string) => {
+      if (turnstileTokenRef.current) {
+        onAdmitted(queueToken, turnstileTokenRef.current);
+        return;
+      }
+      pendingAdmitRef.current = queueToken;
+    },
+    [onAdmitted],
+  );
+
+  // The other order: the challenge came back after the queue did, so release the parked admission.
+  useEffect(() => {
+    if (!turnstileToken || !pendingAdmitRef.current) return;
+    const queueToken = pendingAdmitRef.current;
+    pendingAdmitRef.current = null;
+    onAdmitted(queueToken, turnstileToken);
+  }, [turnstileToken, onAdmitted]);
 
   // Smooth 1-second countdown ticker for user UI
   useEffect(() => {
@@ -47,14 +91,13 @@ export const WaitingRoomModal: React.FC<WaitingRoomModalProps> = ({
         if (!isMounted) return;
 
         if (joinRes.status === 'admitted' && joinRes.queueToken) {
-          onAdmitted(joinRes.queueToken, turnstileTokenRef.current);
+          admit(joinRes.queueToken);
           return;
         }
 
         const pos = joinRes.queuePosition ?? 1;
         const waitSec = joinRes.estimatedWaitSeconds ?? 3;
         setQueuePosition(pos);
-        setEstimatedWaitSeconds(waitSec);
         setDisplayWaitSeconds(waitSec);
 
         // Start active polling every 2 seconds
@@ -65,11 +108,10 @@ export const WaitingRoomModal: React.FC<WaitingRoomModalProps> = ({
 
             if (statusRes.status === 'admitted' && statusRes.queueToken) {
               if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-              onAdmitted(statusRes.queueToken, turnstileTokenRef.current);
+              admit(statusRes.queueToken);
             } else if (statusRes.status === 'waiting') {
               setQueuePosition(statusRes.queuePosition ?? 1);
               const nextWait = statusRes.estimatedWaitSeconds ?? 3;
-              setEstimatedWaitSeconds(nextWait);
               setDisplayWaitSeconds((prev) => (prev === null || prev <= 0 ? nextWait : prev));
             }
           } catch (err: unknown) {
@@ -89,7 +131,7 @@ export const WaitingRoomModal: React.FC<WaitingRoomModalProps> = ({
       isMounted = false;
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     };
-  }, [isOpen, showtimeId, onAdmitted]);
+  }, [isOpen, showtimeId, admit]);
 
   if (!isOpen) return null;
 

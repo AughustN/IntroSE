@@ -121,8 +121,15 @@ export function resetRateLimitStore(namespace?: string): void {
   if (namespace) {
     stores.get(namespace)?.clear();
   } else {
+    // Empty each namespace in place, and leave the registry itself alone.
+    //
+    // `createSlidingRateLimiter` resolves its namespace once, when the middleware is built at
+    // import time, and closes over that Map for the process's whole life. Dropping the entry from
+    // `stores` does not reach into the closure — it only orphans it: the limiter keeps counting
+    // against a Map nothing can find any more, and the reset after this one sweeps an empty
+    // registry while `catalog:ip` climbs past its ceiling of 60/min. Every later test that reads
+    // the catalogue then answers 429, whatever it was asserting.
     stores.forEach((store) => store.clear());
-    stores.clear();
   }
 }
 

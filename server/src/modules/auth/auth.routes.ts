@@ -139,11 +139,12 @@ authRouter.post(
     const ipNorm = normalizeIpKey(req.ip || '127.0.0.1');
     const ipCheck = checkSlidingLimit('register:ip', ipNorm, 6, 60 * 60 * 1000);
     if (!ipCheck.allowed && !body.turnstileToken) {
-      return res.status(403).json({
+      res.status(403).json({
         error: 'captcha_required',
         message: 'Nhiều tài khoản vừa được tạo từ địa chỉ IP này. Vui lòng hoàn tất xác thực CAPTCHA.',
         requireCaptcha: true,
       });
+      return;
     }
 
     if (body.turnstileToken) {
@@ -211,7 +212,9 @@ authRouter.post(
 
     const classified = classifyIdentifier(body.identifier);
     const idHash = classified.kind === 'unknown' ? hashIdentifier(body.identifier) : hashIdentifier(classified.value);
-    const failCount = await recentIdentifierFailures(idHash, 15 * 60_000);
+    // Scoped to this source: see `recentIdentifierFailures`. Counted globally, both defences below
+    // become a way to lock any account whose email you know, from anywhere.
+    const failCount = await recentIdentifierFailures(idHash, 15 * 60_000, ipNorm);
     const MAX_LOGIN_ATTEMPTS = 10;
 
     // Temporary lockout after 10 failed attempts in 15 minutes
@@ -225,11 +228,12 @@ authRouter.post(
     // Adaptive Turnstile challenge on >= 3 consecutive failed logins
     if (failCount >= 3) {
       if (!body.turnstileToken) {
-        return res.status(403).json({
+        res.status(403).json({
           error: 'captcha_required',
           message: 'Tài khoản đã đăng nhập sai nhiều lần. Vui lòng hoàn tất xác thực CAPTCHA để tiếp tục.',
           requireCaptcha: true,
         });
+        return;
       }
       const captchaRes = await verifyTurnstile(body.turnstileToken, req.ip);
       if (!captchaRes.success) {

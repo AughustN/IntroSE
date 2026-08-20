@@ -5,6 +5,7 @@ import { activityTest } from "../../src/modules/admin/activity.js";
 import { settingServiceTest } from "../../src/modules/admin/settings.service.js";
 import { resetAuthThrottle } from "../../src/modules/auth/throttle.js";
 import { resetHoldRateLimit } from "../../src/modules/holds/holds.throttle.js";
+import { resetRateLimitStore } from "../../src/middleware/rateLimit.js";
 import { resetAiThrottle } from "../../src/modules/studio/ai/ai.throttle.js";
 import { setListingModelForTest } from "../../src/modules/studio/ai/listing.model.js";
 
@@ -41,6 +42,13 @@ beforeEach(async () => {
   // Same for the auth throttle: every case registers users from the same loopback IP, so the
   // per-IP register window would otherwise be shared across a whole file (→ spurious 429s).
   resetAuthThrottle();
+  // And the anti-bot sliding windows, which are the SECOND per-IP register window in the process
+  // and reintroduce exactly the problem the line above solves. `register:ip` admits six sign-ups
+  // per hour from one address (auth.routes), and the whole suite registers from loopback: without
+  // this, the seventh case in a file — whatever it asserts — gets 403 `captcha_required` from
+  // `/auth/register`, and every case after it fails for its POSITION rather than its subject.
+  // Reset without a namespace, so `login:ip`, `login:failed:*` and the rest go with it.
+  resetRateLimitStore();
   // And the DAU dedupe (0035): it is a per-process set of who has already been written today, so a
   // TRUNCATE without this leaves the middleware believing rows exist that the suite just deleted.
   activityTest.reset();

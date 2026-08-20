@@ -346,6 +346,42 @@ export default function App() {
   const [turnstileTokens, setTurnstileTokens] = useState<Record<number, string>>({});
   const pendingHoldActionRef = useRef<((qToken: string, cToken?: string) => Promise<void>) | null>(null);
 
+  /*
+   * Every way the drop gate can turn a buyer away, and the one answer to all of them: queue again.
+   *
+   * Only `queue_token_required` used to be caught here, which was the case that could not happen
+   * twice — the other two are what a buyer actually hits. A pass expires after three minutes, and
+   * one minted before a server restart no longer resolves. Both arrived as a red toast with the
+   * waiting room shut, and the guard below skips reopening it while a token — any token, live or
+   * dead — sits in state, so the buyer was left pressing a seat that would never hold.
+   *
+   * Dropping the stale pass is what makes the guard true again.
+   */
+  const QUEUE_GATE_CODES = [
+    "queue_token_required",
+    "queue_token_invalid",
+    "queue_token_expired",
+    // A Turnstile token dies at Cloudflare the first time it is redeemed, and this app keeps one
+    // per showtime for as long as the buyer stays on the page. Re-queueing is what mints a fresh
+    // challenge, so a spent one recovers by the same route as a spent pass rather than dead-ending.
+    "captcha_failed",
+  ];
+
+  const reQueue = (showtimeId: number, action: (qToken: string, cToken?: string) => Promise<void>) => {
+    setQueueTokens((prev) => {
+      const next = { ...prev };
+      delete next[showtimeId];
+      return next;
+    });
+    setTurnstileTokens((prev) => {
+      const next = { ...prev };
+      delete next[showtimeId];
+      return next;
+    });
+    pendingHoldActionRef.current = action;
+    setWaitingRoomShowtimeId(showtimeId);
+  };
+
   const handleWaitingRoomAdmitted = async (showtimeId: number, qToken: string, cToken?: string) => {
     setQueueTokens((prev) => ({ ...prev, [showtimeId]: qToken }));
     if (cToken) setTurnstileTokens((prev) => ({ ...prev, [showtimeId]: cToken }));
@@ -1689,7 +1725,7 @@ export default function App() {
       setHoldBusy(true);
       try {
         const activeQToken = qToken || queueTokens[bookingShowtimeId];
-        const activeCToken = cToken || turnstileTokens[bookingShowtimeId] || "mock-turnstile-token";
+        const activeCToken = cToken || turnstileTokens[bookingShowtimeId];
         if (mine && hold) {
           const updated = await holdsClient.release(hold.reservationId, [seat.showtimeSeatId!]);
           setHold(updated.items.length === 0 ? null : sessionFromReservation(updated, context));
@@ -1705,9 +1741,8 @@ export default function App() {
           setHold(sessionFromReservation(updated, context));
         }
       } catch (e) {
-        if (e instanceof HoldError && e.code === "queue_token_required") {
-          pendingHoldActionRef.current = executeToggle;
-          setWaitingRoomShowtimeId(bookingShowtimeId);
+        if (e instanceof HoldError && QUEUE_GATE_CODES.includes(e.code)) {
+          reQueue(bookingShowtimeId, executeToggle);
           return;
         }
         pushToast(
@@ -1784,7 +1819,7 @@ export default function App() {
         try {
           const tierId = Number(tier.id);
           const activeQToken = qToken || queueTokens[showtimeId];
-          const activeCToken = cToken || turnstileTokens[showtimeId] || "mock-turnstile-token";
+          const activeCToken = cToken || turnstileTokens[showtimeId];
           const updated =
             delta > 0
               ? live
@@ -1799,9 +1834,8 @@ export default function App() {
           // there is nothing left to hold — not an error.
           setHold(updated.status === "active" ? sessionFromReservation(updated, context) : null);
         } catch (e) {
-          if (e instanceof HoldError && e.code === "queue_token_required") {
-            pendingHoldActionRef.current = executeHold;
-            setWaitingRoomShowtimeId(showtimeId);
+          if (e instanceof HoldError && QUEUE_GATE_CODES.includes(e.code)) {
+            reQueue(showtimeId, executeHold);
             return;
           }
           pushToast(
