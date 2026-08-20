@@ -111,7 +111,7 @@ export const TicketTierBreakdown: React.FC<TicketTierBreakdownProps> = ({
                                 : "Xóa hạng vé này."
                             }
                           >
-                            {sold > 0 ? "Archive" : "Xóa"}
+                            {sold > 0 ? "Lưu trữ" : "Xóa"}
                           </button>
                         </>
                       )}

@@ -1,7 +1,7 @@
 # ĐIỀU KHOẢN SỬ DỤNG NỀN TẢNG TIXHUB
 
 > **Áp dụng đối với:** Khách hàng (Người tham dự sự kiện)  
-> **Phiên bản:** Tháng 06/2026 · **Nhóm phát triển:** Group 02 — Intro2SE 24C11
+> **Phiên bản:** Tháng 06/2026 · **Nhóm phát triển:** Group 02 — Intro2SE 24C11  
 
 ---
 

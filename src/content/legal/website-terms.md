@@ -1,7 +1,7 @@
 # ĐIỀU KHOẢN SỬ DỤNG DÀNH CHO NHÀ TỔ CHỨC
 
-> **Áp dụng đối với:** Nhà Tổ Chức Sự Kiện trên Nền Tảng TixHub  
-> **Phiên bản:** Tháng 06/2026 · **Nhóm phát triển:** Group 02 — Intro2SE 24C11
+> **Áp dụng đối với:** Khách hàng (Người tham dự sự kiện)  
+> **Phiên bản:** Tháng 06/2026 · **Nhóm phát triển:** Group 02 — Intro2SE 24C11  
 
 ---
 
