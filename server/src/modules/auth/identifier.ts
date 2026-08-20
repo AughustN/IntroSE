@@ -3,7 +3,23 @@
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
+  const trimmed = email.trim().toLowerCase();
+  const atIndex = trimmed.lastIndexOf('@');
+  if (atIndex === -1) return trimmed;
+
+  let user = trimmed.slice(0, atIndex);
+  let domain = trimmed.slice(atIndex + 1);
+
+  if (domain === 'googlemail.com' || domain === 'gmail.com') {
+    domain = 'gmail.com';
+    user = user.replace(/\./g, '').split('+')[0];
+  } else if (domain === 'outlook.com' || domain === 'hotmail.com') {
+    user = user.split('+')[0];
+  } else if (domain === 'yahoo.com') {
+    user = user.split('-')[0].split('+')[0];
+  }
+
+  return `${user}@${domain}`;
 }
 
 export function isEmail(value: string): boolean {

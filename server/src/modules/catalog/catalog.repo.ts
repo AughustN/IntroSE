@@ -145,10 +145,11 @@ export async function getEventDetail(slug: string, db: Db = pool): Promise<Event
     seo_description: string | null;
     category_id: number;
     venue_guide: string | null;
+    is_high_demand: boolean;
   }>(
     `SELECT e.id, e.slug, e.title, e.image_url, ec.code AS category, ec.label_vi AS category_label, e.description, e.age_restriction,
             e.lineup, e.genre, e.trailer_url, e.refund_policy, e.event_type, e.seo_title, e.seo_description,
-            e.category_id,
+            e.category_id, COALESCE(e.is_high_demand, false) AS is_high_demand,
             ${EARLIEST} AS earliest_showtime, ${START_PRICE} AS starting_price, ${CITY} AS city,
             ${HAS_UPCOMING} AS has_upcoming, ${HAS_AVAILABLE} AS has_available,
             (SELECT v.guide FROM showtimes s JOIN venues v ON v.id = s.venue_id WHERE s.event_id = e.id ORDER BY s.starts_at LIMIT 1) AS venue_guide
@@ -206,6 +207,7 @@ export async function getEventDetail(slug: string, db: Db = pool): Promise<Event
     tiers,
     related: relatedRes.rows.map(toCard),
     seo: { title: r.seo_title ?? r.title, description: r.seo_description ?? r.description, imageUrl: r.image_url },
+    isHighDemand: Boolean(r.is_high_demand),
   };
 }
 
@@ -248,8 +250,8 @@ interface SeatMapSnapshot {
 
 /** Read-only seat map (seated) or tier availability (GA) for a showtime (US3). Null if not visible. */
 export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<SeatMap | null> {
-  const evRes = await db.query<{ event_type: 'general_admission' | 'seated' }>(
-    `SELECT e.event_type FROM showtimes s JOIN events e ON e.id = s.event_id ${VISIBLE_JOIN}
+  const evRes = await db.query<{ event_type: 'general_admission' | 'seated'; is_high_demand: boolean }>(
+    `SELECT e.event_type, COALESCE(e.is_high_demand, false) AS is_high_demand FROM showtimes s JOIN events e ON e.id = s.event_id ${VISIBLE_JOIN}
       WHERE s.id = $1 AND ${VISIBLE_WHERE}`,
     [showtimeId],
   );
@@ -352,6 +354,7 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
               opacity: s.planOpacity,
             }
           : null,
+      isHighDemand: Boolean(ev.is_high_demand),
     };
   }
 
@@ -364,6 +367,7 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
   );
   return {
     eventType: 'general_admission',
+    isHighDemand: Boolean(ev.is_high_demand),
     tiers: tiers.rows.map((t) => ({
       id: t.id,
       label: t.label,

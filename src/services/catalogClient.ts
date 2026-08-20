@@ -72,6 +72,7 @@ export interface MyEvent {
   imageUrl: string | null;
   eventType: "general_admission" | "seated";
   category: string;
+  isHighDemand?: boolean;
 }
 export interface MyVenue {
   id: number;
@@ -520,6 +521,7 @@ export const studioApi = {
       refundPolicy?: string | null;
       ageRestriction?: string;
       categoryCode?: string;
+      isHighDemand?: boolean;
     },
   ) => authed<EventMutationResult>(`/organizer/events/${eventId}`, { method: "PATCH", body: b }),
   deleteEvent: (eventId: number) =>

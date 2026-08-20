@@ -6,6 +6,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { Me } from "@/shared/auth/types";
 import { ApiClientError, authClient } from "../services/authClient";
+import { TurnstileWidget } from "./common/TurnstileWidget";
 
 interface AuthModalProps {
   onClose: () => void;
@@ -46,16 +47,22 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [requireCaptcha, setRequireCaptcha] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const fail = (e: unknown) =>
-    setError(
-      e instanceof ApiClientError && e.userMessage
-        ? e.userMessage
-        : "Có lỗi xảy ra, vui lòng thử lại.",
-    );
+  const fail = (e: unknown) => {
+    if (e instanceof ApiClientError) {
+      if (e.code === "captcha_required" || e.code === "captcha_failed") {
+        setRequireCaptcha(true);
+      }
+      setError(e.userMessage || "Có lỗi xảy ra, vui lòng thử lại.");
+    } else {
+      setError("Có lỗi xảy ra, vui lòng thử lại.");
+    }
+  };
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -65,13 +72,18 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
     try {
       const user =
         mode === "login"
-          ? await authClient.login({ identifier, password })
+          ? await authClient.login({
+              identifier,
+              password,
+              turnstileToken: turnstileToken || undefined,
+            })
           : await authClient.register({
               email,
               nickname,
               phone: phone.trim() || null,
               password,
               passwordConfirm,
+              turnstileToken: turnstileToken || undefined,
             });
       onLogin(user);
     } catch (e) {
@@ -228,6 +240,15 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
                 className={inputClass}
               />
             </label>
+          )}
+
+          {(mode === "register" || requireCaptcha) && (
+            <div className="py-1">
+              <TurnstileWidget
+                onSuccess={(token) => setTurnstileToken(token)}
+                onExpire={() => setTurnstileToken(null)}
+              />
+            </div>
           )}
 
           {error && (

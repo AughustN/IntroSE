@@ -34,12 +34,16 @@ export async function recordAuthEvent(e: AuthEventInput, db: Db = pool): Promise
   }
 }
 
-/** Count recent login failures for one identifier hash — drives the progressive delay (R-5). */
+/** Count recent consecutive login failures for one identifier hash — drives the warning & lockout. */
 export async function recentIdentifierFailures(identifierHash: string, windowMs: number, db: Db = pool): Promise<number> {
   const { rows } = await db.query<{ count: string }>(
     `SELECT count(*)::text AS count FROM auth_events
       WHERE identifier_hash = $1 AND event = 'login_failure'
-        AND created_at > now() - ($2::int * interval '1 millisecond')`,
+        AND created_at > now() - ($2::int * interval '1 millisecond')
+        AND created_at > COALESCE((
+          SELECT max(created_at) FROM auth_events
+           WHERE identifier_hash = $1 AND event = 'login_success'
+        ), '1970-01-01'::timestamptz)`,
     [identifierHash, windowMs],
   );
   return Number(rows[0]?.count ?? 0);

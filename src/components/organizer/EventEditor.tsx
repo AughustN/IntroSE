@@ -43,6 +43,7 @@ export default function EventEditor({
   const [title, setTitle] = useState(event.title);
   const [description, setDescription] = useState("");
   const [categoryCode, setCategoryCode] = useState(event.category);
+  const [isHighDemand, setIsHighDemand] = useState(event.isHighDemand ?? false);
   const categories = useEventCategories();
   const [refusal, setRefusal] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -102,6 +103,7 @@ export default function EventEditor({
     if (title !== event.title) fields.push("event.title");
     if (description.trim()) fields.push("event.description");
     if (categoryCode !== event.category) fields.push("event.category");
+    if (isHighDemand !== (event.isHighDemand ?? false)) fields.push("event.isHighDemand");
     return fields;
   };
 
@@ -126,6 +128,7 @@ export default function EventEditor({
         title: title !== event.title ? title : undefined,
         description: description.trim() ? description.trim() : undefined,
         categoryCode: categoryCode !== event.category ? categoryCode : undefined,
+        isHighDemand: isHighDemand !== (event.isHighDemand ?? false) ? isHighDemand : undefined,
       });
       setNotice(
         res.returnedToReview
@@ -204,6 +207,18 @@ export default function EventEditor({
               </option>
             ))}
           </select>
+        </label>
+
+        <label className="mt-3 flex items-center gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={isHighDemand}
+            onChange={(e) => setIsHighDemand(e.target.checked)}
+            className="h-4 w-4 rounded border-beige-kem/60 accent-burgundy"
+          />
+          <span className="font-mono text-xs text-beige-kem">
+            🛡️ Phòng Chờ Vé Hot - Bảo Vệ Chống Bot
+          </span>
         </label>
 
         {isLive && changedFields().length > 0 && isMaterialEdit(changedFields()) && (

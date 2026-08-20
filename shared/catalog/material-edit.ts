@@ -28,7 +28,7 @@
  *
  * `seat.blocked` is feature 005's per-seat block/unblock, listed here so 005 has one place to point at.
  */
-export const INVENTORY_ONLY_FIELDS = ["tier.capacity", "seat.blocked"] as const;
+export const INVENTORY_ONLY_FIELDS = ["tier.capacity", "seat.blocked", "event.isHighDemand"] as const;
 
 export type InventoryOnlyField = (typeof INVENTORY_ONLY_FIELDS)[number];
 

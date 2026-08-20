@@ -19,6 +19,8 @@ export interface UpdateEventInput {
   refundPolicy?: string | null;
   ageRestriction?: string;
   categoryCode?: string;
+  isHighDemand?: boolean;
+  is_high_demand?: boolean;
 }
 
 export async function updateEvent(
@@ -33,18 +35,36 @@ export async function updateEvent(
     if (rows.length === 0) throw err.badRequest("validation_failed", "Danh mục không hợp lệ.");
   }
 
+  const isHighDemandProvided = input.isHighDemand !== undefined || input.is_high_demand !== undefined;
+  const isHighDemandValue = input.isHighDemand ?? input.is_high_demand ?? false;
+
   return withTransaction(async (client) => {
+    const { rows: current } = await client.query<{
+      title: string;
+      description: string;
+      image_url: string | null;
+      refund_policy: string | null;
+      age_restriction: string;
+      category_code: string;
+      is_high_demand: boolean;
+    }>(
+      `SELECT e.title, e.description, e.image_url, e.refund_policy, e.age_restriction, ec.code AS category_code, COALESCE(e.is_high_demand, false) AS is_high_demand
+         FROM events e
+         JOIN event_categories ec ON ec.id = e.category_id
+        WHERE e.id = $1`,
+      [eventId],
+    );
+    if (!current[0]) throw err.notFound("not_found", "Không tìm thấy sự kiện.");
+    const cur = current[0];
+
     const changed: string[] = [];
-    for (const [key, field] of [
-      ["title", "event.title"],
-      ["description", "event.description"],
-      ["imageUrl", "event.image"],
-      ["refundPolicy", "event.refundPolicy"],
-      ["ageRestriction", "event.ageRestriction"],
-      ["categoryCode", "event.category"],
-    ] as const) {
-      if (input[key] !== undefined) changed.push(field);
-    }
+    if (input.title !== undefined && input.title !== cur.title) changed.push("event.title");
+    if (input.description !== undefined && input.description !== cur.description) changed.push("event.description");
+    if (input.imageUrl !== undefined && input.imageUrl !== cur.image_url) changed.push("event.image");
+    if (input.refundPolicy !== undefined && input.refundPolicy !== cur.refund_policy) changed.push("event.refundPolicy");
+    if (input.ageRestriction !== undefined && input.ageRestriction !== cur.age_restriction) changed.push("event.ageRestriction");
+    if (input.categoryCode !== undefined && input.categoryCode !== cur.category_code) changed.push("event.category");
+    if (isHighDemandProvided && isHighDemandValue !== cur.is_high_demand) changed.push("event.isHighDemand");
 
     const { rows } = await client.query<{
       id: number;
@@ -59,6 +79,7 @@ export async function updateEvent(
           refund_policy = CASE WHEN $6::boolean THEN $7 ELSE refund_policy END,
           age_restriction = COALESCE($8, age_restriction),
           category_id = COALESCE((SELECT id FROM event_categories WHERE code = $9), category_id),
+          is_high_demand = CASE WHEN $10::boolean THEN $11::boolean ELSE is_high_demand END,
           updated_at = now()
         WHERE id = $1
         RETURNING id, slug, title, status`,
@@ -72,6 +93,8 @@ export async function updateEvent(
         input.refundPolicy ?? null,
         input.ageRestriction ?? null,
         input.categoryCode ?? null,
+        isHighDemandProvided,
+        isHighDemandValue,
       ],
     );
     if (!rows[0]) throw err.notFound("not_found", "Không tìm thấy sự kiện.");

@@ -70,6 +70,8 @@ export async function listMyEvents(userId: number, db: Db = pool) {
   const { rows } = await db.query(
     `SELECT e.id, e.slug, e.title, e.description, e.status, e.moderation_status AS moderation, e.review_note AS "reviewNote",
             e.image_url AS "imageUrl", e.event_type AS "eventType", ec.code AS category,
+            COALESCE(e.is_high_demand, false) AS "isHighDemand",
+            COALESCE(e.is_high_demand, false) AS is_high_demand,
             e.created_at AS "createdAt", e.updated_at AS "updatedAt",
             COALESCE((
               SELECT SUM(tt.total_quantity)
@@ -136,9 +138,14 @@ export async function updateEvent(
     description?: string;
     imageUrl?: string | null;
     refundPolicy?: string | null;
+    isHighDemand?: boolean;
+    is_high_demand?: boolean;
   },
   db: Db = pool,
 ) {
+  const isHighDemandProvided = f.isHighDemand !== undefined || f.is_high_demand !== undefined;
+  const isHighDemandValue = f.isHighDemand ?? f.is_high_demand ?? false;
+
   return withTransaction(async (client) => {
     const { rows } = await client.query<{
       id: number;
@@ -153,11 +160,20 @@ export async function updateEvent(
           description = COALESCE($3, description),
           image_url = COALESCE($4, image_url),
           refund_policy = COALESCE($5, refund_policy),
+          is_high_demand = CASE WHEN $6::boolean THEN $7::boolean ELSE is_high_demand END,
           moderation_status = CASE WHEN moderation_status = 'approved' THEN 'pending_review' ELSE moderation_status END,
           updated_at = now()
         WHERE id = $1
         RETURNING id, slug, title, status, moderation_status AS moderation, updated_at`,
-      [eventId, f.title ?? null, f.description ?? null, f.imageUrl ?? null, f.refundPolicy ?? null],
+      [
+        eventId,
+        f.title ?? null,
+        f.description ?? null,
+        f.imageUrl ?? null,
+        f.refundPolicy ?? null,
+        isHighDemandProvided,
+        isHighDemandValue,
+      ],
     );
     const event = rows[0];
     if (event) {

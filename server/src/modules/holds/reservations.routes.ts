@@ -13,6 +13,10 @@ import {
   removeQuantity,
   removeSeats,
 } from './holds.service.js';
+import { verifyTimingTicket } from '../../services/timingTicket.js';
+import { verifyQueueToken, consumeQueueToken } from '../../services/waitingRoom.service.js';
+import { verifyTurnstile } from '../../services/turnstile.js';
+import { pool } from '../../db/pool.js';
 
 /**
  * Reservations = seat holds (feature 003). Every route is behind `requireAuth`: a hold must have an
@@ -35,6 +39,9 @@ const holdBody = z.object({
   seatIds: z.array(id).max(50).optional(),
   ticketTierId: id.optional(),
   quantity: z.number().int().positive().max(50).optional(),
+  timingTicket: z.string().optional(),
+  queueToken: z.string().optional(),
+  turnstileToken: z.string().optional(),
 });
 
 const patchBody = z.object({
@@ -56,7 +63,56 @@ reservationsRouter.post(
   holdRateLimit,
   validate(holdBody),
   asyncH(async (req, res) => {
-    const result = await hold(req.auth!.userId, req.body);
+    const { showtimeId, timingTicket, queueToken, turnstileToken } = req.body;
+    const userId = req.auth!.userId;
+
+    // 1. Behavioral Timing Verification (if timingTicket present)
+    if (timingTicket) {
+      const timingCheck = verifyTimingTicket(timingTicket, showtimeId);
+      if (!timingCheck.valid) {
+        if (timingCheck.error === 'inhuman_interaction_speed') {
+          throw err.badRequest('inhuman_interaction_speed', 'Thao tác quá nhanh. Vui lòng tương tác bình thường để giữ vé.');
+        }
+      }
+    }
+
+    // 2. Check if Showtime is High-Demand
+    const checkHighDemand = await pool.query<{ is_high_demand: boolean }>(
+      `SELECT COALESCE(e.is_high_demand, false) AS is_high_demand
+       FROM showtimes s
+       JOIN events e ON e.id = s.event_id
+       WHERE s.id = $1`,
+      [showtimeId],
+    );
+
+    const isHighDemand = Boolean(checkHighDemand.rows[0]?.is_high_demand);
+
+    if (isHighDemand) {
+      // 3. Queue Token Validation
+      if (!queueToken) {
+        throw err.forbidden('queue_token_required', 'Sự kiện mở bán vé hot yêu cầu lượt phòng chờ hợp lệ.');
+      }
+      const tokenResult = verifyQueueToken(showtimeId, userId, queueToken);
+      if (!tokenResult.valid) {
+        if (tokenResult.error === 'queue_token_expired') {
+          throw err.forbidden('queue_token_expired', 'Lượt phòng chờ đã hết hạn (quá 3 phút). Vui lòng xếp hàng lại.');
+        }
+        throw err.forbidden('queue_token_invalid', 'Lượt phòng chờ không hợp lệ.');
+      }
+
+      // 4. CAPTCHA Verification
+      const captchaResult = await verifyTurnstile(turnstileToken, req.ip);
+      if (!captchaResult.success) {
+        throw err.badRequest('captcha_failed', 'Xác thực CAPTCHA thất bại, vui lòng thử lại.');
+      }
+    }
+
+    const result = await hold(userId, req.body);
+
+    if (isHighDemand && queueToken) {
+      consumeQueueToken(showtimeId, queueToken);
+    }
+
     res.status(result.created ? 201 : 200).json(result.reservation);
   }),
 );

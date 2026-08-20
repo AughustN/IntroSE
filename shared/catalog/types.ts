@@ -72,6 +72,7 @@ export interface EventDetail extends EventCard {
   tiers: Tier[];
   related: EventCard[];
   seo: { title: string; description: string; imageUrl: string | null };
+  isHighDemand?: boolean;
 }
 
 export interface SeatMapSeat {
@@ -194,6 +195,10 @@ export interface SeatMap {
   tierLegend?: SeatMapTierLegendEntry[];
   /** Tables the showtime snapshotted, so a seat labelled "Bàn 5 - Ghế 3" is drawn at its table (FR-082). */
   tables?: SeatMapTable[];
+  /** Anti-Bot Defense fields (feature 013) */
+  isHighDemand?: boolean;
+  timingTicket?: string;
+  viewTimestamp?: number;
 }
 
 export interface SeatMapTierLegendEntry {

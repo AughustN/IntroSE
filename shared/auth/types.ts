@@ -73,12 +73,14 @@ export interface RegisterBody {
   passwordConfirm: string;
   nickname: string;
   phone?: string | null;
+  turnstileToken?: string;
 }
 
 export interface LoginBody {
   /** email OR phone, classified server-side. */
   identifier: string;
   password: string;
+  turnstileToken?: string;
 }
 
 export interface ForgotBody {

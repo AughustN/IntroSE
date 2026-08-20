@@ -245,6 +245,30 @@ export const SingleEventPage: React.FC = () => {
     }
   };
 
+  const [togglingBotDefense, setTogglingBotDefense] = useState(false);
+
+  const handleToggleBotDefense = async () => {
+    if (!eventId || !eventData || togglingBotDefense) return;
+    const nextVal = !eventData.isHighDemand;
+    setTogglingBotDefense(true);
+    setEventData((prev) => (prev ? { ...prev, isHighDemand: nextVal } : null));
+    try {
+      await updateEventDetails(eventId, { isHighDemand: nextVal });
+      showToast(
+        "success",
+        nextVal
+          ? "Đã kích hoạt Chống Bot & Phòng Chờ Vé Hot (High-Demand Drop)!"
+          : "Đã tắt chế độ Phòng Chờ Vé Hot.",
+      );
+      loadEvent();
+    } catch (err: any) {
+      showToast("error", err.message || "Cập nhật chế độ bảo vệ thất bại.");
+      loadEvent();
+    } finally {
+      setTogglingBotDefense(false);
+    }
+  };
+
   const handleDeleteOrArchiveTier = async (tierId: string) => {
     if (!eventId) return;
     try {
@@ -552,6 +576,58 @@ export const SingleEventPage: React.FC = () => {
       {getStatusBanner(eventData.computedStatus, eventData.cancellationReason)}
 
       <EventMetricsSummary metrics={metrics} />
+
+      {/* Bot Defense & Virtual Waiting Room (High-Demand Drop) Control Card */}
+      <div
+        className={`p-5 border transition-all duration-200 ${
+          eventData.isHighDemand
+            ? "bg-indigo-950/40 border-indigo-500/50 shadow-lg shadow-indigo-950/30"
+            : "bg-surface-2 border-beige-kem/25"
+        }`}
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-lg">🛡️</span>
+              <h3 className="font-display text-base font-bold text-beige-kem">
+                Phòng Chờ Vé Hot
+              </h3>
+              <span
+                className={`px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider ${
+                  eventData.isHighDemand
+                    ? "bg-indigo-500 text-white"
+                    : "bg-beige-kem/20 text-beige-kem/80"
+                }`}
+              >
+                {eventData.isHighDemand ? "Đang Bật" : "Đang Tắt"}
+              </span>
+            </div>
+            <p className="font-meta text-xs text-ink-soft max-w-2xl leading-relaxed">
+              Bật phòng chờ ảo để xếp hàng công bằng và ngăn bot mua vé tự động khi mở bán vé hot.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0 self-start sm:self-center">
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={Boolean(eventData.isHighDemand)}
+                onChange={handleToggleBotDefense}
+                disabled={togglingBotDefense || isCanceledOrCompleted}
+                className="sr-only peer"
+              />
+              <div className="w-12 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600 disabled:opacity-50"></div>
+            </label>
+            <span className="font-mono text-xs font-semibold text-beige-kem min-w-[70px]">
+              {togglingBotDefense
+                ? "Đang lưu..."
+                : eventData.isHighDemand
+                  ? "Kích hoạt"
+                  : "Vô hiệu"}
+            </span>
+          </div>
+        </div>
+      </div>
 
       <TicketTierBreakdown
         ticketTiers={eventData.ticketTiers || []}

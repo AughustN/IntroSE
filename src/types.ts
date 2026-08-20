@@ -55,6 +55,7 @@ export interface MovieEvent {
   venueMapUrl: string;
   venueGuide: string;
   refundPolicy: string;
+  isHighDemand?: boolean;
   // `finished` is not a degree of "sold out": the event happened. It keeps its card, its tag, and
   // its detail page, but nothing about it is buyable, so every booking control reads it the same
   // way it reads `cancelled`.
@@ -194,6 +195,7 @@ export interface OrganizerEvent {
   ticketTiers: TicketTier[];
   times: string[];
   dates: string[];
+  isHighDemand?: boolean;
 }
 
 export interface OrganizerPortfolioSummary {

@@ -15,6 +15,9 @@ export interface HoldRequest {
   seatIds?: number[];
   ticketTierId?: number;
   quantity?: number;
+  timingTicket?: string;
+  queueToken?: string;
+  turnstileToken?: string;
 }
 
 export interface ReservationPatch {

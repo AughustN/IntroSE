@@ -57,6 +57,7 @@ import AIChatPanel from "./components/AIChatPanel";
 import ToastStack, { type ToastKind, type ToastMessage } from "./components/ToastStack";
 import ConfirmDialog, { type ConfirmRequest } from "./components/ConfirmDialog";
 import HoldExpiredDialog from "./components/HoldExpiredDialog";
+import { WaitingRoomModal } from "./components/common/WaitingRoomModal";
 import CheckoutForm from "./components/CheckoutForm";
 import CategoryRow from "./components/CategoryRow";
 import EventDetail from "./components/EventDetail";
@@ -339,6 +340,27 @@ export default function App() {
   /** A hold/release round trip is in flight; seat clicks are disabled so two do not race. */
   const [holdBusy, setHoldBusy] = useState(false);
   const [finalBooking, setFinalBooking] = useState<Booking | null>(null);
+  /** Virtual Waiting Room & Bot Defense queue states */
+  const [waitingRoomShowtimeId, setWaitingRoomShowtimeId] = useState<number | null>(null);
+  const [queueTokens, setQueueTokens] = useState<Record<number, string>>({});
+  const [turnstileTokens, setTurnstileTokens] = useState<Record<number, string>>({});
+  const pendingHoldActionRef = useRef<((qToken: string, cToken?: string) => Promise<void>) | null>(null);
+
+  const handleWaitingRoomAdmitted = async (showtimeId: number, qToken: string, cToken?: string) => {
+    setQueueTokens((prev) => ({ ...prev, [showtimeId]: qToken }));
+    if (cToken) setTurnstileTokens((prev) => ({ ...prev, [showtimeId]: cToken }));
+    setWaitingRoomShowtimeId(null);
+    if (pendingHoldActionRef.current) {
+      const action = pendingHoldActionRef.current;
+      pendingHoldActionRef.current = null;
+      try {
+        await action(qToken, cToken);
+      } catch (err: any) {
+        pushToast("error", err.message || "Giữ vé thất bại. Vui lòng thử lại.");
+      }
+    }
+  };
+
   /** The server's numbers from a rejected checkout, handed to the top-up sheet (UC-12 A2). */
   const [shortfall, setShortfall] = useState<{
     required: number;
@@ -1632,30 +1654,48 @@ export default function App() {
     };
     const mine = hold?.seats.some((s) => s.showtimeSeatId === seat.showtimeSeatId) ?? false;
 
-    setHoldBusy(true);
-    try {
-      if (mine && hold) {
-        const updated = await holdsClient.release(hold.reservationId, [seat.showtimeSeatId]);
-        setHold(updated.items.length === 0 ? null : sessionFromReservation(updated, context));
-      } else {
-        const updated = hold
-          ? await holdsClient.add(hold.reservationId, { seatIds: [seat.showtimeSeatId] })
-          : await holdsClient.hold({
-              showtimeId: bookingShowtimeId,
-              seatIds: [seat.showtimeSeatId],
-            });
-        setHold(sessionFromReservation(updated, context));
+    const executeToggle = async (qToken?: string, cToken?: string) => {
+      setHoldBusy(true);
+      try {
+        const activeQToken = qToken || queueTokens[bookingShowtimeId];
+        const activeCToken = cToken || turnstileTokens[bookingShowtimeId] || "mock-turnstile-token";
+        if (mine && hold) {
+          const updated = await holdsClient.release(hold.reservationId, [seat.showtimeSeatId!]);
+          setHold(updated.items.length === 0 ? null : sessionFromReservation(updated, context));
+        } else {
+          const updated = hold
+            ? await holdsClient.add(hold.reservationId, { seatIds: [seat.showtimeSeatId!], queueToken: activeQToken, turnstileToken: activeCToken })
+            : await holdsClient.hold({
+                showtimeId: bookingShowtimeId,
+                seatIds: [seat.showtimeSeatId!],
+                queueToken: activeQToken,
+                turnstileToken: activeCToken,
+              });
+          setHold(sessionFromReservation(updated, context));
+        }
+      } catch (e) {
+        if (e instanceof HoldError && e.code === "queue_token_required") {
+          pendingHoldActionRef.current = executeToggle;
+          setWaitingRoomShowtimeId(bookingShowtimeId);
+          return;
+        }
+        pushToast(
+          "error",
+          e instanceof HoldError ? e.message : "Không giữ được ghế. Vui lòng thử lại.",
+        );
+        if (e instanceof HoldError && e.status === 404) setHold(null); // the hold ended underneath us
+      } finally {
+        setHoldBusy(false);
       }
-    } catch (e) {
-      // Every refusal is explainable: seat just taken, cap reached, showtime closed (SC-008).
-      pushToast(
-        "error",
-        e instanceof HoldError ? e.message : "Không giữ được ghế. Vui lòng thử lại.",
-      );
-      if (e instanceof HoldError && e.status === 404) setHold(null); // the hold ended underneath us
-    } finally {
-      setHoldBusy(false);
+    };
+
+    if (selectedMovie.isHighDemand && !mine && !hold && !queueTokens[bookingShowtimeId]) {
+      pendingHoldActionRef.current = executeToggle;
+      setWaitingRoomShowtimeId(bookingShowtimeId);
+      return;
     }
+
+    await executeToggle();
   };
 
   /**
@@ -1708,31 +1748,49 @@ export default function App() {
         mode: "ga" as const,
       };
 
-      setHoldBusy(true);
-      try {
-        const tierId = Number(tier.id);
-        const updated =
-          delta > 0
-            ? live
-              ? await holdsClient.add(live.reservationId, { ticketTierId: tierId, quantity: delta })
-              : await holdsClient.hold({ showtimeId, ticketTierId: tierId, quantity: delta })
-            : await holdsClient.releaseQuantity(live!.reservationId, tierId, -delta);
+      const executeHold = async (qToken?: string, cToken?: string) => {
+        setHoldBusy(true);
+        try {
+          const tierId = Number(tier.id);
+          const activeQToken = qToken || queueTokens[showtimeId];
+          const activeCToken = cToken || turnstileTokens[showtimeId] || "mock-turnstile-token";
+          const updated =
+            delta > 0
+              ? live
+                ? await holdsClient.add(live.reservationId, { ticketTierId: tierId, quantity: delta, queueToken: activeQToken, turnstileToken: activeCToken })
+                : await holdsClient.hold({ showtimeId, ticketTierId: tierId, quantity: delta, queueToken: activeQToken, turnstileToken: activeCToken })
+              : await holdsClient.releaseQuantity(live!.reservationId, tierId, -delta);
 
-        setBookingDate(date);
-        setBookingTime(time);
-        setBookingShowtimeId(showtimeId);
-        // Stepping the last ticket off closes the reservation server-side, which is the signal that
-        // there is nothing left to hold — not an error.
-        setHold(updated.status === "active" ? sessionFromReservation(updated, context) : null);
-      } catch (e) {
-        pushToast(
-          "error",
-          e instanceof HoldError ? e.message : "Không giữ được vé. Vui lòng thử lại.",
-        );
-        if (e instanceof HoldError && e.status === 404) setHold(null);
-      } finally {
-        setHoldBusy(false);
+          setBookingDate(date);
+          setBookingTime(time);
+          setBookingShowtimeId(showtimeId);
+          // Stepping the last ticket off closes the reservation server-side, which is the signal that
+          // there is nothing left to hold — not an error.
+          setHold(updated.status === "active" ? sessionFromReservation(updated, context) : null);
+        } catch (e) {
+          if (e instanceof HoldError && e.code === "queue_token_required") {
+            pendingHoldActionRef.current = executeHold;
+            setWaitingRoomShowtimeId(showtimeId);
+            return;
+          }
+          pushToast(
+            "error",
+            e instanceof HoldError ? e.message : "Không giữ được vé. Vui lòng thử lại.",
+          );
+          if (e instanceof HoldError && e.status === 404) setHold(null);
+        } finally {
+          setHoldBusy(false);
+        }
+      };
+
+      // If high demand event and we don't have a token yet for this showtime, go straight to waiting room
+      if (selectedMovie.isHighDemand && delta > 0 && !live && !queueTokens[showtimeId]) {
+        pendingHoldActionRef.current = executeHold;
+        setWaitingRoomShowtimeId(showtimeId);
+        return;
       }
+
+      await executeHold();
     });
   };
 
@@ -2526,6 +2584,20 @@ export default function App() {
           {...confirmRequest}
           onConfirm={() => answerConfirm(true)}
           onCancel={() => answerConfirm(false)}
+        />
+      )}
+
+      {waitingRoomShowtimeId !== null && (
+        <WaitingRoomModal
+          showtimeId={waitingRoomShowtimeId}
+          isOpen={true}
+          onAdmitted={(qToken, cToken) => {
+            void handleWaitingRoomAdmitted(waitingRoomShowtimeId, qToken, cToken);
+          }}
+          onClose={() => {
+            setWaitingRoomShowtimeId(null);
+            pendingHoldActionRef.current = null;
+          }}
         />
       )}
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
