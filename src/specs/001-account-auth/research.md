@@ -299,28 +299,23 @@ rate-limited" — reveals nothing about account existence and is harmless.
 - **Always `200`, silent drop past the limit (2a)**: equally leak-free, but a genuinely throttled user is
   left blind (waits for mail that will not come). 2b tells them to slow down without disclosing existence.
 
-## R-14 — Avatar upload (VPS disk, Q8 / ADR 0004)
+## R-14 — Avatar upload: managed media pipeline (ADR-0006)
 
 **Decision**: Users set their avatar by **uploading a file** (`POST /api/me/avatar`, multipart); the
 paste-a-URL path is removed for users (only the Google `picture` seed remains as a trusted external URL).
-Bytes are stored on the **VPS local disk** and served by **Nginx static**, so `avatar_url` =
-`https://tixhub.fit/uploads/avatars/<uuid>.webp`. Safety pipeline (all mandatory): accept only raster
-`jpeg`/`png`/`webp`; **reject SVG**; verify by **magic bytes**, not `Content-Type`/extension; ≤ 2 MB;
-**re-encode via `sharp`** (strips EXIF + embedded payloads); random uuid filename (never user-supplied);
-serve with `X-Content-Type-Options: nosniff` from a non-executable directory; deleting/replacing removes
-the old file.
+The backend accepts only raster `jpeg`/`png`/`webp`; **rejects SVG**; verifies **magic bytes**, not
+`Content-Type`/extension; enforces the ≤ 2 MB request cap; and **re-encodes via `sharp`** (strips EXIF
+and embedded payloads) before a deterministic Cloudinary upload. The stored `avatar_url` is the secure
+Cloudinary URL; replacement overwrites the deterministic asset so it does not accumulate orphans.
 
-**Rationale**: the requested UX is device upload, not URL paste. On a self-hosted VPS, file storage is
-disk + a static route, **not** a new external integration, so it does not breach the two-integration cap
-(this is what makes reopening the spec's "upload out of scope" assumption cheap). File upload is a classic
-footgun; the magic-byte check + SVG ban + `sharp` re-encode + random name + `nosniff` are the controls
-that keep a malicious upload from becoming stored XSS or a path-traversal write.
+**Rationale**: the requested UX is device upload, not URL paste. Centralizing validation and
+normalization in the backend preserves the security controls against stored XSS, path traversal, and
+malicious payloads, while the approved managed-media integration supplies CDN delivery without VPS-disk
+lifecycle management.
 
-**Spec impact**: supersedes the assumption *"avatar is a URL, not an upload; file storage out of scope."*
-Flagged for `/speckit-clarify` (plan.md → Upstream follow-ups).
+**Historical alternative (superseded)**: ADR-0004 originally selected local VPS disk plus Nginx static
+serving and rejected external object storage. ADR-0006 supersedes that decision. URL paste only remains
+rejected for user-chosen avatars (the trusted Google seed is the exception); storing image bytes in
+Postgres `bytea` remains rejected because it bloats the database and backups.
 
-**Alternatives rejected**: URL paste only (safest, but not the requested UX — kept only for the trusted
-Google seed); external object storage S3/Cloudinary (a third integration + quota surface, no benefit at
-this scale); bytes in Postgres `bytea` (bloats DB + backups).
-
-See [ADR 0004](../../../docs/adr/0004-avatar-upload-vps-disk.md).
+See [ADR-0006](../../../docs/adr/0006-cloudinary-media-storage.md).

@@ -263,10 +263,10 @@ paths:
     post:
       summary: >
         Upload the background image. Accepts jpeg/png/webp decided by MAGIC BYTES (never Content-Type
-        or extension); SVG is refused outright; the image is re-encoded to strip metadata and stored
-        under a random uuid, served with X-Content-Type-Options nosniff (ADR-0004, FR-021/022).
-        Dimensions are checked BEFORE re-encoding so a decompression bomb is refused, not allocated.
-        Rate-limited per organizer with a cap on concurrent processing (FR-023a).
+        or extension); SVG is refused outright; the image is re-encoded to strip metadata, uploaded
+        through the canonical Cloudinary media pipeline, and returned as a secure CDN URL (ADR-0006,
+        FR-021/022). Dimensions are checked BEFORE re-encoding so a decompression bomb is refused, not
+        allocated. Rate-limited per organizer with a cap on concurrent processing (FR-023a).
       security: [{ accessToken: [] }]
       parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
       requestBody:
@@ -275,7 +275,7 @@ paths:
       responses:
         '200': { description: stored; returns the layout's floorPlan block }
         '400': { description: "invalid_image (not a raster jpeg/png/webp by its own bytes, incl. SVG) | image_too_large (>4000 px long edge)", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '400': { description: "file_too_large (>5 MB) — 400 not 413, matching the shipped avatar upload handler from ADR-0004, which feature 001 asserts" }
+        '400': { description: "file_too_large (>5 MB) — rejected before image processing" }
         '429': { description: upload_rate_limited (try again shortly), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     patch:
       summary: Alignment and visibility — scale, offset, opacity, buyer visibility (FR-024, FR-026). Seats never move.

@@ -1,10 +1,10 @@
 # Research: Event Reviews & Ratings
 
-## Decision: Eligibility is a paid ticket to a started event, derived per request
+## Decision: Eligibility is a paid, non-void ticket, derived per request
 
-- **Decision**: A review may be written when the caller holds a ticket whose order is `paid` and is not void, for an event whose earliest relevant showtime has already started. Both facts are re-derived from the caller's own rows on every write; nothing about eligibility is stored on the review.
-- **Rationale**: UC-18 asks for a *checked-in* ticket. Check-in depends on a staff member scanning at the door — an external step whose absence is not the attendee's doing — and the database holds zero checked-in tickets, so the strict rule makes the feature undemonstrable today and unusable for anyone whose event ran without a scanner. A purchase is a fact TixHub owns end to end. Measured against live data: **zero** (user, event) pairs qualify under the strict rule, **two** under this one. The integrity UC-18 protects survives — the reviewer paid, and a refunded or void ticket confers nothing. Requiring the event to have started is kept because nobody can hold an opinion about something that has not happened.
-- **Alternatives considered**: Storing an `eligible` flag on the review at write time was rejected: a refund afterwards would leave a rating that no longer has a purchase behind it, and the flag would have to be swept. Trusting a client-supplied "I attended" was never on the table (Principle II).
+- **Decision**: A review may be written when the caller holds a ticket whose order is `paid` and whose ticket is not `void`, whether or not the event has started. Both facts are re-derived from the caller's own rows on every write; nothing about eligibility is stored on the review.
+- **Rationale**: UC-18 formerly required a *checked-in* ticket. Check-in is an operational door process, so making it an eligibility gate makes a purchase-based opinion depend on staff scanning. A purchase is a fact TixHub owns end to end; a refunded, cancelled, or void ticket provides no stake and therefore no eligibility. The listing, pricing, and booking experience can be reviewed before showtime, when prospective buyers can still benefit from that information.
+- **Alternatives considered**: Requiring a started event was rejected because it makes reviews of the booking and listing experience unavailable until after the decision window has passed. Storing an `eligible` flag on the review at write time was rejected: a refund afterwards would leave a rating that no longer has a purchase behind it, and the flag would have to be swept. Trusting a client-supplied "I attended" was never on the table (Principle II).
 
 ## Decision: Uniqueness is a database constraint, not a check-then-insert
 

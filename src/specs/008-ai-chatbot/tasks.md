@@ -200,18 +200,18 @@ This is a web application in one repository:
 
 **Purpose**: The technology substitution gate recorded in [plan.md](./plan.md). Code may land on the branch without these; merge to `main` may not.
 
-- [ ] T062 Open the amendment pull request against `src/.specify/memory/constitution.md`: the fixed technology table's AI row becomes OpenAI-compatible chat completions, the four-integration list swaps Gemini for OpenAI, Principle III's "AI (Gemini)" parenthetical is genericised, and the unused `text-embedding-004` mention is dropped; add a dated entry to the Sync Impact Report and bump the version per the team's reading of the versioning policy
+- [X] T062 Update `src/.specify/memory/constitution.md` through the approved provider-neutral amendment: AI uses the shared `AIProvider` abstraction, provider details are recorded in ADR-0005, and the four-integration cap remains unchanged.
 - [ ] T063 Write `docs/adr/0005-ai-provider-openai.md` recording the decision, the alternatives from [research.md](./research.md), and the fact that `AIProvider` keeps a future vendor change to one class
 
 ---
 
 ## Phase 10: Deferred — Documentation Alignment
 
-**Purpose**: Correct the five documents that still name Google Gemini as the AI actor.
+**Purpose**: Reconcile remaining AI governance and architecture documentation with the provider-neutral `AIProvider` contract.
 
 **⚠️ DEFERRED BY DECISION**: Do this only after every phase above is complete and the amendment in T062 has carried. Doing it earlier would put the documents ahead of the governance decision that authorises them, and would churn files that may need different wording depending on how T062 lands.
 
-- [ ] T064 Update UC-10 and UC-22 in `docs/Analysis_Design/Group02_UseCaseSpecification.md`: secondary actor, the `«include» Gemini` markers, and the basic-flow wording; also reconcile UC-10 with the shipped behaviour — it is a chatbot with a bounded conversation window, its A1 cache hit costs no allowance, and its A3 threshold is now automatic
+- [X] T064 Update UC-10 and UC-22 in `docs/Analysis_Design/Group02_UseCaseSpecification.md`: use the configured provider behind `AIProvider`, remove vendor-specific actor/include wording, and reconcile UC-10 with the shipped bounded conversation, cache-first allowance, grounding, and fallback behavior.
 - [ ] T065 [P] Update the AI element and its label in `docs/Analysis_Design/C4_Deployment.md`
 - [ ] T066 [P] Update the AI references in `docs/Requirements/Group02_VisionDocument/VisionDocument.md`
 - [ ] T067 [P] Update the AI references in `docs/Management/Group02_ProjectPlan/Group02_ProjectPlan.md`

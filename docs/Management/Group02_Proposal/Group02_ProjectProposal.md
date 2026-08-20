@@ -75,7 +75,7 @@ Because the project runs at zero monetary cost, the resources below are contribu
     + Frontend: **Vercel**
     + Backend: **Render / Railway**
     + Database: **Neon / Supabase** (managed PostgreSQL)
-    + Image storage: **Cloudinary / Supabase Storage**
+    + Image storage: **Cloudinary** (canonical managed media storage; see ADR-0006)
 
 3. **Equipment** *(members' own — VND 0)*
     + Personal laptops for all five members.
@@ -85,7 +85,7 @@ Because the project runs at zero monetary cost, the resources below are contribu
     + Backend: **Node.js / Express**, **Socket.IO**
     + Database: **PostgreSQL**
     + Payments: **VNPay** sandbox
-    + AI: **Google Gemini API**
+    + AI: **Configured provider behind the shared `AIProvider` abstraction**
     + Tooling: **Git / GitHub**, **GitHub Actions**, **VS Code**, **draw.io**
 
 5. **Other** *(VND 0)*
@@ -108,7 +108,7 @@ The key features of TixHub include:
 - **Secure checkout** through the **VNPay** payment gateway, issuing every buyer a unique **QR-code digital ticket**.
 - **Door check-in** via phone QR scanning, giving organizers live attendance data and blocking duplicate tickets.
 - **Event discovery** with keyword, category, date, location, and price filters.
-- **Two AI features** powered by the Google Gemini API: personalized event recommendations for attendees, and an AI listing assistant that helps organizers write descriptions, titles, tags, and suggested prices.
+- **Two AI features** powered by an approved configured provider behind the shared `AIProvider` abstraction: personalized event recommendations for attendees, and an AI listing assistant that helps organizers write descriptions, titles, tags, and suggested prices.
 - **Real-time analytics**, automated **notifications and waitlists**, **reviews and ratings**, and an **admin moderation** layer that approves organizers and keeps the marketplace safe.
 
 The system is built by a five member team over one academic semester (13 weeks) using the **Agile / Scrum** process model. Because the project is developed entirely on free service tiers and student owned equipment, the **direct monetary cost of the project is zero**, while still delivering a complete software product.
@@ -136,7 +136,7 @@ The major objective of building TixHub is to deliver a working, production-shape
 * **Support real reserved seating**
     > Provide a real-time interactive seat map where attendees select specific seats and concurrent buyers can never be sold the same seat.
 * **Apply AI to real product problems**
-    > Use the Gemini API to recommend relevant events to attendees and to help organizers produce better event listings, demonstrating practical, non-trivial AI integration.
+    > Use an approved AI provider through the shared `AIProvider` abstraction to recommend relevant events to attendees and help organizers produce better event listings, demonstrating practical, non-trivial AI integration.
 * **Give organizers actionable data**
     > Provide a real-time analytics dashboard of sales, revenue, remaining inventory, and check-ins so organizers can react to how an event is performing.
 * **Keep the marketplace safe and credible**
@@ -200,20 +200,20 @@ mindmap
 2. **Secure Checkout & Payments:** checkout flow through the **VNPay sandbox** gateway; on success the attendee instantly receives confirmation and a digital ticket.
 3. **QR-Code Digital Tickets + Door Scanner:** every ticket carries a unique QR code; organizers scan it at the entrance via their phone browser to check attendees in and block duplicates.
 4. **Event Discovery, Search & Filters:** public browse page filtering by keyword, category, date, location, and price (free/paid).
-5. **AI Personalized Event Recommendations** *(AI #1):* a chatbot powered by Gemini that suggests events from a user's past tickets, saved events, and browsing history.
-6. **AI Event-Listing Assistant** *(AI #2):* Gemini helps organizers auto-generate a polished description, suggest catchy titles and tags, and recommend a sensible ticket price.
+5. **AI Personalized Event Recommendations** *(AI #1):* a provider-backed chatbot that suggests events from a user's past tickets, saved events, and browsing history.
+6. **AI Event-Listing Assistant** *(AI #2):* the configured provider helps organizers auto-generate a polished description, suggest catchy titles and tags, and recommend a sensible ticket price.
 7. **Real-Time Analytics Dashboard:** live charts of sales over time, revenue, tickets remaining, and check-in counts; scoped per organizer, with a platform-wide view for admins.
 8. **Notifications, Reminders & Waitlist:** automated email/in-app alerts for confirmations, reminders (e.g. 24h before), changes/cancellations, and a waitlist for sold-out events.
-9. **Reviews, Ratings & Social Proof:** attendees rate events (1–5 stars) and leave reviews after attending; ratings appear on the organizer's profile and future events.
+9. **Reviews, Ratings & Social Proof:** attendees holding a paid, non-void ticket rate events (1–5 stars) and leave reviews; showtime start and door check-in are not required for eligibility. Ratings appear on the event, while organizer-profile aggregation remains deferred.
 10. **Admin Moderation & Organizer Approval:** admin tools to approve new organizers before they can sell, review reported events, and take down policy-violating content.
 
 #### AI Features
 
-Two AI capabilities, both powered by **Google Gemini**, set TixHub apart from a conventional ticketing platform. They serve the two opposite sides of the marketplace: attendees discovering events, and organizers publishing them.
+Two AI capabilities, both powered through the shared **`AIProvider`** abstraction, set TixHub apart from a conventional ticketing platform. They serve the two opposite sides of the marketplace: attendees discovering events, and organizers publishing them.
 
 1. **AI Personalized Event Recommendations** *(AI #1, attendee-facing):* a conversational chatbot that learns each user's taste from their past tickets, saved events, and browsing history, then suggests events worth attending. Instead of forcing users to phrase the perfect search query, the assistant answers natural-language questions ("any live music near me this weekend?") and ranks results against the user's profile. This raises discovery and conversion for the long tail of smaller events that keyword search tends to bury.
 
-2. **AI Event Listing Assistant** *(AI #2, organizer-facing):* a co-author for organizers creating a listing. From a few rough inputs Gemini auto-generates a polished description, proposes catchy titles and relevant tags, and recommends a sensible ticket price benchmarked against comparable events. This lowers the effort of publishing a high-quality, discoverable listing and improves consistency across the catalogue.
+2. **AI Event Listing Assistant** *(AI #2, organizer-facing):* a co-author for organizers creating a listing. From a few rough inputs the configured provider auto-generates a polished description, proposes catchy titles and relevant tags, and recommends a sensible ticket price benchmarked against comparable events. This lowers the effort of publishing a high-quality, discoverable listing and improves consistency across the catalogue.
 
 Both features are **assistive, not autonomous**: AI output is always editable, the user stays in control, and every recommendation or generated field can be overridden before it goes live. Personalization respects the same privacy and moderation rules as the rest of the platform.
 
@@ -299,7 +299,7 @@ The table below itemises a real proposal's cost categories and shows, for each, 
 | --- | --- | :---: |
 | **Hosting & Infrastructure** | Vercel (frontend), Render/Railway (backend), Neon/Supabase (PostgreSQL) free tier | **VND 0** |
 | **Software & Tools** | VS Code, Git/GitHub, GitHub Actions CI/CD, draw.io — all free | **VND 0** |
-| **AI Services** | Google Gemini API free tier | **VND 0** |
+| **AI Services** | Configured provider free tier, accessed through `AIProvider` | **VND 0** |
 | **Payments** | VNPay **sandbox** free test environment | **VND 0** |
 | **Personnel** | 5 students, in kind labour (academic project) | **VND 0** |
 | **Equipment** | Members' own laptops | **VND 0** |
@@ -315,7 +315,7 @@ The table below itemises a real proposal's cost categories and shows, for each, 
 
 #### Overview
 
-TixHub uses a modern client–server architecture: a **React** single page front-end, a **Node.js / Express** back-end API, and a **PostgreSQL** database, integrated with the **VNPay** payment gateway and the **Google Gemini** AI API. Real-time features (live seat map, live analytics, notifications) use **WebSockets (Socket.IO)**.
+TixHub uses a modern client–server architecture: a **React** single page front-end, a **Node.js / Express** back-end API, and a **PostgreSQL** database, integrated with the **VNPay** payment gateway and an approved AI provider behind the shared **`AIProvider`** abstraction. Real-time features (live seat map, live analytics, notifications) use **WebSockets (Socket.IO)**.
 
 - **Presentation layer** — React SPA (the browser UI for all three roles), deployed on Vercel.
 - **Application layer** — Node.js/Express REST API plus a Socket.IO real-time channel; handles requests, business rules, payment callbacks, and AI calls. Deployed on Render/Railway.
@@ -337,8 +337,8 @@ flowchart TB
         DB[(Relational DB)]
     end
     VNPay[[VNPay Sandbox]]
-    Gemini[[Google Gemini API]]
-    Storage[[Image Storage — Cloudinary/Supabase]]
+    AI[[Configured AI Provider]]
+    Storage[[Image Storage — Cloudinary]]
 
     UI -->|HTTPS / REST| API
     UI <-->|WebSocket| WS
@@ -346,7 +346,7 @@ flowchart TB
     WS --> DB
     API -->|payment| VNPay
     VNPay -->|callback| API
-    API -->|recommend / generate| Gemini
+    API -->|recommend / generate via AIProvider| AI
     UI --> Storage
 ```
 
@@ -389,7 +389,7 @@ sequenceDiagram
 | --- | --- |
 | **Concurrent seat double-booking** — two buyers select the same seat at the same moment, risking an oversold event and refunds. | <ul><li>Use a temporary **SeatHold with TTL** so a clicked seat is reserved during checkout and auto-released if abandoned.</li><li>Enforce correctness with a **PostgreSQL row lock** (`SELECT … FOR UPDATE`) at purchase the database, not the socket, is the source of truth.</li></ul> |
 | **Payment integration & failures** — VNPay callbacks may be delayed, duplicated, or fail mid-flow, risking tickets issued without payment (or vice-versa). | <ul><li>Treat the **VNPay callback** as the only trigger to issue a ticket; hold the order as *pending* until confirmed.</li><li>Make callback handling **idempotent** and reconcile pending orders on a timer.</li></ul> |
-| **Free-tier limits** — hosting, database, or Gemini free quotas may be exceeded during demos or load testing. | <ul><li>Monitor usage; cache AI responses and rate-limit AI endpoints.</li><li>Keep a documented upgrade path; design so a paid tier is a config change, not a rewrite.</li></ul> |
+| **Free-tier limits** — hosting, database, or configured AI-provider quotas may be exceeded during demos or load testing. | <ul><li>Monitor usage; cache AI responses and rate-limit AI endpoints.</li><li>Keep a documented upgrade path; design so a paid tier is a config change, not a rewrite.</li></ul> |
 | **Integration risk from independent development** — frontend and backend are built separately until Sprint 2 and may drift. | <ul><li>Agree a **shared API contract** in Sprint 0 and keep shared types in a `/shared` folder.</li><li>Integrate early (after Sprint 2) and run integration tests each sprint thereafter.</li></ul> |
 | **Scope creep** — ten features plus a real-time seat map across 13 weeks. | <ul><li>Maintain a prioritised backlog and the explicit **out-of-scope** list (§4).</li><li>Protect sprint commitments; defer non-essential polish.</li></ul> |
 | **Security of payments & user data** — the system handles money and personal data. | <ul><li>Never store card data (delegated to VNPay); use HTTPS, hashed passwords, and role-based access control.</li><li>Validate all input server-side; require admin approval before organizers can sell.</li></ul> |
@@ -404,10 +404,10 @@ sequenceDiagram
 | --- | --- |
 | **Data Sources** | <ul><li>Organizer-submitted event and seat-map data</li><li>Attendee accounts, orders, and browsing history</li><li>VNPay payment callbacks</li></ul> |
 | **Data Schema** | Relational schema in PostgreSQL: `User`, `Event`, `TicketType`, `Venue → Section → Row → Seat`, `SeatHold`, `Order`, `Ticket`, `Review` (see ERD in §8). |
-| **Data Transformation** | Raw sales and check-in events aggregated into real-time analytics; user history transformed into Gemini prompts for recommendations. |
+| **Data Transformation** | Raw sales and check-in events aggregated into real-time analytics; user history transformed into grounded prompts for the configured AI provider. |
 | **Programming Languages** | TypeScript / JavaScript (frontend + backend), SQL |
 | **Frameworks & Libraries** | React, Node.js, Express, Socket.IO, Recharts, html5-qrcode, Jest / Vitest |
-| **External Services** | VNPay (payments), Google Gemini API (AI), GitHub Actions (CI/CD) |
+| **External Services** | VNPay (payments), configured AI provider through `AIProvider`, GitHub Actions (CI/CD) |
 | **Hardware Requirements** | <ul><li>Development: standard laptop, multi-core CPU, 8GB+ RAM</li><li>Runtime: free-tier cloud instances (no owned servers)</li></ul> |
 | **Software Requirements** | <ul><li>OS: Windows / macOS / Linux</li><li>Runtime: Node.js LTS, modern browser</li><li>IDE: Visual Studio Code</li><li>Database: PostgreSQL</li><li>Version control: Git</li></ul> |
 
@@ -480,8 +480,8 @@ sequenceDiagram
         <td><b>Sprint 4 — AI &amp; Engagement</b><br>(Week 9–11)</td>
         <td>
             <ul>
-                <li>Feature 5: AI recommendations (Gemini)</li>
-                <li>Feature 6: AI listing assistant (Gemini)</li>
+                <li>Feature 5: AI recommendations (provider-backed)</li>
+                <li>Feature 6: AI listing assistant (provider-backed)</li>
                 <li>Feature 8: Notifications, reminders &amp; waitlist</li>
             </ul>
         </td>

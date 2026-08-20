@@ -6,7 +6,7 @@ Validation guide. Payload shapes are in [contracts/reviews.openapi.yaml](./contr
 
 - PostgreSQL reachable through `DATABASE_URL`; `TEST_DATABASE_URL` pointing at a Neon branch nobody else uses (the suite truncates thirty tables before every test).
 - Dependencies installed; `npm run db:migrate` applied.
-- **An account holding a paid ticket to an event that has already started.** This is the whole eligibility rule, and without one there is nothing to test. On the current development data two such (account, event) pairs exist; `SELECT o.user_id, s.event_id FROM tickets t JOIN orders o ON o.id = t.order_id JOIN reservations r ON r.id = o.reservation_id JOIN showtimes s ON s.id = r.showtime_id WHERE o.payment_status = 'paid' AND t.qr_status <> 'void' AND s.starts_at < now()` lists them.
+- **An account holding a paid, non-void ticket to the event, whether or not its showtime has started.** This is the whole eligibility rule, and without one there is nothing to test. On the current development data eligible (account, event) pairs can be listed with `SELECT o.user_id, s.event_id FROM tickets t JOIN orders o ON o.id = t.order_id JOIN reservations r ON r.id = o.reservation_id JOIN showtimes s ON s.id = r.showtime_id WHERE o.payment_status = 'paid' AND t.qr_status <> 'void'`.
 - An admin account, and a second ordinary account with no ticket to that event.
 
 ## Apply schema
@@ -29,7 +29,7 @@ Expected: zero type errors, zero lint errors, `server/tests/reviews/` passing, r
 
 ## Scenario 1 — Write a review
 
-Sign in as the eligible account, open the attended event, and submit four stars with a sentence.
+Sign in as the eligible account with a paid, non-void ticket, open the event, and submit four stars with a sentence.
 
 Expected: the review appears immediately at the top of the list with the account's name and avatar; the summary above shows `4.0` and a count one higher than before.
 
@@ -61,7 +61,7 @@ Expected: no form, and a line explaining that a ticket to the event is needed. T
 curl -X POST http://localhost:4000/api/events/<id>/reviews -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d '{\"rating\":5}'
 ```
 
-Expected: `403` with code `no_ticket`. Repeat against an event that has not started with an account that *does* hold a ticket: `403` with code `event_not_started`. Repeat with no token at all: `401`.
+Expected: `403` with code `no_ticket`. Repeat against an event before its showtime with an account that *does* hold a paid, non-void ticket: the review is accepted, because timing is not an eligibility condition. Repeat with no token at all: `401`.
 
 ## Scenario 6 — Reading needs no account
 

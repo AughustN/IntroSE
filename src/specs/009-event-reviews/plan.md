@@ -6,7 +6,7 @@
 
 ## Summary
 
-Let an attendee who paid for a ticket to an event that has already started give it one to five stars and optional text, once per event, editable and deletable by its author. Show the average, the count and the reviews on the event-detail page to everyone, signed in or not. Let a reader report a review into the moderation queue that already exists and already accepts `target_type = 'review'`.
+Let an attendee who holds a paid, non-void ticket give an event one to five stars and optional text, whether or not its showtime has started. Show the average, the count and the reviews on the event-detail page to everyone, signed in or not. Let a reader report a review into the moderation queue that already exists and already accepts `target_type = 'review'`.
 
 One new table, one new module following the repo/service/routes split every other module uses, a shared contract in `shared/reviews/types.ts`, and a section added to the existing event-detail screen. The aggregate is computed from live rows rather than stored, so an edit, a delete and a moderation removal cannot leave it stale.
 
@@ -38,7 +38,7 @@ One new table, one new module following the repo/service/routes split every othe
 
 - **III. AI Is Assistive, Grounded, Non-Blocking**: N/A — no AI in this feature. Worth one note: the assistant's candidate projection is unchanged, so ratings do not leak into recommendations and nothing here can slow a chat answer.
 
-- **IV. Verifiable Requirements & Test-First**: PASS. The denial paths are the feature's whole integrity story and each gets a test that asserts the refusal: no ticket, unpaid ticket, refunded ticket, event not yet started, not signed in, someone else's review, duplicate review under concurrency.
+- **IV. Verifiable Requirements & Test-First**: PASS. The denial paths are the feature's whole integrity story and each gets a test that asserts the refusal: no ticket, unpaid ticket, refunded ticket, void ticket, not signed in, someone else's review, duplicate rating under concurrency.
 
 - **V. Simplicity & Free-Tier Discipline**: PASS. One table and one index. The aggregate is a `GROUP BY` over live rows rather than a denormalised counter with triggers to keep honest — at this scale the query is cheaper than the bug surface it avoids. Reporting reuses `content_reports` instead of a second reporting concept.
 

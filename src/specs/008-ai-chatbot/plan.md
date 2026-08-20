@@ -48,21 +48,16 @@ The assistant keeps its current shape — Express router, `AIProvider` seam, Pos
 
 - **VI. Clean Codebase & Seamless FE/BE Integration**: PASS after the change, FAIL today. The AI payload is currently declared twice — `server/src/modules/ai/providers/ai.provider.ts` and again in `src/services/aiClient.ts` — which the constitution names explicitly as prohibited contract drift; `shared/ai/types.ts` is the missing fifth shared module beside `admin`, `auth`, `catalog`, and `holds`. Removing the superseded endpoint in the same change satisfies the rule that a contract change updates every consumer and leaves no dead code.
 
-### Open gate: technology substitution requires an amendment
+### Governance gate: provider-neutral AI contract
 
-**Status: not passed. Governance action required before merge.**
+**Status: passed on 2026-08-20.**
 
-The constitution fixes the technology table — "changing a listed technology requires an amendment" — and its AI row reads *Google Gemini API (chat + `text-embedding-004`)*. The architecture section further enumerates the four permitted external integrations by name: VNPay, **Gemini**, Google OAuth, Resend. Principle III itself says "AI (Gemini)".
-
-The code on `mvp-demo` calls OpenAI, and the key the team holds is an OpenAI key. The count of integrations is unchanged at four, but a named one is substituted, which the amendment procedure covers.
-
-This is a governance defect, not a design defect, and no decision in this plan depends on which vendor wins. Resolution path:
-
-1. Open the amendment PR against `.specify/memory/constitution.md`: AI row becomes OpenAI-compatible chat completions, the integration list swaps Gemini for OpenAI, Principle III's parenthetical is genericised, and the `text-embedding-004` mention is dropped since no embedding is used. MINOR or MAJOR bump per the team's reading; the Sync Impact Report gains a dated entry.
-2. Record the reasoning durably as **ADR-0005, "AI provider: OpenAI behind a provider interface"** under `docs/adr/`, noting that `AIProvider` keeps the swap to one class.
-3. Correct the five documents that still name Gemini: the use-case specification (UC-10, UC-22 secondary actor), `C4_Deployment.md`, `VisionDocument.md`, the project plan, and the proposal.
-
-Until step 1 merges, implementation may proceed on the branch but MUST NOT merge to `main`. Recorded in Complexity Tracking below.
+The constitution now defines AI as an approved provider behind the shared `AIProvider`
+ abstraction and keeps the provider within the four-external-integration cap. ADR-0005,
+ `docs/adr/0005-ai-provider-abstraction.md`, records the decision and its consequences.
+UC-10 and UC-22 therefore specify behavior and trust boundaries without making Gemini,
+OpenAI, or another vendor a product requirement. Provider-specific implementation details
+remain in the runtime adapter and operational documentation.
 
 ## Project Structure
 

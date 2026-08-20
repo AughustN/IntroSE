@@ -20,9 +20,10 @@
   (FR-028, FR-040).
 - **SC-005 — logout timing wording**: "within 1 second" → "on the very next request". The guarantee is
   synchronous (session validity is read live per request, ADR 0001), not a wall-clock latency race.
-- **Avatar (Assumptions)**: users **upload** an image, stored on the VPS disk and served statically; the
-  URL-paste path is dropped (Google's seeded picture is the one exception). Supersedes the earlier
-  "avatar is a URL, upload out of scope" assumption (ADR 0004).
+- **Avatar (Assumptions)**: users **upload** an image through the backend to Cloudinary-managed storage;
+  arbitrary URL entry is not offered (Google's seeded picture is the one exception). The shared media
+  pipeline owns content validation, WebP normalization, deterministic replacement, and remote cleanup;
+  profile behavior remains owned by this feature (ADR-0006).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -556,33 +557,27 @@ and unique) and **D5** (the two account kinds never merge). What changed:
   accounts.
 - **Session lifetime** is assumed to be a short-lived working credential refreshed from a longer-lived
   one, rather than a single long-lived credential, so that revocation is possible at all.
-- **The avatar is uploaded by the user** as an image file and stored on the application's own host (the
-  VPS disk, served as a static file); arbitrary URL entry is not offered to users. The one exception is
-  the picture supplied by Google, seeded at Google sign-up. (This supersedes the earlier "avatar is a
-  URL, upload out of scope" assumption; see plan ADR 0004.)
+- **The avatar is uploaded by the user** as an image file and stored through the canonical Cloudinary
+  managed-media pipeline after backend validation and normalization; arbitrary URL entry is not offered
+  to users. The one exception is the picture supplied by Google, seeded at Google sign-up. (This
+  supersedes the earlier "avatar is a URL, upload out of scope" assumption; see ADR-0006.)
 - **One wallet per account is created at registration** and never by a later flow.
 
 ## Dependencies
 
-- **Unresolved governance conflict — now on the critical path.** The constitution
-  (`.specify/memory/constitution.md`, *Architecture & Coding Standards*) states: *"External
-  integrations are limited to two: VNPay (payments) and Gemini (AI). Adding a third external
-  dependency requires an amendment."* This feature requires **Google** (User Story 3) and a
-  **transactional email provider** (User Story 4) — four in total. The amendment procedure requires
-  team agreement, so this cannot be resolved inside this specification.
-
-  Since User Story 4 is P1 (see D-D), the email provider is no longer a nice-to-have that can wait:
-  **the amendment gates the first release.** It should be raised with the team before planning
-  finishes, not discovered during implementation.
+- **Governance gate — resolved.** Constitution v2.1.0 permits four integrations: VNPay (payments), one
+  approved configured AI provider behind `AIProvider`, Google OAuth, and Resend (transactional email).
+  Provider/model selection is implementation configuration recorded in ADR-0005; it does not change
+  account-feature behavior. A fifth external dependency still requires an amendment.
 
   | Story | Blocked? | Note |
   |---|---|---|
   | US1, US2, US5, US6, US7 | No | Buildable immediately; no external dependency |
-  | **US4 — password reset (P1)** | **Yes — email provider** | Must be resolved before release, not after |
-  | US3 — Google sign-in (P2) | Yes — Google | May land after release without stranding anyone |
+  | US4 — password reset (P1) | No | Uses the approved Resend transactional-email integration |
+  | US3 — Google sign-in (P2) | No | Uses the approved Google OAuth integration |
 
-  If the team rejects the email provider, the fallback is **not** to ship without recovery. It is to
-  ship with wallet top-up disabled, so no account can hold money it cannot reach.
+  The product retains a safe development fallback for unavailable transactional email; production
+  recovery remains a release requirement.
 - **Reference documents**: `docs/Analysis_Design/Group02_UseCaseSpecification.md` (UC-01 to UC-06,
   UC-37) is authoritative for flows; `docs/Analysis_Design/SCHEMA_DATABASE.md` is authoritative for
   the users, wallets, and organizers structures and for the API contract shape.

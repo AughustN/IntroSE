@@ -17,8 +17,8 @@
 
 ## Phase 1: Setup
 
-- [X] T001 Create the module skeleton: `server/src/modules/seatmap/`, `server/tests/seatmap/`, `src/components/seatmap/`, and the `uploads/floorplans/` directory (gitignored, like `uploads/avatars/`)
-- [X] T002 [P] Confirm no new packages are needed — `multer` and `sharp` are already dependencies from the 001 avatar upload; record in `package.json` that nothing is added (ADR-0004, Principle V)
+- [X] T001 Create the module skeleton: `server/src/modules/seatmap/`, `server/tests/seatmap/`, and `src/components/seatmap/`. Floor-plan assets are managed by Cloudinary rather than a local upload directory.
+- [X] T002 [P] Confirm no new packages are needed — `multer` and `sharp` are already dependencies from the managed-media pipeline; record in `package.json` that nothing is added (ADR-0006, Principle V)
 
 ---
 
@@ -106,10 +106,10 @@
 
 - [X] T034 [P] [US4] Tests `server/tests/seatmap/floorplan.test.ts`: a valid JPEG/PNG/WebP accepted; **a real SVG refused** regardless of name or declared type; a text file renamed `plan.png` refused; an `image/png` header over non-PNG bytes refused; a 7 MB file → `413`; a small PNG decoding to 20000×20000 refused **before** re-encoding; the stored file has no original metadata and a name unrelated to the upload (FR-021, FR-022, FR-023, SC-006). Plus SC-007: snapshot every seat position, remove the floor plan, assert **100% of positions are unchanged**; and assert a buyer's seat statuses are identical with the plan visible and hidden (FR-025)
 - [X] T035 [P] [US4] Tests in the same file for FR-023a: repeated uploads from one organizer are throttled with a clear message, never queued or half-attached; layout saves are **not** throttled. Then SC-005b: run a burst of concurrent uploads **against a showtime with an active seat map** and assert the process stays under its memory ceiling while seat updates keep meeting feature 003's bound — the concurrency semaphore, not the rate limit, is what this pins (PERF-07)
-- [X] T036 [US4] `server/src/modules/seatmap/floorplan.ts` mirroring `server/src/modules/auth/avatar.ts`: magic-byte detection (jpeg/png/webp only) → `sharp().metadata()` dimension check **before** any resize → re-encode to WebP → write `uploads/floorplans/<uuid>.webp`; unlink the previous file on replace or remove (ADR-0004, R-7)
+- [X] T036 [US4] `server/src/modules/seatmap/floorplan.ts` reuses the managed-media sanitizer: magic-byte detection (jpeg/png/webp only) → `sharp().metadata()` dimension check **before** any resize → re-encode to WebP → deterministic Cloudinary upload; replacement overwrites the managed asset and removal cleans it up (ADR-0006, R-7)
 - [X] T037 [US4] `server/src/modules/seatmap/upload.throttle.ts`: per-organizer token bucket copying the shape of `server/src/modules/holds/holds.throttle.ts`, plus a concurrency semaphore bounding the instantaneous memory spike (FR-023a, PERF-07, R-8)
 - [X] T038 [US4] `POST`/`PATCH`/`DELETE /organizer/layouts/{id}/floorplan` with `multer` memory storage capped at `FLOORPLAN_MAX_BYTES`; PATCH persists scale/offset/opacity/buyer-visibility and **never moves a seat** (FR-024, FR-025)
-- [X] T039 [P] [US4] Static serving: `server/src/app.ts` + the Nginx location for `/uploads/floorplans` with `X-Content-Type-Options: nosniff`, same shape as `uploads/avatars` (FR-022)
+- [X] T039 [P] [US4] Cloudinary delivery: return the managed secure URL after backend validation; no local `/uploads/floorplans` static route is mounted (FR-022, ADR-0006)
 - [X] T040 [P] [US4] `src/components/seatmap/FloorPlanPanel.tsx`: upload, scale/offset/opacity sliders, buyer-visibility toggle **default off**, and plain wording that anyone given the link can open the image (FR-026a)
 **Checkpoint**: an irregular venue is quick to author, and the picture still owns nothing. (Rendering the background lives in Phase 4 with the rest of the render path — this phase adds upload and alignment.)
 
@@ -220,7 +220,7 @@
 - **A generated map is a snapshot.** A layout edit reaches a showtime only through an explicit, previewed re-apply (FR-005, FR-027a) — this is the single decision most of the write path hangs on.
 - **Refusals are refusals.** Another organizer's layout, seat, upload or clone returns 403, never a filtered-out empty result (SEC-04, FR-042).
 - **Never release a buyer's hold to make room for an organizer's edit** (FR-028). The organizer waits for it to lapse.
-- No new external integration and no new packages — disk plus a static route, exactly as ADR-0004 established for avatars.
+- The existing Cloudinary managed-media integration and current packages are reused; no new external integration is introduced.
 
 ---
 

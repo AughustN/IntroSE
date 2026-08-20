@@ -210,7 +210,7 @@ Stakeholders are parties with an interest in TixHub who are not necessarily dire
 | **Development team (Group 02)** | Steering | High | Five students responsible for delivery; also act as testers and maintainers. They make day to day scope and design trade offs. |
 | **Survey respondents / prospective users** | Market proxy | Medium | The 52 people whose needs ground the requirements; an indirect voice. They shape priorities through the survey but do not approve work.|
 | **VNPay (payment provider)** | Dependency | Medium | External sandbox gateway that processes payments; TixHub depends on its callback contract and never stores card data. |
-| **Google Gemini (AI provider)** | Dependency | Low | External API powering the two AI features under a shared free-tier quota; AI degrades to non AI fallbacks if it is unavailable, so its influence on the core flow is low. |
+| **Configured AI provider behind `AIProvider`** | Dependency | Low | External provider powering the two AI features under a shared quota; AI degrades to non-AI fallbacks if it is unavailable, so its influence on the core flow is low. |
 | **Hosting (single VPS `tixhub.fit` + Neon Postgres)** | Dependency | Medium | Self-managed VPS (Nginx: TLS + static SPA + reverse-proxy, same-origin) with Neon for Postgres; TLS and OS patching are the team's responsibility; scale-out is a config change, not a rewrite (Section 4.3). |
 
 #### 3.3 User Summary
@@ -267,7 +267,7 @@ flowchart TB
         DB[(PostgreSQL<br/>events, tickets, wallets, seat holds)]
     end
     VN[[VNPay Sandbox]]
-    GM[[Google Gemini API]]
+    AI[[Configured AI Provider]]
     GO[[Google OAuth]]
     RS[[Resend email]]
 
@@ -280,12 +280,12 @@ flowchart TB
     API -->|SQL| DB
     API -->|broadcast seat change| WS
     API -->|wallet top-up: redirect + signed IPN| VN
-    API -->|AI prompt / completion| GM
+    API -->|AI prompt / completion via AIProvider| AI
     API -->|verify ID token| GO
     API -->|password-reset mail| RS
 ```
 
-TixHub integrates with **four** external systems: the **VNPay** sandbox — which funds **wallet top-ups only** (TixHub never sees card data), **Gemini** for the two AI features (with non-AI fallbacks), **Google** for OAuth sign-in, and **Resend** for transactional email (password-reset links). The cap was raised from two to four by a constitution amendment (v2.0.0). The concurrency, persistence, and scaling guarantees behind these flows are specified in Section 6 (Non-Functional Requirements).
+TixHub integrates with **four** external systems: the **VNPay** sandbox — which funds **wallet top-ups only** (TixHub never sees card data), one approved configured AI provider behind **`AIProvider`** for the two AI features (with non-AI fallbacks), **Google** for OAuth sign-in, and **Resend** for transactional email (password-reset links). The cap was raised from two to four by a constitution amendment (v2.1.0). The concurrency, persistence, and scaling guarantees behind these flows are specified in Section 6 (Non-Functional Requirements).
 
 #### 4.2 Summary of Capabilities
 
@@ -300,7 +300,7 @@ Each item is tagged as an **Assumption** (something we take to be true) or a **D
 | # | Type | Assumption / Dependency | Likelihood × Impact | Impact if it changes |
 |---|---|---|---|---|
 | 1 | Dependency | VNPay's sandbox callback contract stays stable and reachable. | Low × High | Only **wallet top-ups** break — checkout is wallet-only and atomic, so a seat never waits on a gateway callback (schema D2); a slow gateway costs at most the held seats after the one bounded grace (REL-02), never the money. Mitigated by idempotent top-up IPNs (REL-03). |
-| 2 | Dependency | Google Gemini's free tier quota remains usable (~10 req/min, ~100–250/day, shared). | Medium × Low | AI features degrade gracefully to non AI fallbacks, so the core flow is unaffected (Section 6 SCAL-03). |
+| 2 | Dependency | The configured provider's quota remains usable. | Medium × Low | AI features degrade gracefully to non-AI fallbacks, so the core flow is unaffected (Section 6 SCAL-03). |
 | 3 | Assumption | A single self-managed VPS (`tixhub.fit`, Nginx same-origin) + Neon Postgres provides enough capacity for demos. | Medium × Medium | Performance/availability ceilings apply; scaling out (more Node workers behind Nginx, or a bigger VPS) is a config change, not a rewrite. |
 | 4 | Assumption | Users access TixHub on a modern browser; organizers' phones have a working camera for QR scanning. | Low × Medium | QR check-in needs a camera in a mobile browser (PLAT-03), served over HTTPS (SEC-01); if the camera is unavailable, staff fall back to manual code entry (Feature 3). |
 | 5 | Assumption | Scope stays at VND-only, Vietnam only, sandbox payments. | Low × Low | Out of scope items (multi-currency, real settlement) remain excluded to protect the 13-week timeline (team-controlled). |
@@ -324,11 +324,11 @@ TixHub delivers **eleven core features** across the three roles. Each is summari
 | 2 | **Secure Checkout & Wallet** | Must | Checkout is **wallet-only**: the attendee tops up a store-credit wallet via the VNPay sandbox, then buying a ticket debits the wallet and issues the ticket in one atomic transaction (no gateway leg on the order). VNPay's signed IPN is the sole trigger for crediting a top-up. | UN-02 (secure payment), UN-06 (fast checkout) |
 | 3 | **QR-Code Tickets + Door Scanner** | Must | Every ticket carries a unique QR code; organizers scan it from a phone browser to check attendees in and block duplicates. If the camera is denied or unavailable, staff fall back to manual code entry. | UN-10 (trustworthy check-in) |
 | 4 | **Event Discovery, Search & Filters** | Must | Public browse page filtering by keyword, category, date, location, and price. | UN-04 (find the right event) |
-| 5 | **AI Personalized Recommendations** *(AI #1)* | Could | A Gemini chatbot that suggests events from a user's tickets, saved events, and browsing history, answering natural-language questions. | UN-04 (long-tail discovery), UN-08 (optional smart help) |
-| 6 | **AI Event Listing Assistant** *(AI #2)* | Could | Gemini drafts a polished description, suggests titles, tags, and a sensible price from a few rough inputs. | UN-09 (sell without skill), UN-08 (optional smart help) |
+| 5 | **AI Personalized Recommendations** *(AI #1)* | Could | A provider-backed chatbot that suggests events from a user's tickets, saved events, and browsing history, answering natural-language questions. | UN-04 (long-tail discovery), UN-08 (optional smart help) |
+| 6 | **AI Event Listing Assistant** *(AI #2)* | Could | The configured provider drafts a polished description, suggests titles, tags, and a sensible price from a few rough inputs. | UN-09 (sell without skill), UN-08 (optional smart help) |
 | 7 | **Real Time Analytics Dashboard** | Should | Live charts of sales, revenue, tickets remaining, and check-ins; per-organizer, with a platform-wide admin view. | UN-11 (see sales live) |
 | 8 | **Notifications, Reminders & Waitlist** | Should | Automated email/in-app alerts for confirmations, reminders (1 week / 1 day before), changes, and a waitlist for sold-out events. | UN-07 (timely reminders) |
-| 9 | **Reviews, Ratings & Social Proof** | Should | Attendees rate events (1–5 stars) and review after attending; ratings appear on the organizer's profile and future events. | UN-05 (confidence before buying) |
+| 9 | **Reviews, Ratings & Social Proof** | Should | Attendees holding a paid, non-void ticket rate events (1–5 stars) and leave reviews; showtime start and door check-in are not required. Ratings appear on the event, while organizer-profile aggregation remains deferred. | UN-05 (confidence before buying) |
 | 10 | **Admin Moderation & Organizer Approval** | Must | Admin tools to approve organizers before they can sell, **approve each event before it is visible to buyers (pre-publish moderation)**, review reported events, and take down policy-violating content. | UN-02 (marketplace trust & safety) |
 | 11 | **Real-Time Seat Selection & Holds** | Must | Buyers of seated events pick seats on a live map and each click holds that seat immediately; general-admission buyers hold a **quantity** in a tier the same way. A hold is concurrency-safe (two buyers are never sold the same seat, DATA-02), auto-released on timeout (REL-02), broadcast to every viewer within ~1 s, and capped per buyer (default **8 tickets**, one active selection per showtime) so no one can lock a map. This is TixHub's core differentiator (§4.1). | UN-03 (easy seat selection), UN-01 (stays up under load) |
 
@@ -392,10 +392,10 @@ Three threads run through the requirements below:
 | SEC-05 | TixHub never stores payment card or bank account data **no card/bank fields exist in the database schema**. All sensitive payment data is handled exclusively by the VNPay sandbox gateway. | Schema inspection asserts no card/bank columns |
 | SEC-06 | VNPay funds **wallet top-ups only** (schema decision D2). A wallet is credited **only via VNPay's server to server IPN**, never the browser return URL (display only). An IPN is accepted only if its signature **and** the amount/top-up reference validate; otherwise no balance moves. Orders have no gateway leg at all: checkout debits the wallet locally (DATA-01), so no ticket ever waits on a callback. | Unit tests with forged, replayed, and late arriving IPNs |
 | SEC-07 | Every API input is **validated against a strict schema** and rejected on wrong type/length/format before processing. Database access uses **parameterized queries only** (no raw string concatenation), blocking SQL injection. User-supplied content is **output encoded**, never rendered as raw HTML, blocking XSS. | OWASP ZAP active scan + code review |
-| SEC-08 | Gemini AI endpoints are rate limited **per authenticated user** to ≤ 10 requests/hour. This is the per user fairness layer; it sits on top of the platform wide quota guard (SCAL-03), which enforces the actual shared free tier ceiling. | Test fires 11 calls, asserts the 11th is blocked |
+| SEC-08 | AI endpoints are rate limited **per authenticated user** to ≤ 10 model-backed requests/hour. This is the per-user fairness layer; it sits on top of the platform-wide quota guard (SCAL-03), which enforces the configured provider's shared ceiling. | Test fires 11 calls, asserts the 11th is blocked |
 | SEC-09 | Every privileged admin action (organizer approval/suspension, event removal) writes an **immutable audit record** (acting admin ID, action type, target entity ID, timestamp, before/after values). Records cannot be updated or deleted; read access is Admin only; retained for the project lifetime. | Integration test asserts an audit row per admin action; DB grants block UPDATE/DELETE |
 | SEC-10 | Login, registration, and password-reset endpoints are **throttled per source (IP)** and answered with a **progressive per-identifier delay** as failures accumulate — applied equally to unknown identifiers, and **never an account lockout** (a lockout is a DoS anyone can aim at a known email, and it leaks which accounts exist). A correct password is always accepted (schema decision D6). Responses are indistinguishable whether or not the account exists. | Test: 50 failures on one identifier then the correct password succeeds; a source over the rate is throttled while the owner signs in from another source |
-| SEC-11 | All secrets (JWT signing key, `AUTH_EVENT_HASH_KEY`, VNPay `vnp_HashSecret`, DB credentials, Gemini + Google + Resend keys) are stored in **environment variables on the VPS host**, never hard-coded or committed. `.env` is git-ignored; a `.env.example` with placeholders is committed instead. Secrets are rotatable without code changes. | gitleaks repository scan in CI |
+| SEC-11 | All secrets (JWT signing key, `AUTH_EVENT_HASH_KEY`, VNPay `vnp_HashSecret`, DB credentials, configured AI-provider + Google + Resend keys) are stored in **environment variables on the VPS host**, never hard-coded or committed. `.env` is git-ignored; a `.env.example` with placeholders is committed instead. Secrets are rotatable without code changes. | gitleaks repository scan in CI |
 
 #### 6.3 Platform & Compatibility
 

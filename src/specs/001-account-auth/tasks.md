@@ -128,9 +128,9 @@ P3 = US5, US6, US7.
 **Independent Test**: change nickname/phone/avatar and confirm persistence across reload; change password and confirm the old one stops working.
 
 - [X] T039 [P] [US5] Integration tests in `server/tests/auth/profile.test.ts`: `PATCH /me` nickname/phone persist; unknown/privilege fields ignored (FR-035/008); `phone_taken` 409 (FR-050); change-password revokes **other** families but keeps the current session (FR-057); wrong current password → 403
-- [X] T040 [P] [US5] Integration tests in `server/tests/auth/avatar.test.ts`: jpeg/png/webp upload → 200 + `avatarUrl` under `/uploads/avatars/`; SVG or renamed non-image → 400 `invalid_image`; >2MB → 400; stored file is re-encoded with a random uuid name (ADR 0004)
+- [X] T040 [P] [US5] Integration tests in `server/tests/auth/avatar.test.ts`: jpeg/png/webp upload → 200 + Cloudinary secure `avatarUrl`; SVG or renamed non-image → 400 `invalid_image`; >2MB → 400; stored payload is re-encoded and deterministic replacement is asserted (ADR-0006)
 - [X] T041 [US5] `GET/PATCH /me` (allow-list nickname/phone only) + `POST /me/password` (verify current, revoke other families) (FR-033/034/035/057)
-- [X] T042 [US5] `POST /me/avatar` in `server/src/modules/auth/avatar.ts`: multer, magic-byte type check, SVG ban, `sharp` re-encode (strip EXIF), uuid filename, disk write, delete previous (ADR 0004)
+- [X] T042 [US5] `POST /me/avatar` in `server/src/modules/auth/avatar.ts`: backend-mediated upload, magic-byte type check, SVG ban, `sharp` re-encode (strip EXIF), deterministic Cloudinary overwrite and cleanup (ADR-0006)
 - [X] T043 [P] [US5] FE: profile page + avatar upload widget + change-password form in `src/pages/auth/`
 
 **Checkpoint**: a signed-in user can manage their account.

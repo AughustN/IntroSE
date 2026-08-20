@@ -3,7 +3,7 @@
 **Feature Branch**: `009-event-reviews`
 **Created**: 2026-08-11
 **Status**: Draft
-**Input**: User description: "Tính năng đánh giá & bình luận sự kiện (reviews & ratings). Người tham dự đã mua vé và đã dự sự kiện có thể chấm sao và viết nhận xét; người khác đọc được trên trang chi tiết sự kiện." Grounded in UC-18 (*Rate & review attended event*) and UC-39 (*Report event or review*) of `docs/Analysis_Design/Group02_UseCaseSpecification.md`.
+**Input**: User description: "Tính năng đánh giá & bình luận sự kiện (reviews & ratings). Người mua vé đã thanh toán và vé chưa bị void có thể chấm sao và viết nhận xét; người khác đọc được trên trang chi tiết sự kiện." Grounded in UC-18 (*Rate & review event*) and UC-39 (*Report event or review*) of `docs/Analysis_Design/Group02_UseCaseSpecification.md`.
 
 ## Context
 
@@ -13,13 +13,13 @@ The reporting half already has its foundation. `content_reports` exists with `ta
 
 ## User Scenarios & Testing *(mandatory)*
 
-### User Story 1 - Rate and review an event you attended (Priority: P1)
+### User Story 1 - Rate and review a purchased event (Priority: P1)
 
-An attendee who went to an event opens it afterwards, gives it one to five stars, optionally writes what they thought, and sees their review appear on the event.
+An attendee with a paid, non-void ticket opens the event, gives it one to five stars, optionally writes what they thought, and sees their review appear on the event.
 
 **Why this priority**: This is UC-18's basic flow and the only thing that creates the data every other story reads. Nothing else in the feature is observable without it.
 
-**Independent Test**: Sign in as an attendee with an attended ticket, open the event, submit four stars and a sentence, and verify the review appears on the event with the attendee's name and the aggregate updates.
+**Independent Test**: Sign in as an attendee with a paid, non-void ticket, open the event, submit four stars and a sentence, and verify the review appears on the event with the attendee's name and the aggregate updates.
 
 **Acceptance Scenarios**:
 
@@ -92,12 +92,12 @@ A reader who finds a review abusive, fake or off-topic reports it, and an admin 
 
 ### Edge Cases
 
-- An attendee attended several showtimes of the same event: they get one rating for the event, not one per showtime.
-- An attendee attended, reviewed, and the event was later cancelled: the review stays, since it describes something that happened.
+- An attendee holds paid, non-void tickets for several showtimes of the same event: they get one rating for the event, not one per showtime.
+- An attendee reviews an event with a paid, non-void ticket and the event is later cancelled: the review stays, since it describes the listing and purchase experience.
 - Every review of an event is removed by moderation: the event returns to showing no rating rather than a zero.
 - Two devices submit a first review for the same attendee and event at the same instant: exactly one is stored.
 - Review text is entirely whitespace: treated as no text at all, with the star rating standing alone.
-- An organizer holds an attended ticket for their own event: out of scope for this feature; see Assumptions.
+- An organizer holds a paid, non-void ticket for their own event: out of scope for this feature; see Assumptions.
 
 ## Requirements *(mandatory)*
 
@@ -135,7 +135,7 @@ A reader who finds a review abusive, fake or off-topic reports it, and an admin 
 
 ### Measurable Outcomes
 
-- **SC-001**: An attendee who attended an event can publish a rating in under one minute from opening the event.
+- **SC-001**: An attendee who holds a paid, non-void ticket for an event can publish a rating in under one minute from opening the event.
 - **SC-002**: No review is ever stored for an account without a paid ticket to that event — verified by automated test, zero tolerance.
 - **SC-003**: No account ever holds two ratings for one event, including when two submissions arrive simultaneously.
 - **SC-004**: Text submitted with markup in it is rendered as literal characters in 100% of display locations.
@@ -148,10 +148,10 @@ A reader who finds a review abusive, fake or off-topic reports it, and an admin 
 
 ## Assumptions
 
-- **Eligibility is a paid ticket plus a started event**, which is a deliberate relaxation of UC-18's "checked-in" precondition, decided 2026-08-11. Two reasons. Check-in depends on a staff member scanning at the door — an external step whose absence is not the attendee's doing, and the database currently holds **zero** checked-in tickets, so the strict rule would make the feature undemonstrable and unusable for anyone whose event had no scanner on the night. And a purchase is a fact TixHub owns end to end, so the rule is verifiable from our own records rather than from someone else's diligence. The integrity property UC-18 protects — that a rating comes from someone with a real stake in the event — survives: the reviewer paid, and a refunded or cancelled ticket confers nothing. UC-18 should be amended to match.
-- One review per attendee per **event**, not per showtime or per ticket, even when several were attended.
+- **Eligibility is a paid, non-void ticket**, whether or not the showtime has started. This supersedes UC-18's former checked-in precondition and the interim started-event rule. Check-in is an operational door process and is not required for a purchase-based opinion; a purchase is a fact TixHub owns end to end, while a refunded, cancelled, or void ticket confers no eligibility.
+- One review per attendee per **event**, not per showtime or per ticket, even when several tickets are held.
 - Reviews are attributed to the attendee's display name and avatar, the same identity the rest of the product shows. Anonymous reviewing is out of scope.
 - Organizers cannot reply to reviews in this feature. UC-18 does not describe a reply and the moderation path covers abuse; a reply thread is a separate feature.
 - Ratings surface on the event only. UC-18 also mentions the organizer profile; there is no such page in the product, and adding one is explicitly deferred (decided 2026-08-11) rather than blocked — the aggregate is computed per event, so a profile page can sum those later without reworking anything here.
-- No voting on reviews (helpful / not helpful), no photo attachments, no verified-purchase badge beyond the attendance rule that already gates writing.
+- No voting on reviews (helpful / not helpful), no photo attachments, no verified-purchase badge beyond the purchase eligibility rule that already gates writing.
 - Removal by moderation hides a review and excludes it from the aggregate; it is not erased, so the moderation record keeps its subject.

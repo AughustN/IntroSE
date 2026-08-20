@@ -4,6 +4,7 @@ import { app } from "../helpers/app.js";
 import { bearer, makeApprovedOrganizer, registerUser } from "../helpers/authFixture.js";
 import * as seed from "../helpers/catalogSeed.js";
 import { pool } from "../../src/db/pool.js";
+import { moveShowtime } from "../helpers/salesSeed.js";
 
 /**
  * A bought ticket owned by a registered organizer user (so we have a token to auth with).
@@ -33,7 +34,11 @@ async function boughtTicket() {
     .send({ reservationId: reservation.body.id })
     .expect(201);
 
-  return { organizer: o, ticketCode: order.body.tickets[0].ticketCode as string };
+  return {
+    organizer: o,
+    showtimeId,
+    ticketCode: order.body.tickets[0].ticketCode as string,
+  };
 }
 
 describe("organizer ticket check-in (US6)", () => {
@@ -63,7 +68,8 @@ describe("organizer ticket check-in (US6)", () => {
   });
 
   it("checks a ticket in once, and reports already on a rescan", async () => {
-    const { organizer, ticketCode } = await boughtTicket();
+    const { organizer, showtimeId, ticketCode } = await boughtTicket();
+    await moveShowtime(showtimeId, 60 * 60 * 1000);
 
     const first = await request(app)
       .post("/api/organizer/tickets/check-in")
@@ -80,5 +86,17 @@ describe("organizer ticket check-in (US6)", () => {
       .expect(200);
     expect(again.body.already).toBe(true);
     expect(again.body.ticket.status).toBe("checked_in");
+  });
+
+  it("applies the canonical opening window to manual code entry", async () => {
+    const { organizer, ticketCode } = await boughtTicket();
+
+    const res = await request(app)
+      .post("/api/organizer/tickets/check-in")
+      .set(bearer(organizer.token))
+      .send({ code: ticketCode });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("too_early");
   });
 });

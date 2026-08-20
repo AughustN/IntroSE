@@ -98,20 +98,20 @@ Alternatives rejected**.
 - **Alternatives**: Trusting the preview (applying a stored plan) — a sale between preview and confirm
   would be overwritten. Violates Principle I. Rejected.
 
-## R-7 — Floor-plan upload: ADR-0004, verbatim
+## R-7 — Floor-plan upload: managed media pipeline (ADR-0006)
 
-- **Decision**: `modules/seatmap/floorplan.ts` is a direct sibling of `modules/auth/avatar.ts`:
-  `multer` memory storage capped at 5 MB → magic-byte detection (JPEG/PNG/WebP only; SVG and everything
-  else rejected) → `sharp().metadata()` dimension check (≤ 4,000 px long edge) *before* any resize →
-  re-encode to WebP → write to `uploads/floorplans/<uuid>.webp` → served by Nginx with
-  `X-Content-Type-Options: nosniff`. Replacing or removing a plan unlinks the previous file.
-- **Rationale**: The pattern is already shipped, reviewed, and covered by ADR-0004, and reusing it means
-  the SVG-rejection and EXIF-stripping guarantees are the same code shape in both places rather than two
-  hand-rolled validators. The dimension check runs before the resize specifically to refuse a
-  decompression bomb — a 2 MB PNG that decodes to 30,000 × 30,000 would otherwise be allocated in full.
-- **Alternatives**: Sniffing `Content-Type` or the extension — the exact thing ADR-0004 forbids.
-  Rejected. Object storage (S3/Cloudinary) — a fifth external integration, breaching the constitution's
-  cap for no benefit at this scale. Rejected.
+- **Decision**: `modules/seatmap/floorplan.ts` reuses the managed-media sanitizer: `multer` memory
+  storage capped at 5 MB → magic-byte detection (JPEG/PNG/WebP only; SVG and everything else rejected)
+  → `sharp().metadata()` dimension check (≤ 4,000 px long edge) *before* any resize → re-encode to
+  WebP → deterministic Cloudinary upload. Replacing a plan overwrites the managed asset; removing one
+  performs best-effort Cloudinary cleanup.
+- **Rationale**: Backend validation and normalization keep the SVG-rejection, EXIF-stripping, and
+  decompression-bomb protections in one shared code path while Cloudinary provides canonical CDN delivery.
+  The dimension check runs before resize specifically to refuse a decompression bomb — a 2 MB PNG that
+  decodes to 30,000 × 30,000 would otherwise be allocated in full.
+- **Historical alternative (superseded)**: The former ADR-0004 local-disk/Nginx pattern was chosen before
+  ADR-0006. It is no longer the current storage decision. Sniffing `Content-Type` or the extension remains
+  rejected because validation must rely on actual file bytes.
 
 ## R-8 — Upload abuse bound: token bucket + concurrency semaphore
 
