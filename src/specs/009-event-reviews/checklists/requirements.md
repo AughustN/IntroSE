@@ -33,7 +33,7 @@
 
 Two findings from validation worth carrying into planning rather than resolving here:
 
-1. **The eligibility rule is satisfiable in principle and not in practice.** UC-18 requires a checked-in ticket, and the database currently holds zero of them. The specification keeps the rule — relaxing it to "bought a ticket" would let someone who never turned up rate the event, which is the exact integrity property UC-18 protects — and records the consequence in Assumptions. Demonstrating the feature needs check-in data, which is a seeding task for the plan, not a change of requirement.
+1. **Eligibility is purchase-based and server-derived.** UC-18 requires a paid, non-void ticket. The server derives that fact from the caller's own ticket, order, and event rows on every write; neither client input nor door check-in state grants review access. Tests must cover unpaid, refunded, cancelled, and void tickets.
 
 2. **Half of UC-18 has nowhere to land.** UC-18 says ratings surface "on the organizer profile and future events"; no organizer profile page exists in the product. That half is scoped out explicitly rather than left as an unstated gap, so nobody plans against a screen that is not there.
 

@@ -215,7 +215,7 @@ paths:
 
   /me/avatar:
     post:
-      summary: Upload an avatar image from the user's device (US5, Q8 / ADR 0004)
+      summary: Upload an avatar image from the user's device (US5, ADR-0006)
       security: [{ accessToken: [] }]
       requestBody:
         required: true
@@ -228,9 +228,9 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: "raster image only — jpeg/png/webp, ≤2MB, verified by magic bytes (not Content-Type/extension). SVG rejected. Re-encoded via sharp (strips EXIF/payload), stored to VPS disk under a random uuid name, served by Nginx static."
+                  description: "raster image only — jpeg/png/webp, ≤2MB, verified by magic bytes (not Content-Type/extension). SVG rejected. Re-encoded via sharp (strips EXIF/payload), then uploaded through the backend-mediated Cloudinary pipeline."
       responses:
-        '200': { description: "Stored. Returns the updated profile; avatarUrl now points to https://tixhub.fit/uploads/avatars/<uuid>.webp. Any previous uploaded avatar is deleted.", content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+        '200': { description: "Stored. Returns the updated profile; avatarUrl contains the Cloudinary secure CDN URL. Deterministic replacement prevents orphan accumulation.", content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
         '400': { description: "invalid_image (bad magic bytes / disallowed type incl. SVG) | file_too_large", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /me/password:

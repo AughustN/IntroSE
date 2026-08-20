@@ -22,7 +22,7 @@ description: "Task list for 009-event-reviews"
 
 ## Phase 1: Setup
 
-- [X] T001 Create `server/tests/reviews/` and add a seed helper at `server/tests/helpers/reviewSeed.ts` that produces an eligible (account, event) pair — a paid order with a non-void ticket against a showtime already in the past — plus variants for unpaid, refunded, void, and not-yet-started
+- [X] T001 Create `server/tests/reviews/` and add a seed helper at `server/tests/helpers/reviewSeed.ts` that produces an eligible (account, event) pair — a paid order with a non-void ticket, regardless of showtime — plus variants for unpaid, refunded, and void
 - [X] T002 [P] Confirm `TEST_DATABASE_URL` points at a branch nobody else uses; the suite truncates thirty tables before every test
 
 ---
@@ -45,7 +45,7 @@ description: "Task list for 009-event-reviews"
 
 ## Phase 3: User Story 4 - Only ticket holders may review (Priority: P1) 🎯 FIRST
 
-**Goal**: Nobody without a paid ticket to a started event can write a review, by any route.
+**Goal**: Nobody without a paid, non-void ticket can write a review, by any route; showtime start and door check-in are not eligibility conditions.
 
 **Independent Test**: With an account holding no paid ticket, confirm the API refuses a direct submission with a reason naming the failed rule.
 
@@ -54,19 +54,19 @@ description: "Task list for 009-event-reviews"
 ### Tests for User Story 4
 
 - [X] T010 [P] [US4] Eligibility tests in `server/tests/reviews/write.test.ts`: no ticket → 403 `no_ticket`; order not `paid` → 403; ticket `qr_status = 'void'` → 403; refunded → 403
-- [X] T011 [P] [US4] Timing test in `server/tests/reviews/write.test.ts`: a paid ticket to an event that has not started → 403 `event_not_started`
+- [X] T011 [P] [US4] Pre-showtime eligibility test in `server/tests/reviews/write.test.ts`: a paid, non-void ticket to an event before its showtime is accepted
 - [X] T012 [P] [US4] Authentication test in `server/tests/reviews/write.test.ts`: no session → 401, and `event_reviews` is unchanged
 
 ### Implementation for User Story 4
 
-- [X] T013 [US4] Implement `eligibility(userId, eventId)` in `reviews.repo.ts`: join `tickets → orders → reservations → showtimes`, requiring `orders.payment_status = 'paid'`, `tickets.qr_status <> 'void'`, `showtimes.starts_at < now()`; return the two conditions separately so a refusal can name which failed
+- [X] T013 [US4] Implement `eligibility(userId, eventId)` in `reviews.repo.ts`: join `tickets → orders → reservations → showtimes`, requiring `orders.payment_status = 'paid'` and `tickets.qr_status <> 'void'`; derive eligibility from the caller's own rows and return failed conditions separately so a refusal can name which failed
 - [X] T014 [US4] Enforce it in `reviews.service.ts` before every write, mapping each failure to its own error code
 
 **Checkpoint**: The gate exists and is proven, before anything can pass through it.
 
 ---
 
-## Phase 4: User Story 1 - Rate and review an event you attended (Priority: P1)
+## Phase 4: User Story 1 - Rate and review a purchased event (Priority: P1)
 
 **Goal**: An eligible attendee submits stars and optional text and sees it appear.
 
@@ -172,7 +172,7 @@ description: "Task list for 009-event-reviews"
 
 ## Phase 9: Documentation
 
-- [ ] T052 Update UC-18 in `docs/Analysis_Design/Group02_UseCaseSpecification.md`: the precondition becomes a paid ticket to a started event rather than a checked-in one, with the reasoning from [research.md](./research.md), and note that the organizer-profile half is deferred until such a page exists
+- [X] T052 Update UC-18 in `docs/Analysis_Design/Group02_UseCaseSpecification.md`: the precondition is a paid, non-void ticket regardless of showtime start or door check-in; the organizer-profile half remains deferred until such a page exists
 
 ---
 

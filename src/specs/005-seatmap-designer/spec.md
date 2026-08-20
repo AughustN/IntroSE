@@ -12,7 +12,7 @@ product renders today. Extends UC-21, closing A2 and A4. Depends on 001, 002, 00
 checkout (004). Introduces a layout layer between venue and showtime; coordinates are the source of
 truth; an uploaded floor plan is a background layer only. In scope: canvas drawing (place, drag,
 multi-select, align, distribute, rotate, arc a row, delete), non-sellable elements, floor-plan upload
-(magic-byte typed, SVG refused, re-encoded, uuid filename, nosniff — ADR-0004), background alignment,
+(magic-byte typed, SVG refused, re-encoded, deterministic Cloudinary asset, CDN delivery — ADR-0006), background alignment,
 inventory-checked map editing replacing the blanket 409, per-seat block/unblock, marquee tier
 assignment, pre-publish validation, templates and cloning, and mandatory buyer-side parity in both
 renderers with zoom/pan at 360–1920 px. Fixes the venue-wide seat uniqueness constraint. Out of scope:
@@ -33,13 +33,11 @@ moderation (002); the hold algorithm itself (003)."
   sale, and its refusals would come from a showtime the organizer was not thinking about.
 
 - Q: Is an uploaded floor plan reachable by anyone holding its URL, or only by people the server checks?
-  → A: **Public but unguessable — a static file under a random name, exactly as ADR-0004 serves
-  avatars.** The buyer-visibility toggle (FR-026) governs whether the app *shows* the plan, not whether
-  the file can be fetched. Chosen for consistency with a pattern already shipped and reviewed, and
-  because routing every image fetch through the app costs an auth check per load and holds image bytes
-  in a process already bounded at ~450 MB (PERF-07). The residual exposure is bounded and accepted: the
-  name is unguessable, a floor plan is not personal data, and a URL only exists for someone the
-  organizer already showed it to.
+  → A: **Public CDN delivery through the canonical Cloudinary media pipeline.** The buyer-visibility toggle
+  (FR-026) governs whether the app *shows* the plan, not whether the stored asset can be fetched. The
+  backend still validates magic bytes, dimensions, and re-encodes the image before upload; Cloudinary
+  serves the resulting deterministic asset URL. The residual exposure is bounded and accepted: a floor
+  plan is not personal data, and a URL only exists for someone the organizer already showed it to.
 
 - Q: What exactly counts as two seats "overlapping", given a seat is stored as a point with a rotation?
   → A: **Centres closer than one seat width.** Every seat has the same fixed nominal diameter in layout
@@ -90,8 +88,8 @@ moderation (002); the hold algorithm itself (003)."
 - Q: What are the ceilings? → A: **2,000 seats and 200 non-sellable elements per layout; 20 layouts per
   venue; 5 MB and 4,000 px on the long edge for a floor-plan upload; 50 undo steps.** 2,000 seats covers
   the largest venue realistically in scope for this build and keeps both the editor canvas and the
-  buyer map inside PLAT-01/PERF-02. 5 MB is ADR-0004's avatar cap raised for the extra detail a floor
-  plan carries; the file is re-encoded, so the *stored* size is far smaller.
+  buyer map inside PLAT-01/PERF-02. 5 MB is the floor-plan request cap; the file is re-encoded before
+  upload, so the *stored* Cloudinary asset is far smaller.
 - Q: Do sections stay venue-scoped or move to the layout? → A: **They move to the layout.** Seats belong
   to a layout, and seat uniqueness becomes per-section; if sections stayed venue-wide, two layouts of one
   venue could not both have a "Khu A", and cloning a layout would not be self-contained. Section names
@@ -802,10 +800,10 @@ three times and confirm each object disappears in one step, in reverse order.
 - **FR-026**: Whether **buyers** see the floor plan MUST be an organizer-controlled setting, **default
   off**; when on, the plan is drawn behind the seats and is never interactive. This setting governs
   **display**, not file reachability (FR-026a).
-- **FR-026a**: A stored floor plan MUST be served as a static file under its unguessable random name,
-  with no per-request access check — the same treatment ADR-0004 gives avatars. Turning buyer visibility
-  off MUST remove the plan from the buyer map but MUST NOT be presented to the organizer as making the
-  file unreachable; the upload surface MUST say plainly that anyone given the link can open the image.
+- **FR-026a**: A stored floor plan MUST be delivered from the canonical Cloudinary CDN URL after
+  backend validation and normalization. Turning buyer visibility off MUST remove the plan from the buyer
+  map but MUST NOT be presented to the organizer as deleting the stored asset; the upload surface MUST
+  say plainly that anyone given the link can open the image.
 
 **Map lifecycle & inventory safety**
 
@@ -1183,10 +1181,11 @@ unchanged and none of the behaviour they describe is re-opened.*
   testing to one rule. Per-seat sizing (a wider `double` seat drawn to scale) is deliberately not built:
   the `seat_type` already labels it, and variable footprints would make overlap a per-pair geometry
   problem for no requirement that asks for it.
-- **The floor-plan upload is disk plus a static route, mirroring ADR-0004** (avatar upload on the VPS
-  disk), not a new external service. The constitution's four-integration cap (VNPay, Gemini, Google
-  OAuth, Resend) is untouched. It mirrors ADR-0004's serving model too: unguessable name, no per-request
-  access check (FR-026a).
+- **The floor-plan upload uses the canonical Cloudinary media pipeline (ADR-0006)**, shared with avatar
+  and other managed-media uploads. The backend validates and normalizes the bytes before deterministic
+  Cloudinary upload; the existing four-integration cap is unchanged because this is the already-approved
+  media integration. Cloudinary CDN delivery requires no per-request application authorization check
+  (FR-026a).
 - **Ceilings**: 2,000 seats and 200 elements per layout, 20 layouts per venue, 5 MB and 4,000 px per
   upload, 50 undo steps. These are settings with these defaults, not hard-coded constants, and they are
   chosen to keep the editor and the buyer map inside PLAT-01 and PERF-02 rather than to describe a
@@ -1276,7 +1275,7 @@ unchanged and none of the behaviour they describe is re-opened.*
 ## Dependencies
 
 - **Feature 001 (Account & Authentication)** — DONE. Provides the organizer identity that ownership
-  scoping (SEC-04) resolves against, and the ADR-0004 upload pattern this feature mirrors.
+  scoping (SEC-04) resolves against, and the ADR-0006 managed-media pipeline this feature reuses.
 - **Feature 002 (Event Catalog & Discovery)** — DONE. Provides venues, sections, seats, showtimes, ticket
   tiers, `showtime_seats`, the generation endpoint this feature replaces, and both buyer renderers this
   feature rewrites.

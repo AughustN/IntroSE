@@ -29,8 +29,9 @@ The diagram applies the following C4 notation:
 
 - The diagram reflects **one VPS**. The repository contains no Docker, Kubernetes, Redis, internal
   load balancer, or worker queue.
-- `@google/genai` is listed in `package.json`, but no runtime source code invokes Gemini at the time
-  of verification. Gemini is therefore excluded from this as-built deployment diagram.
+- The repository's AI integration is selected through the shared `AIProvider` abstraction. The
+  configured provider is not represented as a fixed deployment node here because provider details are
+  environment-dependent and recorded in ADR-0005.
 - The README mentions GitHub Actions, but the repository currently has no `.github/workflows`
   directory. The deployment procedure in this repository is manual: `git pull`, `npm ci`, migration
   and build steps, then a systemd restart.

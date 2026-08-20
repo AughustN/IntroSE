@@ -334,7 +334,7 @@ Group 02 · SoE
 **Basic flow**
 1. User opens the account/profile page.
 2. System shows current profile fields.
-3. User edits one or more fields (nickname, phone, avatar) and/or requests a password change. The avatar is **uploaded as an image file** and stored on the application's own host; arbitrary URL entry is not offered (the one exception is the picture Google supplies at sign-up).
+3. User edits one or more fields (nickname, phone, avatar) and/or requests a password change. The avatar is **uploaded as an image file through the backend to Cloudinary**; arbitrary URL entry is not offered (the one exception is the picture Google supplies at sign-up). The backend owns validation, normalization, and replacement of the managed asset.
 4. System validates the input `[SEC-07]`, accepting **only** the fields this update may change and ignoring anything else in the submission — an admin flag or a wallet balance sent here changes nothing.
 5. For a password change, system re-authenticates (asks current password) and hashes the new one `[SEC-02]`.
 6. System saves the changes and confirms.
@@ -510,32 +510,34 @@ Group 02 · SoE
 | Field | Value |
 |---|---|
 | **Use-case ID** | UC-10 |
-| **Actor(s)** | Attendee (primary); Google Gemini API (secondary) |
-| **Description** | Signed-in attendee asks a chatbot for event suggestions; Gemini answers using the attendee's tickets, saved events, and browsing history. Assistive and non-blocking. |
+| **Actor(s)** | Attendee (primary); configured AI provider behind `AIProvider` (secondary) |
+| **Description** | Signed-in attendee asks a bounded conversational assistant for event suggestions; the configured provider answers from server-supplied catalog and attendee context. Assistive and non-blocking. |
 
 **Preconditions**
 - Attendee is signed in.
 
 **Basic flow**
-1. Attendee opens the recommendation chatbot and/or asks a natural-language question.
-2. System checks the per-user rate limit (≤ 10 req/hour) `[SEC-08]` and the cache `[SCAL-02]`.
-3. On a cache miss, system builds a prompt from the attendee's tickets/saved/browsing context and calls Gemini `«include» Gemini` `[PERF-05]`.
-4. System caches and displays the recommended events, each linking to UC-09.
+1. Attendee opens the recommendation chatbot and asks a natural-language question, optionally with the bounded recent conversation history.
+2. System derives candidate events and the attendee's own purchase, saved-event, and browsing context on the server; it checks the response cache before any usage allowance is consumed `[SCAL-02]`.
+3. On a cache miss, system checks the per-user allowance (≤ 10 model-backed requests/hour) and platform quota, then calls the configured AI provider through `AIProvider` `[SEC-08]` `[PERF-05]`.
+4. System grounds every returned recommendation against the server-supplied candidate set, caches the result, and displays zero to six recommended events, each linking to UC-09.
 5. Attendee opens a recommended event → UC-09.
 
 **Alternative flows**
-- **A1 — Cache hit:** system returns the cached recommendation without calling Gemini `[SCAL-02]`.
-- **A2 — Per-user rate limit exceeded:** system blocks the call and shows "try again later" `[SEC-08]`.
-- **A3 — Platform-wide quota threshold reached:** system serves the last cached result or a non-AI fallback (e.g. popular/related events), never an error `[SCAL-03]` `«extend»`.
-- **A4 — Gemini timeout (~8 s) or error:** system falls back to non-AI suggestions `[PERF-05]` `[SCAL-03]`.
-- **A5 — New user with no history:** system falls back to popular/curated events.
+- **A1 — Cache hit:** system returns the cached recommendation without calling the provider or consuming per-user/platform allowance `[SCAL-02]`.
+- **A2 — Per-user rate limit exceeded:** system blocks a new model-backed call and shows "try again later" `[SEC-08]`.
+- **A3 — Platform-wide quota threshold reached:** system serves the last cached result or a non-AI fallback, never an error `[SCAL-03]` `«extend»`.
+- **A4 — Provider timeout (~8 s), error, or unusable output:** system falls back to non-AI suggestions `[PERF-05]` `[SCAL-03]`.
+- **A5 — Off-domain question:** system declines briefly and offers event-discovery help without recommendations.
+- **A6 — New user with no history or no matching events:** system returns an appropriate catalog-based fallback without an external call where no candidate exists.
 
 **Postconditions**
-- **Success:** recommendations shown (from AI or cache).
-- **Fallback:** non-AI suggestions shown; core browsing unaffected.
+- **Success:** a grounded AI or cache result is shown; recent conversation is not persisted after the client session ends.
+- **Fallback:** non-AI suggestions or a bounded domain refusal is shown; core browsing remains unaffected.
 
 **Special requirements**
-- AI is non-blocking and off the purchase critical path; UI stays interactive with a loading state `[PERF-05]`; per-user rate limit `[SEC-08]`.
+- AI is non-blocking and off the purchase critical path; UI stays interactive with a loading state `[PERF-05]`.
+- The provider is an implementation detail behind `AIProvider`; event facts shown to the attendee come from platform data, not model memory. Personal context is scoped to the signed-in attendee `[SEC-04]`, `[STD-02]`.
 
 **Prototype.** Screens: *Chatbot panel*, *Recommendation results*, *Non-AI fallback state*, *Loading state*.
 `![UC-10 prototype](../prototypes/uc-10-ai-recs.png)`
@@ -941,38 +943,41 @@ Group 02 · SoE
 
 ---
 
-## UC-18 Rate & review attended event
+## UC-18 Rate & review event
 
 | Field | Value |
 |---|---|
 | **Use-case ID** | UC-18 |
 | **Actor(s)** | Attendee (primary) |
-| **Description** | After attending, the attendee rates the event 1–5 stars and writes a review; ratings surface on the organizer profile and future events. |
+| **Description** | An attendee with a paid, non-void ticket rates an event from 1–5 stars and may write comments; ratings surface on the event and may support future organizer aggregates. |
 
 **Preconditions**
-- Attendee is signed in and has a checked-in (attended) ticket for the event.
+- Attendee is signed in and owns a ticket for the event whose order is `paid` and whose ticket is not `void`.
+- Check-in and showtime start are not required for eligibility.
 
 **Basic flow**
-1. Attendee opens an attended event and selects "Write a review".
-2. Attendee picks a star rating (1–5) and optionally writes text.
-3. System validates and output-encodes the text (no raw HTML) `[SEC-07]`.
-4. System stores the review and updates the aggregated rating on the event and organizer profile.
-5. System confirms and displays the review.
+1. Attendee opens an event they purchased and selects "Write a review".
+2. Attendee picks a star rating (1–5) and optionally writes text for the first rated review.
+3. System validates the ticket eligibility and output-encodes the text as plain data (no raw HTML) `[SEC-07]`.
+4. System stores the rating/review, or stores a subsequent comment/reply under the same event, and recalculates the live event aggregate.
+5. System confirms and displays the result.
 
 **Alternative flows**
-- **A1 — Attendee did not attend (no check-in):** review option is unavailable / rejected.
-- **A2 — Already reviewed:** system offers to edit the existing review instead of creating a duplicate.
-- **A3 — Empty rating:** system requires a star value before submit.
-- **A4 — Review reported/removed later:** admin moderation may remove it (UC-34).
+- **A1 — No paid non-void ticket:** review controls are unavailable and direct submission is rejected.
+- **A2 — Already has a rating:** system permits further text comments and offers edit/withdraw controls for the attendee's own content; it does not create a second rating.
+- **A3 — Empty rating on first rated review:** system requires a star value before submit.
+- **A4 — Reply to a reply:** system attaches the response to the top-level comment so threads remain one level deep.
+- **A5 — Review reported/removed later:** admin moderation may hide it and exclude it from aggregates (UC-34).
 
 **Postconditions**
-- **Success:** review stored; aggregate rating recalculated.
-- **Failure:** no review saved.
+- **Success:** review/comment stored; event aggregate recalculated from live rated content.
+- **Failure:** no review/comment saved.
 
 **Special requirements**
-- Output encoding blocks XSS `[SEC-07]`; only attendees who attended can review (social-proof integrity).
+- Output encoding blocks XSS `[SEC-07]`; eligibility is enforced from the attendee's current paid, non-void ticket rather than check-in state.
+- Review body length is limited to 2,000 characters; own content can be edited or withdrawn.
 
-**Prototype.** Screens: *Review form (stars + text)*, *Review submitted*, *Aggregated rating on event/profile*.
+**Prototype.** Screens: *Review form (stars + text)*, *Review submitted*, *Comments/replies*, *Aggregated rating on event*.
 `![UC-18 prototype](../prototypes/uc-18-review.png)`
 
 ---
@@ -1139,8 +1144,8 @@ Group 02 · SoE
 | Field | Value |
 |---|---|
 | **Use-case ID** | UC-22 |
-| **Actor(s)** | Organizer (primary); Google Gemini API (secondary) |
-| **Description** | Gemini drafts a polished description and suggests titles, tags, and a sensible price from the organizer's rough inputs. Assistive; output always editable. |
+| **Actor(s)** | Organizer (primary); configured AI provider behind `AIProvider` (secondary) |
+| **Description** | The configured AI provider drafts a polished description and suggests titles, tags, and a sensible price from the organizer's rough inputs. Assistive; output always editable. |
 
 **Preconditions**
 - Organizer is signed in and creating/editing an event (UC-20/UC-23).
@@ -1148,7 +1153,7 @@ Group 02 · SoE
 **Basic flow**
 1. Organizer enters a few rough inputs (topic, keywords, draft price idea) and clicks "Generate".
 2. System checks the per-user rate limit (≤ 10 req/hour) `[SEC-08]` and cache `[SCAL-02]`.
-3. On a cache miss, system calls Gemini `«include» Gemini` `[PERF-05]`.
+3. On a cache miss, system calls configured AI provider `«include» configured AI provider` `[PERF-05]`.
 4. System shows the suggested title(s), description, tags, and price.
 5. Organizer edits/accepts any field before it goes into the event form.
 
@@ -1156,7 +1161,7 @@ Group 02 · SoE
 - **A1 — Cache hit:** system returns the cached suggestion `[SCAL-02]`.
 - **A2 — Per-user rate limit exceeded:** system blocks and shows "try again later" `[SEC-08]`.
 - **A3 — Platform-wide quota reached:** AI disabled gracefully; organizer fills fields manually, no error `[SCAL-03]` `«extend»`.
-- **A4 — Gemini timeout (~8 s)/error:** system shows a fallback message; manual entry continues `[PERF-05]`.
+- **A4 — configured AI provider timeout (~8 s)/error:** system shows a fallback message; manual entry continues `[PERF-05]`.
 - **A5 — Organizer rejects all suggestions:** nothing is written to the form.
 
 **Postconditions**
@@ -1329,36 +1334,38 @@ Group 02 · SoE
 | Field | Value |
 |---|---|
 | **Use-case ID** | UC-27 |
-| **Actor(s)** | Organizer (primary; door staff) |
-| **Description** | At the venue, the organizer scans each attendee's QR from a phone browser to check them in; the system blocks duplicate and fake tickets. |
+| **Actor(s)** | Organizer / door staff (primary); Admin (override) |
+| **Description** | Authorized door staff scans a ticket QR in a browser and the server admits the ticket at most once. Manual entry in UC-28 uses the same canonical check-in contract. |
 
 **Preconditions**
-- Organizer is signed in on a mobile browser with camera access (Android Chrome ≥ 100; iOS Safari ≥ 15 best-effort) `[PLAT-03]`.
-- The event is on / near its start.
+- Organizer/door staff is authenticated and authorized for the event; an Admin may use the admin door endpoint for any organizer's event `[SEC-04]`.
+- The ticket's showtime is within the operational scan window: from 6 hours before `starts_at` through 12 hours after it.
+- Camera support is a client capability, not a server-side admission condition `[PLAT-03]`.
 
 **Basic flow**
-1. Organizer opens the door scanner and grants camera access `[PLAT-03]`.
-2. Organizer points the camera at the attendee's QR.
-3. System reads the code and validates the ticket (exists, belongs to this event, not already used) `[SEC-04]`.
-4. System marks the ticket `used` and shows a green "checked in" result with the attendee/seat.
-5. Organizer scans the next attendee.
+1. Authorized staff opens the door scanner and grants camera access when using camera mode `[PLAT-03]`.
+2. The camera reads a ticket code; the client may serialize scans and apply a local cooldown before submitting the next one.
+3. The server trims the code, locks the ticket row, and validates ownership/override, payment, ticket status, showtime status, and the scan window `[SEC-04]`.
+4. For the first valid scan, the server changes the ticket status from `unused` to `checked_in`, records `checked_in_at` and the scanner, and returns an admitted result with attendee/tier/seat details.
+5. Staff scans the next attendee; continuous camera mode may remain open.
 
 **Alternative flows**
-- **A1 — Duplicate ticket (already checked in):** system shows a red "already used" result and refuses re-entry.
-- **A2 — Fake / invalid QR:** system shows "invalid ticket" and blocks entry.
-- **A3 — Ticket for a different event:** system shows "wrong event".
-- **A4 — Cancelled ticket:** system shows "cancelled, not valid".
-- **A5 — Camera denied/unavailable:** organizer falls back to manual code entry → UC-28 `«extend»`.
-- **A6 — Poor lighting / unreadable code:** system prompts to retry or use manual entry (UC-28).
+- **A1 — Already checked in:** system returns a successful informational result with `admitted = false` and the original check-in time; it does not admit the ticket again.
+- **A2 — Fake, unknown, or foreign ticket:** system returns the same not-found result, so the scanner cannot distinguish an invented code from another organizer's code.
+- **A3 — Void, unpaid, or cancelled-showtime ticket:** system rejects admission and leaves the ticket unchanged.
+- **A4 — Too early or too late:** system rejects admission when outside the 6-hour-before/12-hour-after window.
+- **A5 — Camera denied/unavailable or poor lighting:** organizer falls back to manual code entry → UC-28 `«extend»`.
+- **A6 — Ordinary signed-in attendee:** access to the organizer door route is refused; only an approved organizer or Admin may scan.
 
 **Postconditions**
-- **Success:** ticket marked `used`; attendee admitted once.
-- **Failure:** ticket unchanged; entry blocked.
+- **Success:** ticket status is `checked_in`, the first valid scan is the only admitted scan, and the scanner/time metadata is recorded.
+- **Repeat:** ticket remains `checked_in`; no second admission occurs.
+- **Failure:** ticket and its check-in state remain unchanged.
 
 **Special requirements**
-- Runs in a mobile browser, no native app `[PLAT-03]`; validation server-side `[SEC-04]`; blocks duplicates/fakes `[UN-10]`.
+- Validation and serialization are server-side `[SEC-04]`; the client-side 3-second cooldown applies only to the continuous camera mode in the current SingleEventPage flow and is not a server guarantee `[PLAT-03]`.
 
-**Prototype.** Screens: *Camera scanner*, *Checked-in (green)*, *Already-used (red)*, *Invalid ticket*.
+**Prototype.** Screens: *Camera scanner*, *Checked-in result*, *Already-checked-in informational result*, *Invalid/blocked ticket*.
 `![UC-27 prototype](../prototypes/uc-27-qr-scan.png)`
 
 ---
@@ -1368,31 +1375,33 @@ Group 02 · SoE
 | Field | Value |
 |---|---|
 | **Use-case ID** | UC-28 |
-| **Actor(s)** | Organizer (primary; door staff) |
-| **Description** | When the camera is unavailable, the organizer types the ticket code to check the attendee in. Extends UC-27. |
+| **Actor(s)** | Organizer / door staff (primary); Admin (override) |
+| **Description** | When camera scanning is unavailable, authorized staff enters the ticket code manually. The request uses exactly the same server-side contract and admission rules as UC-27. |
 
 **Preconditions**
-- Organizer is at the door scanner and the camera is denied/unavailable.
+- Staff is authorized for the event and has a ticket code to enter; camera availability is not required.
+- The same operational scan window and ticket/payment/showtime rules as UC-27 apply.
 
 **Basic flow**
-1. Organizer switches to "Enter code manually".
-2. Organizer types the ticket code.
-3. System validates it exactly as in UC-27 (exists, this event, not used) `[SEC-04]`.
-4. System marks the ticket `used` and shows the check-in result.
+1. Staff switches to manual entry and submits the trimmed ticket code.
+2. The server applies the canonical UC-27 validation and row-locking rules.
+3. A first valid code changes the ticket to `checked_in` and returns the attendee/tier/seat result.
+4. A repeated code returns the original check-in time with `admitted = false` and no second admission.
 
 **Alternative flows**
-- **A1 — Code not found:** system shows "invalid code".
-- **A2 — Already used / cancelled / wrong event:** same rejections as UC-27 A1/A3/A4.
-- **A3 — Typo:** organizer re-enters.
+- **A1 — Code not found or belongs to another organizer:** system returns the same not-found response.
+- **A2 — Void, unpaid, cancelled-showtime, too-early, or too-late ticket:** system rejects admission and leaves the ticket unchanged.
+- **A3 — Typo:** staff corrects and resubmits the code.
+- **A4 — Manual entry rescan:** system reports the existing check-in informationally rather than treating it as a fake or server error.
 
 **Postconditions**
-- **Success:** ticket `used`; attendee admitted once.
-- **Failure:** unchanged.
+- **Success:** same as UC-27; ticket is admitted once and marked `checked_in`.
+- **Failure/repeat:** same state-preserving or idempotent behavior as UC-27.
 
 **Special requirements**
-- Same server-side validation as UC-27 `[SEC-04]`.
+- Manual input and camera input share one canonical server contract `[SEC-04]`; manual entry has no camera cooldown.
 
-**Prototype.** Screens: *Manual code entry field*, *Check-in result*, *Invalid-code state*.
+**Prototype.** Screens: *Manual code entry field*, *Check-in result*, *Already-checked-in state*, *Invalid/blocked-code state*.
 `![UC-28 prototype](../prototypes/uc-28-manual-entry.png)`
 
 ---

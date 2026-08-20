@@ -22,7 +22,7 @@ A person's identity. One account owns exactly one wallet.
 | `provider_user_id` | TEXT NULL | Google stable `sub`; identity, not email (FR-025) |
 | `is_admin` | BOOLEAN NOT NULL DEFAULT false | only stored privilege (FR-020) |
 | `status` | TEXT NOT NULL DEFAULT `'active'` | CHECK in (`active`,`suspended`); read **per request** (FR-051/052) |
-| `avatar_url` | TEXT NULL | Points to the image, **no default stored**. Password register → `NULL` → FE renders a nickname-initials fallback. Google register → seeded from the `picture` claim (https-validated). User sets it by **uploading** a file (Q8/ADR 0004): stored on VPS disk, served by Nginx, so `avatar_url` = `https://tixhub.fit/uploads/avatars/<uuid>.webp`. Users cannot paste an arbitrary URL — upload only. |
+| `avatar_url` | TEXT NULL | Points to the image, **no default stored**. Password register → `NULL` → FE renders a nickname-initials fallback. Google register → seeded from the `picture` claim (https-validated). User sets it by **uploading** a file through the backend-mediated Cloudinary pipeline (ADR-0006), so `avatar_url` stores the resulting secure CDN URL. Users cannot paste an arbitrary URL — upload only. |
 | `created_at` / `updated_at` | TIMESTAMPTZ | |
 
 **Constraints / indexes**

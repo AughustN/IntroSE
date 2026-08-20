@@ -97,11 +97,10 @@ moderation actions (002, unchanged)."
   with a click they never thought of as an edit, and a machine-written rewrite is the last thing a
   moderator-approved, actively-selling listing needs.
 
-- Q: Does a cache hit consume the AI assistant's per-user hourly allowance? → A: **Yes — every request
-  counts.** SEC-08's stated verification is "fire 11 calls, assert the 11th is blocked", and eleven
-  identical calls would otherwise all be cache hits and all succeed. The rate limit (SEC-08) is a
-  per-user fairness control on the *endpoint*; the cache (SCAL-02) is a quota control on the *upstream
-  call*. They are independent, and the limit is checked first.
+- Q: Does a cache hit consume the AI assistant's per-user hourly allowance? → A: **No.** The cache is
+  consulted before either the per-user allowance or platform quota. A cache hit makes no upstream call and
+  therefore consumes no model-backed request allowance. Only a request that is about to call the provider
+  increments the counters; this is the shared policy for UC-10 and UC-22.
 
 - Q: How long does a cached suggestion stay reusable? → A: **24 hours, configurable.** Long enough that an
   organizer drafting a listing across a working day never spends a second upstream call on the same inputs —
@@ -469,8 +468,9 @@ the form still works as plain manual entry with no blocking error.
 - **FR-030**: On timeout (~8 s), upstream error, or platform-wide quota exhaustion, the System MUST degrade
   to plain manual entry with a non-blocking notice and MUST NOT surface a failure that stops the organizer
   (PERF-05, SCAL-03).
-- **FR-031**: System MUST rate-limit assistant requests to **10 per hour per authenticated user**, counting
-  every request including those served from cache, and MUST refuse the excess with a plain "try again later"
+- **FR-031**: System MUST rate-limit **model-backed** assistant requests to **10 per hour per authenticated
+  user**. A cache hit is served before allowance consumption and does not count; a request that would call
+  the provider consumes one allowance unit and excess requests receive a plain "try again later" response
   that leaves manual entry working (SEC-08).
 - **FR-032**: System MUST cache suggestions so an identical request within the cache window — **24 hours by
   default, configurable** — is served without a further upstream call (SCAL-02).
@@ -478,8 +478,9 @@ the form still works as plain manual entry with no blocking error.
   inputs or from platform data — including the price suggestion, which MUST be derived from comparable
   published events rather than model memory (Principle III, ADR-0001). A prompt MUST never carry another
   organizer's data.
-- **FR-034**: The assistant MUST use the existing permitted Gemini integration; this feature MUST NOT
-  introduce a fifth external integration (constitution v2.0.0).
+- **FR-034**: The assistant MUST use the shared `AIProvider` abstraction and an approved provider
+  configuration; this feature MUST NOT introduce an unapproved external integration or bypass the shared
+  grounding, quota, timeout, and fallback rules.
 
 **Access control & integrity**
 
@@ -607,8 +608,8 @@ the form still works as plain manual entry with no blocking error.
   happened; sending the message is downstream.
 - **The assistant's cache window (24 h) and its comparable-price window are settings, not constants**, so
   quota behaviour can be tuned without a code change (Principle V).
-- **Gemini is reached through the already-installed permitted integration.** No fifth external integration is
-  introduced, and no AI feature sits on a purchase path.
+- **AI is reached through the shared `AIProvider` abstraction.** The deployed provider is an implementation
+  detail governed by the architecture decision; no AI feature sits on a purchase path.
 - **Vietnamese** is the user-facing language and **VND integers** the only currency, consistent with the rest
   of the product.
 

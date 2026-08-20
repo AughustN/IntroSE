@@ -88,7 +88,7 @@ TixHub delivers **eleven core features** across three user roles Admin, Organize
 - Hosting: a single team-managed **VPS** (`tixhub.fit`, Nginx serving the SPA and reverse-proxying the API same-origin) plus free-tier **Neon** PostgreSQL.
 - Third-party AI API free-tier quota.
 - VNPay **sandbox** only; no real funds are processed.
-- External integrations capped at **four** — VNPay, Gemini, Google OAuth, Resend (constitution v2.0.0); a fifth needs an amendment.
+- External integrations capped at **four** — VNPay, one approved configured AI provider behind `AIProvider`, Google OAuth, Resend (constitution v2.1.0); a fifth needs an amendment.
 - Real-time seat updates run over **Socket.IO** on the same Node process and origin (constitution technology stack) — no message broker, no second service; the database stays the source of truth and socket updates are advisory.
 - 13 week semester, 5 sprints (PA1–PA5), 5 member team.
 - The deployed application will be reachable via a public URL for evaluator grading.
@@ -161,7 +161,7 @@ TixHub delivers **eleven core features** across three user roles Admin, Organize
 
 - ***Nguyễn Thành Đạt:*** Fullstack Developer and Tester. Implements cross features that span both frontend and backend, owns QA strategy, writes and runs test cases (unit, integration, and acceptance), and coordinates the test report deliverables for each PA.
 
-- ***Nguyễn Minh Khoa:*** Backend Developer. Implements core backend modules and REST API endpoints, owns payment integration (VNPay) and AI integration (Gemini), and supports architectural decisions on the server side.
+- ***Nguyễn Minh Khoa:*** Backend Developer. Implements core backend modules and REST API endpoints, owns payment integration (VNPay) and AI integration behind the shared provider abstraction, and supports architectural decisions on the server side.
 
 - ***Nguyễn Tấn Hiệu:*** Frontend Developer and DevOps Engineer. Implements and owns the React SPA and all user facing interfaces, configures and maintains the CI/CD pipeline (GitHub Actions), manages deployment to the team-managed VPS (`tixhub.fit`: Nginx TLS, static SPA, reverse-proxied API) and the Neon database, and monitors hosting infrastructure.
 
@@ -252,7 +252,7 @@ This project follows the **Scrum** process model, organized into five sprints th
 
 #### Sprint 4: AI & Engagement 
 
-**Focus:** AI-powered features (Gemini), automated notifications, and waitlist.
+**Focus:** Provider-backed AI features, automated notifications, and waitlist.
 
 **Planned tasks:**
 - Implement AI Personalized Event Recommendations chatbot (API, attendee facing)
@@ -261,7 +261,7 @@ This project follows the **Scrum** process model, organized into five sprints th
 - Build notification system: in web and email alerts for booking confirmation, event reminders (1 week / 1 day before), and cancellations
 - Implement ticket cancellation with **wallet refund**: self-cancel up to T-24h voids the ticket, returns the seat to inventory, credits the ticket's stored `refundable_amount` back to the buyer's wallet (service fee kept), and notifies the waitlist; event cancellation refunds 100% including the fee
 - Implement waitlist feature: join waitlist for sold out events; auto notify and offer tickets when seats are released
-- Implement AI response caching and rate limiting to stay within Gemini free-tier quotas
+- Implement AI response caching and rate limiting to stay within the configured provider's quota
 - Write unit and integration tests for all Sprint 4 features
 - Sprint 4 review, retrospective, and Jira board update
 
@@ -272,7 +272,7 @@ This project follows the **Scrum** process model, organized into five sprints th
 **Focus:** reviews & ratings, admin moderation & organizer approval, system testing, production deployment, and PA5 demo.
 
 **Planned tasks:**
-- Implement reviews and ratings: attendees rate events (1–5 stars) and leave written reviews after attending
+- Implement reviews and ratings: attendees with a paid, non-void ticket rate events (1–5 stars) and leave written reviews; showtime start and door check-in are not eligibility requirements
 - Display aggregated ratings on organizer profiles and event pages
 - Implement the remaining admin moderation tools: approve / suspend organizers, review reported events and reviews, remove policy-violating content (pre-publish event approval shipped in Sprint 3)
 - Implement admin platform wide analytics view

@@ -31,7 +31,7 @@ One named arrangement of a venue. A venue owns several; a seated showtime picks 
 | `status` | TEXT NOT NULL DEFAULT `'draft'` | CHECK in (`draft`, `published`) — FR-004 |
 | `is_template` | BOOLEAN NOT NULL DEFAULT false | FR-036 |
 | `version` | INT NOT NULL DEFAULT 1 | optimistic concurrency; bumped on every save (FR-015) |
-| `plan_url` | TEXT | `/uploads/floorplans/<uuid>.webp`, NULL when no plan |
+| `plan_url` | TEXT | Cloudinary secure CDN URL for the managed floor-plan asset, NULL when no plan |
 | `plan_scale` | INT NOT NULL DEFAULT 1000 | per-mille of the coordinate space |
 | `plan_offset_x` / `plan_offset_y` | INT NOT NULL DEFAULT 0 | layout units |
 | `plan_opacity` | SMALLINT NOT NULL DEFAULT 50 | CHECK 0–100 |

@@ -38,7 +38,7 @@ import {
   kickNotificationWorker,
   queueAnnouncement,
 } from "../notifications/notifications.service.js";
-import { cancelEvent, checkInTicket, lookupTicket } from "../payments/tickets.service.js";
+import { cancelEvent, lookupTicket } from "../payments/tickets.service.js";
 import { attendees, checkIn, toCsv } from "../checkin/checkin.service.js";
 import { getOrganizerAnalyticsController } from "../organizer/analyticsController.js";
 
@@ -239,13 +239,35 @@ organizerRouter.post(
   validate(checkInSchema),
   asyncH(async (req, res) => {
     const body = req.body as z.infer<typeof checkInSchema>;
+    const result = await checkIn(
+      { userId: req.auth!.userId, isAdmin: req.auth!.user.isAdmin },
+      "code" in body ? body.code : body.barcode,
+    );
+    // The organizer screens predate the canonical door contract and render this ticket-shaped result.
+    // Keep the response adapter at the HTTP boundary so both manual entry and barcode scans share every
+    // validation and admission rule in `checkIn`.
     if ("code" in body) {
-      res.json(await checkInTicket(body.code, req.auth!.userId));
+      res.json({
+        ticket: {
+          id: result.ticketId,
+          code: result.barcode,
+          status: "checked_in",
+          tierLabel: result.tier,
+          seatLabel: result.seat,
+          customerName: result.buyerName,
+          customerEmail: result.buyerEmail,
+          eventId: result.eventId,
+          eventTitle: result.eventTitle,
+          showtimeId: result.showtimeId,
+          startsAt: result.startsAt,
+          venueName: result.venueName,
+          venueAddress: result.venueAddress,
+        },
+        already: !result.admitted,
+      });
       return;
     }
-    res.json(
-      await checkIn({ userId: req.auth!.userId, isAdmin: req.auth!.user.isAdmin }, body.barcode),
-    );
+    res.json(result);
   }),
 );
 

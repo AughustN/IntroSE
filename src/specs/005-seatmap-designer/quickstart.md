@@ -7,11 +7,11 @@ Runnable validation that the designer works end-to-end. Details live in
 ## Prerequisites
 
 - Features 001–004 migrated; `0007_seatmap.sql` applied.
-- No new packages: `multer` and `sharp` are already dependencies from the 001 avatar upload (ADR-0004).
+- No new packages: `multer` and `sharp` are already dependencies from the managed-media pipeline (ADR-0006).
 - Seed loaded — the seated demo event **"Đêm Nhạc Trịnh Công Sơn"** (`server/src/db/seed-dev.ts`) gives
   a venue whose existing seats the migration lifts into a **"Sơ đồ mặc định"** layout.
-- An `uploads/floorplans/` directory, served by Nginx with `X-Content-Type-Options: nosniff` (same
-  location block shape as `uploads/avatars/`).
+- Cloudinary credentials are configured for managed media delivery; no local `uploads/floorplans/`
+  directory or Nginx floor-plan location is required.
 
 ## Setup
 

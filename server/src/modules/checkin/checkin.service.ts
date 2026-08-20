@@ -39,21 +39,27 @@ interface TicketRow {
   qr_status: "unused" | "checked_in" | "void";
   checked_in_at: Date | null;
   organizer_user_id: number;
+  event_id: number;
   event_title: string;
+  showtime_id: number;
   starts_at: Date;
   showtime_status: string;
+  venue_name: string;
+  venue_address: string;
   tier: string;
   seat: string | null;
   buyer_name: string;
+  buyer_email: string;
   payment_status: string;
 }
 
 const TICKET_LOOKUP = `
   SELECT t.id, t.barcode_value, t.qr_status, t.checked_in_at,
-         org.user_id AS organizer_user_id, e.title AS event_title, s.starts_at,
-         s.status AS showtime_status, tt.label AS tier,
+         org.user_id AS organizer_user_id, e.id AS event_id, e.title AS event_title,
+         s.id AS showtime_id, s.starts_at, s.status AS showtime_status,
+         v.name AS venue_name, v.raw_address AS venue_address, tt.label AS tier,
          CASE WHEN ss.id IS NULL THEN NULL ELSE se.row_label || se.seat_number::text END AS seat,
-         o.customer_name AS buyer_name, o.payment_status
+         o.customer_name AS buyer_name, o.customer_email AS buyer_email, o.payment_status
     FROM tickets t
     JOIN orders o ON o.id = t.order_id
     JOIN reservation_items ri ON ri.id = t.reservation_item_id
@@ -62,6 +68,7 @@ const TICKET_LOOKUP = `
     LEFT JOIN seats se ON se.id = ss.seat_id
     JOIN reservations r ON r.id = o.reservation_id
     JOIN showtimes s ON s.id = r.showtime_id
+    JOIN venues v ON v.id = s.venue_id
     JOIN events e ON e.id = s.event_id
     JOIN organizers org ON org.id = e.organizer_id`;
 
@@ -120,11 +127,16 @@ export async function checkIn(actor: Actor, barcode: string): Promise<CheckinRes
     return {
       ticketId: ticket.id,
       barcode: ticket.barcode_value,
+      eventId: ticket.event_id,
       eventTitle: ticket.event_title,
+      showtimeId: ticket.showtime_id,
       startsAt: ticket.starts_at.toISOString(),
+      venueName: ticket.venue_name,
+      venueAddress: ticket.venue_address,
       tier: ticket.tier,
       seat: ticket.seat,
       buyerName: ticket.buyer_name,
+      buyerEmail: ticket.buyer_email,
       checkedInAt: checkedInAt.toISOString(),
       admitted: !already,
     };

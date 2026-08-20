@@ -1,9 +1,13 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: 1.1.0 → 2.0.0
-Bump rationale (2.0.0): Team-approved amendment (2026-07-23) — backward-incompatible
-  governance changes, so MAJOR:
+Version change: 2.0.0 → 2.1.0
+Bump rationale (2.1.0): Team-approved amendment (2026-08-20) — MINOR governance clarification:
+  1. AI vendor references are provider-neutral: the application uses the shared `AIProvider` seam
+     and one approved configured provider; the current provider choice is recorded in ADR-0005.
+
+Prior (2.0.0): Team-approved amendment (2026-07-23) — backward-incompatible governance changes,
+so MAJOR:
   1. Integration cap redefined two → four (added Google OAuth sign-in and Resend
      transactional email; a fifth still needs an amendment).
   2. Wallet refunds reintroduced into scope (refund to store-credit wallet per ticket,
@@ -16,7 +20,8 @@ Prior (1.1.0): Added Principle VI (Clean Codebase & Seamless FE/BE
 Prior (1.0.0): Initial ratification of a concrete constitution from the template.
   First codified set of principles, constraints, and governance → MAJOR baseline 1.0.0.
 
-Modified principles: N/A (Principle VI added, none redefined)
+Modified principles: III (provider-neutral terminology)
+Modified constraints: AI technology row and external-integration naming
 Added sections:
   - Purpose & Scope
   - Core Principles (6): Reliability Under Load, Security & Trust by Default,
@@ -111,7 +116,7 @@ requirements trace back to payment integrity or data protection or they do not b
 
 ### III. AI Is Assistive, Grounded, and Non-Blocking
 
-The survey rates AI a bonus, not the deciding factor. AI (Gemini) enhances the product; it
+The survey rates AI a bonus, not the deciding factor. Configured AI assistance enhances the product; it
 never gates it and never invents facts.
 
 - **Non-blocking:** AI features MUST NOT sit on the critical purchase path. During an AI call
@@ -203,7 +208,7 @@ The stack is fixed for this project; changing a listed technology requires an am
 | Backend | Node.js, Express (REST API), Socket.IO (real-time seat channel) | One language across the stack (TypeScript); Socket.IO delivers the live seat-map updates that PERF-03/06 require. |
 | Database | PostgreSQL (+ `pgvector` extension) | ACID transactions and row locking underpin the seat/order invariants (DATA-01/02/03); pgvector adds AI retrieval without a separate vector store. |
 | Payments | VNPay sandbox | Vietnamese gateway; sandbox-only, no real settlement. TixHub never stores card data. |
-| AI | Google Gemini API (chat + `text-embedding-004`) | Powers the assistive AI features under a shared free-tier quota, with non-AI fallbacks. |
+| AI | Approved provider behind the shared `AIProvider` abstraction | Powers the assistive AI features under a shared quota, with non-AI fallbacks; provider and model details are recorded in ADRs. |
 | CI/CD | GitHub Actions | Runs type-check, lint, tests, coverage, and gitleaks on every push / PR. |
 | Hosting | Single team-managed **VPS** (Nginx: TLS + static SPA + reverse proxy, same-origin at `tixhub.fit`), Neon (Postgres) | Amended 2026-07-23 (was Vercel + Render): self-hosted VPS; TLS is team-managed; scale-out / paid upgrade remains a config change. |
 
@@ -218,8 +223,8 @@ The stack is fixed for this project; changing a listed technology requires an am
 
 - Standard client-server split: React SPA ↔ REST/JSON over HTTPS, with a Socket.IO WebSocket
   channel dedicated to live seat status. External integrations are limited to **four**: VNPay
-  (payments), Gemini (AI), Google (OAuth sign-in), and Resend (transactional email). Adding a fifth
-  external dependency requires an amendment. *(Amended 2026-07-23, v2.0.0: was two — Google and Resend
+  (payments), one approved configured AI provider behind `AIProvider`, Google (OAuth sign-in), and Resend
+  (transactional email). Adding a fifth external dependency requires an amendment. *(Amended 2026-07-23, v2.0.0: was two — Google and Resend
   added for the account & authentication feature.)*
 - The request path MUST stay **stateless** so the backend can scale horizontally; session-mode
   database features that would break the transaction-pooled endpoint are avoided (SCAL-01).

@@ -1,6 +1,6 @@
 # Avatar images: user upload, stored on VPS disk, served by Nginx
 
-**Status**: accepted (2026-07-23) — feature 001-account-auth
+**Status**: superseded (2026-07-23 decision; superseded 2026-08-20 by ADR-0006) — historical record for feature 001-account-auth
 
 ## Context
 

@@ -452,11 +452,16 @@ export interface AttendeeList {
 export interface CheckinResult {
   ticketId: number;
   barcode: string;
+  eventId: number;
   eventTitle: string;
+  showtimeId: number;
   startsAt: string;
+  venueName: string;
+  venueAddress: string;
   tier: string;
   seat: string | null;
   buyerName: string;
+  buyerEmail: string;
   checkedInAt: string;
   /** True when this scan is the one that admitted them; false when they were already inside. */
   admitted: boolean;

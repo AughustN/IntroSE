@@ -9,7 +9,7 @@ this is the run/verify guide, not the implementation.
 - Node.js 20 LTS, PostgreSQL reachable (Neon/Supabase free tier or local).
 - `.env` with `DATABASE_URL`, `JWT_SECRET`, `AUTH_EVENT_HASH_KEY` (keyed-hash for `identifier_hash`), and — **when the constitution amendment lands** — `GOOGLE_CLIENT_ID` and `RESEND_API_KEY`/`MAIL_FROM`. US1/US2/US5/US6/US7 run without the last two. Empty `RESEND_API_KEY` → `ConsoleMailer` (reset links print to the terminal), which is what the test suite uses.
 - **Resend deliverability**: `MAIL_FROM` is `no-reply@tixhub.fit`; the `tixhub.fit` domain must be verified in Resend with SPF + DKIM DNS records or reset mail lands in spam / is rejected. DevOps task, not code.
-- **Avatar uploads**: a writable `uploads/avatars/` directory on the host, served by an Nginx static location with `X-Content-Type-Options: nosniff` (ADR 0004). In local dev the app serves it directly.
+- **Avatar uploads**: Cloudinary credentials are configured for the backend-mediated managed-media pipeline (ADR-0006). Local development may use the service's deterministic mock CDN URL when credentials are absent.
 - Migrations applied (adds `password_resets`, new to the reference schema — see research R-7).
 
 ## Setup
@@ -49,7 +49,7 @@ Each maps to the spec's Independent Test. Run against the API; the SPA exercises
 3. Expired link → refused; a Google account's forgot request → same `200`, mints nothing. **(FR-053, D5)**
 
 ### US5 — Profile & change password (P3)
-1. `PATCH /api/me` nickname/phone → persists across reload. **(FR-033)** Avatar is set separately: `POST /api/me/avatar` with a jpeg/png/webp ≤2MB → stored to VPS disk, `avatarUrl` now points to `…/uploads/avatars/<uuid>.webp`. A `.svg` or a renamed non-image → `400 invalid_image`. **(Q8/ADR 0004)**
+1. `PATCH /api/me` nickname/phone → persists across reload. **(FR-033)** Avatar is set separately: `POST /api/me/avatar` with a jpeg/png/webp ≤2MB → backend validates and re-encodes it, then `avatarUrl` stores the resulting Cloudinary secure URL. A `.svg` or a renamed non-image → `400 invalid_image`. **(ADR-0006)**
 2. `POST /api/me/password` with correct current → old password stops working; **other** sessions revoked, this one stays alive. **(FR-057)**
 3. Wrong current password → `403`, existing password still valid.
 4. `PATCH /api/me` submitting `isAdmin`/`balance` → ignored, privileges unchanged. **(FR-035/008)**

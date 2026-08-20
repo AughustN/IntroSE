@@ -148,8 +148,8 @@ An attendee who repeats a question they already asked is served from cache and i
 
 ## Assumptions
 
-- The OpenAI API key is available to the team and will be supplied through the environment; it is never committed and never handled in chat.
-- Choosing OpenAI in place of Google Gemini contradicts the fixed technology table in the constitution and requires an amendment plus an ADR before implementation merges. This specification assumes that amendment is proposed and carried; the plan records it as an open gate rather than a settled fact.
+- An approved AI provider is configured through the server environment or Admin-managed settings; credentials are never committed or handled in chat.
+- The feature depends on the shared `AIProvider` abstraction. The deployed provider and any vendor-specific amendment belong in an ADR and must not change the UC-level grounding, privacy, quota, timeout, or fallback contract.
 - The Admin switch `ai_features_enabled` already exists and remains the manual kill switch; the platform threshold of FR-009 is an automatic guard layered beneath it.
 - UC-22's organizer listing assistant keeps its current behaviour except where the shared plumbing it depends on — allowance ordering, timeout, platform threshold, shared contract — changes underneath it. Redesigning the organizer AI panel is out of scope.
 - Streaming token-by-token output is out of scope; a single response per turn is sufficient for the non-blocking requirement.
