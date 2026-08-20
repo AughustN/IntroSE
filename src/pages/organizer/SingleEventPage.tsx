@@ -70,6 +70,23 @@ export const SingleEventPage: React.FC = () => {
   const cameraBusyRef = useRef(false);
   // A ticket presented while one is still checking in — kept so it is not lost, run next.
   const pendingScanRef = useRef<string | null>(null);
+  const cameraCooldownRef = useRef(false);
+  const cameraCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearCameraCooldown = () => {
+    if (cameraCooldownTimerRef.current !== null) {
+      clearTimeout(cameraCooldownTimerRef.current);
+      cameraCooldownTimerRef.current = null;
+    }
+  };
+
+  const resetCameraCooldown = () => {
+    pendingScanRef.current = null;
+    clearCameraCooldown();
+    cameraCooldownRef.current = false;
+  };
+
+  useEffect(() => clearCameraCooldown, []);
 
   const logScan = (kind: "ok" | "warning" | "bad", text: string) => {
     setScanLog((log) => [{ id: Date.now() + Math.random(), kind, text }, ...log].slice(0, 30));
@@ -113,7 +130,23 @@ export const SingleEventPage: React.FC = () => {
       pendingScanRef.current = trimmed; // scanned while the last one was in flight — run it next
       return;
     }
+
+    if (cameraCooldownRef.current) {
+      pendingScanRef.current = trimmed;
+      return;
+    }
+
     cameraBusyRef.current = true;
+    cameraCooldownRef.current = true;
+    clearCameraCooldown();
+    cameraCooldownTimerRef.current = setTimeout(() => {
+      cameraCooldownTimerRef.current = null;
+      cameraCooldownRef.current = false;
+      if (cameraBusyRef.current) return;
+      const next = pendingScanRef.current;
+      pendingScanRef.current = null;
+      if (next) void cameraDetect(next);
+    }, 3000);
     setScanViaCamera(true);
     setScanCode(trimmed);
     setScanErr(null);
@@ -144,10 +177,10 @@ export const SingleEventPage: React.FC = () => {
       logScan("bad", `${trimmed} — ${e.message || "không check-in được"}`);
     } finally {
       cameraBusyRef.current = false;
-      const next = pendingScanRef.current;
-      if (next) {
+      if (!cameraCooldownRef.current) {
+        const next = pendingScanRef.current;
         pendingScanRef.current = null;
-        void cameraDetect(next);
+        if (next) void cameraDetect(next);
       }
     }
   };
@@ -459,8 +492,8 @@ export const SingleEventPage: React.FC = () => {
                 setScanLog([]);
                 setScanOk(0);
                 setScanFail(0);
-                pendingScanRef.current = null;
                 cameraBusyRef.current = false;
+                resetCameraCooldown();
                 // Straight to scanning: the point of opening the modal is a line of guests, not
                 // the camera controls — the toggle underneath still turns it off or back on.
                 setCameraOn(true);
@@ -770,6 +803,7 @@ export const SingleEventPage: React.FC = () => {
                   setScanResult(null);
                   setScanErr(null);
                   setCameraOn(false);
+                  resetCameraCooldown();
                 }}
                 className="p-1.5 text-beige-kem/60 hover:bg-beige-kem/10 hover:text-beige-kem transition cursor-pointer"
               >
@@ -806,7 +840,12 @@ export const SingleEventPage: React.FC = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setCameraOn((on) => !on)}
+                  onClick={() => {
+                    setCameraOn((on) => {
+                      if (on) resetCameraCooldown();
+                      return !on;
+                    });
+                  }}
                   className={` border border-beige-kem/30 px-3 py-2 text-xs font-bold transition cursor-pointer ${
                     cameraOn
                       ? "bg-burgundy text-white"

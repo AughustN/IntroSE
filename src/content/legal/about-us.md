@@ -1,7 +1,6 @@
 # VỀ TIXHUB
 
-> **Phiên bản:** Tháng 06/2026  
-> **Nhóm phát triển:** Nhóm 02 — Học phần Nhập môn Công nghệ Phần mềm (Intro2SE), ĐH Khoa học Tự nhiên, ĐHQG-HCM
+> **Phiên bản:** Tháng 06/2026 · **Nhóm phát triển:** Group 02 — Intro2SE 24C11  
 
 ---
 

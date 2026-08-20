@@ -277,7 +277,7 @@ export default function CheckoutForm({
                     id="checkout-phone"
                     type="tel"
                     required
-                    placeholder="09xx xxx xxx"
+                    placeholder="0xxx xxx xxx"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     className="h-11 w-full border-b border-beige-kem/40 bg-transparent text-body text-beige-kem outline-none transition placeholder:text-ink-soft/60 focus:border-burgundy"
