@@ -41,6 +41,7 @@ export function cardToMovie(c: EventCard): MovieEvent {
     times: [],
     dates: c.earliestShowtime ? [c.earliestShowtime.slice(0, 10)] : [],
     city: toCity(c.city),
+    releasePhase: c.releasePhase,
     location: '',
     venueName: '',
     venueMapUrl: '',

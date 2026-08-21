@@ -21,6 +21,8 @@ export interface UpdateEventInput {
   categoryCode?: string;
   isHighDemand?: boolean;
   is_high_demand?: boolean;
+  /** Cinema's two landing tabs (0038). Meaningless outside the `movie` category. */
+  releasePhase?: 'now_showing' | 'upcoming';
 }
 
 export async function updateEvent(
@@ -38,6 +40,10 @@ export async function updateEvent(
   const isHighDemandProvided = input.isHighDemand !== undefined || input.is_high_demand !== undefined;
   const isHighDemandValue = input.isHighDemand ?? input.is_high_demand ?? false;
 
+  if (input.releasePhase !== undefined && !['now_showing', 'upcoming'].includes(input.releasePhase)) {
+    throw err.badRequest('validation_failed', 'Trạng thái phát hành không hợp lệ.');
+  }
+
   return withTransaction(async (client) => {
     const { rows: current } = await client.query<{
       title: string;
@@ -47,8 +53,10 @@ export async function updateEvent(
       age_restriction: string;
       category_code: string;
       is_high_demand: boolean;
+      release_phase: 'now_showing' | 'upcoming';
     }>(
-      `SELECT e.title, e.description, e.image_url, e.refund_policy, e.age_restriction, ec.code AS category_code, COALESCE(e.is_high_demand, false) AS is_high_demand
+      `SELECT e.title, e.description, e.image_url, e.refund_policy, e.age_restriction, ec.code AS category_code,
+              COALESCE(e.is_high_demand, false) AS is_high_demand, e.release_phase
          FROM events e
          JOIN event_categories ec ON ec.id = e.category_id
         WHERE e.id = $1`,
@@ -65,6 +73,12 @@ export async function updateEvent(
     if (input.ageRestriction !== undefined && input.ageRestriction !== cur.age_restriction) changed.push("event.ageRestriction");
     if (input.categoryCode !== undefined && input.categoryCode !== cur.category_code) changed.push("event.category");
     if (isHighDemandProvided && isHighDemandValue !== cur.is_high_demand) changed.push("event.isHighDemand");
+    // Which tab a film sits under is a listing detail, like the drop flag beside it: it changes
+    // nothing a buyer has already paid for, so it is not a material edit and does not send an
+    // approved event back for review.
+    if (input.releasePhase !== undefined && input.releasePhase !== cur.release_phase) {
+      changed.push("event.releasePhase");
+    }
 
     const { rows } = await client.query<{
       id: number;
@@ -80,6 +94,7 @@ export async function updateEvent(
           age_restriction = COALESCE($8, age_restriction),
           category_id = COALESCE((SELECT id FROM event_categories WHERE code = $9), category_id),
           is_high_demand = CASE WHEN $10::boolean THEN $11::boolean ELSE is_high_demand END,
+          release_phase = COALESCE($12, release_phase),
           updated_at = now()
         WHERE id = $1
         RETURNING id, slug, title, status`,
@@ -95,6 +110,7 @@ export async function updateEvent(
         input.categoryCode ?? null,
         isHighDemandProvided,
         isHighDemandValue,
+        input.releasePhase ?? null,
       ],
     );
     if (!rows[0]) throw err.notFound("not_found", "Không tìm thấy sự kiện.");

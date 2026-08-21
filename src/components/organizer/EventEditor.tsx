@@ -13,6 +13,7 @@ import {
   studioApi,
 } from "../../services/catalogClient";
 import { useEventCategories } from "../../hooks/useEventCategories";
+import { sectionOfCategory } from "../../services/eventSections";
 import AiListingPanel from "./AiListingPanel";
 import { CancelEventModal } from "./CancelEventModal";
 import CheckInPanel from "./CheckInPanel";
@@ -55,6 +56,7 @@ export default function EventEditor({
   const [description, setDescription] = useState("");
   const [categoryCode, setCategoryCode] = useState(event.category);
   const [isHighDemand, setIsHighDemand] = useState(event.isHighDemand ?? false);
+  const [releasePhase, setReleasePhase] = useState(event.releasePhase ?? "now_showing");
   const categories = useEventCategories();
   const [refusal, setRefusal] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -62,6 +64,21 @@ export default function EventEditor({
 
   /** An approved, on-sale event is the only one a save can pull out of the public catalog. */
   const isLive = event.moderation === "approved" && event.status === "on_sale";
+
+  /*
+   * Whether this event lands in the cinema band, asked of the same function the band asks.
+   *
+   * Not `categoryCode === "movie"`: the band collects several of the catalogue's categories under
+   * one heading, so a hand-written test here would offer the control on some films and withhold it
+   * on others — and the mismatch would show up as an organizer unable to move a film they can see
+   * sitting in the band. Read from the live `categoryCode` rather than `event.category`, so
+   * switching an event's category updates the form without a round trip.
+   */
+  const isCinema =
+    sectionOfCategory(
+      categoryCode,
+      categories.find((c) => c.code === categoryCode)?.labelVi ?? "",
+    ) === "movie";
 
   /**
    * Submitting for review, and withdrawing.
@@ -152,6 +169,7 @@ export default function EventEditor({
     if (description.trim()) fields.push("event.description");
     if (categoryCode !== event.category) fields.push("event.category");
     if (isHighDemand !== (event.isHighDemand ?? false)) fields.push("event.isHighDemand");
+    if (releasePhase !== (event.releasePhase ?? "now_showing")) fields.push("event.releasePhase");
     return fields;
   };
 
@@ -177,6 +195,8 @@ export default function EventEditor({
         description: description.trim() ? description.trim() : undefined,
         categoryCode: categoryCode !== event.category ? categoryCode : undefined,
         isHighDemand: isHighDemand !== (event.isHighDemand ?? false) ? isHighDemand : undefined,
+        releasePhase:
+          releasePhase !== (event.releasePhase ?? "now_showing") ? releasePhase : undefined,
       });
       setNotice(
         res.returnedToReview
@@ -342,6 +362,40 @@ export default function EventEditor({
             ))}
           </select>
         </label>
+
+        {/*
+          Films only. The column exists on every event and nothing outside the cinema band reads it,
+          so offering the choice on a concert would be asking a question whose answer is discarded.
+
+          Two radios rather than a checkbox: "sắp chiếu" and "đang chiếu" are two states a film moves
+          between on a known date, not a flag that is on or off, and the pair names both so the
+          organizer is not left inferring what unticking means.
+        */}
+        {isCinema && (
+          <fieldset className="mt-3">
+            <legend className={label}>Trạng thái phát hành</legend>
+            <div className="flex flex-wrap gap-4">
+              {(
+                [
+                  ["upcoming", "Sắp chiếu"],
+                  ["now_showing", "Đang chiếu"],
+                ] as const
+              ).map(([value, text]) => (
+                <label key={value} className="flex cursor-pointer select-none items-center gap-2">
+                  <input
+                    type="radio"
+                    name="releasePhase"
+                    value={value}
+                    checked={releasePhase === value}
+                    onChange={() => setReleasePhase(value)}
+                    className="h-4 w-4 accent-burgundy"
+                  />
+                  <span className="font-mono text-xs text-beige-kem">{text}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        )}
 
         <label className="mt-3 flex items-center gap-2 cursor-pointer select-none">
           <input

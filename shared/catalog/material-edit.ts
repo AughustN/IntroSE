@@ -27,8 +27,18 @@
  * is not content, not a price, and not a date, so changing it does not need a moderator's eyes.
  *
  * `seat.blocked` is feature 005's per-seat block/unblock, listed here so 005 has one place to point at.
+ *
+ * `event.releasePhase` is which of cinema's two landing tabs a film sits under (0038). It is
+ * shelving, not content: the film, the dates and the prices are all unchanged, and the day it opens
+ * somebody has to move it across. Leaving it out would send an approved film back for review on a
+ * change every organizer makes on schedule, and pull it off the public page while it waits.
  */
-export const INVENTORY_ONLY_FIELDS = ["tier.capacity", "seat.blocked", "event.isHighDemand"] as const;
+export const INVENTORY_ONLY_FIELDS = [
+  "tier.capacity",
+  "seat.blocked",
+  "event.isHighDemand",
+  "event.releasePhase",
+] as const;
 
 export type InventoryOnlyField = (typeof INVENTORY_ONLY_FIELDS)[number];
 

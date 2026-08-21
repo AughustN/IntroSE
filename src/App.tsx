@@ -2283,6 +2283,7 @@ export default function App() {
                 // the band, not on a category code — `sectionOfCategory` already decided which of
                 // the catalogue's admin-created categories count as film.
                 film={section.id === "movie"}
+                tabs={section.tabs}
                 // No link out of an empty band: `/events` filtered to nothing is a blank page with
                 // no way to tell it from a broken one.
                 onViewMore={

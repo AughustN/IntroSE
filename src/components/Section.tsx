@@ -200,6 +200,11 @@ export function SectionHead({
         <h2 className="font-display text-title-l font-black leading-none text-beige-kem">
           {title}
         </h2>
+        {/*
+          `right` still prints here when a caller passes one, but the reel band does not: a way out
+          of the band belongs after the band, not between its title and its first card. `CategoryRow`
+          puts it at the foot instead, where a reader who has read the row is looking.
+        */}
         {right}
       </div>
     );

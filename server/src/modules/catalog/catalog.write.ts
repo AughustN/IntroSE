@@ -73,6 +73,7 @@ export async function listMyEvents(userId: number, db: Db = pool) {
             e.image_url AS "imageUrl", e.event_type AS "eventType", ec.code AS category,
             COALESCE(e.is_high_demand, false) AS "isHighDemand",
             COALESCE(e.is_high_demand, false) AS is_high_demand,
+            e.release_phase AS "releasePhase",
             e.created_at AS "createdAt", e.updated_at AS "updatedAt",
             COALESCE((
               SELECT SUM(tt.total_quantity)

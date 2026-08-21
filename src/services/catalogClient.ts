@@ -86,6 +86,8 @@ export interface MyEvent {
   eventType: "general_admission" | "seated";
   category: string;
   isHighDemand?: boolean;
+  /** Cinema only: which landing tab this film sits under (0038). */
+  releasePhase?: "now_showing" | "upcoming";
   /**
    * How the event is selling. `listMyEvents` has always computed and sent these three; the interface
    * stopped declaring them when the components that read them were removed, so they crossed the wire
@@ -587,6 +589,7 @@ export const studioApi = {
       ageRestriction?: string;
       categoryCode?: string;
       isHighDemand?: boolean;
+      releasePhase?: "now_showing" | "upcoming";
     },
   ) => authed<EventMutationResult>(`/organizer/events/${eventId}`, { method: "PATCH", body: b }),
   deleteEvent: (eventId: number) =>

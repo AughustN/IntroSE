@@ -56,6 +56,8 @@ export interface MovieEvent {
   venueGuide: string;
   refundPolicy: string;
   isHighDemand?: boolean;
+  /** Cinema only: which of the landing band's two tabs this film belongs under (0038). */
+  releasePhase?: "now_showing" | "upcoming";
   // `finished` is not a degree of "sold out": the event happened. It keeps its card, its tag, and
   // its detail page, but nothing about it is buyable, so every booking control reads it the same
   // way it reads `cancelled`.

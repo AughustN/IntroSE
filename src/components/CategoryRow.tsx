@@ -16,7 +16,9 @@
  * reads differently for having been sorted into a band.
  */
 
+import { useState } from "react";
 import { MovieEvent } from "../types";
+import type { LandingTab } from "../services/eventSections";
 import { RuledCard } from "./EventCards";
 import Section, { BAND, FilmRail, SectionHead } from "./Section";
 
@@ -42,6 +44,14 @@ interface CategoryRowProps {
    * Set for the cinema band, whose artwork is posters rather than stills.
    */
   film?: boolean;
+  /**
+   * Sub-divisions of this band, switched in place. Cinema's "Sắp chiếu" / "Đang chiếu" (0038).
+   *
+   * They replace the heading rather than sitting under it: the two words ARE what the band is
+   * called once it holds two things, and a title plus two tabs saying nearly the same thing makes
+   * the reader work out which one is the control.
+   */
+  tabs?: LandingTab[];
 }
 
 export default function CategoryRow({
@@ -56,7 +66,15 @@ export default function CategoryRow({
   wishlistedIds,
   onToggleWishlist,
   film = false,
+  tabs,
 }: CategoryRowProps) {
+  const [activeTab, setActiveTab] = useState(0);
+  // A tabbed band shows the tab; a plain one shows what it was given. `tabs?.[activeTab]` and not
+  // `tabs[0]` so a band whose tab list shrinks between renders cannot land on a hole.
+  const current = tabs?.[activeTab];
+  const shownEvents = current ? current.events : events;
+  const shownEmptyNote = current ? current.emptyNote : emptyNote;
+
   return (
     /*
       20px from a title to its own cards, 32px from those cards to the next title. The heading has
@@ -67,24 +85,66 @@ export default function CategoryRow({
       {film && <FilmRail />}
 
       <div className={BAND}>
-        <SectionHead
-          variant="bar"
-          eyebrow={eyebrow}
-          title={title}
-          actionLabel={onViewMore ? "Xem thêm" : undefined}
-          onAction={onViewMore}
-        />
+        {/*
+          The reel band centres its head and the others keep the ruled bar.
+
+          A band held between two perforated rails is bounded on all four sides already; the bar's
+          left stroke is a divider for bands that have no frame, and inside a symmetrical one a
+          left-anchored title reads as having slipped off centre. "Xem thêm" goes with it — see the
+          foot of the band below — because centring the head and then hanging a link off its right
+          shoulder puts the heading back off-axis by the width of the link.
+        */}
+        {tabs && tabs.length > 1 ? (
+          <div className="flex flex-col items-center gap-3 text-center">
+            <p className="label-eyebrow text-ink-soft">{eyebrow}</p>
+            {/*
+              The two names, at heading size, because that is what they are — the band's title, in
+              two halves, one of which is currently true. Drawing them as small pills under a
+              separate `<h2>` would make the heading the loudest thing and the actual choice a
+              footnote to it.
+            */}
+            <div role="tablist" aria-label={eyebrow} className="flex items-end gap-6 sm:gap-10">
+              {tabs.map((tab, index) => {
+                const active = index === activeTab;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setActiveTab(index)}
+                    className={`font-display text-title-l font-black leading-none transition ${
+                      active
+                        ? "border-b-4 border-burgundy pb-1 text-beige-kem"
+                        : "border-b-4 border-transparent pb-1 text-ink-soft hover:text-beige-kem"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <SectionHead
+            variant={film ? "reel" : "bar"}
+            eyebrow={eyebrow}
+            title={title}
+            actionLabel={!film && onViewMore ? "Xem thêm" : undefined}
+            onAction={film ? undefined : onViewMore}
+          />
+        )}
       </div>
 
       <div className={BAND}>
-        {events.length === 0 ? (
+        {shownEvents.length === 0 ? (
           /*
             An empty band still prints. "Phim sắp chiếu" with nothing under it says something true
             about the catalogue; a band that vanishes when it is empty is indistinguishable from one
             that was never on the page.
           */
           <div className="hud-dashed px-4 py-14 text-center">
-            <p className="font-meta text-body text-ink-soft">{emptyNote}</p>
+            <p className="font-meta text-body text-ink-soft">{shownEmptyNote}</p>
           </div>
         ) : (
           /*
@@ -99,7 +159,7 @@ export default function CategoryRow({
               film ? "lg:grid-cols-5" : "lg:grid-cols-4"
             }`}
           >
-            {events.map((evt) => (
+            {shownEvents.map((evt) => (
               <RuledCard
                 key={evt.id}
                 evt={evt}
@@ -111,6 +171,25 @@ export default function CategoryRow({
                 onToggleWishlist={onToggleWishlist}
               />
             ))}
+          </div>
+        )}
+
+        {/*
+          The way out of a reel band, at its foot and to the right — where a reader who has run out
+          of cards is already looking, and the last thing they read rather than something competing
+          with the heading. Hidden when the band is empty, for the reason `onViewMore` is: a link to
+          a listing guaranteed to be blank is a promise the page cannot keep.
+        */}
+        {film && onViewMore && shownEvents.length > 0 && (
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={onViewMore}
+              className="label-eyebrow inline-flex items-center gap-2 text-beige-kem transition hover:text-burgundy-ink"
+            >
+              Xem thêm
+              <span aria-hidden="true">&gt;</span>
+            </button>
           </div>
         )}
       </div>

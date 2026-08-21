@@ -38,6 +38,15 @@ export interface EventCard {
   // is only ever true while `hasUpcoming` is, so without this field a finished event arrives looking
   // identical to a bookable one.
   hasUpcoming: boolean;
+  /**
+   * Whether a film is in cinemas or still to come — the cinema band's two tabs (0038).
+   *
+   * Set by the organizer rather than derived from the showtimes: a film sells tickets for days
+   * before it opens, and a run keeps selling for weeks after, so a clock cannot tell the two apart
+   * without moving films between the tabs on its own. Present on every card and meaningless outside
+   * the `movie` category, where nothing reads it.
+   */
+  releasePhase: 'now_showing' | 'upcoming';
 }
 
 export interface Tier {

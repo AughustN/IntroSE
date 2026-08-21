@@ -121,6 +121,7 @@ const updateEventSchema = z
     ageRestriction: z.enum(["all", "13+", "16+", "18+"]).optional(),
     categoryCode: z.string().trim().min(1).optional(),
     isHighDemand: z.boolean().optional(),
+    releasePhase: z.enum(['now_showing', 'upcoming']).optional(),
     is_high_demand: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "empty" });

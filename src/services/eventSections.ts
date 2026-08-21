@@ -86,6 +86,25 @@ export interface LandingSection {
    */
   codes: string[];
   events: MovieEvent[];
+  /**
+   * The band's own sub-divisions, when it has any. Only cinema does (0038).
+   *
+   * A film that opens next month and one playing tonight are both "on sale", and putting them in one
+   * row of four means the row answers neither question a reader arrives with. The split is by
+   * `releasePhase`, which the organizer sets — see the migration for why a date cannot decide it.
+   *
+   * `events` still holds the band's default set, so a caller that ignores tabs shows something
+   * sensible rather than nothing.
+   */
+  tabs?: LandingTab[];
+}
+
+export interface LandingTab {
+  id: string;
+  label: string;
+  events: MovieEvent[];
+  /** Shown in place of the cards when this tab has nothing. */
+  emptyNote: string;
 }
 
 const BANDS: ReadonlyArray<Pick<LandingSection, "id" | "title" | "eyebrow" | "emptyNote">> = [
@@ -149,11 +168,44 @@ export function buildLandingSections(events: MovieEvent[], perSection = 4): Land
     (codes.get(id) ?? codes.set(id, new Set()).get(id)!).add(event.category);
   }
 
-  return BANDS.map((band) => ({
-    ...band,
-    codes: [...(codes.get(band.id) ?? [])],
-    events: [...(grouped.get(band.id) ?? [])].sort(byRelevance).slice(0, perSection),
-  }));
+  return BANDS.map((band) => {
+    const all = [...(grouped.get(band.id) ?? [])].sort(byRelevance);
+    return {
+      ...band,
+      codes: [...(codes.get(band.id) ?? [])],
+      events: all.slice(0, perSection),
+      tabs: band.id === "movie" ? cinemaTabs(all, perSection) : undefined,
+    };
+  });
+}
+
+/**
+ * Cinema's two tabs: what is coming, then what is on.
+ *
+ * Upcoming leads. The band is the one place on the landing page that can tell somebody about a film
+ * before it opens, and a reader who already knows what is playing tonight is the reader most likely
+ * to go looking; the other order puts the news second.
+ *
+ * A film with no `releasePhase` — anything that predates 0038, or a card built before the column
+ * reached the client — counts as now showing, matching the column's own default.
+ */
+function cinemaTabs(films: MovieEvent[], perTab: number): LandingTab[] {
+  const upcoming = films.filter((film) => film.releasePhase === "upcoming");
+  const nowShowing = films.filter((film) => film.releasePhase !== "upcoming");
+  return [
+    {
+      id: "upcoming",
+      label: "Sắp chiếu",
+      events: upcoming.slice(0, perTab),
+      emptyNote: "Chưa có phim nào được công bố lịch chiếu.",
+    },
+    {
+      id: "now_showing",
+      label: "Đang chiếu",
+      events: nowShowing.slice(0, perTab),
+      emptyNote: "Chưa có phim nào đang chiếu.",
+    },
+  ];
 }
 
 /**
