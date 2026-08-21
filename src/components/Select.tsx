@@ -42,6 +42,14 @@ interface SelectProps {
   selectedValues?: string[];
   /** The trigger's text when `selectedValues` is empty. Multi-select only. */
   emptyLabel?: string;
+  /**
+   * Inert, and visibly so.
+   *
+   * A native `<select>` gets this from the platform; rebuilding the control means rebuilding the
+   * state too, or the callers that relied on it — a showtime whose venue is frozen once a seat map
+   * exists, say — quietly become editable when they swap over.
+   */
+  disabled?: boolean;
 }
 
 /**
@@ -72,6 +80,7 @@ export default function Select({
   placeholder,
   selectedValues,
   emptyLabel,
+  disabled = false,
 }: SelectProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -106,12 +115,13 @@ export default function Select({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
+        disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
         // A form that already labels the field in its own markup passes no `label`; the placeholder
         // is then the only description a screen reader has to go on.
         aria-label={label ?? placeholder}
-        className={`flex w-full items-center justify-between gap-2 text-left text-beige-kem transition ${triggerClassName ?? UNDERLINE_TRIGGER}`}
+        className={`flex w-full items-center justify-between gap-2 text-left text-beige-kem transition disabled:cursor-not-allowed disabled:opacity-50 ${triggerClassName ?? UNDERLINE_TRIGGER}`}
       >
         <span
           className={`truncate ${ multiple
@@ -136,17 +146,35 @@ export default function Select({
        * rendered states, so unmounting on close would trade the reveal for a pop. `inert` keeps the
        * collapsed rows out of the tab order in the meantime.
        */}
+      {/*
+        The panel starts at the trigger's width and grows to fit its longest row.
+        
+        Pinned to both edges it was exactly as wide as the control, which is fine for "Tất cả /
+        Đã duyệt" and wrong for a list of event titles: every name past about thirty characters lost
+        its tail, so an organizer picking between two editions of the same festival was choosing
+        between two identical truncations. `w-max` lets it size to content, `min-w-full` keeps it
+        from ever being narrower than the trigger it hangs off, and the cap stops a long title
+        pushing it off the side of the screen.
+      */}
       <div
         data-open={open}
         inert={!open}
-        className="menu-panel absolute left-0 right-0 top-[calc(100%+8px)] z-30"
+        className="menu-panel absolute left-0 top-[calc(100%+8px)] z-30 w-max min-w-full max-w-[min(92vw,32rem)]"
       >
         <div>
           <ul
             role="listbox"
             aria-label={label}
             aria-multiselectable={multiple || undefined}
-            className="ticket-corners max-h-64 overflow-y-auto bg-surface-2 py-1"
+            /*
+              The width lives here as well as on the wrapper.
+              
+              `overflow-y-auto` makes this a scroll container, and a scroll container does not hand
+              its max-content width up to an ancestor sizing itself with `w-max` — the wrapper
+              measured the trigger instead and the longest titles lost their last few characters
+              with no ellipsis to admit it.
+            */
+            className="ticket-corners max-h-64 w-max min-w-full max-w-[min(92vw,32rem)] overflow-y-auto bg-surface-2 py-1"
           >
             {options.map((option, i) => {
               const selected = multiple
@@ -172,7 +200,17 @@ export default function Select({
                     <span
                       data-a="y"
                       style={{ "--menu-row-delay": `${0.04 + i * 0.03}s` } as React.CSSProperties}
-                      className="block truncate"
+                      /*
+                       * Wraps to two lines rather than truncating to one.
+                       *
+                       * `truncate` promises an ellipsis and, inside a panel that is itself a
+                       * horizontal clip container, did not always get to draw one — a title ended
+                       * mid-word with no mark that anything was missing, which is worse than either
+                       * wrapping or an honest "…". Two editions of the same festival are told apart
+                       * by their last few characters, so those are exactly the ones a picker cannot
+                       * afford to drop.
+                       */
+                      className="line-clamp-2 block"
                     >
                       {option.label}
                     </span>

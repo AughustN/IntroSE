@@ -81,6 +81,15 @@ export default function DatePicker({ label, value, available, onChange }: DatePi
   useDismiss(ref, open, close);
 
   const availableSet = useMemo(() => new Set(available), [available]);
+  /*
+   * Whether this picker has anything to say about which days are worth picking.
+   *
+   * An empty `available` means "no such information", not "no day qualifies" — the analytics range
+   * filter has no notion of a day the catalogue runs on, and dimming all thirty-one made every date
+   * read as unselectable while every one of them was in fact clickable. With nothing to mark, the
+   * grid stops marking.
+   */
+  const marksAvailability = available.length > 0;
 
   const start = value ? parseISO(value.from) : null;
   const now = new Date();
@@ -287,7 +296,7 @@ export default function DatePicker({ label, value, available, onChange }: DatePi
                         ? "bg-burgundy font-bold text-white"
                         : inBand
                           ? "bg-bubblegum/60 text-on-tint"
-                          : hasEvents
+                          : hasEvents || !marksAvailability
                             ? "text-beige-kem hover:bg-bubblegum/40"
                             : "text-ink-soft/40 hover:bg-bubblegum/20"
                     }`}

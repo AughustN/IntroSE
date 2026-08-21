@@ -5,6 +5,7 @@
 
 import type { BlockKind } from "@/shared/catalog/seatmap-document";
 import { BLOCK_DRAG_TYPE, type BlockGeometry, type BlockTarget, formatBlockDrag } from "./documentOps";
+import Select from "../Select";
 
 /**
  * What the organizer can add to a chart.
@@ -142,37 +143,36 @@ export default function BlockPalette({
       <div className="mt-2 grid gap-1 border border-beige-kem/30 p-2">
         <label className="grid gap-0.5 font-mono text-[10px] text-beige-kem/60">
           Khối mới vào khu
-          <select
+          {/*
+            The shared dropdown, not a native `<select>`: the option list of a native one is drawn
+            by the operating system, so it opened as a grey platform menu over a designer built
+            entirely from hairlines and mono type, and no styling on the element reaches inside it.
+          */}
+          <Select
             value={valueOf(pinned.sectionId)}
-            onChange={(e) => onPin({ sectionId: parse(e.target.value) })}
+            options={[
+              { value: "auto", label: `Tự động (${nameOf(sections, resolved.sectionId, "không thuộc khu nào")})` },
+              { value: "none", label: "Không thuộc khu nào" },
+              ...sections.map((x) => ({ value: String(x.id), label: x.name })),
+            ]}
             disabled={disabled}
-            className="border border-beige-kem/40 bg-surface-2 px-1.5 py-1 text-[11px] text-beige-kem disabled:opacity-40"
-          >
-            <option value="auto">Tự động ({nameOf(sections, resolved.sectionId, "không thuộc khu nào")})</option>
-            <option value="none">Không thuộc khu nào</option>
-            {sections.map((x) => (
-              <option key={x.id} value={x.id}>
-                {x.name}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => onPin({ sectionId: parse(v) })}
+            triggerClassName="border border-beige-kem/40 bg-surface-2 px-1.5 py-1 text-[11px]"
+          />
         </label>
         <label className="grid gap-0.5 font-mono text-[10px] text-beige-kem/60">
           Hạng ghế
-          <select
+          <Select
             value={valueOf(pinned.categoryId)}
-            onChange={(e) => onPin({ categoryId: parse(e.target.value) })}
+            options={[
+              { value: "auto", label: `Tự động (${nameOf(categories, resolved.categoryId, "chưa xếp hạng")})` },
+              { value: "none", label: "Chưa xếp hạng ghế" },
+              ...categories.map((x) => ({ value: String(x.id), label: x.name })),
+            ]}
             disabled={disabled}
-            className="border border-beige-kem/40 bg-surface-2 px-1.5 py-1 text-[11px] text-beige-kem disabled:opacity-40"
-          >
-            <option value="auto">Tự động ({nameOf(categories, resolved.categoryId, "chưa xếp hạng")})</option>
-            <option value="none">Chưa xếp hạng ghế</option>
-            {categories.map((x) => (
-              <option key={x.id} value={x.id}>
-                {x.name}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => onPin({ categoryId: parse(v) })}
+            triggerClassName="border border-beige-kem/40 bg-surface-2 px-1.5 py-1 text-[11px]"
+          />
         </label>
         {(pinned.sectionId === null || pinned.categoryId === null) && (
           <p className="text-[10px] leading-4 text-beige-kem/50">

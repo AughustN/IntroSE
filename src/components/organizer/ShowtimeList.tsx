@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ManageShowtime, MyVenue, organizerApi, studioApi } from "../../services/catalogClient";
 import TierPanel from "./TierPanel";
 import { Empty, ErrorRetry, Loading, Refusal } from "./states";
+import Select from "../Select";
 
 const input =
   "h-10 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
@@ -122,20 +123,18 @@ export default function ShowtimeList({
         <div className="space-y-2">
           <p className="font-mono text-[11px] text-beige-kem/60">Suất chiếu mới (1–4 hạng vé)</p>
           <div className="grid gap-2 sm:grid-cols-2">
-            <select
-              value={addVenue}
-              onChange={(e) => setAddVenue(Number(e.target.value) || "")}
-              className={input}
-            >
-              <option value="" className="bg-xanh-pho">
-                Chọn địa điểm
-              </option>
-              {venues.map((v) => (
-                <option key={v.id} value={v.id} className="bg-xanh-pho">
-                  {v.name}
-                </option>
-              ))}
-            </select>
+            {/*
+              The shared dropdown, not a native `<select>`: the platform draws that list itself, so
+              it arrived as a grey Windows menu in the middle of a cream, mono-set panel and no
+              amount of styling on the element could reach it.
+            */}
+            <Select
+              value={addVenue === "" ? "" : String(addVenue)}
+              options={venues.map((v) => ({ value: String(v.id), label: v.name }))}
+              placeholder="Chọn địa điểm"
+              onChange={(v) => setAddVenue(Number(v) || "")}
+              triggerClassName={input}
+            />
             <input
               type="datetime-local"
               value={addDate}
@@ -239,22 +238,15 @@ export default function ShowtimeList({
                 }}
                 className={input}
               />
-              <select
-                defaultValue={st.venueId}
+              <Select
+                value={String(st.venueId)}
+                options={venues.map((v) => ({ value: String(v.id), label: v.name }))}
                 disabled={locked || st.hasSeatMap}
-                onChange={(e) =>
-                  void run(st.id, () =>
-                    studioApi.updateShowtime(st.id, { venueId: Number(e.target.value) }),
-                  )
+                onChange={(v) =>
+                  void run(st.id, () => studioApi.updateShowtime(st.id, { venueId: Number(v) }))
                 }
-                className={input}
-              >
-                {venues.map((v) => (
-                  <option key={v.id} value={v.id} className="bg-xanh-pho">
-                    {v.name}
-                  </option>
-                ))}
-              </select>
+                triggerClassName={input}
+              />
               <div className="flex gap-2">
                 <button
                   onClick={() => setOpenTiers(openTiers === st.id ? null : st.id)}

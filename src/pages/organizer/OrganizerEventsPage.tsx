@@ -25,6 +25,11 @@ import {
   saveDraft,
   type CreateEventDraft,
 } from "./createEventDraft";
+import Select from "../../components/Select";
+
+/** The cities an event can be created in — one list, where there were two that had to agree. */
+const CITIES = ["TP.HCM", "Hà Nội", "Đà Nẵng"] as const;
+type City = (typeof CITIES)[number];
 
 export const OrganizerEventsPage: React.FC<{
   /** From `/organizer/events/:id` — which event the console should open at, if the URL names one. */
@@ -149,7 +154,7 @@ export const OrganizerEventsPage: React.FC<{
   const [isCreating, setIsCreating] = useState(false);
   const [createVenueName, setCreateVenueName] = useState("");
   const [createVenueAddress, setCreateVenueAddress] = useState("");
-  const [createCity, setCreateCity] = useState<"TP.HCM" | "Hà Nội" | "Đà Nẵng">("TP.HCM");
+  const [createCity, setCreateCity] = useState<City>(CITIES[0]);
   const [createDescription, setCreateDescription] = useState("");
 
   const [toastMsg, setToastMsg] = useState<{ type: "success" | "error"; text: string } | null>(
@@ -636,17 +641,12 @@ export const OrganizerEventsPage: React.FC<{
                       more (UC-35); any list compiled into the bundle is a stale second opinion, which
                       is exactly why `useEventCategories` exists.
                     */}
-                    <select
+                    <Select
                       value={createCategory}
-                      onChange={(e) => setCreateCategory(e.target.value)}
-                      className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none transition-colors"
-                    >
-                      {categories.map((c) => (
-                        <option key={c.code} value={c.code} className="bg-xanh-pho">
-                          {c.labelVi}
-                        </option>
-                      ))}
-                    </select>
+                      options={categories.map((c) => ({ value: c.code, label: c.labelVi }))}
+                      onChange={setCreateCategory}
+                      triggerClassName="w-full border border-beige-kem/30 bg-xanh-pho p-3 transition-colors"
+                    />
                   </div>
                 </div>
 
@@ -719,15 +719,12 @@ export const OrganizerEventsPage: React.FC<{
                     <label className="block font-meta text-beige-kem font-semibold mb-1">
                       Thành phố
                     </label>
-                    <select
+                    <Select
                       value={createCity}
-                      onChange={(e) => setCreateCity(e.target.value as any)}
-                      className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none"
-                    >
-                      <option value="TP.HCM">TP.HCM</option>
-                      <option value="Hà Nội">Hà Nội</option>
-                      <option value="Đà Nẵng">Đà Nẵng</option>
-                    </select>
+                      options={CITIES.map((c) => ({ value: c, label: c }))}
+                      onChange={(c) => setCreateCity(c as City)}
+                      triggerClassName="w-full border border-beige-kem/30 bg-xanh-pho p-3"
+                    />
                   </div>
                 </div>
 

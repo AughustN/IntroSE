@@ -80,16 +80,40 @@ const TITLE_FADE_END = 0.55;
  */
 const START = { widthOfViewport: 0.581, maxHeightOfViewport: 0.731 };
 
+/**
+ * How much of the width the opening frame takes, which cannot be one number.
+ *
+ * 0.581 was measured against a reference site on a 1536px-wide window, and it is right there: a
+ * television sitting in a room, with the page visible around it. Carried to a 390px phone the same
+ * fraction is 227px of glass — a postage stamp with a cabinet drawn around it, and the type beside
+ * it larger than the picture it introduces. The set has to take most of a narrow screen to read as
+ * a screen at all.
+ *
+ * So the fraction opens up as the viewport narrows, and is flat at either end: 0.92 at 480px and
+ * below, the measured 0.581 from 1280px up, interpolated between. Linear, because there is nothing
+ * to be gained from a curve here and a straight line is the version somebody can check with a
+ * ruler the way the endpoints were.
+ */
+const NARROW = { width: 480, fraction: 0.92 };
+const WIDE = { width: 1280, fraction: START.widthOfViewport };
+
+function openingWidthFraction(viewportWidth: number): number {
+  if (viewportWidth <= NARROW.width) return NARROW.fraction;
+  if (viewportWidth >= WIDE.width) return WIDE.fraction;
+  const t = (viewportWidth - NARROW.width) / (WIDE.width - NARROW.width);
+  return NARROW.fraction + (WIDE.fraction - NARROW.fraction) * t;
+}
+
 /** Shape of the opening frame, as measured above: 893 / 572. */
 const START_ASPECT = 1.561;
 
 /**
- * How far above the centre of the stage the small screen sits, in pixels.
+ * How far above the centre of the stage the small screen sits, as a fraction of the frame's height.
  *
  * Interpolated away as it opens, because at full bleed the frame is the viewport — hold the offset
  * there and it would leave a strip of the page showing along the bottom edge.
  */
-const START_RISE = 40;
+const START_RISE_RATIO = 0.07;
 
 /**
  * How far each pair of edges bows out at the start, as a fraction of the screen's own size.
@@ -250,21 +274,39 @@ export default function HeroVideo({
     const write = () => {
       frame = 0;
       const rect = section.getBoundingClientRect();
-      // The stage is sticky for `height - viewport`, so that distance is the whole animation.
-      const travel = rect.height - window.innerHeight;
+      /*
+       * The stage's own measured height, not `window.innerHeight`.
+       *
+       * Three different numbers were being treated as one. The section is sized in `vh`, which on a
+       * phone means the LARGE viewport — the height the page would have with the address bar gone.
+       * The stage inside it is `dvh`, which is the height right now. And this read `innerHeight`,
+       * the visual viewport, which is a third thing again while the bar is on screen and the user
+       * is mid-pinch. So `travel` was computed against a height the stage did not have, the
+       * progress ran at the wrong rate, and the address bar sliding away mid-scroll resized the
+       * stage under an animation keyed to a height that had not moved.
+       *
+       * Measuring the element removes the question: whatever unit produced the stage, this is how
+       * tall it actually is.
+       */
+      const stageHeight = shell.getBoundingClientRect().height;
+      // The stage is sticky for `height - stage`, so that distance is the whole animation.
+      const travel = rect.height - stageHeight;
       const p = travel > 0 ? clamp01(-rect.top / travel) : 0;
 
       // Whichever limit binds first, so a short window shrinks the frame rather than overflowing.
-      const byWidth = window.innerWidth * START.widthOfViewport;
-      const byHeight = window.innerHeight * START.maxHeightOfViewport * START_ASPECT;
+      const byWidth = window.innerWidth * openingWidthFraction(window.innerWidth);
+      const byHeight = stageHeight * START.maxHeightOfViewport * START_ASPECT;
       const startW = Math.min(byWidth, byHeight);
       const startH = startW / START_ASPECT;
 
       const w = startW + (window.innerWidth - startW) * p;
-      const h = startH + (window.innerHeight - startH) * p;
+      const h = startH + (stageHeight - startH) * p;
       shell.style.setProperty("--screen-w", `${w}px`);
       shell.style.setProperty("--screen-h", `${h}px`);
-      shell.style.setProperty("--screen-rise", `${-START_RISE * (1 - p)}px`);
+      // Proportional to the frame, not a fixed 40px. On this machine's 571px-tall opening frame
+      // that constant was 7% of it; on a phone's 145px frame it was a quarter, which lifted the set
+      // most of the way out of the stage and left it floating over the type.
+      shell.style.setProperty("--screen-rise", `${-startH * START_RISE_RATIO * (1 - p)}px`);
 
       // The cabinet collapses on `1 - p` and fades on its own, faster curve, so it is thinning for
       // the whole opening but has already gone by the time the glass is half the viewport.
@@ -416,7 +458,16 @@ export default function HeroVideo({
     <section
       id="hero-trailer-section"
       ref={sectionRef}
-      className={`relative w-full bg-black text-white ${plain ? "h-[62vh] min-h-[380px]" : "h-[200vh]"}`}
+      /*
+       * `dvh` throughout, matching the sticky stage inside.
+       *
+       * `vh` on a phone is the height the page WOULD have with the address bar retracted, so a
+       * `200vh` section paired with a `100dvh` stage promised two stage-heights of travel and
+       * delivered less — the animation finished early and the last stretch of scroll moved a
+       * finished picture. `min-h` goes for the same reason: 380px is taller than a landscape phone
+       * has to spare, and forcing it there is what pushed the band off the bottom of the screen.
+       */
+      className={`relative w-full bg-black text-white ${plain ? "h-[62dvh] min-h-[16rem]" : "h-[200dvh]"}`}
     >
       <div
         ref={shellRef}

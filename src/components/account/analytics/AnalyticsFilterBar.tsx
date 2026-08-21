@@ -1,6 +1,8 @@
 import React from "react";
 import { Calendar, Filter, RefreshCw } from "lucide-react";
 import type { DatePeriodFilter } from "../../../../shared/types/analytics";
+import Select from "../../Select";
+import DatePicker from "../../DatePicker";
 
 interface EventOption {
   id: string;
@@ -77,23 +79,29 @@ export function AnalyticsFilterBar({
           </button>
         </div>
 
-        {/* Custom Date Pickers */}
+        {/*
+          One range control, where there were two `<input type="date">` boxes.
+          
+          A native date field is drawn by the browser and formatted from its UI language, not from
+          the page's: on an English-language Chrome it reads `mm/dd/yyyy` in the middle of a
+          Vietnamese console, and setting `lang="vi"` on the document does not change it — measured.
+          The calendar it opens is the platform's too, so nothing about it can be made to match.
+
+          The catalogue filter's own picker already draws a Vietnamese month grid and already models
+          exactly this shape — a `{ from, to }` span with an explicit commit — so the two boxes and
+          the word "đến" between them collapse into it. `available` is empty here: it marks the days
+          the catalogue has events on, and a revenue report has no such notion.
+        */}
         {period === "custom" && (
-          <div className="flex items-center gap-2 text-xs">
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => onStartDateChange(e.target.value)}
-              className="border border-beige-kem/40 bg-surface-2 px-3 py-1.5 text-beige-kem outline-none focus:border-burgundy focus:ring-1 focus:ring-burgundy transition"
-            />
-            <span className="text-beige-kem/60 font-medium">đến</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => onEndDateChange(e.target.value)}
-              className="border border-beige-kem/40 bg-surface-2 px-3 py-1.5 text-beige-kem outline-none focus:border-burgundy focus:ring-1 focus:ring-burgundy transition"
-            />
-          </div>
+          <DatePicker
+            label="Khoảng ngày"
+            value={startDate && endDate ? { from: startDate, to: endDate } : null}
+            available={[]}
+            onChange={(range) => {
+              onStartDateChange(range?.from ?? "");
+              onEndDateChange(range?.to ?? "");
+            }}
+          />
         )}
       </div>
 
@@ -103,18 +111,22 @@ export function AnalyticsFilterBar({
           <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-beige-kem/70">
             <Filter className="h-4 w-4 text-cam-dat" /> Sự kiện:
           </span>
-          <select
-            value={selectedEventId}
-            onChange={(e) => onEventChange(e.target.value)}
-            className="h-10 border-2 border-beige-kem/40 bg-surface-2 px-3 text-xs font-bold text-beige-kem outline-none transition focus:border-burgundy cursor-pointer max-w-[200px] truncate"
-          >
-            <option value="all">Tất cả sự kiện</option>
-            {eventList.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.title}
-              </option>
-            ))}
-          </select>
+          {/*
+            The shared dropdown. A native `<select>` hands its option list to the operating system,
+            which draws a grey platform menu in the middle of a panel built entirely from hairlines
+            and mono type — no styling on the element reaches inside it.
+          */}
+          <div className="max-w-[200px]">
+            <Select
+              value={selectedEventId}
+              options={[
+                { value: "all", label: "Tất cả sự kiện" },
+                ...eventList.map((e) => ({ value: String(e.id), label: e.title })),
+              ]}
+              onChange={onEventChange}
+              triggerClassName="h-10 w-full border-2 border-beige-kem/40 bg-surface-2 px-3 text-xs font-bold"
+            />
+          </div>
         </div>
 
         {onRefresh && (

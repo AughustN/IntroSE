@@ -15,6 +15,7 @@ import { adsClient } from "../../services/adsClient";
 import { getOrganizerEvents } from "../../services/organizerClient";
 import { formatVnd } from "../../services/currency";
 import type { OrganizerEventStatus, OrganizerPortfolioSummary } from "../../types";
+import Select from "../Select";
 
 /**
  * Buying promotion for an event (the organizer half of the advertising feature).
@@ -210,18 +211,15 @@ export default function AdPackagesPanel() {
             </p>
           ) : (
             <div className="flex flex-wrap items-center gap-3">
-              <select
-                value={eventId}
-                onChange={(event) => setEventId(event.target.value)}
-                className="min-w-[16rem] border-2 border-beige-kem/30 bg-xanh-pho px-3 py-2 text-xs text-beige-kem"
-              >
-                <option value="">— Chọn sự kiện —</option>
-                {choices.map((event) => (
-                  <option key={event.eventId} value={event.eventId}>
-                    {event.title}
-                  </option>
-                ))}
-              </select>
+              <div className="min-w-[16rem]">
+                <Select
+                  value={eventId}
+                  options={choices.map((event) => ({ value: event.eventId, label: event.title }))}
+                  placeholder="— Chọn sự kiện —"
+                  onChange={setEventId}
+                  triggerClassName="w-full border-2 border-beige-kem/30 bg-xanh-pho px-3 py-2 text-xs"
+                />
+              </div>
               <button
                 type="button"
                 disabled={!eventId || busy}

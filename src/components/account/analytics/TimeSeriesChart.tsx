@@ -11,6 +11,14 @@ import {
 } from "recharts";
 import { RefreshCw, TrendingUp } from "lucide-react";
 import type { DatePeriodFilter, TimeSeriesSalesPoint } from "../../../../shared/types/analytics";
+import Select from "../../Select";
+
+/** The windows this chart can be read over. */
+const PERIODS = [
+  { value: "7d", label: "7 ngày gần đây" },
+  { value: "this_month", label: "Tháng này" },
+  { value: "custom", label: "Tùy chỉnh" },
+] as const;
 
 interface Props {
   data: TimeSeriesSalesPoint[];
@@ -46,15 +54,12 @@ export function TimeSeriesChart({ data, period, onPeriodChange, onRefresh, loadi
 
         <div className="flex items-center gap-2">
           {period && onPeriodChange && (
-            <select
+            <Select
               value={period}
-              onChange={(e) => onPeriodChange(e.target.value as DatePeriodFilter)}
-              className="h-8 border border-beige-kem/40 bg-surface-2 px-2.5 text-xs font-bold text-beige-kem outline-none transition focus:border-burgundy cursor-pointer"
-            >
-              <option value="7d">7 ngày gần đây</option>
-              <option value="this_month">Tháng này</option>
-              <option value="custom">Tùy chỉnh</option>
-            </select>
+              options={PERIODS}
+              onChange={(v) => onPeriodChange(v as DatePeriodFilter)}
+              triggerClassName="h-8 border border-beige-kem/40 bg-surface-2 px-2.5 text-xs font-bold"
+            />
           )}
 
           {onRefresh && (

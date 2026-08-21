@@ -96,6 +96,7 @@ import {
 import SectionPanel from "./SectionPanel";
 import { useLayoutHistory } from "./useLayoutHistory";
 import { CATEGORY_COLORS, snap } from "./layoutOps";
+import Select from "../Select";
 
 /**
  * The chart editor.
@@ -1876,50 +1877,48 @@ export default function ChartEditor({
 
                 <label className="flex items-center gap-1 font-mono text-[11px] text-beige-kem/55">
                   Khu
-                  <select
+                  {/*
+                    The shared dropdown, not a native `<select>`: the platform draws a native one's
+                    list itself, so it opened as a grey operating-system menu over an editor made
+                    entirely of hairlines and mono type.
+
+                    "— nhiều khu —" is only offered while the selection actually spans several, the
+                    way it was: it is a report on the selection, not somewhere to move it to.
+                  */}
+                  <Select
                     value={(() => {
                       const v = sharedValue((s) => s.sectionId ?? null);
                       return v === "mixed" ? "mixed" : v === null ? "" : String(v);
                     })()}
-                    onChange={(e) =>
-                      assignSectionTo(e.target.value === "" ? null : Number(e.target.value))
-                    }
-                    className="border-2 border-beige-kem/50 bg-transparent px-1.5 py-0.5 text-beige-kem"
-                  >
-                    {sharedValue((s) => s.sectionId ?? null) === "mixed" && (
-                      <option value="mixed">— nhiều khu —</option>
-                    )}
-                    <option value="">Chưa thuộc khu</option>
-                    {draft.sections.map((sec) => (
-                      <option key={sec.id} value={sec.id}>
-                        {sec.name}
-                      </option>
-                    ))}
-                  </select>
+                    options={[
+                      ...(sharedValue((s) => s.sectionId ?? null) === "mixed"
+                        ? [{ value: "mixed", label: "— nhiều khu —" }]
+                        : []),
+                      { value: "", label: "Chưa thuộc khu" },
+                      ...draft.sections.map((sec) => ({ value: String(sec.id), label: sec.name })),
+                    ]}
+                    onChange={(v) => assignSectionTo(v === "" ? null : Number(v))}
+                    triggerClassName="border-2 border-beige-kem/50 bg-transparent px-1.5 py-0.5"
+                  />
                 </label>
 
                 <label className="flex items-center gap-1 font-mono text-[11px] text-beige-kem/55">
                   Hạng ghế
-                  <select
+                  <Select
                     value={(() => {
                       const v = sharedValue((s) => s.categoryId ?? null);
                       return v === "mixed" ? "mixed" : v === null ? "" : String(v);
                     })()}
-                    onChange={(e) =>
-                      assignCategoryTo(e.target.value === "" ? null : Number(e.target.value))
-                    }
-                    className="border-2 border-beige-kem/50 bg-transparent px-1.5 py-0.5 text-beige-kem"
-                  >
-                    {sharedValue((s) => s.categoryId ?? null) === "mixed" && (
-                      <option value="mixed">— nhiều hạng ghế —</option>
-                    )}
-                    <option value="">Chưa có hạng ghế</option>
-                    {draft.categories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                    options={[
+                      ...(sharedValue((s) => s.categoryId ?? null) === "mixed"
+                        ? [{ value: "mixed", label: "— nhiều hạng ghế —" }]
+                        : []),
+                      { value: "", label: "Chưa có hạng ghế" },
+                      ...draft.categories.map((c) => ({ value: String(c.id), label: c.name })),
+                    ]}
+                    onChange={(v) => assignCategoryTo(v === "" ? null : Number(v))}
+                    triggerClassName="border-2 border-beige-kem/50 bg-transparent px-1.5 py-0.5"
+                  />
                 </label>
 
                 <label
@@ -1929,24 +1928,24 @@ export default function ChartEditor({
                   title="Chọn từng ghế (giữ Alt) để đổi loại ghế"
                 >
                   Loại ghế
-                  <select
+                  <Select
                     disabled={seatSel.size === 0}
                     value={(() => {
                       const types = new Set(subjectSeats.map((s) => s.seatType ?? "single"));
                       return types.size === 1 ? [...types][0] : "mixed";
                     })()}
-                    onChange={(e) => setSeatsType(e.target.value as EditableSeatType)}
-                    className="border-2 border-beige-kem/50 bg-transparent px-1.5 py-0.5 text-beige-kem disabled:cursor-not-allowed"
-                  >
-                    {new Set(subjectSeats.map((s) => s.seatType ?? "single")).size > 1 && (
-                      <option value="mixed">— nhiều loại —</option>
-                    )}
-                    {EDITABLE_SEAT_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {t === "single" ? "Ghế đơn" : "Ghế đôi"}
-                      </option>
-                    ))}
-                  </select>
+                    options={[
+                      ...(new Set(subjectSeats.map((s) => s.seatType ?? "single")).size > 1
+                        ? [{ value: "mixed", label: "— nhiều loại —" }]
+                        : []),
+                      ...EDITABLE_SEAT_TYPES.map((t) => ({
+                        value: t,
+                        label: t === "single" ? "Ghế đơn" : "Ghế đôi",
+                      })),
+                    ]}
+                    onChange={(v) => setSeatsType(v as EditableSeatType)}
+                    triggerClassName="border-2 border-beige-kem/50 bg-transparent px-1.5 py-0.5"
+                  />
                 </label>
 
                 <button

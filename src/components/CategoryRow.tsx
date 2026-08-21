@@ -131,13 +131,25 @@ export default function CategoryRow({
                     role="tab"
                     aria-selected={active}
                     onClick={() => setActiveTab(index)}
-                    className={`font-display text-title-m font-black leading-none transition sm:text-title-l ${
+                    className={`block pb-1 transition ${
                       active
-                        ? "border-b-4 border-burgundy pb-1 text-beige-kem"
-                        : "border-b-4 border-transparent pb-1 text-ink-soft hover:text-beige-kem"
+                        ? "border-b-4 border-burgundy text-beige-kem"
+                        : "border-b-4 border-transparent text-ink-soft hover:text-beige-kem"
                     }`}
                   >
-                    {tab.label}
+                    {/*
+                      The type lives on a span, not on the button.
+                      
+                      `index.css` sets `button, input, select { font: inherit }` OUTSIDE any layer,
+                      which outranks every Tailwind utility — a `text-title-l` written on a button
+                      is silently dropped and the control inherits body's 16px. The rule is
+                      deliberate and documented there; moving it into `@layer base` would resize
+                      every control in the app at once. A span inside the button is not a button, so
+                      the utilities apply to it normally.
+                    */}
+                    <span className="font-display text-title-m font-black leading-none sm:text-title-l">
+                      {tab.label}
+                    </span>
                   </button>
                 );
               })}
@@ -171,12 +183,23 @@ export default function CategoryRow({
             a single rule the way a printed listing page is ruled.
           */
           <div
-            className={`grid grid-flow-dense grid-cols-1 border-l border-t border-beige-kem/45 sm:grid-cols-2 ${
-              // Posters are half the width of a still at the same height, so more of them fit
-              // across before the row starts to tower over the bands around it. Five here has to
-              // stay in step with `CINEMA_PER_ROW`, which is how many the band is given — Tailwind
-              // only compiles class names it can read in the source, so this cannot be a variable.
-              film ? "lg:grid-cols-5" : "lg:grid-cols-4"
+            className={`grid grid-flow-dense border-l border-t border-beige-kem/45 ${
+              /*
+               * Posters go two-up on a phone; stills stay one.
+               *
+               * A 2:3 poster at the full width of a 390px screen is 465px tall, so one film filled
+               * the display and five of them made the band five screens of scrolling — the reader
+               * has to remember the first card by the time they reach the last, which is the one
+               * thing a shortlist is meant to save them. Half width makes it a glance again, and a
+               * portrait card survives being narrow far better than a landscape one does.
+               *
+               * Five at `lg` has to stay in step with `CINEMA_PER_ROW`, which is how many the band
+               * is given: Tailwind only compiles class names it can read in the source, so neither
+               * of these can be built from a variable.
+               */
+              film
+                ? "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5"
+                : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4"
             }`}
           >
             {shownEvents.map((evt) => (

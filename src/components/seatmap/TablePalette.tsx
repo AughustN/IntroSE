@@ -5,6 +5,13 @@
 
 import { useState } from "react";
 import type { LayoutElement, LayoutSection, LayoutTable, ShapePoint } from "@/shared/catalog/seatmap";
+import Select from "../Select";
+
+/** The two table shapes the designer can drop. */
+const TABLE_SHAPES = [
+  { value: "round", label: "Bàn tròn" },
+  { value: "rect", label: "Bàn chữ nhật" },
+] as const;
 
 /**
  * Tables, hall shapes and the standing area (FR-076).
@@ -164,26 +171,21 @@ export default function TablePalette({
       </p>
 
       <div className="mt-3 grid gap-2">
-        <select value={sectionId} onChange={(e) => setSectionId(Number(e.target.value) || "")} className={input}>
-          <option value="" className="bg-xanh-pho">
-            Khu vực cho bàn
-          </option>
-          {sections.map((s) => (
-            <option key={s.id} value={s.id} className="bg-xanh-pho">
-              {s.name}
-            </option>
-          ))}
-        </select>
+        <Select
+          value={sectionId === "" ? "" : String(sectionId)}
+          options={sections.map((s) => ({ value: String(s.id), label: s.name }))}
+          placeholder="Khu vực cho bàn"
+          onChange={(v) => setSectionId(Number(v) || "")}
+          triggerClassName={input}
+        />
 
         <div className="grid grid-cols-2 gap-2">
-          <select value={shape} onChange={(e) => setShape(e.target.value as "round" | "rect")} className={input}>
-            <option value="round" className="bg-xanh-pho">
-              Bàn tròn
-            </option>
-            <option value="rect" className="bg-xanh-pho">
-              Bàn chữ nhật
-            </option>
-          </select>
+          <Select
+            value={shape}
+            options={TABLE_SHAPES}
+            onChange={(v) => setShape(v as "round" | "rect")}
+            triggerClassName={input}
+          />
           <input
             value={seatCount}
             onChange={(e) => setSeatCount(e.target.value)}

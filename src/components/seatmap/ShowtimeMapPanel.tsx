@@ -10,6 +10,7 @@ import { layoutApi } from "../../services/catalogClient";
 import { formatVnd } from "../../services/currency";
 import SeatCanvas, { type CanvasBlock, type SeatCanvasHandle } from "./SeatCanvas";
 import { seatsInRect } from "./layoutOps";
+import Select from "../Select";
 
 /**
  * The inventory-aware actions on a showtime that already has a generated map (FR-027a, FR-033, FR-034).
@@ -334,20 +335,20 @@ export default function ShowtimeMapPanel({
           Mở khoá
         </button>
 
-        <select
-          value={tierId}
-          onChange={(e) => setTierId(Number(e.target.value) || "")}
-          className="h-9 border-2 border-beige-kem bg-surface-2 px-2 text-xs text-beige-kem outline-none"
-        >
-          <option value="" className="bg-xanh-pho">
-            Hạng vé
-          </option>
-          {tiers.map((t) => (
-            <option key={t.id} value={t.id} className="bg-xanh-pho">
-              {t.label} — {t.price.toLocaleString("vi-VN")}đ
-            </option>
-          ))}
-        </select>
+        {/*
+          The shared dropdown. A native `<select>` hands its list to the platform, which draws it in
+          the operating system's own chrome — a grey menu over a cream, mono-set designer.
+        */}
+        <Select
+          value={tierId === "" ? "" : String(tierId)}
+          options={tiers.map((t) => ({
+            value: String(t.id),
+            label: `${t.label} — ${t.price.toLocaleString("vi-VN")}đ`,
+          }))}
+          placeholder="Hạng vé"
+          onChange={(v) => setTierId(Number(v) || "")}
+          triggerClassName="h-9 border-2 border-beige-kem bg-surface-2 px-2 text-xs"
+        />
         <button
           className={btn}
           disabled={busy || ids.length === 0 || tierId === ""}

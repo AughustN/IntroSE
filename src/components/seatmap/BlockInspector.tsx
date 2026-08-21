@@ -15,6 +15,7 @@ import type {
 import { isSeatBearing } from "@/shared/catalog/seatmap-document";
 import { type BlockGeometry, BLOCK_LABEL } from "./documentOps";
 import { MAX_ARC_ANGLE } from "@/shared/catalog/seatmap-document";
+import Select from "../Select";
 
 /**
  * The block inspector — the reason the editor moved to a document at all.
@@ -198,38 +199,33 @@ export default function BlockInspector({
       {/* ---- Section and category: what makes the block publishable and priceable ---- */}
       <label className={`${label} mt-2`}>
         Khu vực
-        <select
-          value={block.sectionId ?? ""}
-          onChange={(e) => onChange({ sectionId: e.target.value === "" ? null : Number(e.target.value) })}
-          className={`mt-1 ${input}`}
-        >
-          <option value="" className="bg-xanh-pho">
-            — chưa thuộc khu nào —
-          </option>
-          {sections.map((s) => (
-            <option key={s.id} value={s.id} className="bg-xanh-pho">
-              {s.name}
-            </option>
-          ))}
-        </select>
+        {/*
+          The shared dropdown. A native `<select>` hands its list to the operating system, which
+          draws a grey platform menu over a designer made entirely of hairlines and mono type —
+          nothing written on the element reaches inside that menu.
+        */}
+        <div className="mt-1">
+          <Select
+            value={block.sectionId === null || block.sectionId === undefined ? "" : String(block.sectionId)}
+            options={sections.map((s) => ({ value: String(s.id), label: s.name }))}
+            placeholder="— chưa thuộc khu nào —"
+            onChange={(v) => onChange({ sectionId: v === "" ? null : Number(v) })}
+            triggerClassName={input}
+          />
+        </div>
       </label>
 
       <label className={`${label} mt-2`}>
         Hạng ghế
-        <select
-          value={block.categoryId ?? ""}
-          onChange={(e) => onChange({ categoryId: e.target.value === "" ? null : Number(e.target.value) })}
-          className={`mt-1 ${input}`}
-        >
-          <option value="" className="bg-xanh-pho">
-            — chưa thuộc hạng ghế nào —
-          </option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id} className="bg-xanh-pho">
-              {c.name}
-            </option>
-          ))}
-        </select>
+        <div className="mt-1">
+          <Select
+            value={block.categoryId === null || block.categoryId === undefined ? "" : String(block.categoryId)}
+            options={categories.map((c) => ({ value: String(c.id), label: c.name }))}
+            placeholder="— chưa thuộc hạng ghế nào —"
+            onChange={(v) => onChange({ categoryId: v === "" ? null : Number(v) })}
+            triggerClassName={input}
+          />
+        </div>
       </label>
       {(block.sectionId === null || block.categoryId === null) && isSeatBearing(block.kind) && (
         <p className="mt-1 text-[10px] leading-4 text-cam-dat">
@@ -324,32 +320,26 @@ export default function BlockInspector({
 
           <label className={`${label} mt-2`}>
             Nhãn hàng
-            <select
-              value={p.rowLabelScheme ?? "alpha-asc"}
-              onChange={(e) => onParams({ rowLabelScheme: e.target.value as RowLabelScheme })}
-              className={`mt-1 ${input}`}
-            >
-              {ROW_SCHEMES.map((o) => (
-                <option key={o.value} value={o.value} className="bg-xanh-pho">
-                  {o.label}
-                </option>
-              ))}
-            </select>
+            <div className="mt-1">
+              <Select
+                value={p.rowLabelScheme ?? "alpha-asc"}
+                options={ROW_SCHEMES}
+                onChange={(v) => onParams({ rowLabelScheme: v as RowLabelScheme })}
+                triggerClassName={input}
+              />
+            </div>
           </label>
 
           <label className={`${label} mt-2`}>
             Số ghế
-            <select
-              value={p.seatLabelScheme ?? "num-asc"}
-              onChange={(e) => onParams({ seatLabelScheme: e.target.value as SeatLabelScheme })}
-              className={`mt-1 ${input}`}
-            >
-              {SEAT_SCHEMES.map((o) => (
-                <option key={o.value} value={o.value} className="bg-xanh-pho">
-                  {o.label}
-                </option>
-              ))}
-            </select>
+            <div className="mt-1">
+              <Select
+                value={p.seatLabelScheme ?? "num-asc"}
+                options={SEAT_SCHEMES}
+                onChange={(v) => onParams({ seatLabelScheme: v as SeatLabelScheme })}
+                triggerClassName={input}
+              />
+            </div>
           </label>
 
           <label className={`${label} mt-2`}>

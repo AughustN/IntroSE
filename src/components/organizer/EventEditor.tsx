@@ -14,6 +14,7 @@ import {
 } from "../../services/catalogClient";
 import { useEventCategories } from "../../hooks/useEventCategories";
 import { sectionOfCategory } from "../../services/eventSections";
+import Select from "../Select";
 import AiListingPanel from "./AiListingPanel";
 import { CancelEventModal } from "./CancelEventModal";
 import CheckInPanel from "./CheckInPanel";
@@ -350,17 +351,12 @@ export default function EventEditor({
 
         <label className="mt-3 block">
           <span className={label}>Danh mục</span>
-          <select
+          <Select
             value={categoryCode}
-            onChange={(e) => setCategoryCode(e.target.value)}
-            className={input}
-          >
-            {categories.map((c) => (
-              <option key={c.code} value={c.code} className="bg-xanh-pho">
-                {c.labelVi}
-              </option>
-            ))}
-          </select>
+            options={categories.map((c) => ({ value: c.code, label: c.labelVi }))}
+            onChange={setCategoryCode}
+            triggerClassName={input}
+          />
         </label>
 
         {/*

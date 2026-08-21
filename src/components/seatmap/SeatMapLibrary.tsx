@@ -9,6 +9,7 @@ import { layoutApi, organizerApi, type MyVenue } from "../../services/catalogCli
 import { CHANGE_LABEL, compareDocuments, type DocumentDiff } from "./compare";
 import ConfirmDialog, { type ConfirmRequest } from "../ConfirmDialog";
 import OrganizerNav from "../organizer/OrganizerNav";
+import Select from "../Select";
 
 /**
  * The seat map library — every chart the organizer owns, in one place.
@@ -747,43 +748,38 @@ export default function SeatMapLibrary({
                   <span className="mb-1 block font-meta text-[11px] text-beige-kem/70">
                     Địa điểm
                   </span>
-                  <select
+                  {/*
+                    The shared dropdown, not a native `<select>`: a native one's option list is
+                    drawn by the operating system, so it opened as a grey platform menu over a
+                    designer built from hairlines and mono type, and nothing written on the element
+                    reaches inside that menu.
+                  */}
+                  <Select
                     value={venueId}
-                    onChange={(e) => setVenueId(e.target.value)}
+                    options={venues.map((venue) => ({
+                      value: String(venue.id),
+                      label: `${venue.name} · ${venue.city}`,
+                    }))}
+                    placeholder="Chọn địa điểm"
                     disabled={creating}
-                    className="h-10 w-full border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow text-beige-kem outline-none focus:border-burgundy"
-                  >
-                    <option value="" className="bg-xanh-pho">
-                      Chọn địa điểm
-                    </option>
-                    {venues.map((venue) => (
-                      <option key={venue.id} value={venue.id} className="bg-xanh-pho">
-                        {venue.name} · {venue.city}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setVenueId}
+                    triggerClassName="h-10 w-full border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow"
+                  />
                 </label>
 
                 {createMode === "template" && (
                   <label className="block">
                     <span className="mb-1 block font-meta text-[11px] text-beige-kem/70">Mẫu</span>
-                    <select
+                    <Select
                       value={templateSourceId}
-                      onChange={(e) => setTemplateSourceId(e.target.value)}
-                      disabled={creating}
-                      className="h-10 w-full border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow text-beige-kem outline-none focus:border-burgundy"
-                    >
-                      <option value="" className="bg-xanh-pho">
-                        Chọn mẫu
-                      </option>
-                      {(rows ?? [])
+                      options={(rows ?? [])
                         .filter((l) => l.isTemplate)
-                        .map((t) => (
-                          <option key={t.id} value={t.id} className="bg-xanh-pho">
-                            {t.name} · {t.seatCount} ghế
-                          </option>
-                        ))}
-                    </select>
+                        .map((t) => ({ value: String(t.id), label: `${t.name} · ${t.seatCount} ghế` }))}
+                      placeholder="Chọn mẫu"
+                      disabled={creating}
+                      onChange={setTemplateSourceId}
+                      triggerClassName="h-10 w-full border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow"
+                    />
                     {(rows ?? []).filter((l) => l.isTemplate).length === 0 && (
                       <p className="mt-2 font-meta text-meta text-cam-dat">
                         Chưa có mẫu nào. Mở một sơ đồ, rồi dùng "Lưu thành mẫu" để tạo.
@@ -797,23 +793,19 @@ export default function SeatMapLibrary({
                     <span className="mb-1 block font-meta text-[11px] text-beige-kem/70">
                       Sơ đồ nguồn
                     </span>
-                    <select
+                    <Select
                       value={duplicateSourceId}
-                      onChange={(e) => setDuplicateSourceId(e.target.value)}
-                      disabled={creating}
-                      className="h-10 w-full border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow text-beige-kem outline-none focus:border-burgundy"
-                    >
-                      <option value="" className="bg-xanh-pho">
-                        Chọn sơ đồ
-                      </option>
-                      {(rows ?? [])
+                      options={(rows ?? [])
                         .filter((l) => l.status !== "archived")
-                        .map((l) => (
-                          <option key={l.id} value={l.id} className="bg-xanh-pho">
-                            {l.name} · {l.venueName} · {l.seatCount} ghế
-                          </option>
-                        ))}
-                    </select>
+                        .map((l) => ({
+                          value: String(l.id),
+                          label: `${l.name} · ${l.venueName} · ${l.seatCount} ghế`,
+                        }))}
+                      placeholder="Chọn sơ đồ"
+                      disabled={creating}
+                      onChange={setDuplicateSourceId}
+                      triggerClassName="h-10 w-full border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow"
+                    />
                     {(rows ?? []).filter((l) => l.status !== "archived").length === 0 && (
                       <p className="mt-2 font-meta text-meta text-cam-dat">
                         Chưa có sơ đồ nào để nhân bản.

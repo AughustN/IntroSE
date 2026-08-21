@@ -104,7 +104,16 @@ export function RuledCard({
   return (
     <article
       onClick={() => onBookNow(evt)}
-      className={`group flex cursor-pointer flex-col border-b border-r border-beige-kem/45 transition-colors ${
+      /*
+       * A container, so the card can answer to its own width.
+       *
+       * It is five across in the cinema band and four across in the others, at every viewport, so
+       * "how much room does this card have" and "how wide is the window" are different questions
+       * and only the first one matters here. `@2xs` is 288px: on a 1536px window the cinema card is
+       * 294px and keeps every size it has today, while the same card on a 1280px window is 243px
+       * and takes the compact set. Nothing about the wider layouts moves.
+       */
+      className={`group @container flex cursor-pointer flex-col border-b border-r border-beige-kem/45 transition-colors ${
         isActiveHero ? "bg-bubblegum/25" : "bg-surface-2 hover:bg-bubblegum/20"
       }`}
     >
@@ -255,10 +264,18 @@ export function RuledCard({
           )}
         </div>
 
-        <div className="mt-auto flex items-end justify-between gap-4 pt-5">
+        {/*
+          `flex-wrap` is the guarantee and the container query is the polish.
+          
+          The price and the booking link sat on one line at a fixed 32px whatever the card's width,
+          so a long price in a narrow card pushed the link past the edge. Wrapping means it cannot
+          overflow at ANY width — including ones nobody has measured — and the smaller type below
+          288px means it rarely has to.
+        */}
+        <div className="mt-auto flex flex-wrap items-end justify-between gap-x-4 gap-y-2 pt-5">
           <div>
             <p className="label-eyebrow text-ink-soft">Từ</p>
-            <p className="mt-1 font-display text-title-m font-black leading-none text-beige-kem">
+            <p className="mt-1 font-display text-title-s font-black leading-none text-beige-kem @2xs:text-title-m">
               {formatVnd(evt.price)}
             </p>
           </div>
