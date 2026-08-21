@@ -133,9 +133,9 @@ export const TurnstileWidget: React.FC<TurnstileWidgetProps> = ({
 
   if (!siteKey) {
     return (
-      <div className="flex items-center gap-2 text-xs text-slate-500 py-1.5 px-3 bg-slate-50 dark:bg-slate-800/40 rounded-lg border border-slate-200 dark:border-slate-700/50">
-        <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
-        <span>Bảo vệ chống bot tự động đang hoạt động</span>
+      <div className="flex items-center gap-2 font-meta text-meta text-la-co-ink py-1.5 px-3 bg-la-co/10 rounded-full border border-la-co/30">
+        <ShieldCheck className="w-4 h-4 text-la-co-ink shrink-0" />
+        <span>Bảo vệ chống bot tự động đang kích hoạt</span>
       </div>
     );
   }
@@ -143,13 +143,13 @@ export const TurnstileWidget: React.FC<TurnstileWidgetProps> = ({
   return (
     <div className={`turnstile-container my-2 flex flex-col items-center justify-center min-h-[65px] ${className}`}>
       {isLoading && (
-        <div className="flex items-center gap-2 text-sm text-slate-500 animate-pulse">
-          <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
-          <span>Đang tải kiểm tra bảo mật...</span>
+        <div className="flex items-center gap-2 font-meta text-body text-ink-soft animate-pulse">
+          <Loader2 className="w-4 h-4 animate-spin text-burgundy-ink" />
+          <span>Đang kiểm tra bảo mật...</span>
         </div>
       )}
       {loadError && (
-        <div className="flex items-center gap-2 text-xs text-rose-500 bg-rose-50 dark:bg-rose-950/30 p-2 rounded-lg border border-rose-200 dark:border-rose-900/50">
+        <div className="flex items-center gap-2 font-meta text-meta text-burgundy-ink bg-burgundy/10 p-2.5 rounded-xl border border-burgundy/40">
           <AlertCircle className="w-4 h-4 shrink-0" />
           <span>{loadError}</span>
         </div>

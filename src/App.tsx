@@ -658,6 +658,16 @@ export default function App() {
    */
   const releaseHold = useCallback(async (session: HoldSession) => {
     setHold(null);
+    setQueueTokens((prev) => {
+      const next = { ...prev };
+      delete next[session.showtimeId];
+      return next;
+    });
+    setTurnstileTokens((prev) => {
+      const next = { ...prev };
+      delete next[session.showtimeId];
+      return next;
+    });
     try {
       await holdsClient.cancel(session.reservationId);
     } catch (e) {
@@ -668,6 +678,18 @@ export default function App() {
   const handleHoldExpired = useCallback(() => {
     const expired = holdRef.current;
     setHold(null);
+    if (expired) {
+      setQueueTokens((prev) => {
+        const next = { ...prev };
+        delete next[expired.showtimeId];
+        return next;
+      });
+      setTurnstileTokens((prev) => {
+        const next = { ...prev };
+        delete next[expired.showtimeId];
+        return next;
+      });
+    }
     if (!expired) return;
 
     // UC-11 A2: the whole selection lapses together and the buyer is returned to pick again.
@@ -1692,7 +1714,21 @@ export default function App() {
         const activeCToken = cToken || turnstileTokens[bookingShowtimeId] || "mock-turnstile-token";
         if (mine && hold) {
           const updated = await holdsClient.release(hold.reservationId, [seat.showtimeSeatId!]);
-          setHold(updated.items.length === 0 ? null : sessionFromReservation(updated, context));
+          if (updated.items.length === 0) {
+            setHold(null);
+            setQueueTokens((prev) => {
+              const next = { ...prev };
+              delete next[bookingShowtimeId];
+              return next;
+            });
+            setTurnstileTokens((prev) => {
+              const next = { ...prev };
+              delete next[bookingShowtimeId];
+              return next;
+            });
+          } else {
+            setHold(sessionFromReservation(updated, context));
+          }
         } else {
           const updated = hold
             ? await holdsClient.add(hold.reservationId, { seatIds: [seat.showtimeSeatId!], queueToken: activeQToken, turnstileToken: activeCToken })
@@ -1705,7 +1741,22 @@ export default function App() {
           setHold(sessionFromReservation(updated, context));
         }
       } catch (e) {
-        if (e instanceof HoldError && e.code === "queue_token_required") {
+        if (
+          e instanceof HoldError &&
+          (e.code === "queue_token_required" ||
+            e.code === "queue_token_invalid" ||
+            e.code === "queue_token_expired")
+        ) {
+          setQueueTokens((prev) => {
+            const next = { ...prev };
+            delete next[bookingShowtimeId];
+            return next;
+          });
+          setTurnstileTokens((prev) => {
+            const next = { ...prev };
+            delete next[bookingShowtimeId];
+            return next;
+          });
           pendingHoldActionRef.current = executeToggle;
           setWaitingRoomShowtimeId(bookingShowtimeId);
           return;
@@ -1785,21 +1836,50 @@ export default function App() {
           const tierId = Number(tier.id);
           const activeQToken = qToken || queueTokens[showtimeId];
           const activeCToken = cToken || turnstileTokens[showtimeId] || "mock-turnstile-token";
-          const updated =
-            delta > 0
-              ? live
-                ? await holdsClient.add(live.reservationId, { ticketTierId: tierId, quantity: delta, queueToken: activeQToken, turnstileToken: activeCToken })
-                : await holdsClient.hold({ showtimeId, ticketTierId: tierId, quantity: delta, queueToken: activeQToken, turnstileToken: activeCToken })
-              : await holdsClient.releaseQuantity(live!.reservationId, tierId, -delta);
+          if (delta < 0) {
+            const updated = await holdsClient.releaseQuantity(live!.reservationId, tierId, -delta);
+            if (updated.status !== "active" || updated.items.length === 0) {
+              setHold(null);
+              setQueueTokens((prev) => {
+                const next = { ...prev };
+                delete next[showtimeId];
+                return next;
+              });
+              setTurnstileTokens((prev) => {
+                const next = { ...prev };
+                delete next[showtimeId];
+                return next;
+              });
+            } else {
+              setHold(sessionFromReservation(updated, context));
+            }
+          } else {
+            const updated = live
+              ? await holdsClient.add(live.reservationId, { ticketTierId: tierId, quantity: delta, queueToken: activeQToken, turnstileToken: activeCToken })
+              : await holdsClient.hold({ showtimeId, ticketTierId: tierId, quantity: delta, queueToken: activeQToken, turnstileToken: activeCToken });
+            setHold(updated.status === "active" ? sessionFromReservation(updated, context) : null);
+          }
 
           setBookingDate(date);
           setBookingTime(time);
           setBookingShowtimeId(showtimeId);
-          // Stepping the last ticket off closes the reservation server-side, which is the signal that
-          // there is nothing left to hold — not an error.
-          setHold(updated.status === "active" ? sessionFromReservation(updated, context) : null);
         } catch (e) {
-          if (e instanceof HoldError && e.code === "queue_token_required") {
+          if (
+            e instanceof HoldError &&
+            (e.code === "queue_token_required" ||
+              e.code === "queue_token_invalid" ||
+              e.code === "queue_token_expired")
+          ) {
+            setQueueTokens((prev) => {
+              const next = { ...prev };
+              delete next[showtimeId];
+              return next;
+            });
+            setTurnstileTokens((prev) => {
+              const next = { ...prev };
+              delete next[showtimeId];
+              return next;
+            });
             pendingHoldActionRef.current = executeHold;
             setWaitingRoomShowtimeId(showtimeId);
             return;
@@ -2623,6 +2703,7 @@ export default function App() {
         <WaitingRoomModal
           showtimeId={waitingRoomShowtimeId}
           isOpen={true}
+          theme={theme}
           onAdmitted={(qToken, cToken) => {
             void handleWaitingRoomAdmitted(waitingRoomShowtimeId, qToken, cToken);
           }}
