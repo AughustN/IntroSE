@@ -4,6 +4,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Image } from "lucide-react";
 import type { EventDetail } from "@/shared/catalog/types";
 import { organizerApi } from "../../services/catalogClient";
 import { ageRestrictionLabel } from "@/shared/catalog/age-restriction";
@@ -86,7 +87,10 @@ export default function EventPreviewOverlay({
         {/* Named as a preview at the top, so a screenshot of this can never be mistaken for the
             live page by whoever it gets sent to. */}
         <div className="flex items-center justify-between border-b border-beige-kem/25 bg-cam-dat/15 px-5 py-3">
-          <p id="preview-title" className="font-meta text-eyebrow font-bold uppercase tracking-widest text-cam-dat">
+          <p
+            id="preview-title"
+            className="font-meta text-eyebrow font-bold uppercase tracking-widest text-cam-dat"
+          >
             Xem trước — chưa hiển thị công khai
           </p>
           <button
@@ -103,16 +107,24 @@ export default function EventPreviewOverlay({
 
         {detail && (
           <div className="space-y-4 p-5">
-            {detail.imageUrl && (
-              <img
-                src={detail.imageUrl}
-                alt=""
-                className="aspect-[16/9] w-full object-cover"
-              />
+            {/* The cover slot is always drawn — an empty banner renders as a named placeholder
+                rather than a blank gap, so the organizer sees WHAT is missing, and where. */}
+            {detail.imageUrl ? (
+              <img src={detail.imageUrl} alt="" className="aspect-[16/9] w-full object-cover" />
+            ) : (
+              <div
+                className="flex aspect-[16/9] w-full items-center justify-center gap-2.5 border border-beige-kem/20"
+                style={{ background: "#f0e3d0" }}
+              >
+                <Image className="h-[30px] w-[30px] text-ink-soft" />
+                <span className="font-meta text-meta text-ink-soft">Ảnh bìa sự kiện 16:9</span>
+              </div>
             )}
 
             <div>
-              <h2 className="font-display text-title-m font-black text-beige-kem">{detail.title}</h2>
+              <h2 className="font-display text-title-m font-black text-beige-kem">
+                {detail.title}
+              </h2>
               <p className="mt-1 font-meta text-meta text-ink-soft">
                 {detail.categoryLabel}
                 {detail.ageRestriction ? ` · ${ageRestrictionLabel(detail.ageRestriction)}` : ""}

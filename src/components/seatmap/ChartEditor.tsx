@@ -9,6 +9,7 @@ import type {
   BlockParams,
   ChartDocument,
   DocumentBlock,
+  DocumentSeat,
 } from "@/shared/catalog/seatmap-document";
 import { emptyDocument, nextBlockKey } from "@/shared/catalog/seatmap-document";
 import { projectDocument } from "@/shared/catalog/seatmap-project";
@@ -545,37 +546,57 @@ export default function ChartEditor({
 
   const projected = useMemo(() => projectDocument(draft), [draft]);
 
-  const issues = useMemo<ValidationIssue[]>(
-    () =>
-      validateLayout({
-        // The same validator the publish gate runs, on the same geometry it will judge — so a problem
-        // shows up here rather than at the moment the organizer presses "Phát hành".
-        seats: projected.seats.map((s, i) => ({
-          id: s.id ?? -(i + 1),
-          sectionId: s.sectionId,
-          categoryId: s.categoryId,
-          rowLabel: s.rowLabel,
-          seatNumber: s.seatNumber,
-          x: s.x,
-          y: s.y,
-        })),
-        sections: projected.sections.map((s) => ({
-          id: s.id as number,
-          name: s.name,
-          seatSizeMultiplier: s.seatSizeMultiplier,
-        })),
-        categories: projected.categories.map((c) => ({ id: c.id as number, name: c.name })),
-        elements: projected.elements.map((e) => ({
-          kind: e.kind,
-          x: e.x,
-          y: e.y,
-          points: e.points,
-          capacity: e.capacity,
-          categoryId: e.categoryId,
-        })),
-      }),
-    [projected],
-  );
+  const issues = useMemo<ValidationIssue[]>(() => {
+    /*
+     * Companion pointers (0036) live in the DOCUMENT's seat-id space — editor-minted negatives as
+     * well as database ids — but the validator below addresses seats by the VALIDATOR id space,
+     * where a never-saved seat is a position-derived `-(index+1)`. The two spaces agree only for
+     * saved seats, so the pointer is translated through `seatOrigin` before the call or the live
+     * validation would flag `companion_wrong_target` on every freshly drawn pair until its first
+     * save (and then, worse, silently stop flagging real breakage once ids settle).
+     */
+    const docSeatByOrigin = new Map<string, DocumentSeat>();
+    for (const b of draft.blocks) {
+      (b.seats ?? []).forEach((s, i) => docSeatByOrigin.set(`${b.key}|${i}`, s));
+    }
+    const toValidatorId = new Map<number, number>();
+    projected.seatOrigin.forEach((origin, i) => {
+      const docSeat = docSeatByOrigin.get(`${origin.blockKey}|${origin.index}`);
+      if (docSeat) toValidatorId.set(docSeat.seatId, projected.seats[i]?.id ?? -(i + 1));
+    });
+    return validateLayout({
+      // The same validator the publish gate runs, on the same geometry it will judge — so a problem
+      // shows up here rather than at the moment the organizer presses "Phát hành".
+      seats: projected.seats.map((s, i) => ({
+        id: s.id ?? -(i + 1),
+        sectionId: s.sectionId,
+        categoryId: s.categoryId,
+        rowLabel: s.rowLabel,
+        seatNumber: s.seatNumber,
+        x: s.x,
+        y: s.y,
+        isAccessible: s.isAccessible,
+        companionSeatId:
+          s.companionSeatId === null || s.companionSeatId === undefined
+            ? (s.companionSeatId ?? undefined)
+            : (toValidatorId.get(s.companionSeatId) ?? s.companionSeatId),
+      })),
+      sections: projected.sections.map((s) => ({
+        id: s.id as number,
+        name: s.name,
+        seatSizeMultiplier: s.seatSizeMultiplier,
+      })),
+      categories: projected.categories.map((c) => ({ id: c.id as number, name: c.name })),
+      elements: projected.elements.map((e) => ({
+        kind: e.kind,
+        x: e.x,
+        y: e.y,
+        points: e.points,
+        capacity: e.capacity,
+        categoryId: e.categoryId,
+      })),
+    });
+  }, [projected, draft.blocks]);
 
   /**
    * What actually stops a publish, and what merely wants saying.
@@ -673,7 +694,33 @@ export default function ChartEditor({
     return map;
   }, [projected.seats, draft.categories]);
 
-  /** Section hulls, drawn behind the seats — the canvas already knows how to title a group. */
+  /**
+   * The category legend: colour, name, how much of the chart sells under each one.
+   *
+   * Counted from the document itself — seats for seat-bearing blocks, capacity for standing zones —
+   * because a legend that listed every category ever created would show colours that appear nowhere
+   * on the picture. Alphabetical, matching the way the server orders categories, so the two readers
+   * of categories cannot disagree about order (Principle VI).
+   */
+  const categoryLegend = useMemo(() => {
+    const inUse = [...draft.categories]
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        color: c.color,
+        count: projected.seats.filter((s) => s.categoryId === c.id).length,
+        capacity: draft.blocks
+          .filter((b) => b.kind === "ga-zone" && b.categoryId === c.id)
+          .reduce((n, b) => n + (b.capacity ?? 0), 0),
+      }))
+      .filter((c) => c.count > 0 || c.capacity > 0)
+      .sort((a, b) => a.name.localeCompare(b.name, "vi"));
+    return inUse;
+  }, [draft.categories, draft.blocks, projected.seats]);
+
+  /**
+   * Section hulls, drawn behind the seats — the canvas already knows how to title a group.
+   */
   const blocks = useMemo<CanvasBlock[]>(
     () =>
       // The hulls are a view aid the organizer can switch off (§44), so an empty list when hidden
@@ -1287,6 +1334,60 @@ export default function ChartEditor({
     return projected.seats.filter((s, i) => selected.has(blockOfSeat.get(s.id ?? -(i + 1)) ?? ""));
   }, [projected.seats, seatSel, selected, blockOfSeat]);
 
+  /**
+   * Seat id → its label ("A1" or "Khu A · A1") — lookups for the pairing UI (0036). Built from the
+   * projection so the id space matches what `subjectSeats` rows and `selectedSeatRefs` address.
+   */
+  const seatLabelOf = useMemo(() => {
+    const map = new Map<number, string>();
+    projected.seats.forEach((s, i) => {
+      map.set(s.id ?? -(i + 1), `${s.rowLabel}${s.seatNumber}`);
+    });
+    return map;
+  }, [projected.seats]);
+
+  /**
+   * The two selections the pairing toolbar needs (0036), both derived from `subjectSeats`:
+   * - `pairableAccessible`: the selection holds exactly one wheelchair seat — the TARGET of a pair.
+   * - `pairableCompanion`: exactly one ordinary (non-wheelchair) seat — the would-be companion.
+   *
+   * The "Ghép ghế đi kèm" button is enabled only when BOTH are true for a two-seat selection: one
+   * wheelchair, one ordinary. Unpairing is offered whenever one of the selected seats carries a
+   * pointer — dangling included (a deleted partner must still be clearable).
+   */
+  const pairPairable = useMemo(() => {
+    const accessibleOnes = subjectSeats.filter((s) => s.isAccessible);
+    const ordinaryOnes = subjectSeats.filter((s) => !s.isAccessible);
+    return {
+      canPair:
+        subjectSeats.length === 2 && accessibleOnes.length === 1 && ordinaryOnes.length === 1,
+      accessible: accessibleOnes[0] ?? null,
+      companion: ordinaryOnes[0] ?? null,
+    };
+  }, [subjectSeats]);
+
+  /** The pair link the current selection already carries, for the "Đang đi kèm" readout. */
+  const existingPair = useMemo(() => {
+    if (subjectSeats.length !== 1) return null;
+    const s = subjectSeats[0];
+    if (!s) return null;
+    const docCompanionId = (() => {
+      // Find the document seat behind this projected one to read its pointer. The projection SHOWS
+      // the pointer on the LayoutSeat, but the document is the source — and this also works for
+      // unsaved seats, where the projected id is a position-derived negative.
+      const origin = originOfSeat.get(s.id ?? -(projected.seats.indexOf(s) + 1));
+      if (!origin) return null;
+      return (
+        draft.blocks.find((b) => b.key === origin.blockKey)?.seats?.[origin.index]
+          ?.companionSeatId ?? null
+      );
+    })();
+    if (docCompanionId === null || docCompanionId === undefined) return null;
+    // The label resolves only for a target seat THIS chart still holds — a pointer at one the
+    // organizer already deleted shows "(ghế đã xoá)", which is exactly the state to repair.
+    return { seat: s, targetLabel: seatLabelOf.get(docCompanionId) ?? "(ghế đã xoá)" };
+  }, [subjectSeats, originOfSeat, draft.blocks, seatLabelOf, projected.seats]);
+
   const hasGroupedSelection = useMemo(
     () => [...selected].some((k) => draft.blocks.find((b) => b.key === k)?.groupId),
     [selected, draft.blocks],
@@ -1334,6 +1435,37 @@ export default function ChartEditor({
   /** Mark or unmark the selected seats as accessible — a per-seat property by nature. */
   const setSeatsAccessible = (accessible: boolean) =>
     op((d) => updateSeats(d, selectedSeatRefs, { isAccessible: accessible }));
+
+  /**
+   * Companion pairing (0036): the toolbar's "Ghép ghế đi kèm" sets the pointer on the ORDINARY seat
+   * of a two-seat selection (one wheelchair, one ordinary). The pointer lives in the document's
+   * seat-id space, so the value written is the TARGET's DOCUMENT seatId, not its projection id —
+   * resolved through `originOfSeat` back into the block.
+   */
+  const pairSeats = () => {
+    const { accessible, companion } = pairPairable;
+    if (!accessible || !companion) return;
+    const accessibleOrigin = originOfSeat.get(
+      accessible.id ?? -(projected.seats.indexOf(accessible) + 1),
+    );
+    if (!accessibleOrigin) return;
+    const targetBlock = draft.blocks.find((b) => b.key === accessibleOrigin.blockKey);
+    const targetDocSeat = targetBlock?.seats?.[accessibleOrigin.index];
+    if (!targetDocSeat) return;
+    const companionOrigin = originOfSeat.get(
+      companion.id ?? -(projected.seats.indexOf(companion) + 1),
+    );
+    if (!companionOrigin) return;
+    op((d) => updateSeats(d, [companionOrigin], { companionSeatId: targetDocSeat.seatId }));
+  };
+
+  /** Break the current selection's partner link (0036). Offered whenever the one selected seat
+   *  carries a pointer — including a dangling one. */
+  const unpairSeats = () =>
+    op((d) => {
+      const cleared = updateSeats(d, selectedSeatRefs, { companionSeatId: undefined });
+      return cleared;
+    });
 
   /**
    * Begin a rotation drag from the handle.
@@ -1959,6 +2091,33 @@ export default function ChartEditor({
                   {seatSel.size > 0 && subjectSeats.every((s) => s.isAccessible) ? " · bật" : ""}
                 </button>
 
+                {/*
+                  Companion pairing (0036). Two buttons appear only when they are meaningful — the
+                  selector is the guide: pick the wheelchair seat and the seat beside it together.
+                  "Ghép ghế đi kèm" requires the selection to contain one wheelchair seat and one
+                  ordinary seat; anything else is disabled with a hint. Unpairing appears whenever
+                  the one selected seat has a pointer — dangling ones included, since the organizer
+                  cannot repair what they cannot release.
+                */}
+                {pairPairable.canPair && (
+                  <button
+                    onClick={pairSeats}
+                    className={btn}
+                    disabled={seatSel.size !== 2}
+                    title="Chọn 1 ghế xe lăn + 1 ghế kế bên để ghép"
+                  >
+                    Ghép ghế đi kèm
+                  </button>
+                )}
+                {existingPair && (
+                  <span className="flex items-center gap-1 font-mono text-[11px] text-beige-kem/70">
+                    Đang đi kèm: {existingPair.targetLabel}
+                    <button onClick={unpairSeats} className={`${btn} py-0`} title="Bỏ ghép cặp này">
+                      Bỏ ghép
+                    </button>
+                  </span>
+                )}
+
                 <button
                   onClick={() => {
                     const anyOpen = draft.blocks.some(
@@ -1999,37 +2158,35 @@ export default function ChartEditor({
                   Xoá
                 </button>
 
-                {(["left", "centerX", "right", "top", "centerY", "bottom"] as const).map(
-                  (edge) => (
-                    <button
-                      key={edge}
-                      className={btn}
-                      disabled={selected.size < 2}
-                      onClick={() => applyAlign(edge)}
-                      title={
-                        {
-                          left: "Canh trái",
-                          centerX: "Canh giữa ngang",
-                          right: "Canh phải",
-                          top: "Canh trên",
-                          centerY: "Canh giữa dọc",
-                          bottom: "Canh dưới",
-                        }[edge] + " — cần từ 2 khối"
-                      }
-                    >
+                {(["left", "centerX", "right", "top", "centerY", "bottom"] as const).map((edge) => (
+                  <button
+                    key={edge}
+                    className={btn}
+                    disabled={selected.size < 2}
+                    onClick={() => applyAlign(edge)}
+                    title={
                       {
-                        {
-                          left: "⇤",
-                          centerX: "↔",
-                          right: "⇥",
-                          top: "⇧",
-                          centerY: "↕",
-                          bottom: "⇩",
-                        }[edge]
-                      }
-                    </button>
-                  ),
-                )}
+                        left: "Canh trái",
+                        centerX: "Canh giữa ngang",
+                        right: "Canh phải",
+                        top: "Canh trên",
+                        centerY: "Canh giữa dọc",
+                        bottom: "Canh dưới",
+                      }[edge] + " — cần từ 2 khối"
+                    }
+                  >
+                    {
+                      {
+                        left: "⇤",
+                        centerX: "↔",
+                        right: "⇥",
+                        top: "⇧",
+                        centerY: "↕",
+                        bottom: "⇩",
+                      }[edge]
+                    }
+                  </button>
+                ))}
 
                 {/* Distribute (§26). Needs three: two blocks have no gap between them to even out. */}
                 {(["horizontal", "vertical"] as const).map((axis) => (
@@ -2359,7 +2516,7 @@ export default function ChartEditor({
                     const a = ((selectedBlock.rotation - 90) * Math.PI) / 180;
                     const hx = selectedBlock.x + Math.cos(a) * reach;
                     const hy = selectedBlock.y + Math.sin(a) * reach;
-                    return (
+                    const handle = (
                       <g>
                         <line
                           x1={selectedBlock.x}
@@ -2381,6 +2538,41 @@ export default function ChartEditor({
                           aria-label={`Xoay ${selectedBlock.title}`}
                           onPointerDown={(e) => beginRotate(selectedBlock, e)}
                         />
+                      </g>
+                    );
+                    // The solid selection box (§selection): the seat tint already says "selected",
+                    // but only where the seats are — from two rows away nothing says which BLOCK the
+                    // rotation handle belongs to. Seating-block seats carry no rotation of their own
+                    // (a block rotates as one piece), so their axis-aligned extremes ARE the block's
+                    // outline, and the box stays aligned with a rotated block by definition.
+                    const bSeats = canvasSeats.filter((s) =>
+                      selected.has(blockOfSeat.get(s.id) ?? ""),
+                    );
+                    if (bSeats.length === 0) return handle;
+                    const pad = 90;
+                    let minX = Infinity;
+                    let minY = Infinity;
+                    let maxX = -Infinity;
+                    let maxY = -Infinity;
+                    for (const s of bSeats) {
+                      if (s.x < minX) minX = s.x;
+                      if (s.x > maxX) maxX = s.x;
+                      if (s.y < minY) minY = s.y;
+                      if (s.y > maxY) maxY = s.y;
+                    }
+                    return (
+                      <g>
+                        <rect
+                          x={minX - pad}
+                          y={minY - pad}
+                          width={maxX - minX + pad * 2}
+                          height={maxY - minY + pad * 2}
+                          fill="none"
+                          className="stroke-burgundy"
+                          strokeWidth={16}
+                          pointerEvents="none"
+                        />
+                        {handle}
                       </g>
                     );
                   })()
@@ -2409,6 +2601,29 @@ export default function ChartEditor({
               }
             />
           </div>
+
+          {/* What the colours MEAN, under the picture that uses them. Each chip is a category that
+              actually sells something on this chart — seats where seats exist, capacity where a
+              standing zone does — an unused class gets no chip, because a swatch that names nothing
+              on the picture is decoration. Colour carries the class here and never the price: pricing
+              belongs to each showtime's tiers (see BlockInspector's header comment). */}
+          {categoryLegend.length > 0 && (
+            <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 px-3 py-1.5 font-mono text-[10px] text-beige-kem/70">
+              {categoryLegend.map((c) => (
+                <span key={c.id} className="flex items-center gap-1.5">
+                  <span
+                    aria-hidden="true"
+                    className="h-3 w-3 shrink-0 border"
+                    style={{ borderColor: c.color, backgroundColor: c.color }}
+                  />
+                  {c.name}
+                  <span className="text-beige-kem/45">
+                    ({c.count > 0 ? `${c.count} ghế` : `sức chứa ${c.capacity}`})
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* §3's bottom bar: what the view is doing, and what is selected. Reads left-to-right from
               the map's own state to the organizer's — zoom and pointer first, then the selection. */}
@@ -2784,11 +2999,22 @@ export default function ChartEditor({
               </p>
               {(
                 [
-                  ["balanced", "Cân bằng", "Không để ghế lẻ kẹt giữa hàng. Ghế lẻ sát lối đi hoặc cuối hàng thì được."],
-                  ["strict", "Nghiêm ngặt", "Không để ghế lẻ ở bất kỳ đâu. Lấp đầy tốt hơn, nhưng từ chối nhiều lựa chọn hợp lý."],
+                  [
+                    "balanced",
+                    "Cân bằng",
+                    "Không để ghế lẻ kẹt giữa hàng. Ghế lẻ sát lối đi hoặc cuối hàng thì được.",
+                  ],
+                  [
+                    "strict",
+                    "Nghiêm ngặt",
+                    "Không để ghế lẻ ở bất kỳ đâu. Lấp đầy tốt hơn, nhưng từ chối nhiều lựa chọn hợp lý.",
+                  ],
                 ] as const
               ).map(([value, label, hint]) => (
-                <label key={value} className="flex cursor-pointer gap-2 border border-beige-kem/25 p-2">
+                <label
+                  key={value}
+                  className="flex cursor-pointer gap-2 border border-beige-kem/25 p-2"
+                >
                   <input
                     type="radio"
                     name="orphan-rule"
@@ -2798,7 +3024,9 @@ export default function ChartEditor({
                       void layoutApi.setOrphanRule(layout.id, value).catch(() => {
                         // Put the control back where the server still has it: a radio that stays
                         // moved after a failed save is a lie about what the chart will do.
-                        setLayout((prev) => (prev ? { ...prev, orphanRule: layout.orphanRule } : prev));
+                        setLayout((prev) =>
+                          prev ? { ...prev, orphanRule: layout.orphanRule } : prev,
+                        );
                       });
                     }}
                     className="mt-0.5 accent-burgundy"

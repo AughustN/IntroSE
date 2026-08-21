@@ -2,7 +2,7 @@ import type { Db } from "../../db/pool.js";
 import { pool, withTransaction } from "../../db/pool.js";
 import { generateUniqueSlug } from "./slug.js";
 import { queueEventNotification } from "../notifications/notifications.service.js";
-import { refreshSnapshot } from "../seatmap/apply.js";
+import { refreshSnapshot, syncCompanionLinks } from "../seatmap/apply.js";
 import { defaultCategoryId } from "../seatmap/layouts.repo.js";
 import { err } from "../../http.js";
 import { CATEGORY_COLORS } from "@shared/catalog/tier-palette.js";
@@ -555,6 +555,14 @@ export async function generateSeatMap(showtimeId: number, layoutId: number): Pro
       );
       total += res.rowCount ?? 0;
     }
+
+    /*
+     * Companion links (0036): copied from `seats` onto the showtime's own rows, through the shared
+     * sync the re-apply path uses. Run AFTER every tier's INSERTs — a pair straddles two physical
+     * seats, so both halves of every link must already exist as `showtime_seats` rows before either
+     * end can resolve its partner.
+     */
+    await syncCompanionLinks(showtimeId, layoutId, client);
 
     /*
      * Capacity zones (0027): a zone sells by COUNT, so its capacity becomes its tier's quantity

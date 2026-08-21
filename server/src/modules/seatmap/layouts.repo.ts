@@ -201,12 +201,13 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
       table_id: number | null;
       is_accessible: boolean;
       row_id: number | null;
+      companion_seat_id: number | null;
     }>(
       // `archived_at IS NULL`: an archived seat has left the chart and must not come back as one the
       // editor can move or the validator can complain about. Its row stays in the table for the
       // bookings that point at it (§18).
       `SELECT id, section_id, category_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation,
-              table_id, is_accessible, row_id
+              table_id, is_accessible, row_id, companion_seat_id
          FROM seats WHERE layout_id = $1 AND archived_at IS NULL
         ORDER BY section_id, row_label, seat_number`,
       [layoutId],
@@ -303,6 +304,7 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
       tableId: s.table_id,
       isAccessible: s.is_accessible,
       rowId: s.row_id,
+      companionSeatId: s.companion_seat_id,
     })),
     elements: elements.rows.map((e) => ({
       id: e.id,
@@ -769,7 +771,7 @@ export async function saveLayout(
         await client.query(
           `UPDATE seats SET section_id = $2, row_label = $3, seat_number = $4, seat_type = $5,
                             pos_x = $6, pos_y = $7, rotation = $8, category_id = $10,
-                            is_accessible = $11, row_id = $12
+                            is_accessible = $11, row_id = $12, companion_seat_id = NULL
              WHERE id = $1 AND layout_id = $9`,
           [
             seat.id,
@@ -790,8 +792,8 @@ export async function saveLayout(
       } else {
         const { rows } = await client.query<{ id: number }>(
           `INSERT INTO seats (layout_id, section_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation,
-                              category_id, is_accessible, row_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+                              category_id, is_accessible, row_id, companion_seat_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL) RETURNING id`,
           [
             layoutId,
             sectionId,
@@ -808,6 +810,47 @@ export async function saveLayout(
         );
         keptSeats.push(rows[0].id);
         savedIds.push(rows[0].id);
+      }
+    }
+
+    /*
+     * --- companion links (0036), written in a SECOND pass.
+     *
+     * A link names the partner by the DOCUMENT's seat id — which is the database id for a kept seat
+     * but an editor-minted negative for one that was drawn this session. Inside the loop above, a
+     * partner minted LATER in row-major order has no database id yet, so resolving first would drop
+     * the pairing on every save that creates both ends of it. Doing it after every seat has a real id
+     * costs one UPDATE per paired seat and never loses one.
+     *
+     * `docIdToRealId` maps every document seat id (positive or minted) to the id this save gave it,
+     * built from the SAME positional walk `stitchSeatIds` uses. What it cannot resolve — a pointer at
+     * a seat that is no longer in the chart — stays NULL: the validator's `companion_wrong_target`
+     * is the one to say so, and silently inventing a different pairing would be worse than a
+     * publish-time refusal.
+     */
+    const docIdToRealId = new Map<number, number>();
+    if (body.document && projected) {
+      const seatsByKey = new Map(body.document.blocks.map((b) => [b.key, b.seats ?? []]));
+      projected.seatOrigin.forEach((origin, i) => {
+        const docSeat = seatsByKey.get(origin.blockKey)?.[origin.index];
+        const real = savedIds[i];
+        if (docSeat && real !== undefined) docIdToRealId.set(docSeat.seatId, real);
+      });
+    }
+    const keptSeatSet = new Set(keptSeats);
+    const resolveCompanion = (companionId: number | null | undefined): number | null => {
+      if (companionId === null || companionId === undefined) return null;
+      const remapped = docIdToRealId.get(companionId);
+      if (remapped !== undefined) return remapped;
+      return keptSeatSet.has(companionId) ? companionId : null;
+    };
+    for (let i = 0; i < inSeats.length; i += 1) {
+      const companion = resolveCompanion(inSeats[i].companionSeatId);
+      if (companion !== null) {
+        await client.query(
+          `UPDATE seats SET companion_seat_id = $2 WHERE id = $1 AND layout_id = $3`,
+          [savedIds[i], companion, layoutId],
+        );
       }
     }
 
@@ -1034,10 +1077,10 @@ export async function updateOrphanRule(
   rule: "balanced" | "strict",
   db: Db = pool,
 ): Promise<void> {
-  await db.query(
-    `UPDATE venue_layouts SET orphan_rule = $2, updated_at = now() WHERE id = $1`,
-    [layoutId, rule],
-  );
+  await db.query(`UPDATE venue_layouts SET orphan_rule = $2, updated_at = now() WHERE id = $1`, [
+    layoutId,
+    rule,
+  ]);
 }
 
 /** The reference chart's current file, so a replacement can unlink the old one. */
@@ -1314,11 +1357,30 @@ export async function getShowtimeMap(showtimeId: number, db: Db = pool): Promise
     pos_x: number | null;
     pos_y: number | null;
     rotation: number;
+    buyer_name: string | null;
+    checked_in_at: Date | null;
   }>(
     `SELECT ss.id, ss.row_label, ss.seat_number, ss.section_name, ss.category_name, ss.ticket_tier_id,
-            tt.label, tt.price_amount::text AS price, ss.status, ss.pos_x, ss.pos_y, ss.rotation
+            tt.label, tt.price_amount::text AS price, ss.status, ss.pos_x, ss.pos_y, ss.rotation,
+            -- Who the seat was sold under, and when they walked in. The chain is the attendees
+            -- export's own (ticket -> order -> reservation_item -> this seat), and it takes the
+            -- newest NON-VOID ticket: a void is a refund, which un-names the seat even though the
+            -- seat row is still 'sold' while the money settles. customer_name is checkout's snapshot
+            -- of the buyer's nickname, the exact column the CSV prints — one name per buyer on both
+            -- surfaces. LIMIT 1 also keeps the map at one row per seat no matter how many times the
+            -- seat's ticket was refunded and reissued.
+            latest.customer_name AS buyer_name, latest.checked_in_at
        FROM showtime_seats ss
        JOIN ticket_tiers tt ON tt.id = ss.ticket_tier_id
+       LEFT JOIN LATERAL (
+         SELECT o2.customer_name, t.checked_in_at
+           FROM tickets t
+           JOIN orders o2 ON o2.id = t.order_id
+           JOIN reservation_items ri ON ri.id = t.reservation_item_id
+          WHERE ri.showtime_seat_id = ss.id AND t.qr_status <> 'void'
+          ORDER BY t.created_at DESC, t.id DESC
+          LIMIT 1
+       ) latest ON TRUE
       WHERE ss.showtime_id = $1
       ORDER BY ss.section_name NULLS FIRST, ss.row_label, ss.seat_number`,
     [showtimeId],
@@ -1374,6 +1436,8 @@ export async function getShowtimeMap(showtimeId: number, db: Db = pool): Promise
       rotation: r.rotation,
       shape: r.section_name ? styleOf.get(r.section_name)?.seatShape : undefined,
       sizeMultiplier: r.section_name ? styleOf.get(r.section_name)?.seatSizeMultiplier : undefined,
+      buyerName: r.buyer_name ?? null,
+      checkedInAt: r.checked_in_at?.toISOString() ?? null,
     })),
   };
 }

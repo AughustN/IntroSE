@@ -6,39 +6,39 @@ Dependencies installed for the monorepo (`npm install`), branch `BE`, 2026-07-23
 
 ### Runtime dependencies
 
-| Package | Version | Role |
-|---|---|---|
-| express | 4.22.2 | REST API |
-| pg | 8.22.0 | PostgreSQL driver |
-| bcrypt | 6.0.0 | password hashing (cost 12) |
-| sharp | 0.35.3 | avatar re-encode / strip EXIF |
-| jsonwebtoken | 9.0.3 | access token |
-| google-auth-library | 9.15.1 | verify Google ID token |
-| resend | 4.8.0 | transactional email (password reset) |
-| multer | 2.2.0 | multipart avatar upload |
-| zod | 3.25.76 | strict schema validation |
-| cookie-parser | 1.4.7 | refresh cookie |
-| uuid | 11.1.1 | random avatar filenames |
-| dotenv | 17.x | env loading |
-| react | 19.2.7 | SPA |
-| react-dom | 19.x | SPA |
-| lucide-react | ^1.17.0 | icons (FE) |
-| motion | ^12.23.24 | animation (FE) |
-| @google/genai | ^2.4.0 | Gemini (AI features) |
+| Package             | Version   | Role                                 |
+| ------------------- | --------- | ------------------------------------ |
+| express             | 4.22.2    | REST API                             |
+| pg                  | 8.22.0    | PostgreSQL driver                    |
+| bcrypt              | 6.0.0     | password hashing (cost 12)           |
+| sharp               | 0.35.3    | avatar re-encode / strip EXIF        |
+| jsonwebtoken        | 9.0.3     | access token                         |
+| google-auth-library | 9.15.1    | verify Google ID token               |
+| resend              | 4.8.0     | transactional email (password reset) |
+| multer              | 2.2.0     | multipart avatar upload              |
+| zod                 | 3.25.76   | strict schema validation             |
+| cookie-parser       | 1.4.7     | refresh cookie                       |
+| uuid                | 11.1.1    | random avatar filenames              |
+| dotenv              | 17.x      | env loading                          |
+| react               | 19.2.7    | SPA                                  |
+| react-dom           | 19.x      | SPA                                  |
+| lucide-react        | ^1.17.0   | icons (FE)                           |
+| motion              | ^12.23.24 | animation (FE)                       |
+| @google/genai       | ^2.4.0    | Gemini (AI features)                 |
 
 ### Dev dependencies
 
-| Package | Version |
-|---|---|
-| vite | 6.4.3 |
-| @vitejs/plugin-react | 5.2.0 |
-| @tailwindcss/vite / tailwindcss | 4.1.x |
-| typescript | ~5.8.2 |
-| tsx | 4.22.4 |
-| vitest / @vitest/coverage-v8 | 2.1.9 |
-| eslint | ^9.17.0 |
-| prettier | ^3.4.2 |
-| @types/* | node 22.x, express, pg, bcrypt, jsonwebtoken, multer, cookie-parser |
+| Package                         | Version                                                             |
+| ------------------------------- | ------------------------------------------------------------------- |
+| vite                            | 6.4.3                                                               |
+| @vitejs/plugin-react            | 5.2.0                                                               |
+| @tailwindcss/vite / tailwindcss | 4.1.x                                                               |
+| typescript                      | ~5.8.2                                                              |
+| tsx                             | 4.22.4                                                              |
+| vitest / @vitest/coverage-v8    | 2.1.9                                                               |
+| eslint                          | ^9.17.0                                                             |
+| prettier                        | ^3.4.2                                                              |
+| @types/*                        | node 22.x, express, pg, bcrypt, jsonwebtoken, multer, cookie-parser |
 
 ### Security bumps applied during install
 
@@ -69,15 +69,15 @@ Assembled the monorepo (FE from branch `FE` into `src/`, BE in `server/`, shared
 Full email/password + Google OAuth identity. Migration `0001_auth.sql` (users, wallets, refresh_tokens,
 password_resets, auth_events, organizers).
 
-| Area | What shipped |
-|---|---|
-| Register / login | email + optional unique phone + password (bcrypt 12); sign in by email OR phone; wallet created at registration |
-| Sessions | short JWT access token (in memory) + rotating httpOnly refresh cookie; **reuse detection kills the family**; live per-request check (suspend/logout bite next request) |
-| Recovery | password reset by emailed single-use link (Resend + ConsoleMailer) |
-| Profile | edit nickname/phone, **avatar upload** (magic-byte + sharp re-encode + SVG ban, on VPS disk) |
-| Organizer | apply → pending queue; capability derived per request |
-| Abuse | per-source throttle + progressive per-identifier delay; **no lockout** |
-| Google | verify ID token; keyed by provider subject; never merged with a password account |
+| Area             | What shipped                                                                                                                                                           |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Register / login | email + optional unique phone + password (bcrypt 12); sign in by email OR phone; wallet created at registration                                                        |
+| Sessions         | short JWT access token (in memory) + rotating httpOnly refresh cookie; **reuse detection kills the family**; live per-request check (suspend/logout bite next request) |
+| Recovery         | password reset by emailed single-use link (Resend + ConsoleMailer)                                                                                                     |
+| Profile          | edit nickname/phone, **avatar upload** (magic-byte + sharp re-encode + SVG ban, on VPS disk)                                                                           |
+| Organizer        | apply → pending queue; capability derived per request                                                                                                                  |
+| Abuse            | per-source throttle + progressive per-identifier delay; **no lockout**                                                                                                 |
+| Google           | verify ID token; keyed by provider subject; never merged with a password account                                                                                       |
 
 - **4 ADRs** (`docs/adr/`): session validation, refresh-token reuse detection, VPS deployment topology, avatar upload.
 - **Constitution amended to v2.0.0** (team-approved): integration cap 2 → 4 (+Google, +Resend); wallet refunds in scope; DATA-03 `pending_payment` removed (wallet-only atomic checkout); hosting → single VPS.
@@ -89,13 +89,13 @@ password_resets, auth_events, organizers).
 Migration `0002_catalog.sql` (event_categories seeded, venues **+created_by**, sections, seats, events,
 showtimes, ticket_tiers, showtime_seats, audit_logs).
 
-| Story | What shipped |
-|---|---|
-| US1-3 | public browse/search/filter, event detail by stable slug, showtimes, **read-only seat map** |
-| US4 | organizer create/edit/publish events (**pre-publish moderation** — public only after admin approval) |
-| US5 | venues + sections/seats + **per-section seat-map generation** |
-| US6 | admin moderation queue: approve / reject / flag / remove (writes `audit_logs`) |
-| US7 | SEO — server-renderable title/description, Open Graph, JSON-LD `Event`, canonical slug |
+| Story | What shipped                                                                                         |
+| ----- | ---------------------------------------------------------------------------------------------------- |
+| US1-3 | public browse/search/filter, event detail by stable slug, showtimes, **read-only seat map**          |
+| US4   | organizer create/edit/publish events (**pre-publish moderation** — public only after admin approval) |
+| US5   | venues + sections/seats + **per-section seat-map generation**                                        |
+| US6   | admin moderation queue: approve / reject / flag / remove (writes `audit_logs`)                       |
+| US7   | SEO — server-renderable title/description, Open Graph, JSON-LD `Event`, canonical slug               |
 
 - **Visibility predicate** (`catalog/visibility.ts`): public ⟺ `on_sale ∧ approved ∧ organizer.approved`, computed live on every read — the anti-leak control (drafts / pending / suspended-organizer never leak).
 - FE: browse/detail now read the **real API** (`catalogClient` + `catalogAdapter` mapping onto the existing `MovieEvent` UI); OrganizerPanel, AdminModeration, SeatMapBuilder, SeatMapView.
@@ -116,13 +116,13 @@ showtimes, ticket_tiers, showtime_seats, audit_logs).
 
 ### Commits (branch `BE`, author `Aughust`, no push)
 
-| Hash | Summary |
-|---|---|
-| `d4b4a80` | feat(auth): implement account & authentication (001) |
+| Hash      | Summary                                                                              |
+| --------- | ------------------------------------------------------------------------------------ |
+| `d4b4a80` | feat(auth): implement account & authentication (001)                                 |
 | `b85c7d8` | feat(catalog): event catalog & discovery (002) — public read + organizer/admin write |
-| `aeb2b57` | feat(catalog): seat-map generation (US5) |
-| `7263a60` | feat(catalog): seat-map UI — organizer builder + buyer read-only view |
-| `311bab6` | feat(catalog): SEO for event pages + polish (US7) |
+| `aeb2b57` | feat(catalog): seat-map generation (US5)                                             |
+| `7263a60` | feat(catalog): seat-map UI — organizer builder + buyer read-only view                |
+| `311bab6` | feat(catalog): SEO for event pages + polish (US7)                                    |
 
 ### Deferred
 
@@ -136,13 +136,13 @@ showtimes, ticket_tiers, showtime_seats, audit_logs).
 
 Built on branch `BE`. The real-time hold layer between the read-only catalog (002) and checkout (004).
 
-| Story | What shipped |
-|---|---|
-| US1 | hold-on-select: click a seat → concurrency-safe hold (`SELECT … FOR UPDATE`), owner = session user, 8-ticket cap, idempotent re-hold |
-| US2 | one reservation clock (7 min), sweeper releases on the DB's clock even with the client gone; one-time top-up grace (+7, ceiling 14) for 004 |
-| US3 | Socket.IO room per showtime, `seat:update` broadcast after every committed transition; DB stays the source of truth (socket is advisory) |
-| US4 | general admission holds a quantity via `ticket_tiers.reserved_quantity`; never oversold |
-| US5 | add/remove seats, cancel, running total + expiry on one active reservation per (user, showtime) |
+| Story | What shipped                                                                                                                                |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| US1   | hold-on-select: click a seat → concurrency-safe hold (`SELECT … FOR UPDATE`), owner = session user, 8-ticket cap, idempotent re-hold        |
+| US2   | one reservation clock (7 min), sweeper releases on the DB's clock even with the client gone; one-time top-up grace (+7, ceiling 14) for 004 |
+| US3   | Socket.IO room per showtime, `seat:update` broadcast after every committed transition; DB stays the source of truth (socket is advisory)    |
+| US4   | general admission holds a quantity via `ticket_tiers.reserved_quantity`; never oversold                                                     |
+| US5   | add/remove seats, cancel, running total + expiry on one active reservation per (user, showtime)                                             |
 
 - **Migration `0003_holds.sql`**: `reservations` (`extended_once`, partial unique index `uq_reservation_active`), `reservation_items`.
 - **Migration runner is now idempotent** — `schema_migrations` ledger; re-running `npm run db:migrate` is a no-op (0001/0002 backfilled on their "already exists" error).
@@ -160,3 +160,76 @@ Built on branch `BE`. The real-time hold layer between the read-only catalog (00
 
 - k6 WebSocket harness for PERF-03 / PERF-06 (shared with catalog T034).
 - Order conversion (`held → sold`), wallet debit, tickets — feature 004. A mock purchase currently leaves its reservation to expire.
+
+---
+
+## UI/UX polish round (2026-08-20, branch `dev_organizer`, uncommitted)
+
+Executed the approved plan `.opencode/plans/uiux-a2-bcdf-plan.md`: organizer-journey progress,
+chart-editor UX, companion seats end-to-end, form-based statuses, quality gates.
+
+| Task                     | What shipped                                                                                                                                                                                                                                                                             |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A2**                   | `FlowProgressStrip` — the organizer's step rail now carries a real progress strip (`stepProgress` + `ACTION_LABEL` in `flowSteps.ts`)                                                                                                                                                    |
+| **B3–B7**                | chart editor: B4 category legend, B7 live seat-count preview in `BlockInspector`, B5 order-aware map (`buyerName`/`checkedInAt` on `ShowtimeMapSeat`, `getShowtimeMap` joins the latest non-void ticket's `orders.customer_name` + `tickets.checked_in_at`), B6 copy verified consistent |
+| **C8 — companion seats** | full end-to-end pairing of a wheelchair seat with its companion                                                                                                                                                                                                                          |
+| **C9**                   | form-based statuses: hatch pattern in `SeatCanvas`, status-from-form (not hue) in `ShowtimeMapPanel` + legend (FR-064/067)                                                                                                                                                               |
+
+### C8 in detail
+
+- **Direction of the pointer**: set on the ORDINARY seat, pointing AT the wheelchair one (`companionSeatId` on `DocumentSeat`/`LayoutSeat`). The wheelchair seat itself never carries it.
+- **Shared round-trips** (`seatmap-document.ts`): `stripIds` drops the link (a template is re-paired), `remapDocument` re-points both ends onto the clone's own ids, `reviveDocument` follows a re-minted partner, `adoptLayout` normalises. Projection (`seatmap-project.ts`) carries it through `regenerateBlock`.
+- **Validation** (`seatmap-validate.ts`): `companion_wrong_target` is BLOCKING (dangling / non-wheelchair / double-claim); `accessible_without_companion` is a warning.
+- **Server**: migration `0036_companion_seats.sql` (self-referencing `BIGINT` columns on `seats` + `showtime_seats`, `ON DELETE SET NULL`); `saveLayout` writes links in a SECOND pass resolving doc ids via `seatOrigin` + positional `savedIds`; `getLayout` reads the column; `syncCompanionLinks` in `apply.ts` copies onto a showtime's rows at generation AND re-apply.
+- **Editor** (`ChartEditor.tsx`): pair/unpair toolbar buttons, live validation translates document-pointer space to projection space.
+- **Buyer** (`SeatLayout.tsx`): picking a wheelchair seat shows an informational notice.
+- **Tests**: 6 shared validation cases, a `companion pointers round-trip` describe (7 cases) in `seatmap-project.test.ts`, and `server/tests/seatmap/companion-seats.test.ts` (2 integration cases — save-and-read-back resolves both placeholder ids; generation copies the pointer onto the showtime's own row).
+
+### Gate status
+
+- `npm run typecheck`: **0 errors** (web + server).
+- `npm run test:web`: **430/430 pass**, 16 files.
+- Targeted server seatmap tests: **companion-seats 2/2**, showtime-map-orders 5/5.
+- `eslint` on changed files: no NEW findings (the flag hits in `OrganizerBusinessAnalytics` / `OrganizerEventsPage` / `ChartEditor` predate this round — those edits only stripped emojis/redrew spinners).
+- Full server suite (`npm test`): clean re-run finished — see the next round's verified verdict.
+
+## Design-sync round — organizer console + seat map editor (2026-08-21, branch `dev_organizer`, uncommitted on top of A2–C9)
+
+The design handoff bundle (`organizer-and-seat-map-editor/`, committed design = `.dc.html` re-creations
+of the existing module UI) was diffed section-by-section against the code with two read-only sub-agent
+passes; every delta that survived the "fake-controls vs real-controls" filter was applied. Three design
+decisions were confirmed with the organizer before work: keep the second analytics series but recolour
+it amber; give a selected seating block the design's solid red bounding box while the inner dashed hull
+stays; and give `MediaDropzone` a `captionInside` prop so the editor panels get the design's in-box
+caption without touching the create-event form's real constraint wording.
+
+| Area                | What changed                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Analytics           | greeting hero icon simplified to the design's lone outlined Sparkles (no decoration layer); `TimeSeriesChart` second series recoloured `#bfc0f2` → `#f19502` (the platform's remaining amber accent); donut legends rewritten from pills to stacked `font-meta` rows; event filter select dropped its `max-w-[200px] truncate`                                                                                                                                            |
+| Console shell       | mobile tabs `px-3` with shortened labels (Thống kê / Sự kiện / Tạo / Sơ đồ), ads tab hidden below `sm`; revenue stat shows `formatVndShort` (`486tr`) below `sm` via the new `currency.ts` helper                                                                                                                                                                                                                                                                         |
+| FlowProgressStrip   | `truncate` removed — the active-step line wraps on phones instead of being clipped                                                                                                                                                                                                                                                                                                                                                                                        |
+| MediaDropzone       | `captionInside` prop: panel label moves inside the drop target with the help line beneath; wired into `FloorPlanPanel` + `ReferenceChartPanel` only                                                                                                                                                                                                                                                                                                                       |
+| Preview/placeholder | `EventPreviewOverlay` empty-banner placeholder now the design's `#f0e3d0`                                                                                                                                                                                                                                                                                                                                                                                                 |
+| SeatCanvas          | stage: ink wash `/12` + `/55` outline (the showcase treatment); stage + area labels promote to `font-display font-bold` solid ink; capacity text `fill-beige-kem/65 font-sans`; standing zones without a chosen colour fall back to the standing-yellow (`#F0E442`, 2px stroke); facility markers unified to one ink outline; section hulls now a single burgundy dashed frame (`current` token, `/30` stroke, `/50` label, `font-sans`) instead of five category colours |
+| ChartEditor         | selected seating block draws the design's solid `#d93025` bounding box (stroke 16, seat-extent + 90 pad) under the existing rotation handle                                                                                                                                                                                                                                                                                                                               |
+| editorHint          | every branch trimmed to ≤4 clauses; view shortcuts kept only on the tool branch; tests re-pinned (3 clauses-per-state cap, distinct unlocks for 1/2/3-block states)                                                                                                                                                                                                                                                                                                       |
+| BlockInspector      | the rows × seats arithmetic line is always visible, not only mid-edit                                                                                                                                                                                                                                                                                                                                                                                                     |
+| PreviewOverlay      | simulated-sold seats solid `stone-800/stone-900`; picked seats solid burgundy (both match the design's preview palette and the hatch-pattern precedent for state-over-colour)                                                                                                                                                                                                                                                                                             |
+
+Seats already matching the design pixel-for-pixel (glyph geometry, selection colour, legend, status
+bar, every rail panel's interior, SeatMapLibrary) were left untouched.
+
+### Gate status
+
+- `npm run typecheck`: **0 errors**.
+- `npm run test:web`: **432/432 pass**, 16 files (was 430 — the editorHint rewrite re-pinned 2 tests).
+- Targeted server seatmap tests: companion-seats 2/2, showtime-map-orders 5/5.
+- Full server suite (`npm test`): **9 failed / 81 passed files, 12 failed / 722 passed tests** — ALL
+  verified pre-existing at HEAD with zero WIP applied (stash-verified of the same 8 files): Cloudinary
+  external-service 400 on the fake trailer, ai-listing price derivation (2), revision restore-409, RBAC
+  cancel-400, waitlist sold-out state, floorplan dimension guard + deterministic-URL timing, plus two
+  flakes (audit register-401, ownership timeout) that passed on re-run. No server code was touched in
+  this round; these are the round A2–C9's own debt.
+- `eslint` on every file this round touched: **identical finding set to HEAD** — zero NEW (the `any`
+  errors and ref-access warning predate it; `Surprising pre-existing LSP "Cannot find module '@/…'"`
+  noise is the web tsconfig's missing path map, not this round).

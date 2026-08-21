@@ -15,7 +15,7 @@ import { MediaDropzone } from "../../components/common/MediaDropzone";
 import { useEventCategories } from "../../hooks/useEventCategories";
 import { Refusal } from "../../components/organizer/states";
 import { organizerApi } from "../../services/catalogClient";
-import { formatVnd } from "../../services/currency";
+import { formatVnd, formatVndShort } from "../../services/currency";
 import { fetchOrganizerAnalytics } from "../../services/organizerAnalyticsClient";
 import type { OrganizerAnalyticsOverview } from "@/shared/types/analytics";
 import {
@@ -71,7 +71,6 @@ export const OrganizerEventsPage: React.FC<{
     url.searchParams.set("section", section);
     window.history.replaceState(null, "", url.toString());
   };
-
 
   // The server-backed console (feature 006) owns the event list and its drill-down — event →
   // editor → showtimes → tiers — while this page keeps the shell (analytics / ads) and the create
@@ -219,7 +218,15 @@ export const OrganizerEventsPage: React.FC<{
     const id = window.setTimeout(() => saveDraft(draftNow), 500);
     return () => window.clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [createTitle, createDescription, createCategory, createEventType, createVenueName, createVenueAddress, createCity]);
+  }, [
+    createTitle,
+    createDescription,
+    createCategory,
+    createEventType,
+    createVenueName,
+    createVenueAddress,
+    createCity,
+  ]);
 
   /*
    * The browser's own "leave site?" prompt, and ONLY while there is something to lose.
@@ -234,7 +241,6 @@ export const OrganizerEventsPage: React.FC<{
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty, activeSection]);
-
 
   // AI Description Assistant State
   const [aiBrief, setAiBrief] = useState("");
@@ -322,7 +328,9 @@ export const OrganizerEventsPage: React.FC<{
     // checked in JS, so it has to place its own.
     if (!createPictureUrl && !stagedBannerFile) {
       setMediaRefusal("Cần tải lên hình ảnh sự kiện trước khi tạo bản nháp.");
-      document.getElementById("create-media")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      document
+        .getElementById("create-media")
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
     setMediaRefusal(null);
@@ -429,19 +437,31 @@ export const OrganizerEventsPage: React.FC<{
           }`}
         >
           {[
-            { label: "Doanh thu", value: overview ? formatVnd(overview.gross_revenue_vnd) : "—" },
+            {
+              label: "Doanh thu",
+              value: overview ? formatVnd(overview.gross_revenue_vnd) : "—",
+              shortValue: overview ? formatVndShort(overview.gross_revenue_vnd) : "—",
+            },
             {
               label: "Vé đã bán",
               value: overview ? overview.total_tickets_sold.toLocaleString("vi-VN") : "—",
+              shortValue: null,
             },
-            { label: "Sự kiện đang mở bán", value: liveEventCount ?? "—" },
+            { label: "Sự kiện đang mở bán", value: liveEventCount ?? "—", shortValue: null },
           ].map((k) => (
-            <div key={k.label} className="border border-beige-kem/20 bg-surface-1 p-4">
+            <div key={k.label} className="border border-beige-kem/20 bg-surface-2 p-4">
               <dt className="font-meta text-meta uppercase tracking-widest text-ink-soft">
                 {k.label}
               </dt>
               <dd className="mt-1 font-display text-title-s font-black tabular-nums text-beige-kem">
-                {k.value}
+                {k.shortValue === null ? (
+                  k.value
+                ) : (
+                  <>
+                    <span className="sm:hidden">{k.shortValue}</span>
+                    <span className="hidden sm:inline">{k.value}</span>
+                  </>
+                )}
               </dd>
             </div>
           ))}
@@ -455,13 +475,18 @@ export const OrganizerEventsPage: React.FC<{
         >
           {(
             [
-              { key: "analytics", label: "Thống kê kinh doanh", Icon: BarChart3 },
-              { key: "events", label: "Sự kiện", Icon: Calendar },
-              { key: "create", label: "Tạo sự kiện", Icon: Plus },
-              { key: "seatmaps", label: "Sơ đồ ghế", Icon: Armchair },
-              { key: "ads", label: "Gói quảng cáo", Icon: Megaphone },
+              {
+                key: "analytics",
+                label: "Thống kê kinh doanh",
+                shortLabel: "Thống kê",
+                Icon: BarChart3,
+              },
+              { key: "events", label: "Sự kiện", shortLabel: "Sự kiện", Icon: Calendar },
+              { key: "create", label: "Tạo sự kiện", shortLabel: "Tạo", Icon: Plus },
+              { key: "seatmaps", label: "Sơ đồ ghế", shortLabel: "Sơ đồ", Icon: Armchair },
+              { key: "ads", label: "Gói quảng cáo", shortLabel: "Quảng cáo", Icon: Megaphone },
             ] as const
-          ).map(({ key, label, Icon }) => {
+          ).map(({ key, label, shortLabel, Icon }) => {
             const active = key !== "seatmaps" && activeSection === key;
             return (
               <button
@@ -473,14 +498,15 @@ export const OrganizerEventsPage: React.FC<{
                     ? navigate("/organizer/seatmaps")
                     : handleSectionSwitch(key as Section)
                 }
-                className={`-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-bold transition-colors sm:text-sm ${
+                className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2.5 text-xs font-bold transition-colors sm:px-4 sm:text-sm ${
                   active
                     ? "border-burgundy text-beige-kem"
                     : "border-transparent text-ink-soft hover:text-beige-kem"
-                }`}
+                } ${key === "ads" ? "hidden sm:flex" : ""}`}
               >
                 <Icon className="h-4 w-4" />
-                <span>{label}</span>
+                <span className="hidden sm:inline">{label}</span>
+                <span className="sm:hidden">{shortLabel}</span>
               </button>
             );
           })}
@@ -494,7 +520,7 @@ export const OrganizerEventsPage: React.FC<{
       ) : activeSection === "events" ? (
         <div className="space-y-6">
           {/* The server-backed 006 console: events → editor → showtimes → tiers. */}
-          {(
+          {
             <OrganizerConsole
               selectedEventId={selectedEventId}
               onSelectEvent={(id) => {
@@ -507,12 +533,11 @@ export const OrganizerEventsPage: React.FC<{
               onOpenSeatMap={(eventId) => setSeatMapEventId(eventId)}
               reloadKey={reloadKey}
             />
-          )}
-
+          }
         </div>
       ) : (
         <div className="space-y-6">
-          {(
+          {
             <div className="bg-surface-2 border border-beige-kem/25 p-6 sm:p-8 max-w-3xl mx-auto space-y-6 transition-colors">
               {/*
                 Offered, never applied automatically. Someone who walked away from an event on
@@ -580,7 +605,7 @@ export const OrganizerEventsPage: React.FC<{
                       }`}
                     >
                       <span className="block font-bold text-beige-kem">
-                        🪑 Có sơ đồ ghế — khách chọn chỗ
+                        Có sơ đồ ghế — khách chọn chỗ
                       </span>
                       <span className="mt-1 block text-[11px] text-ink-soft">
                         Tạo bản nháp, rồi thêm suất chiếu, vẽ sơ đồ và gán hạng vé ở màn quản lý.
@@ -597,11 +622,11 @@ export const OrganizerEventsPage: React.FC<{
                       }`}
                     >
                       <span className="block font-bold text-beige-kem">
-                        🎫 Vé đại trà — không chọn chỗ
+                        Vé đại trà — không chọn chỗ
                       </span>
                       <span className="mt-1 block text-[11px] text-ink-soft">
-                        Bán theo số lượng từng hạng vé, không cần sơ đồ. Tạo bản nháp, rồi thêm
-                        suất chiếu và hạng vé ở màn quản lý.
+                        Bán theo số lượng từng hạng vé, không cần sơ đồ. Tạo bản nháp, rồi thêm suất
+                        chiếu và hạng vé ở màn quản lý.
                       </span>
                     </button>
                   </div>
@@ -749,8 +774,8 @@ export const OrganizerEventsPage: React.FC<{
                 {/* AI Assistant for Recommended Description */}
                 <div className="bg-surface-2 p-4 border border-beige-kem/30 space-y-3">
                   <div className="flex items-center justify-between">
-                    <h3 className="font-meta text-xs font-bold text-burgundy uppercase tracking-wider flex items-center gap-1.5">
-                      <span>🤖</span> AI Trợ Lý Viết Mô Tả Sự Kiện
+                    <h3 className="font-meta text-xs font-bold text-burgundy uppercase tracking-wider">
+                      AI Trợ Lý Viết Mô Tả Sự Kiện
                     </h3>
                     <span className="text-[10px] font-semibold text-white bg-burgundy px-2 py-0.5">
                       TixHub AI
@@ -774,20 +799,30 @@ export const OrganizerEventsPage: React.FC<{
                       disabled={aiBusy}
                       className="px-4 py-2.5 bg-burgundy hover:brightness-110 disabled:opacity-50 text-white font-bold text-xs transition-all shrink-0 flex items-center justify-center space-x-1"
                     >
-                      {aiBusy ? <span>⏳ AI Đang Tạo...</span> : <span>Nhờ AI Gợi Ý Mô Tả</span>}
+                      {aiBusy ? (
+                        <>
+                          <span
+                            aria-hidden="true"
+                            className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent align-middle"
+                          />
+                          <span>AI Đang Tạo…</span>
+                        </>
+                      ) : (
+                        <span>Nhờ AI Gợi Ý Mô Tả</span>
+                      )}
                     </button>
                   </div>
 
                   {aiSuggestion && (
                     <div className="mt-3 p-3.5 bg-xanh-pho border border-beige-kem/30 space-y-2 text-xs">
                       <div className="flex items-center justify-between border-b border-beige-kem/20 pb-2">
-                        <span className="font-bold text-burgundy">💡 Gợi Ý Từ AI:</span>
+                        <span className="font-bold text-burgundy">Gợi Ý Từ AI:</span>
                         <button
                           type="button"
                           onClick={applyAiSuggestion}
                           className="px-3 py-1 border border-la-co bg-la-co/25 text-beige-kem font-bold text-[11px] transition-colors"
                         >
-                          ✨ Áp Dụng Tiêu Đề & Mô Tả Này
+                          Áp Dụng Tiêu Đề & Mô Tả Này
                         </button>
                       </div>
                       <div>
@@ -844,7 +879,10 @@ export const OrganizerEventsPage: React.FC<{
                   >
                     {isCreating ? (
                       <>
-                        <span className="inline-block animate-spin">⏳</span>
+                        <span
+                          aria-hidden="true"
+                          className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent align-middle"
+                        />
                         <span>Đang tải lên & tạo bản nháp…</span>
                       </>
                     ) : (
@@ -854,7 +892,7 @@ export const OrganizerEventsPage: React.FC<{
                 </div>
               </form>
             </div>
-          )}
+          }
         </div>
       )}
 

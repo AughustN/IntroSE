@@ -41,13 +41,32 @@ describe("editorHint", () => {
     expect(editorHint({ ...idle, drawingPoints: 1, tool: "shape" })).toContain("Đang vẽ");
   });
 
-  it("tells a single-block selection what a second block would unlock", () => {
-    expect(editorHint({ ...idle, blockCount: 1 })).toContain("canh hàng");
-    expect(editorHint({ ...idle, blockCount: 2 })).toContain("dàn đều");
-    // Three is enough for both, so there is nothing left to promise.
+  /*
+   * The hint trimmed to its decision: one sentence, the verbs for the thing in hand, and nothing
+   * shared-but-dimmed. The old line pasted the full shortcut card on every state, and a hint that
+   * prints nine clauses on every state stops being read at all.
+   */
+  it("names what a second and third block unlock, and keeps each kind distinct", () => {
+    const one = editorHint({ ...idle, blockCount: 1 });
+    expect(one).toContain("kéo để dời");
+    expect(one).toContain("Delete xoá");
+    const two = editorHint({ ...idle, blockCount: 2 });
+    expect(two).toContain("dàn đều");
     const three = editorHint({ ...idle, blockCount: 3 });
-    expect(three).not.toContain("canh hàng");
+    expect(three).toContain("3 khối");
+    expect(three).not.toContain("Delete xoá"); // past two, the decision-time verbs give way
     expect(three).not.toContain("dàn đều");
+  });
+
+  it("drops the shared view shortcuts from a selection, where they only dilute the one line", () => {
+    const selected: HintState[] = [
+      { ...idle, seatCount: 4 },
+      { ...idle, rowLabel: "B" },
+      { ...idle, blockCount: 1 },
+    ];
+    for (const s of selected) expect(editorHint(s)).not.toContain("lăn chuột để phóng to");
+    // A held tool still carries them, because typing is exactly when pan-and-zoom are needed.
+    expect(editorHint({ ...idle, tool: "stage" })).toContain("lăn chuột để phóng to");
   });
 
   it("distinguishes seats, a row and blocks", () => {
@@ -60,14 +79,16 @@ describe("editorHint", () => {
     expect(editorHint(idle)).toContain("Bấm một khối để chọn");
   });
 
-  it("keeps the view shortcuts on every branch except drawing", () => {
+  it("prints no more than four clauses in any state", () => {
     const states: HintState[] = [
       idle,
       { ...idle, tool: "stage" },
       { ...idle, seatCount: 1 },
       { ...idle, rowLabel: "A" },
       { ...idle, blockCount: 1 },
+      { ...idle, blockCount: 2 },
+      { ...idle, blockCount: 5 },
     ];
-    for (const s of states) expect(editorHint(s)).toContain("lăn chuột để phóng to");
+    for (const s of states) expect(editorHint(s).split(" · ").length).toBeLessThanOrEqual(4);
   });
 });

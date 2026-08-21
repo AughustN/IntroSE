@@ -1,0 +1,39 @@
+{
+  "shape": "package",
+  "pkg": "tixhub",
+  "globalName": "TixHub",
+  "srcDir": "src/components",
+  "tsconfig": ".design-sync/tsconfig.paths.json",
+  "cssEntry": "ds-styles.css",
+  "extraEntries": [
+    "./.design-sync/.cache/named-defaults.ts",
+    "./.design-sync/preview-surface.tsx"
+  ],
+  "componentSrcMap": {
+    "EventBody": null
+  },
+  "buildCmd": "npm run build && npx tsc -p tsconfig.web.json --declaration --emitDeclarationOnly --noEmit false --outDir dist/types && node .design-sync/prepare-shims.mjs && node .design-sync/prepare-defaults.mjs && node .design-sync/prepare-pkgdir.mjs",
+  "provider": {
+    "component": "DsPreviewSurface"
+  },
+  "overrides": {
+    "BlockPalette": {
+      "cardMode": "column",
+      "viewport": "600x1120"
+    },
+    "EventFlowRail": {
+      "cardMode": "column",
+      "viewport": "1200x460"
+    },
+    "CancelEventModal": {
+      "cardMode": "single",
+      "primaryStory": "WithSoldTickets"
+    },
+    "ToastStack": {
+      "cardMode": "single",
+      "primaryStory": "AllKinds"
+    }
+  },
+  "readmeHeader": ".design-sync/conventions.md",
+  "projectId": "c8d4894a-9399-423b-88f3-5510242641e2"
+}

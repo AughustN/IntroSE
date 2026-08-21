@@ -4,7 +4,7 @@
  */
 
 import { Check } from "lucide-react";
-import type { FlowStep } from "./flowSteps";
+import { ACTION_LABEL, type FlowStep } from "./flowSteps";
 
 /**
  * The setup chain for one event, as a rail.
@@ -112,11 +112,5 @@ export default function EventFlowRail({
   );
 }
 
-/** Each label names the tool it opens, in the words that tool uses for itself. */
-const ACTION_LABEL: Record<NonNullable<FlowStep["action"]>, string> = {
-  showtimes: "Thêm suất chiếu",
-  tiers: "Mở hạng vé",
-  chart: "Mở trình thiết kế sơ đồ",
-  apply: "Gán giá & áp dụng",
-  submit: "Gửi duyệt",
-};
+/** Each label names the tool it opens, in the words that tool uses for itself — imported from
+ *  `flowSteps` so the rail and the strip cannot drift apart (Principle VI). */

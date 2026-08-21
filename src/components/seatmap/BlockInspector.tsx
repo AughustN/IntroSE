@@ -70,11 +70,15 @@ const SEAT_SCHEMES: { value: SeatLabelScheme; label: string }[] = [
 function CommittedNumber({
   value,
   onCommit,
+  onDraft,
   className,
   title,
 }: {
   value: number;
   onCommit: (next: number) => void;
+  /** Every keystroke's parsed value (or null while blank) — lets a parent preview what the commit
+   *  WILL become, without committing on every keystroke. */
+  onDraft?: (draft: number | null) => void;
   className: string;
   title?: string;
 }) {
@@ -85,8 +89,15 @@ function CommittedNumber({
   // shows up here instead of leaving a stale number on screen.
   const shown = editing ? draft : String(value);
 
+  const setEditingValue = (raw: string) => {
+    setDraft(raw);
+    const parsed = Number(raw);
+    onDraft?.(Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : null);
+  };
+
   const commit = (raw: string) => {
     setEditing(false);
+    onDraft?.(null);
     const next = num(raw, value);
     if (next !== value) onCommit(next);
   };
@@ -100,8 +111,9 @@ function CommittedNumber({
       onFocus={() => {
         setDraft(String(value));
         setEditing(true);
+        onDraft?.(value);
       }}
-      onChange={(e) => setDraft(e.target.value)}
+      onChange={(e) => setEditingValue(e.target.value)}
       onBlur={(e) => commit(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
@@ -111,11 +123,13 @@ function CommittedNumber({
         } else if (e.key === "Escape") {
           e.preventDefault();
           setEditing(false);
+          onDraft?.(null);
           (e.target as HTMLInputElement).blur();
         } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
           e.preventDefault();
           const next = Math.max(1, value + (e.key === "ArrowUp" ? 1 : -1));
           setDraft(String(next));
+          onDraft?.(null);
           onCommit(next);
         }
       }}
@@ -156,6 +170,31 @@ export default function BlockInspector({
   onDuplicate: () => void;
   onDelete: () => void;
 }) {
+  /**
+   * What the block WOULD become, shown while typing, not after — hooks hoisted ABOVE the null-block
+   * early return, because a conditional hook call on `block == null` would break the rules of hooks
+   * the first time the selection flipped from nothing to a block.
+   *
+   * `CommittedNumber` commits on blur precisely because each commit regenerates the whole block —
+   * but the organizer does not know that typing "60" into a 20-per-row field is about to mint more
+   * seats than the layout can hold. Lifting the two count fields' in-progress values up here lets
+   * the inspector print the arithmetic live (`6 hàng × 20 ghế → 120 ghế`) and shout about the clip
+   * BEFORE the commit, when it is still a decision instead of a surprise.
+   */
+  const [pending, setPending] = useState<{
+    key: string | undefined;
+    rows: number | null;
+    perRow: number | null;
+  }>({ key: undefined, rows: null, perRow: null });
+  // Adjusting state during render, React's own pattern for "props changed, discard local": a new block
+  // throws away whatever was half-typed in the old one. Done here rather than in an effect so the
+  // preview can never paint one frame of the previous block's arithmetic.
+  if (pending.key !== block?.key) {
+    setPending({ key: block?.key, rows: null, perRow: null });
+  }
+  const setPendingRows = (rows: number | null) => setPending((p) => ({ ...p, rows }));
+  const setPendingPerRow = (perRow: number | null) => setPending((p) => ({ ...p, perRow }));
+
   if (!block) {
     return (
       <div className="border-2 border-beige-kem/40 bg-surface-2 p-4">
@@ -174,8 +213,12 @@ export default function BlockInspector({
   const parametric = p !== undefined && isSeatBearing(block.kind);
   const rows = p?.rowsCount ?? 1;
   const perRow = p?.seatsPerRow ?? 1;
-  // What the block would become if the organizer grew it — so the clip is visible before they try.
-  const wouldClip = parametric && rows * perRow > seats + seatBudget;
+
+  const nextRows = pending.rows ?? rows;
+  const nextPerRow = pending.perRow ?? perRow;
+  const prospectiveCount = nextRows * nextPerRow;
+  const changed = pending.rows !== null || pending.perRow !== null;
+  const wouldClip = parametric && prospectiveCount > seats + seatBudget;
 
   return (
     <div className="border-2 border-beige-kem bg-surface-2 p-4">
@@ -200,7 +243,9 @@ export default function BlockInspector({
         Khu vực
         <select
           value={block.sectionId ?? ""}
-          onChange={(e) => onChange({ sectionId: e.target.value === "" ? null : Number(e.target.value) })}
+          onChange={(e) =>
+            onChange({ sectionId: e.target.value === "" ? null : Number(e.target.value) })
+          }
           className={`mt-1 ${input}`}
         >
           <option value="" className="bg-xanh-pho">
@@ -218,7 +263,9 @@ export default function BlockInspector({
         Hạng ghế
         <select
           value={block.categoryId ?? ""}
-          onChange={(e) => onChange({ categoryId: e.target.value === "" ? null : Number(e.target.value) })}
+          onChange={(e) =>
+            onChange({ categoryId: e.target.value === "" ? null : Number(e.target.value) })
+          }
           className={`mt-1 ${input}`}
         >
           <option value="" className="bg-xanh-pho">
@@ -249,6 +296,7 @@ export default function BlockInspector({
                 <CommittedNumber
                   value={rows}
                   onCommit={(rowsCount) => onParams({ rowsCount })}
+                  onDraft={setPendingRows}
                   className={`mt-1 ${input}`}
                 />
               </label>
@@ -259,11 +307,26 @@ export default function BlockInspector({
                 <CommittedNumber
                   value={perRow}
                   onCommit={(seatsPerRow) => onParams({ seatsPerRow })}
+                  onDraft={setPendingPerRow}
                   className={`mt-1 ${input}`}
                 />
               </label>
             )}
           </div>
+
+          {/* The arithmetic, live: the count the commit WILL produce, restated next to the fields
+              that drive it. It duplicates the header's seat total only while nothing is being
+              edited — but pinning it mid-edit meant an organizer had to START typing to learn what
+              the two numbers mean together, which is exactly when confirmation matters. */}
+          {parametric && block.kind !== "individual-seat" && (
+            <p
+              className={`mt-2 font-mono text-[10px] leading-4 ${
+                wouldClip ? "text-cam-dat" : "text-beige-kem/60"
+              }`}
+            >
+              {nextRows} hàng × {nextPerRow} ghế → {prospectiveCount} ghế
+            </p>
+          )}
 
           {wouldClip && (
             <p className="mt-1 text-[10px] leading-4 text-cam-dat">
@@ -366,8 +429,8 @@ export default function BlockInspector({
         isSeatBearing(block.kind) && (
           <p className="mt-3 border-t border-beige-kem/25 pt-3 text-[11px] leading-4 text-beige-kem/50">
             Khối này được vẽ trước khi sơ đồ có bố cục tham số, nên các ghế đang ở vị trí riêng lẻ.
-            Đặt số hàng và số ghế để chuyển thành khối tham số — lưu ý việc này sẽ đánh nhãn lại toàn
-            bộ ghế trong khối.
+            Đặt số hàng và số ghế để chuyển thành khối tham số — lưu ý việc này sẽ đánh nhãn lại
+            toàn bộ ghế trong khối.
           </p>
         )
       )}
@@ -417,7 +480,8 @@ export default function BlockInspector({
                 title={name}
                 aria-pressed={block.geometry === geometry}
                 onClick={() => onGeometry?.(geometry)}
-                className={`border-2 px-2 py-1.5 text-sm transition ${ block.geometry === geometry
+                className={`border-2 px-2 py-1.5 text-sm transition ${
+                  block.geometry === geometry
                     ? "border-beige-kem bg-beige-kem/10 text-beige-kem"
                     : "border-beige-kem/40 text-beige-kem/70 hover:border-beige-kem"
                 }`}

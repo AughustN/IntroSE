@@ -106,7 +106,7 @@ export function AnalyticsFilterBar({
           <select
             value={selectedEventId}
             onChange={(e) => onEventChange(e.target.value)}
-            className="h-10 border-2 border-beige-kem/40 bg-surface-2 px-3 text-xs font-bold text-beige-kem outline-none transition focus:border-burgundy cursor-pointer max-w-[200px] truncate"
+            className="h-10 border-2 border-beige-kem/40 bg-surface-2 px-3 text-xs font-bold text-beige-kem outline-none transition focus:border-burgundy cursor-pointer"
           >
             <option value="all">Tất cả sự kiện</option>
             {eventList.map((e) => (

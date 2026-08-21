@@ -9,15 +9,10 @@ import {
   CartesianGrid,
   Legend,
 } from "recharts";
-import { RefreshCw, TrendingUp } from "lucide-react";
-import type { DatePeriodFilter, TimeSeriesSalesPoint } from "../../../../shared/types/analytics";
+import type { TimeSeriesSalesPoint } from "../../../../shared/types/analytics";
 
 interface Props {
   data: TimeSeriesSalesPoint[];
-  period?: DatePeriodFilter;
-  onPeriodChange?: (p: DatePeriodFilter) => void;
-  onRefresh?: () => void;
-  loading?: boolean;
 }
 
 function formatShortVND(val: number): string {
@@ -27,48 +22,23 @@ function formatShortVND(val: number): string {
   return `${val} ₫`;
 }
 
-export function TimeSeriesChart({ data, period, onPeriodChange, onRefresh, loading }: Props) {
+export function TimeSeriesChart({ data }: Props) {
+  // The bar the chart spans, stated once in the header — the period is already chosen in the filter
+  // bar above, so repeating a selector here would be a second opinion about the same question.
+  const rangeLabel =
+    data.length > 0
+      ? `${new Date(data[0].date).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" })} – ${new Date(
+          data[data.length - 1].date,
+        ).toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" })}`
+      : null;
+
   return (
     <div className="border-2 border-beige-kem/30 bg-surface-2 p-5 text-beige-kem">
-      {/* Header with Title & Period Selector / Refresh controls */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-beige-kem/10 pb-3">
-        <div className="flex items-center gap-2.5">
-          <div className="bg-burgundy/20 p-2 text-burgundy">
-            <TrendingUp className="h-5 w-5" />
-          </div>
-          <div>
-            <h4 className="text-base font-black text-beige-kem">Thống kê doanh số</h4>
-            <p className="text-xs text-beige-kem/60">
-              Xu hướng doanh thu & lượt vé bán ra theo thời gian
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {period && onPeriodChange && (
-            <select
-              value={period}
-              onChange={(e) => onPeriodChange(e.target.value as DatePeriodFilter)}
-              className="h-8 border border-beige-kem/40 bg-surface-2 px-2.5 text-xs font-bold text-beige-kem outline-none transition focus:border-burgundy cursor-pointer"
-            >
-              <option value="7d">7 ngày gần đây</option>
-              <option value="this_month">Tháng này</option>
-              <option value="custom">Tùy chỉnh</option>
-            </select>
-          )}
-
-          {onRefresh && (
-            <button
-              type="button"
-              onClick={onRefresh}
-              disabled={loading}
-              className="inline-flex h-8 w-8 items-center justify-center border border-beige-kem/40 text-beige-kem/80 transition hover:border-beige-kem hover:text-beige-kem disabled:opacity-50"
-              title="Làm mới biểu đồ"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin text-burgundy" : ""}`} />
-            </button>
-          )}
-        </div>
+      <div className="mb-4 flex items-center justify-between border-b border-beige-kem/20 pb-3">
+        <h4 className="font-display text-base font-black text-beige-kem">
+          Doanh thu & vé bán theo ngày
+        </h4>
+        {rangeLabel && <span className="font-meta text-meta text-ink-soft">{rangeLabel}</span>}
       </div>
 
       {/* Chart Canvas or Empty State */}
@@ -89,14 +59,14 @@ export function TimeSeriesChart({ data, period, onPeriodChange, onRefresh, loadi
                   <stop offset="95%" stopColor="#d93025" stopOpacity={0} />
                 </linearGradient>
                 <linearGradient id="colorTickets" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#bfc0f2" stopOpacity={0.8} />
-                  <stop offset="95%" stopColor="#bfc0f2" stopOpacity={0} />
+                  <stop offset="5%" stopColor="#f19502" stopOpacity={0.8} />
+                  <stop offset="95%" stopColor="#f19502" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#ffffff15" />
               <XAxis dataKey="label" stroke="#fdf6ea" fontSize={11} tickLine={false} />
               <YAxis yAxisId="left" stroke="#fdf6ea" fontSize={11} tickFormatter={formatShortVND} />
-              <YAxis yAxisId="right" orientation="right" stroke="#bfc0f2" fontSize={11} />
+              <YAxis yAxisId="right" orientation="right" stroke="#f19502" fontSize={11} />
               <Tooltip
                 contentStyle={{
                   backgroundColor: "#3d0d1a",
@@ -134,7 +104,7 @@ export function TimeSeriesChart({ data, period, onPeriodChange, onRefresh, loadi
                 type="monotone"
                 dataKey="current_tickets_sold"
                 name="Vé bán kỳ này"
-                stroke="#bfc0f2"
+                stroke="#f19502"
                 fillOpacity={1}
                 fill="url(#colorTickets)"
                 strokeWidth={2}

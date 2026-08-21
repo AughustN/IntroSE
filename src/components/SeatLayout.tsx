@@ -242,6 +242,18 @@ export default function SeatLayout({
     const mine = heldByMe.has(seat.id);
     if (!mine && seat.status !== "available") return; // taken by someone else, or sold/blocked
 
+    // Picking up a wheelchair seat must say what it carries: this one is reserved for a wheelchair
+    // user, and the seat beside them is meant for a companion. The notice is informational, not a
+    // gate — the buyer may still hold it alone, reuses the same inline channel the picker uses, and
+    // repeats on every pick rather than sitting around and going stale.
+    if (!mine && seat.isAccessible) {
+      setBestNotice("Ghế này dành cho người dùng xe lăn và kèm một ghế cho người đi cùng.");
+    } else if (!mine) {
+      // Only clear the notice when moving AWAY from an accessible seat: a "scattered" warning from
+      // "Chọn giúp tôi" stays until the buyer acts, rather than being wiped by any click.
+      setBestNotice(null);
+    }
+
     if (seat.tableBookingMode === "whole_table" && seat.tableId != null) {
       const table = seats.filter((s) => s.tableId === seat.tableId);
       const free = table.every((s) => s.status === "available" || heldByMe.has(s.id));

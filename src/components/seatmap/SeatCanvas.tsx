@@ -216,7 +216,13 @@ export interface SeatCanvasProps<T extends CanvasSeat> {
    * Reports a CUMULATIVE delta from where the drag began, like `onElementDrag`, so the editor applies
    * one resize rather than a hundred — and one undo step, not a hundred (§28).
    */
-  onResize?: (elementIndex: number, handle: string, dx: number, dy: number, phase: "move" | "end") => void;
+  onResize?: (
+    elementIndex: number,
+    handle: string,
+    dx: number,
+    dy: number,
+    phase: "move" | "end",
+  ) => void;
   onElementDrag?: (dx: number, dy: number, phase: "move" | "end") => void;
   onTablePointerDown?: (index: number) => void;
   /**
@@ -254,23 +260,27 @@ export interface SeatCanvasProps<T extends CanvasSeat> {
 }
 
 const ELEMENT_FILL: Record<SeatMapElement["kind"], string> = {
-  stage: "fill-beige-kem/20 stroke-beige-kem/40",
+  // The showcase element: one ink treatment on both sides of the app — a solid semi-transparent
+  // wash with a readable outline, no decorative colour of its own. The showcase (a stage) carries
+  // the organiser's label, which has to read against it.
+  stage: "fill-beige-kem/12 stroke-beige-kem/55",
   aisle: "fill-transparent stroke-beige-kem/20",
   door: "fill-la-co/20 stroke-la-co/50",
   bar: "fill-cam-dat/15 stroke-cam-dat/40",
   label: "fill-transparent stroke-transparent",
-  area: "fill-beige-kem/5 stroke-beige-kem/30",
+  area: "fill-beige-kem/8 stroke-beige-kem/60",
   // Hall outline and dividers — drawn behind the seats, never interactive (FR-060).
   boundary: "fill-transparent stroke-beige-kem/45",
   divider: "fill-transparent stroke-beige-kem/35",
-  // Facility icons (FR-062).
-  exit: "fill-la-co/20 stroke-la-co/60",
-  restroom: "fill-beige-kem/10 stroke-beige-kem/50",
-  food_drink: "fill-cam-dat/15 stroke-cam-dat/50",
-  smoking: "fill-beige-kem/10 stroke-beige-kem/40",
-  first_aid: "fill-bubblegum/20 stroke-bubblegum/60",
-  lift_stairs: "fill-beige-kem/10 stroke-beige-kem/40",
-  wheelchair: "fill-la-co/15 stroke-la-co/50",
+  // Facility markers (FR-062): one outline treatment. The letter inside is what names the kind,
+  // so a per-kind wash only competed with the text it was supposed to sit under.
+  exit: "fill-transparent stroke-beige-kem/60",
+  restroom: "fill-transparent stroke-beige-kem/60",
+  food_drink: "fill-transparent stroke-beige-kem/60",
+  smoking: "fill-transparent stroke-beige-kem/60",
+  first_aid: "fill-transparent stroke-beige-kem/60",
+  lift_stairs: "fill-transparent stroke-beige-kem/60",
+  wheelchair: "fill-transparent stroke-beige-kem/60",
 };
 
 /** Kinds drawn from a point list rather than a rectangle (FR-058). */
@@ -394,8 +404,7 @@ function SeatCanvasInner<T extends CanvasSeat>(
   }, [seats, elements, space]);
 
   const bounds = useMemo(
-    () =>
-      fitContent ? contentBounds : { x: 0, y: 0, w: space.width, h: space.height },
+    () => (fitContent ? contentBounds : { x: 0, y: 0, w: space.width, h: space.height }),
     [fitContent, contentBounds, space.width, space.height],
   );
 
@@ -456,7 +465,10 @@ function SeatCanvasInner<T extends CanvasSeat>(
     const pad = space.seatDiameter * 4;
     return markers.filter(
       (m) =>
-        m.x >= view.x - pad && m.x <= view.x + view.w + pad && m.y >= view.y - pad && m.y <= view.y + view.h + pad,
+        m.x >= view.x - pad &&
+        m.x <= view.x + view.w + pad &&
+        m.y >= view.y - pad &&
+        m.y <= view.y + view.h + pad,
     );
   }, [markers, view, space.seatDiameter]);
 
@@ -487,7 +499,10 @@ function SeatCanvasInner<T extends CanvasSeat>(
   }, []);
 
   /** The view a gesture must reason about: built from the refs, never from a render's snapshot. */
-  const liveView = useCallback(() => viewOf(boundsRef.current, zoomRef.current, panRef.current), []);
+  const liveView = useCallback(
+    () => viewOf(boundsRef.current, zoomRef.current, panRef.current),
+    [],
+  );
 
   /**
    * Client pixels → layout units, via the SVG's own screen matrix.
@@ -966,17 +981,20 @@ function SeatCanvasInner<T extends CanvasSeat>(
               y={hull.y}
               width={hull.w}
               height={hull.h}
-              fill={`${hull.block.color}14`}
-              stroke={`${hull.block.color}66`}
-              strokeWidth={strokeScale}
-              strokeDasharray={`${space.seatDiameter / 2} ${space.seatDiameter / 3}`}
+              fill="transparent"
+              stroke="currentColor"
+              strokeOpacity={0.3}
+              strokeWidth={strokeScale * 1.5}
+              strokeDasharray={`${space.seatDiameter * 0.6} ${space.seatDiameter * 0.4}`}
+              className="text-beige-kem"
             />
             <text
               x={hull.x + space.seatDiameter / 3}
               y={hull.y - space.seatDiameter / 3}
-              fontSize={space.seatDiameter * 1.1}
-              fill={hull.block.color}
-              className="font-mono"
+              fontSize={space.seatDiameter * 1.25}
+              fill="currentColor"
+              fillOpacity={0.5}
+              className="font-sans text-beige-kem"
             >
               {hull.block.name}
             </text>
@@ -1051,6 +1069,9 @@ function SeatCanvasInner<T extends CanvasSeat>(
         {/* Non-sellable decoration. Excluded from the seat tab order (FR-040), and inert for a
             buyer — a stage that swallows the tap meant for the front row is a real misclick. */}
         {elements.map((el, i) => {
+          // A capacity zone without an explicit colour defaults to the standing-yellow: the faint
+          // ink wash made it nearly invisible at overview zoom, and its label carried no colour.
+          const zoneYellow = el.kind === "area" && !el.color ? "#F0E442" : undefined;
           // Skipped IN PLACE rather than filtered out: `i` is this element's identity for
           // `selectedElementIndex`, `onElementPointerDown`, `onResize` and `onVertexDrag`, so
           // removing entries would silently re-point the editor's selection at its neighbour.
@@ -1058,163 +1079,187 @@ function SeatCanvasInner<T extends CanvasSeat>(
           if (!Number.isFinite(el.x) || !Number.isFinite(el.y)) return null;
           const grabbable = editable && !!onElementPointerDown;
           return (
-          <g
-            key={`el-${i}`}
-            transform={`rotate(${el.rotation} ${el.x} ${el.y})`}
-            aria-hidden="true"
-            pointerEvents={grabbable ? undefined : "none"}
-            style={grabbable ? { cursor: "grab" } : undefined}
-            onPointerDown={
-              grabbable
-                ? (e) => {
-                    e.stopPropagation();
-                    if (!wantsPan(e)) onElementPointerDown(i, e.shiftKey);
-                    beginGesture(e, "element");
+            <g
+              key={`el-${i}`}
+              transform={`rotate(${el.rotation} ${el.x} ${el.y})`}
+              aria-hidden="true"
+              pointerEvents={grabbable ? undefined : "none"}
+              style={grabbable ? { cursor: "grab" } : undefined}
+              onPointerDown={
+                grabbable
+                  ? (e) => {
+                      e.stopPropagation();
+                      if (!wantsPan(e)) onElementPointerDown(i, e.shiftKey);
+                      beginGesture(e, "element");
+                    }
+                  : undefined
+              }
+            >
+              {/* Selection ring, drawn only for the one being edited. */}
+              {selectedElementIndex === i && (
+                <rect
+                  x={el.x - el.width / 2 - 20}
+                  y={el.y - el.height / 2 - 20}
+                  width={el.width + 40}
+                  height={el.height + 40}
+                  fill="none"
+                  className="stroke-burgundy"
+                  strokeWidth={strokeScale * 1.5}
+                  strokeDasharray={`${strokeScale * 5} ${strokeScale * 4}`}
+                />
+              )}
+              {SHAPE_KINDS.has(el.kind) && el.points && el.points.length >= 2 && (
+                <polyline
+                  // A boundary closes back to its first point; a divider stays an open line.
+                  points={(el.kind === "boundary" ? [...el.points, el.points[0]] : el.points)
+                    .map((p) => `${p.x},${p.y}`)
+                    .join(" ")}
+                  className={el.color ? "" : ELEMENT_FILL[el.kind]}
+                  strokeWidth={10}
+                  // A closed outline takes its colour as a translucent wash with a solid edge, so shapes
+                  // stay tellable apart without hiding the seats drawn over them. A divider is an open
+                  // line and only ever takes a stroke.
+                  style={
+                    el.color
+                      ? {
+                          stroke: el.color,
+                          fill: el.kind === "boundary" ? `${el.color}33` : "none",
+                        }
+                      : undefined
                   }
-                : undefined
-            }
-          >
-            {/* Selection ring, drawn only for the one being edited. */}
-            {selectedElementIndex === i && (
-              <rect
-                x={el.x - el.width / 2 - 20}
-                y={el.y - el.height / 2 - 20}
-                width={el.width + 40}
-                height={el.height + 40}
-                fill="none"
-                className="stroke-burgundy"
-                strokeWidth={strokeScale * 1.5}
-                strokeDasharray={`${strokeScale * 5} ${strokeScale * 4}`}
-              />
-            )}
-            {SHAPE_KINDS.has(el.kind) && el.points && el.points.length >= 2 && (
-              <polyline
-                // A boundary closes back to its first point; a divider stays an open line.
-                points={(el.kind === "boundary" ? [...el.points, el.points[0]] : el.points)
-                  .map((p) => `${p.x},${p.y}`)
-                  .join(" ")}
-                className={el.color ? "" : ELEMENT_FILL[el.kind]}
-                strokeWidth={10}
-                // A closed outline takes its colour as a translucent wash with a solid edge, so shapes
-                // stay tellable apart without hiding the seats drawn over them. A divider is an open
-                // line and only ever takes a stroke.
-                style={
-                  el.color
-                    ? {
-                        stroke: el.color,
-                        fill: el.kind === "boundary" ? `${el.color}33` : "none",
-                      }
-                    : undefined
-                }
-                fill="none"
-              />
-            )}
-            {/* Vertex handles — only for the selected shape, and only when an editor asked for them. */}
-            {/*
+                  fill="none"
+                />
+              )}
+              {/* Vertex handles — only for the selected shape, and only when an editor asked for them. */}
+              {/*
               Resize handles (§6). Only on a single selected element, and only where `width`/`height`
               ARE the geometry — a drawn shape is defined by its points, and dragging a box around it
               would claim to resize something the box only approximates.
             */}
-            {onResize &&
-              selectedElementIndex === i &&
-              !SHAPE_KINDS.has(el.kind) &&
-              (["nw", "n", "ne", "w", "e", "sw", "s", "se"] as const).map((handle) => {
-                const hx = el.x + (handle.includes("w") ? -el.width / 2 : handle.includes("e") ? el.width / 2 : 0);
-                const hy = el.y + (handle.includes("n") ? -el.height / 2 : handle.includes("s") ? el.height / 2 : 0);
-                return (
-                  <rect
-                    key={handle}
-                    x={hx - Math.max(14, 44 / Math.sqrt(zoom))}
-                    y={hy - Math.max(14, 44 / Math.sqrt(zoom))}
-                    width={Math.max(28, 88 / Math.sqrt(zoom))}
-                    height={Math.max(28, 88 / Math.sqrt(zoom))}
-                    className="fill-burgundy stroke-beige-kem"
-                    strokeWidth={strokeScale}
-                    style={{ cursor: `${handle}-resize` }}
-                    onPointerDown={(e) => beginResize(i, handle, e)}
-                  />
-                );
-              })}
+              {onResize &&
+                selectedElementIndex === i &&
+                !SHAPE_KINDS.has(el.kind) &&
+                (["nw", "n", "ne", "w", "e", "sw", "s", "se"] as const).map((handle) => {
+                  const hx =
+                    el.x +
+                    (handle.includes("w")
+                      ? -el.width / 2
+                      : handle.includes("e")
+                        ? el.width / 2
+                        : 0);
+                  const hy =
+                    el.y +
+                    (handle.includes("n")
+                      ? -el.height / 2
+                      : handle.includes("s")
+                        ? el.height / 2
+                        : 0);
+                  return (
+                    <rect
+                      key={handle}
+                      x={hx - Math.max(14, 44 / Math.sqrt(zoom))}
+                      y={hy - Math.max(14, 44 / Math.sqrt(zoom))}
+                      width={Math.max(28, 88 / Math.sqrt(zoom))}
+                      height={Math.max(28, 88 / Math.sqrt(zoom))}
+                      className="fill-burgundy stroke-beige-kem"
+                      strokeWidth={strokeScale}
+                      style={{ cursor: `${handle}-resize` }}
+                      onPointerDown={(e) => beginResize(i, handle, e)}
+                    />
+                  );
+                })}
 
-            {onVertexDrag &&
-              selectedElementIndex === i &&
-              SHAPE_KINDS.has(el.kind) &&
-              el.points?.map((p, v) => (
-                <circle
-                  key={v}
-                  cx={p.x}
-                  cy={p.y}
-                  r={Math.max(18, 60 / Math.sqrt(zoom))}
-                  className="cursor-move fill-burgundy stroke-beige-kem"
-                  strokeWidth={strokeScale}
-                  onPointerDown={(e) => {
-                    if (wantsPan(e)) return;
-                    e.stopPropagation();
-                    (e.target as Element).setPointerCapture(e.pointerId);
-                    const move = (ev: PointerEvent) => {
-                      const at = toLayout(ev.clientX, ev.clientY);
-                      if (at) onVertexDrag(i, v, at.x, at.y);
-                    };
-                    const up = () => {
-                      window.removeEventListener("pointermove", move);
-                      window.removeEventListener("pointerup", up);
-                    };
-                    window.addEventListener("pointermove", move);
-                    window.addEventListener("pointerup", up);
-                  }}
+              {onVertexDrag &&
+                selectedElementIndex === i &&
+                SHAPE_KINDS.has(el.kind) &&
+                el.points?.map((p, v) => (
+                  <circle
+                    key={v}
+                    cx={p.x}
+                    cy={p.y}
+                    r={Math.max(18, 60 / Math.sqrt(zoom))}
+                    className="cursor-move fill-burgundy stroke-beige-kem"
+                    strokeWidth={strokeScale}
+                    onPointerDown={(e) => {
+                      if (wantsPan(e)) return;
+                      e.stopPropagation();
+                      (e.target as Element).setPointerCapture(e.pointerId);
+                      const move = (ev: PointerEvent) => {
+                        const at = toLayout(ev.clientX, ev.clientY);
+                        if (at) onVertexDrag(i, v, at.x, at.y);
+                      };
+                      const up = () => {
+                        window.removeEventListener("pointermove", move);
+                        window.removeEventListener("pointerup", up);
+                      };
+                      window.addEventListener("pointermove", move);
+                      window.addEventListener("pointerup", up);
+                    }}
+                  />
+                ))}
+              {el.kind !== "label" && !SHAPE_KINDS.has(el.kind) && (
+                <rect
+                  x={el.x - el.width / 2}
+                  y={el.y - el.height / 2}
+                  width={el.width}
+                  height={el.height}
+                  strokeWidth={zoneYellow ? strokeScale * 2.4 : 6}
+                  strokeDasharray={el.kind === "aisle" ? "40 30" : undefined}
+                  // A chosen colour replaces the theme's own ink for this element, the same way it does
+                  // for a drawn outline above: solid edge, translucent wash, so a stage or a standing
+                  // zone can be told apart from the one beside it at a glance. A capacity zone without
+                  // a chosen colour falls back to the standing-yellow rather than the faint wash — an
+                  // almost-invisible outline was a zone nobody noticed until they zoomed in.
+                  className={el.color || zoneYellow ? "" : ELEMENT_FILL[el.kind]}
+                  style={
+                    el.color
+                      ? { stroke: el.color, fill: `${el.color}33` }
+                      : zoneYellow
+                        ? { stroke: zoneYellow, fill: `${zoneYellow}47` }
+                        : undefined
+                  }
                 />
-              ))}
-            {el.kind !== "label" && !SHAPE_KINDS.has(el.kind) && (
-              <rect
-                x={el.x - el.width / 2}
-                y={el.y - el.height / 2}
-                width={el.width}
-                height={el.height}
-                strokeWidth={6}
-                strokeDasharray={el.kind === "aisle" ? "40 30" : undefined}
-                // A chosen colour replaces the theme's own ink for this element, the same way it does
-                // for a drawn outline above: solid edge, translucent wash, so a stage or a standing
-                // zone can be told apart from the one beside it at a glance.
-                className={el.color ? "" : ELEMENT_FILL[el.kind]}
-                style={el.color ? { stroke: el.color, fill: `${el.color}33` } : undefined}
-              />
-            )}
-            {el.label && (
-              // Text content, never markup — React escapes it (FR-018, SEC-07).
-              <text
-                x={el.x}
-                y={el.y - (el.kind === "area" && el.capacity ? Math.max(40, el.height / 10) : 0)}
-                textAnchor="middle"
-                dominantBaseline="central"
-                // Has to fit the element BOTH ways. Height alone was enough while every labelled
-                // element was a fixed-size stage; a named shape can be any proportion, and a long name
-                // in a tall narrow one ran clean off both sides of it.
-                fontSize={Math.min(
-                  Math.max(60, el.height / 3),
-                  // 0.62em is about the width of a monospace glyph; the 0.9 keeps it off the edges.
-                  Math.max(40, (el.width * 0.9) / Math.max(1, el.label.length * 0.62)),
-                )}
-                className="fill-beige-kem/70 font-mono"
-              >
-                {el.label}
-              </text>
-            )}
-            {/* A capacity zone says how many it holds. Without this it draws as an anonymous shape,
+              )}
+              {el.label && (
+                // Text content, never markup — React escapes it (FR-018, SEC-07).
+                <text
+                  x={el.x}
+                  y={el.y - (el.kind === "area" && el.capacity ? Math.max(40, el.height / 10) : 0)}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  // Has to fit the element BOTH ways. Height alone was enough while every labelled
+                  // element was a fixed-size stage; a named shape can be any proportion, and a long name
+                  // in a tall narrow one ran clean off both sides of it.
+                  fontSize={Math.min(
+                    Math.max(60, el.height / 3),
+                    // 0.62em is about the width of a monospace glyph; the 0.9 keeps it off the edges.
+                    Math.max(40, (el.width * 0.9) / Math.max(1, el.label.length * 0.62)),
+                  )}
+                  className={
+                    el.kind === "stage" || el.kind === "area"
+                      ? "fill-beige-kem font-display font-bold"
+                      : "fill-beige-kem/70 font-mono"
+                  }
+                >
+                  {el.label}
+                </text>
+              )}
+              {/* A capacity zone says how many it holds. Without this it draws as an anonymous shape,
                 and a standing floor is indistinguishable from a decorative outline — for the buyer
                 as much as for the organizer, since both sides render through this component. */}
-            {el.kind === "area" && (el.capacity ?? 0) > 0 && (
-              <text
-                x={el.x}
-                y={el.y + (el.label ? Math.max(60, el.height / 6) : 0)}
-                textAnchor="middle"
-                dominantBaseline="central"
-                fontSize={Math.max(50, el.height / 5)}
-                className="fill-beige-kem/55 font-mono"
-              >
-                {el.capacity} chỗ
-              </text>
-            )}
-          </g>
+              {el.kind === "area" && (el.capacity ?? 0) > 0 && (
+                <text
+                  x={el.x}
+                  y={el.y + (el.label ? Math.max(60, el.height / 6) : 0)}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontSize={Math.max(50, el.height / 5)}
+                  className="fill-beige-kem/65 font-sans"
+                >
+                  {el.capacity} chỗ
+                </text>
+              )}
+            </g>
           );
         })}
 
@@ -1234,7 +1279,9 @@ function SeatCanvasInner<T extends CanvasSeat>(
                   cx={m.x}
                   cy={m.y}
                   r={space.seatDiameter * 0.62}
-                  className={picked ? "fill-burgundy/35 stroke-burgundy" : "fill-transparent stroke-none"}
+                  className={
+                    picked ? "fill-burgundy/35 stroke-burgundy" : "fill-transparent stroke-none"
+                  }
                   strokeWidth={strokeScale}
                   style={{ cursor: "pointer" }}
                   role="button"
@@ -1329,7 +1376,9 @@ function SeatCanvasInner<T extends CanvasSeat>(
                   : undefined
               }
               className={
-                interactive || editable ? "cursor-pointer outline-none focus-visible:opacity-80" : ""
+                interactive || editable
+                  ? "cursor-pointer outline-none focus-visible:opacity-80"
+                  : ""
               }
             >
               <title>{label}</title>
@@ -1379,13 +1428,7 @@ function SeatCanvasInner<T extends CanvasSeat>(
               )}
               {/* Invisible hit area — a thin chair is hard to grab, and a buyer on a phone hits the
                   gap between backrest and cushion constantly without it. */}
-              <rect
-                x={seat.x - rr}
-                y={seat.y - rr}
-                width={d}
-                height={d}
-                fill="transparent"
-              />
+              <rect x={seat.x - rr} y={seat.y - rr} width={d} height={d} fill="transparent" />
               {/*
                 The accessibility mark: a ring around the seat, not a pictogram inside it.
 

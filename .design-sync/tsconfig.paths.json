@@ -1,0 +1,10 @@
+{
+  "_comment": "Paths-only tsconfig for design-sync. Do NOT add an `include`/`exclude` glob here: lib/bundle.mjs strips block comments with a regex that treats the `/*` inside \"@/*\" as a comment opener and runs to the first `*/`, which in a normal tsconfig is inside a glob like \"src/**/*.ts\" — that eats the paths block, JSON.parse fails, and the alias plugin silently becomes null. The second target on each rule is the .js-shim tree from prepare-shims.mjs, tried after the real path misses.",
+  "compilerOptions": {
+    "baseUrl": "..",
+    "paths": {
+      "@/*": ["./*", "./.design-sync/.cache/shims/*"],
+      "@shared/*": ["./shared/*", "./.design-sync/.cache/shims/shared/*"]
+    }
+  }
+}

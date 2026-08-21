@@ -82,6 +82,7 @@ export default function ReferenceChartPanel({
         // one click was an inconsistency waiting to cost somebody their upload.
         onRemove={() => setConfirmRemove(true)}
         helpText="JPG, PNG, WEBP hoặc SVG tối đa 5MB"
+        captionInside
         aspectRatio="banner"
         disabled={busy}
       />
@@ -143,11 +144,7 @@ export default function ReferenceChartPanel({
             />
           </label>
 
-          <button
-            className={`${btn} mt-3`}
-            disabled={busy}
-            onClick={() => setConfirmRemove(true)}
-          >
+          <button className={`${btn} mt-3`} disabled={busy} onClick={() => setConfirmRemove(true)}>
             Xoá bản vẽ tham chiếu
           </button>
         </>

@@ -86,13 +86,21 @@ export default function PreviewOverlay({
           space={space}
           interactive
           selectedIds={picked}
-          // No `seatStroke`: a section outline is an editor aid, and on the buyer's map colour means
-          // price and nothing else (FR-064).
-          seatFill={(s) => (sold.has(s.id) ? undefined : colorOfSeat.get(s.id))}
-          seatClass={(s) => (sold.has(s.id) ? "fill-beige-kem/15 stroke-beige-kem/25" : "")}
-          seatLabel={(s) =>
-            `Ghế ${s.row}${s.number}${sold.has(s.id) ? " — đã bán" : ""}`
+          // A sold seat reads as OUT of the room: a solid dark warm neutral, not a washed-out ghost
+          // of the ink — tint-only states were the failure the hatch pattern was added to end, and
+          // a preview that whispers "sold" defeats the point of previewing.
+          seatClass={(s) =>
+            sold.has(s.id)
+              ? "fill-stone-800 stroke-stone-900"
+              : picked.has(s.id)
+                ? "fill-burgundy stroke-burgundy"
+                : ""
           }
+          // No `seatStroke`: a section outline is an editor aid, and on the buyer's map colour means
+          // price and nothing else (FR-064). Picked seats solidify to the selection red — the same
+          // state the buyer's screen will show.
+          seatFill={(s) => (sold.has(s.id) || picked.has(s.id) ? undefined : colorOfSeat.get(s.id))}
+          seatLabel={(s) => `Ghế ${s.row}${s.number}${sold.has(s.id) ? " — đã bán" : ""}`}
           onSeatActivate={(s) => {
             if (sold.has(s.id)) return; // an unavailable seat is not selectable, as for a buyer
             setPicked((cur) => {

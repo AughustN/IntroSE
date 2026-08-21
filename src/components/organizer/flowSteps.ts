@@ -23,6 +23,23 @@ import type { ManageShowtime, MyEvent } from "../../services/catalogClient";
 
 export type StepState = "done" | "blocked" | "todo";
 
+export type FlowAction = "showtimes" | "tiers" | "chart" | "apply" | "submit";
+
+/**
+ * What a fix-it button says, in both readers of these steps — the rail AND the strip.
+ *
+ * Two surfaces, one voice (Principle VI): the label names the tool it opens, in the words that tool
+ * uses for itself. It lived privately in the rail while the strip needed it here, which is exactly
+ * the drift a shared export exists to prevent.
+ */
+export const ACTION_LABEL: Record<FlowAction, string> = {
+  showtimes: "Thêm suất chiếu",
+  tiers: "Mở hạng vé",
+  chart: "Mở trình thiết kế sơ đồ",
+  apply: "Gán giá & áp dụng",
+  submit: "Gửi duyệt",
+};
+
 export interface FlowStep {
   id: string;
   /** Ordinal shown in the rail. A true position in a dependency chain, not decoration. */
@@ -33,8 +50,23 @@ export interface FlowStep {
   reason?: string;
   /** The error contract's code for that refusal, when the server has one for it. */
   code?: string;
-  /** Which tool fixes it — the rail turns this into a link. */
-  action?: "showtimes" | "tiers" | "chart" | "apply" | "submit";
+  /** Which tool fixes it — the rail and the strip turn this into a link. */
+  action?: FlowAction;
+}
+
+/**
+ * The strip's headline, as pure arithmetic over the steps.
+ *
+ * `doneCount` counts `blocked` as progress too: a blocked step is one the server has judged, and a
+ * fresh draft's only unfinished step IS its draft — counting only `done` would print 0/0 when the
+ * organizer has already past the first gate they could fail. `active` is the step the organizer is
+ * being asked to deal with now — the first one not `done` — or the last step when all have passed
+ * (submit), so the strip never goes silent on a finished chain.
+ */
+export function stepProgress(steps: FlowStep[]): { doneCount: number; active: FlowStep | null } {
+  const doneCount = steps.filter((s) => s.state !== "todo").length;
+  const active = steps.find((s) => s.state !== "done") ?? steps[steps.length - 1] ?? null;
+  return { doneCount, active };
 }
 
 const upcoming = (rows: ManageShowtime[]) =>
@@ -79,7 +111,11 @@ const venuesAtWorstRank = (rows: ManageShowtime[], worst: ManageShowtime | null)
   };
   const target = rankOf(worst);
   const names = [
-    ...new Set(upcoming(rows).filter((s) => rankOf(s) === target).map((s) => s.venueName)),
+    ...new Set(
+      upcoming(rows)
+        .filter((s) => rankOf(s) === target)
+        .map((s) => s.venueName),
+    ),
   ];
   return names.join(", ");
 };

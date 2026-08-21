@@ -16,3 +16,13 @@ const VND = new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 });
 export function formatVnd(amount: number): string {
   return `${VND.format(amount)}đ`;
 }
+
+/**
+ * Compact display for narrow cards (~390px): a full-length figure wraps mid-way through the digits,
+ * nothing gets shorter, nothing reads — so below triệu the number collapses to the unit (486tr).
+ * Values under 1tr stay exact; that is where the distinction still matters.
+ */
+export function formatVndShort(amount: number): string {
+  const r = Math.round(amount / 1_000_000);
+  return r >= 1 ? `${r}tr` : `${VND.format(amount)}đ`;
+}

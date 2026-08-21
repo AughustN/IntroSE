@@ -91,7 +91,7 @@ export default function AiListingPanel({
           onChange={(e) => setKeywords(e.target.value)}
           placeholder="Từ khoá, cách nhau bởi dấu phẩy"
           className={input}
-        />
+        />{" "}
         <button onClick={generate} disabled={pending || !topic.trim()} className={btn}>
           {pending ? "Đang tạo…" : "Tạo gợi ý"}
         </button>

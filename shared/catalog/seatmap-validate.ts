@@ -15,25 +15,30 @@ export const SEAT_DIAMETER = 100;
 export const LAYOUT_MAX_SEATS = 2_000;
 
 export type ValidationCode =
-  | 'overlapping_seats'
-  | 'duplicate_label'
-  | 'seat_without_section'
-  | 'zero_capacity'
+  | "overlapping_seats"
+  | "duplicate_label"
+  | "seat_without_section"
+  | "zero_capacity"
   // Added by the hall-scheme amendment (FR-072..FR-075). Reported in the SAME single pass — there is
   // one validate/publish gate, not two.
-  | 'seats_outside_boundary'
-  | 'icon_without_position'
+  | "seats_outside_boundary"
+  | "icon_without_position"
   // Categories. `category_without_tier` replaces the old `section_without_tier`: the thing an event
   // prices is now the class, not the place. `section_without_color` is gone — colour moved to the
   // category, where the column is NOT NULL, so there is nothing left to check at publish time.
-  | 'seat_without_category'
-  | 'category_without_tier'
+  | "seat_without_category"
+  | "category_without_tier"
   // Capacity zones (0027). A zone is an `area` that carries a capacity AND a price class, and is sold
   // by count against that class's tier rather than as seat rows.
-  | 'zone_without_category'
-  | 'category_mixed_inventory'
+  | "zone_without_category"
+  | "category_mixed_inventory"
   // Advisory, NOT a publish blocker — see `severity` below.
-  | 'focal_point_unset';
+  | "focal_point_unset"
+  // Companion seats (0036). `companion_wrong_target` blocks — a pairing that names nothing or
+  // names a non-wheelchair seat is data the apply/generation path cannot honour; the advisory
+  // half is `accessible_without_companion` — a wheelchair seat with nothing pointing at it.
+  | "companion_wrong_target"
+  | "accessible_without_companion";
 
 export interface ValidationIssue {
   code: ValidationCode;
@@ -49,7 +54,7 @@ export interface ValidationIssue {
    * tickets, but something about it will behave in a way the organizer did not choose and cannot
    * observe. `focal_point_unset` is the first of those.
    */
-  severity?: 'error' | 'warning';
+  severity?: "error" | "warning";
   /** Vietnamese, user-facing. */
   message: string;
   /** For `overlapping_seats` this is the PAIR (FR-031). */
@@ -66,6 +71,13 @@ export interface ValidatableSeat {
   seatNumber: number;
   x: number;
   y: number;
+  /**
+   * 0036 companion checks. Both are read from the SAME normalized row: the ordinary seat names the
+   * accessible one it accompanies, and the accessible seat must have at least one seat pointing at
+   * it. `isAccessible` is not used elsewhere in this module.
+   */
+  isAccessible?: boolean;
+  companionSeatId?: number | null;
 }
 
 export interface ValidatableSection {
@@ -107,7 +119,10 @@ export function effectiveDiameter(multiplier: number | undefined): number {
 }
 
 /** Even-odd ray cast. Used only to report seats a drawn boundary leaves outside (FR-073). */
-export function pointInPolygon(pt: { x: number; y: number }, poly: { x: number; y: number }[]): boolean {
+export function pointInPolygon(
+  pt: { x: number; y: number },
+  poly: { x: number; y: number }[],
+): boolean {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
     const intersects =
@@ -141,7 +156,10 @@ export interface ValidatableLayout {
  * neighbourhood, so this stays O(n) at the 2,000-seat ceiling instead of the 2M pairs a naive scan
  * would walk (research R-3).
  */
-function findOverlaps(seats: ValidatableSeat[], sizeOf: (s: ValidatableSeat) => number): number[][] {
+function findOverlaps(
+  seats: ValidatableSeat[],
+  sizeOf: (s: ValidatableSeat) => number,
+): number[][] {
   const cells = new Map<string, ValidatableSeat[]>();
   const key = (cx: number, cy: number) => `${cx}:${cy}`;
 
@@ -195,18 +213,18 @@ export function validateLayout(layout: ValidatableLayout): ValidationIssue[] {
 
   // A zone holds people without holding seats, so "empty" now means neither. Counting only seats
   // would make a standing-only venue permanently unpublishable.
-  const zones = (elements ?? []).filter((el) => el.kind === 'area' && (el.capacity ?? 0) > 0);
+  const zones = (elements ?? []).filter((el) => el.kind === "area" && (el.capacity ?? 0) > 0);
   if (seats.length === 0 && zones.length === 0) {
     issues.push({
-      code: 'zero_capacity',
-      message: 'Sơ đồ chưa có ghế hay khu sức chứa nào, không thể phát hành.',
+      code: "zero_capacity",
+      message: "Sơ đồ chưa có ghế hay khu sức chứa nào, không thể phát hành.",
     });
   }
 
   for (const [a, b] of findOverlaps(seats, sizeOf)) {
     issues.push({
-      code: 'overlapping_seats',
-      message: 'Hai ghế đang nằm chồng lên nhau.',
+      code: "overlapping_seats",
+      message: "Hai ghế đang nằm chồng lên nhau.",
       seatIds: [a, b],
     });
   }
@@ -215,7 +233,7 @@ export function validateLayout(layout: ValidatableLayout): ValidationIssue[] {
   // exactly what the per-section uniqueness change enables (FR-003).
   const byLabel = new Map<string, number[]>();
   for (const seat of seats) {
-    const k = `${seat.sectionId ?? 'none'}|${seat.rowLabel}|${seat.seatNumber}`;
+    const k = `${seat.sectionId ?? "none"}|${seat.rowLabel}|${seat.seatNumber}`;
     const ids = byLabel.get(k);
     if (ids) ids.push(seat.id);
     else byLabel.set(k, [seat.id]);
@@ -226,20 +244,21 @@ export function validateLayout(layout: ValidatableLayout): ValidationIssue[] {
   const collisionsBySection = new Map<string, { labels: string[]; ids: number[] }>();
   for (const [k, ids] of byLabel) {
     if (ids.length < 2) continue;
-    const [section, row, number] = k.split('|');
+    const [section, row, number] = k.split("|");
     const entry = collisionsBySection.get(section) ?? { labels: [], ids: [] };
     entry.labels.push(`${row}${number}`);
     entry.ids.push(...ids);
     collisionsBySection.set(section, entry);
   }
   for (const [section, { labels, ids }] of collisionsBySection) {
-    const name = section === 'none' ? null : sections.find((sec) => String(sec.id) === section)?.name;
-    const shown = labels.slice(0, 5).join(', ');
-    const more = labels.length > 5 ? ` và ${labels.length - 5} nhãn nữa` : '';
+    const name =
+      section === "none" ? null : sections.find((sec) => String(sec.id) === section)?.name;
+    const shown = labels.slice(0, 5).join(", ");
+    const more = labels.length > 5 ? ` và ${labels.length - 5} nhãn nữa` : "";
     issues.push({
-      code: 'duplicate_label',
+      code: "duplicate_label",
       message:
-        `${name ? `Khu "${name}"` : 'Ghế chưa thuộc khu nào'} có ${labels.length} nhãn bị trùng ` +
+        `${name ? `Khu "${name}"` : "Ghế chưa thuộc khu nào"} có ${labels.length} nhãn bị trùng ` +
         `(${shown}${more}). Hai khối đang dùng chung nhãn hàng — đổi nhãn hàng hoặc số ghế bắt đầu của một khối.`,
       seatIds: ids,
     });
@@ -248,19 +267,21 @@ export function validateLayout(layout: ValidatableLayout): ValidationIssue[] {
   const sectionless = seats.filter((s) => s.sectionId === null).map((s) => s.id);
   if (sectionless.length > 0) {
     issues.push({
-      code: 'seat_without_section',
-      message: 'Có ghế chưa thuộc khu vực nào.',
+      code: "seat_without_section",
+      message: "Có ghế chưa thuộc khu vực nào.",
       seatIds: sectionless,
     });
   }
 
   // A seat with no class cannot be priced, so it cannot be sold. Same shape of rule as the missing
   // section above, and permissive in the same way: a draft may hold unclassified seats while drawing.
-  const uncategorised = seats.filter((s) => s.categoryId === null || s.categoryId === undefined).map((s) => s.id);
+  const uncategorised = seats
+    .filter((s) => s.categoryId === null || s.categoryId === undefined)
+    .map((s) => s.id);
   if (uncategorised.length > 0) {
     issues.push({
-      code: 'seat_without_category',
-      message: 'Có ghế chưa thuộc hạng ghế nào.',
+      code: "seat_without_category",
+      message: "Có ghế chưa thuộc hạng ghế nào.",
       seatIds: uncategorised,
     });
   }
@@ -271,7 +292,7 @@ export function validateLayout(layout: ValidatableLayout): ValidationIssue[] {
   const namelessZones = zones.filter((z) => z.categoryId === null || z.categoryId === undefined);
   if (namelessZones.length > 0) {
     issues.push({
-      code: 'zone_without_category',
+      code: "zone_without_category",
       message: `${namelessZones.length} khu sức chứa chưa có hạng ghế — chọn hạng ghế hoặc xoá khu.`,
     });
   }
@@ -289,10 +310,73 @@ export function validateLayout(layout: ValidatableLayout): ValidationIssue[] {
   if (mixed.length > 0) {
     const names = (categories ?? []).filter((c) => mixed.includes(c.id)).map((c) => c.name);
     issues.push({
-      code: 'category_mixed_inventory',
+      code: "category_mixed_inventory",
       message: `Hạng ghế "${names.join('", "')}" vừa có ghế vừa có khu sức chứa — tách thành hai hạng riêng.`,
       categoryIds: mixed,
     });
+  }
+
+  // ---- Companion seats (0036) ----------------------------------------------------------------
+  //
+  // The pairing is an authoring intent with a hard structural rule: an ordinary seat may name the
+  // ACCESSIBLE seat it accompanies, and that is the whole contract. A pointer into nothing, a
+  // pointer into a non-wheelchair seat, or two pointers into one wheelchair seat is a pairing the
+  // apply/generation path cannot honour — because at bind time the map is built seat-by-seat from
+  // exactly these rows, and a broken pointer would silently sell a "companion" as a solo seat.
+  //
+  // The advisory half is deliberately NOT blocking: a wheelchair seat with no companion yet is a
+  // legitimate work-in-progress state (the organizer has marked the seat but not yet paired it),
+  // and the organizer needs to be able to see the chart to fix it.
+
+  const seatById = new Map(seats.map((s) => [s.id, s]));
+
+  // At most one seat may name each accessible seat — two companions on one wheelchair seat is a
+  // data contradiction, and letting one win arbitrarily would sell the other as a stranger.
+  const claimCount = new Map<number, number>();
+  for (const s of seats) {
+    const target = s.companionSeatId;
+    if (target === null || target === undefined) continue;
+    claimCount.set(target, (claimCount.get(target) ?? 0) + 1);
+  }
+
+  for (const s of seats) {
+    const target = s.companionSeatId;
+    if (target === null || target === undefined) continue;
+    const via = seatById.get(target);
+    if (!via) {
+      issues.push({
+        code: "companion_wrong_target",
+        message: "Ghế đi kèm đang trỏ tới một ghế không có trong sơ đồ.",
+        seatIds: [s.id],
+      });
+      continue;
+    }
+    if ((claimCount.get(target) ?? 0) > 1) {
+      issues.push({
+        code: "companion_wrong_target",
+        message: `Hai ghế đang cùng nhận đi kèm với ghế xe lăn ${via.rowLabel}${via.seatNumber}.`,
+        seatIds: [s.id],
+      });
+      continue;
+    }
+    if (!via.isAccessible) {
+      issues.push({
+        code: "companion_wrong_target",
+        message: `Ghế ${s.rowLabel}${s.seatNumber} muốn đi kèm với ghế không phải ghế xe lăn.`,
+        seatIds: [s.id, target],
+      });
+    }
+  }
+
+  for (const s of seats) {
+    if (s.isAccessible && (claimCount.get(s.id) ?? 0) === 0) {
+      issues.push({
+        code: "accessible_without_companion",
+        severity: "warning",
+        message: "Ghế xe lăn chưa có ghế đi kèm.",
+        seatIds: [s.id],
+      });
+    }
   }
 
   // Only checkable at bind time: a layout on its own has no tiers (T050).
@@ -303,7 +387,7 @@ export function validateLayout(layout: ValidatableLayout): ValidationIssue[] {
     const untiered = (categories ?? []).filter((c) => occupied.has(c.id) && !tiered.has(c.id));
     if (untiered.length > 0) {
       issues.push({
-        code: 'category_without_tier',
+        code: "category_without_tier",
         message: `Hạng ghế "${untiered.map((c) => c.name).join('", "')}" chưa có giá vé cho suất diễn này.`,
         categoryIds: untiered.map((c) => c.id),
       });
@@ -313,21 +397,28 @@ export function validateLayout(layout: ValidatableLayout): ValidationIssue[] {
   // ---- hall-scheme amendment: two more checks, same single pass (FR-073, FR-074) ----
 
   for (const el of elements ?? []) {
-    const isShape = el.kind === 'boundary' || el.kind === 'divider';
+    const isShape = el.kind === "boundary" || el.kind === "divider";
     if (isShape) continue;
     if (el.x === null || el.x === undefined || el.y === null || el.y === undefined) {
-      issues.push({ code: 'icon_without_position', message: `Biểu tượng "${el.kind}" chưa có vị trí.` });
+      issues.push({
+        code: "icon_without_position",
+        message: `Biểu tượng "${el.kind}" chưa có vị trí.`,
+      });
     }
   }
 
   // A drawn hall outline that leaves seats outside it is a map that misleads the buyer. Only the
   // FIRST boundary is authoritative — two outlines is a drafting artefact, not two halls.
-  const boundary = (elements ?? []).find((e) => e.kind === 'boundary' && (e.points?.length ?? 0) >= 3);
+  const boundary = (elements ?? []).find(
+    (e) => e.kind === "boundary" && (e.points?.length ?? 0) >= 3,
+  );
   if (boundary?.points) {
-    const outside = seats.filter((s) => !pointInPolygon({ x: s.x, y: s.y }, boundary.points!)).map((s) => s.id);
+    const outside = seats
+      .filter((s) => !pointInPolygon({ x: s.x, y: s.y }, boundary.points!))
+      .map((s) => s.id);
     if (outside.length > 0) {
       issues.push({
-        code: 'seats_outside_boundary',
+        code: "seats_outside_boundary",
         message: `${outside.length} ghế nằm ngoài đường bao của sảnh.`,
         seatIds: outside,
       });
@@ -351,10 +442,10 @@ export function validateLayout(layout: ValidatableLayout): ValidationIssue[] {
    * Only when there are seats. Best-available ranks seats; a zone-only standing chart has nothing to
    * rank and so nothing to get wrong.
    */
-  if (seats.length > 0 && !(elements ?? []).some((el) => el.kind === 'stage')) {
+  if (seats.length > 0 && !(elements ?? []).some((el) => el.kind === "stage")) {
     issues.push({
-      code: 'focal_point_unset',
-      severity: 'warning',
+      code: "focal_point_unset",
+      severity: "warning",
       message:
         'Sơ đồ chưa có sân khấu. Gợi ý "ghế tốt nhất" sẽ tính từ giữa khu ghế thay vì từ sân khấu.',
     });
@@ -365,7 +456,7 @@ export function validateLayout(layout: ValidatableLayout): ValidationIssue[] {
 
 /** Issues that REFUSE the publish. `severity` omitted means blocking — see `ValidationIssue`. */
 export const blockingIssues = (issues: ValidationIssue[]): ValidationIssue[] =>
-  issues.filter((i) => i.severity !== 'warning');
+  issues.filter((i) => i.severity !== "warning");
 
 /** Clamp a coordinate into the space; a stored position is always in range (FR-014). */
 export const clampCoord = (v: number): number => Math.max(0, Math.min(LAYOUT_SPACE, Math.round(v)));

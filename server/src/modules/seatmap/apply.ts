@@ -1,6 +1,6 @@
-import type { ApplyChange, ApplyPreview, ApplyRefusal } from '@shared/catalog/seatmap.js';
-import { clampCoord, normaliseRotation } from '@shared/catalog/seatmap-validate.js';
-import { type Db, pool, withTransaction } from '../../db/pool.js';
+import type { ApplyChange, ApplyPreview, ApplyRefusal } from "@shared/catalog/seatmap.js";
+import { clampCoord, normaliseRotation } from "@shared/catalog/seatmap-validate.js";
+import { type Db, pool, withTransaction } from "../../db/pool.js";
 
 /**
  * Applying a map edit to a showtime that already has bookable seats (FR-027..FR-029).
@@ -40,17 +40,24 @@ interface CurrentSeat {
   seat_number: number | null;
   section_name: string | null;
   ticket_tier_id: number;
-  status: 'available' | 'held' | 'sold' | 'blocked';
+  status: "available" | "held" | "sold" | "blocked";
   pos_x: number | null;
   pos_y: number | null;
   rotation: number;
   live_hold: boolean;
 }
 
-const labelOf = (s: { sectionName?: string | null; section_name?: string | null; rowLabel?: string; row_label?: string | null; seatNumber?: number; seat_number?: number | null }): string => {
+const labelOf = (s: {
+  sectionName?: string | null;
+  section_name?: string | null;
+  rowLabel?: string;
+  row_label?: string | null;
+  seatNumber?: number;
+  seat_number?: number | null;
+}): string => {
   const section = s.sectionName ?? s.section_name ?? null;
-  const row = s.rowLabel ?? s.row_label ?? '?';
-  const num = s.seatNumber ?? s.seat_number ?? '?';
+  const row = s.rowLabel ?? s.row_label ?? "?";
+  const num = s.seatNumber ?? s.seat_number ?? "?";
   return section ? `${section} / ${row}${num}` : `${row}${num}`;
 };
 
@@ -97,13 +104,13 @@ export function classify(desired: DesiredSeat[], current: CurrentSeat[]): ApplyP
 
   for (const d of desired) {
     if (d.showtimeSeatId === null) {
-      changes.push({ kind: 'add', showtimeSeatId: null, seatLabel: labelOf(d) });
+      changes.push({ kind: "add", showtimeSeatId: null, seatLabel: labelOf(d) });
       continue;
     }
     const c = byId.get(d.showtimeSeatId);
     if (!c) {
       // Refers to a seat this showtime does not have — treat as an addition rather than failing.
-      changes.push({ kind: 'add', showtimeSeatId: null, seatLabel: labelOf(d) });
+      changes.push({ kind: "add", showtimeSeatId: null, seatLabel: labelOf(d) });
       continue;
     }
     keptIds.add(c.id);
@@ -114,16 +121,16 @@ export function classify(desired: DesiredSeat[], current: CurrentSeat[]): ApplyP
 
     if (c.live_hold) {
       refusals.push({
-        reason: 'seat_held',
+        reason: "seat_held",
         showtimeSeatId: c.id,
         seatLabel: labelOf(c),
         message: `Ghế ${labelOf(c)} đang được một khách giữ. Hãy thử lại sau khi lượt giữ hết hạn.`,
       });
       continue;
     }
-    if (c.status === 'sold' && identity) {
+    if (c.status === "sold" && identity) {
       refusals.push({
-        reason: 'seat_sold',
+        reason: "seat_sold",
         showtimeSeatId: c.id,
         seatLabel: labelOf(c),
         message: `Ghế ${labelOf(c)} đã được bán: chỉ có thể đổi vị trí hiển thị, không đổi nhãn, khu vực hay hạng vé.`,
@@ -131,7 +138,7 @@ export function classify(desired: DesiredSeat[], current: CurrentSeat[]): ApplyP
       continue;
     }
     changes.push({
-      kind: identity ? (d.ticketTierId !== c.ticket_tier_id ? 'retier' : 'relabel') : 'move',
+      kind: identity ? (d.ticketTierId !== c.ticket_tier_id ? "retier" : "relabel") : "move",
       showtimeSeatId: c.id,
       seatLabel: labelOf(d),
     });
@@ -141,23 +148,23 @@ export function classify(desired: DesiredSeat[], current: CurrentSeat[]): ApplyP
     if (keptIds.has(c.id)) continue;
     if (c.live_hold) {
       refusals.push({
-        reason: 'seat_held',
+        reason: "seat_held",
         showtimeSeatId: c.id,
         seatLabel: labelOf(c),
         message: `Ghế ${labelOf(c)} đang được một khách giữ, không thể xoá.`,
       });
       continue;
     }
-    if (c.status === 'sold') {
+    if (c.status === "sold") {
       refusals.push({
-        reason: 'seat_sold',
+        reason: "seat_sold",
         showtimeSeatId: c.id,
         seatLabel: labelOf(c),
         message: `Ghế ${labelOf(c)} đã được bán, không thể xoá khỏi sơ đồ.`,
       });
       continue;
     }
-    changes.push({ kind: 'remove', showtimeSeatId: c.id, seatLabel: labelOf(c) });
+    changes.push({ kind: "remove", showtimeSeatId: c.id, seatLabel: labelOf(c) });
   }
 
   return { changes, refusals, wouldSucceed: refusals.length === 0 };
@@ -176,7 +183,9 @@ export async function preview(showtimeId: number, desired: DesiredSeat[]): Promi
 export async function apply(showtimeId: number, desired: DesiredSeat[]): Promise<ApplyPreview> {
   return withTransaction(async (client) => {
     // Lock first, then read: whatever we classify cannot move underneath us.
-    await client.query(`SELECT id FROM showtime_seats WHERE showtime_id = $1 FOR UPDATE`, [showtimeId]);
+    await client.query(`SELECT id FROM showtime_seats WHERE showtime_id = $1 FOR UPDATE`, [
+      showtimeId,
+    ]);
     const current = await readCurrent(showtimeId, client);
     const outcome = classify(desired, current);
     if (!outcome.wouldSucceed) return outcome; // caller turns this into 409; the txn wrote nothing
@@ -230,6 +239,15 @@ export async function apply(showtimeId: number, desired: DesiredSeat[]): Promise
       await client.query(`DELETE FROM showtime_seats WHERE id = ANY($1::bigint[])`, [removable]);
     }
 
+    // The re-apply just added and removed seat rows (0036): re-sync the pair links from the chart,
+    // the same way initial generation copies them. A no-op when nothing is paired.
+    const bound = await client.query<{ layout_id: number | null }>(
+      `SELECT layout_id FROM showtimes WHERE id = $1`,
+      [showtimeId],
+    );
+    const layoutId = bound.rows[0]?.layout_id ?? null;
+    if (layoutId !== null) await syncCompanionLinks(showtimeId, layoutId, client);
+
     return outcome;
   });
 }
@@ -239,8 +257,14 @@ export async function apply(showtimeId: number, desired: DesiredSeat[]): Promise
  * matched to the existing map by `seat_id`, so a seat that survived keeps its bookable row (and its
  * sale) rather than being deleted and re-added.
  */
-export async function desiredFromLayout(showtimeId: number, db: Db = pool): Promise<DesiredSeat[] | null> {
-  const head = await db.query<{ layout_id: number | null }>(`SELECT layout_id FROM showtimes WHERE id = $1`, [showtimeId]);
+export async function desiredFromLayout(
+  showtimeId: number,
+  db: Db = pool,
+): Promise<DesiredSeat[] | null> {
+  const head = await db.query<{ layout_id: number | null }>(
+    `SELECT layout_id FROM showtimes WHERE id = $1`,
+    [showtimeId],
+  );
   const layoutId = head.rows[0]?.layout_id ?? null;
   if (layoutId === null) return null;
 
@@ -291,7 +315,11 @@ export async function desiredFromLayout(showtimeId: number, db: Db = pool): Prom
 }
 
 /** Refresh the decoration half of the snapshot from the source layout (FR-005, T046). */
-export async function refreshSnapshot(showtimeId: number, layoutId: number, db: Db = pool): Promise<void> {
+export async function refreshSnapshot(
+  showtimeId: number,
+  layoutId: number,
+  db: Db = pool,
+): Promise<void> {
   await db.query(
     `UPDATE showtimes st
         SET layout_id = $2,
@@ -348,12 +376,64 @@ export async function refreshSnapshot(showtimeId: number, layoutId: number, db: 
   );
 }
 
+/**
+ * Re-sync the showtime's companion links from its source layout (0036).
+ *
+ * The pairing lives on `seats` (the chart) and is COPIED onto `showtime_seats` — a self-reference
+ * between the showtime's own rows, resolved through both seats' physical ids. Whatever path just
+ * (re)wrote the showtime's seat rows — initial generation or a re-apply — calls this afterwards, so
+ * the snapshot and the chart never disagree about who accompanies whom while the chart is the
+ * current source of truth.
+ *
+ * Written as one UPDATE rather than a per-seat loop: pairs are rare on a chart but a map holds
+ * thousands of seats, and a statement that touches nothing on an unpaired chart costs a scan and
+ * returns. NULL-clears pairs whose partner was REMOVED from this showtime (the deleted row breaks
+ * the join, so the seat simply stops naming a companion — the layout's validator is still the one
+ * that calls the chart itself out).
+ */
+export async function syncCompanionLinks(
+  showtimeId: number,
+  layoutId: number,
+  db: Db,
+): Promise<void> {
+  await db.query(
+    `UPDATE showtime_seats ss
+        SET companion_seat_id = partner.id
+       FROM seats se
+       JOIN showtime_seats partner ON partner.showtime_id = $1 AND partner.seat_id = se.companion_seat_id
+      WHERE ss.showtime_id = $1
+        AND ss.seat_id = se.id
+        AND se.layout_id = $2
+        AND se.archived_at IS NULL
+        AND se.companion_seat_id IS NOT NULL`,
+    [showtimeId, layoutId],
+  );
+  // Seats whose partner row is gone (deleted or archived out of this showtime) must stop pointing
+  // at the old link: the UPDATE above cannot reach them (the join fails), so clear explicitly.
+  await db.query(
+    `UPDATE showtime_seats ss
+        SET companion_seat_id = NULL
+       FROM seats se
+      WHERE ss.showtime_id = $1
+        AND ss.seat_id = se.id
+        AND ss.companion_seat_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM showtime_seats partner
+           WHERE partner.id = ss.companion_seat_id
+        )`,
+    [showtimeId],
+  );
+}
+
 /** Block or unblock seats on a live map. Never takes a seat from someone who has it (FR-033). */
 export async function setBlocked(
   showtimeId: number,
   showtimeSeatIds: number[],
   blocked: boolean,
-): Promise<{ refusals: ApplyRefusal[]; changed: { showtimeSeatId: number; status: 'available' | 'blocked' }[] }> {
+): Promise<{
+  refusals: ApplyRefusal[];
+  changed: { showtimeSeatId: number; status: "available" | "blocked" }[];
+}> {
   return withTransaction(async (client) => {
     const { rows } = await client.query<CurrentSeat>(
       `SELECT id, seat_id, row_label, seat_number, section_name, ticket_tier_id, status, pos_x, pos_y, rotation,
@@ -365,20 +445,32 @@ export async function setBlocked(
     const refusals: ApplyRefusal[] = [];
     for (const s of rows) {
       if (s.live_hold) {
-        refusals.push({ reason: 'seat_held', showtimeSeatId: s.id, seatLabel: labelOf(s), message: `Ghế ${labelOf(s)} đang được giữ.` });
-      } else if (s.status === 'sold') {
-        refusals.push({ reason: 'seat_sold', showtimeSeatId: s.id, seatLabel: labelOf(s), message: `Ghế ${labelOf(s)} đã được bán.` });
+        refusals.push({
+          reason: "seat_held",
+          showtimeSeatId: s.id,
+          seatLabel: labelOf(s),
+          message: `Ghế ${labelOf(s)} đang được giữ.`,
+        });
+      } else if (s.status === "sold") {
+        refusals.push({
+          reason: "seat_sold",
+          showtimeSeatId: s.id,
+          seatLabel: labelOf(s),
+          message: `Ghế ${labelOf(s)} đã được bán.`,
+        });
       }
     }
     if (refusals.length > 0) return { refusals, changed: [] };
 
-    const next = blocked ? 'blocked' : 'available';
-    await client.query(`UPDATE showtime_seats SET status = $3 WHERE showtime_id = $1 AND id = ANY($2::bigint[])`, [
-      showtimeId,
-      showtimeSeatIds,
-      next,
-    ]);
-    return { refusals: [], changed: rows.map((s) => ({ showtimeSeatId: s.id, status: next as 'available' | 'blocked' })) };
+    const next = blocked ? "blocked" : "available";
+    await client.query(
+      `UPDATE showtime_seats SET status = $3 WHERE showtime_id = $1 AND id = ANY($2::bigint[])`,
+      [showtimeId, showtimeSeatIds, next],
+    );
+    return {
+      refusals: [],
+      changed: rows.map((s) => ({ showtimeSeatId: s.id, status: next as "available" | "blocked" })),
+    };
   });
 }
 
@@ -405,24 +497,28 @@ export async function setTier(
 
     const refusals: ApplyRefusal[] = [];
     for (const s of rows) {
-      if (s.status === 'sold') {
+      if (s.status === "sold") {
         refusals.push({
-          reason: 'seat_sold',
+          reason: "seat_sold",
           showtimeSeatId: s.id,
           seatLabel: labelOf(s),
           message: `Ghế ${labelOf(s)} đã được bán, không thể đổi hạng vé.`,
         });
       } else if (s.live_hold) {
-        refusals.push({ reason: 'seat_held', showtimeSeatId: s.id, seatLabel: labelOf(s), message: `Ghế ${labelOf(s)} đang được giữ.` });
+        refusals.push({
+          reason: "seat_held",
+          showtimeSeatId: s.id,
+          seatLabel: labelOf(s),
+          message: `Ghế ${labelOf(s)} đang được giữ.`,
+        });
       }
     }
     if (refusals.length > 0) return { refusals, tier: null };
 
-    await client.query(`UPDATE showtime_seats SET ticket_tier_id = $3 WHERE showtime_id = $1 AND id = ANY($2::bigint[])`, [
-      showtimeId,
-      showtimeSeatIds,
-      ticketTierId,
-    ]);
+    await client.query(
+      `UPDATE showtime_seats SET ticket_tier_id = $3 WHERE showtime_id = $1 AND id = ANY($2::bigint[])`,
+      [showtimeId, showtimeSeatIds, ticketTierId],
+    );
     return { refusals: [], tier: { label: tier.rows[0].label, price: Number(tier.rows[0].price) } };
   });
 }

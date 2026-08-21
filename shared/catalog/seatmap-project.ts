@@ -19,8 +19,8 @@ import type {
   DocumentSeat,
   RowLabelScheme,
   SeatLabelScheme,
-} from './seatmap-document.js';
-import { isSeatBearing } from './seatmap-document.js';
+} from "./seatmap-document.js";
+import { isSeatBearing } from "./seatmap-document.js";
 import type {
   ElementKind,
   LayoutCategory,
@@ -28,8 +28,8 @@ import type {
   LayoutElement,
   LayoutSeat,
   LayoutSection,
-} from './seatmap.js';
-import { LAYOUT_MAX_SEATS, clampCoord, normaliseRotation } from './seatmap-validate.js';
+} from "./seatmap.js";
+import { LAYOUT_MAX_SEATS, clampCoord, normaliseRotation } from "./seatmap-validate.js";
 
 export interface ProjectedLayout {
   sections: LayoutSection[];
@@ -57,20 +57,20 @@ export interface ProjectedLayout {
 
 /** Block kinds that become decoration rows, and the `layout_elements.kind` each maps to. */
 const BLOCK_TO_ELEMENT: Record<string, ElementKind> = {
-  stage: 'stage',
-  aisle: 'aisle',
-  door: 'door',
-  bar: 'bar',
-  text: 'label',
-  shape: 'boundary',
-  'ga-zone': 'area',
-  exit: 'exit',
-  restroom: 'restroom',
-  food_drink: 'food_drink',
-  smoking: 'smoking',
-  first_aid: 'first_aid',
-  lift_stairs: 'lift_stairs',
-  wheelchair: 'wheelchair',
+  stage: "stage",
+  aisle: "aisle",
+  door: "door",
+  bar: "bar",
+  text: "label",
+  shape: "boundary",
+  "ga-zone": "area",
+  exit: "exit",
+  restroom: "restroom",
+  food_drink: "food_drink",
+  smoking: "smoking",
+  first_aid: "first_aid",
+  lift_stairs: "lift_stairs",
+  wheelchair: "wheelchair",
 };
 
 // ---- Labels ------------------------------------------------------------------------------------
@@ -78,7 +78,7 @@ const BLOCK_TO_ELEMENT: Record<string, ElementKind> = {
 /** A → B → … → Z → AA, matching `layoutOps.rowLabelAt` so both editors letter rows identically. */
 export function letterAt(index: number): string {
   let n = index;
-  let out = '';
+  let out = "";
   do {
     out = String.fromCharCode(65 + (n % 26)) + out;
     n = Math.floor(n / 26) - 1;
@@ -95,13 +95,16 @@ export function letterAt(index: number): string {
 export function rowLabelFor(
   r: number,
   rows: number,
-  scheme: RowLabelScheme = 'alpha-asc',
-  prefix = '',
+  scheme: RowLabelScheme = "alpha-asc",
+  prefix = "",
   startIndex = 0,
-  suffix = '',
+  suffix = "",
 ): string {
-  const i = scheme === 'alpha-desc' || scheme === 'num-desc' ? rows - 1 - r : r;
-  const body = scheme === 'num-asc' || scheme === 'num-desc' ? String(startIndex + i + 1) : letterAt(startIndex + i);
+  const i = scheme === "alpha-desc" || scheme === "num-desc" ? rows - 1 - r : r;
+  const body =
+    scheme === "num-asc" || scheme === "num-desc"
+      ? String(startIndex + i + 1)
+      : letterAt(startIndex + i);
   // `seats.row_label` is capped at 8 characters by the route schema, so a long prefix or suffix is
   // truncated here rather than rejected at save time after the organizer has drawn the block.
   return `${prefix}${body}${suffix}`.slice(0, 8);
@@ -146,7 +149,7 @@ export function inferStartLabels(block: DocumentBlock): Partial<BlockParams> {
   if (asLetters !== null) {
     out.startRowIndex = asLetters;
   } else if (/^[0-9]+$/.test(topmost)) {
-    out.rowLabelScheme = 'num-asc';
+    out.rowLabelScheme = "num-asc";
     out.startRowIndex = Math.max(0, Number(topmost) - 1);
   }
   return out;
@@ -155,21 +158,21 @@ export function inferStartLabels(block: DocumentBlock): Partial<BlockParams> {
 export function seatNumberFor(
   c: number,
   perRow: number,
-  scheme: SeatLabelScheme = 'num-asc',
+  scheme: SeatLabelScheme = "num-asc",
   start = 1,
   /** How far apart consecutive seats number (§13). 1 is what every stored chart has. */
   step = 1,
 ): number {
   const by = Math.max(1, Math.floor(step));
   switch (scheme) {
-    case 'num-desc':
+    case "num-desc":
       return start + (perRow - 1 - c) * by;
     // Odd/even numbering is how a centre-aisle row is labelled: 1,3,5 to the left, 2,4,6 to the right.
     // The step is deliberately NOT applied here: these schemes already ARE a step of two, and
     // multiplying them again would produce 1,5,9 for a request that says "odd".
-    case 'even':
+    case "even":
       return start * 2 + c * 2;
-    case 'odd':
+    case "odd":
       return start * 2 - 1 + c * 2;
     default:
       return start + c * by;
@@ -186,19 +189,23 @@ export function seatNumberFor(
  */
 export function seatDisplay(seatNumber: number, padding = 0): string {
   const digits = Math.max(0, Math.floor(padding));
-  return String(seatNumber).padStart(digits, '0');
+  return String(seatNumber).padStart(digits, "0");
 }
 
 // ---- Regeneration ------------------------------------------------------------------------------
 
 /** Positions for a block's seats, in block-relative units, before rotation. */
-function seatOffsets(block: DocumentBlock, rows: number, perRow: number): { dx: number; dy: number }[] {
+function seatOffsets(
+  block: DocumentBlock,
+  rows: number,
+  perRow: number,
+): { dx: number; dy: number }[] {
   const p = block.params ?? {};
   const seatSpacing = p.seatSpacing ?? 150;
   const rowSpacing = p.rowSpacing ?? 150;
   const out: { dx: number; dy: number }[] = [];
 
-  if (block.kind === 'curved-row') {
+  if (block.kind === "curved-row") {
     // Rows on concentric arcs, centred on the block's midline and bulging away from the origin, so a
     // curved tier faces the stage the way the organizer drew it.
     const radius = p.radius ?? 1200;
@@ -208,7 +215,10 @@ function seatOffsets(block: DocumentBlock, rows: number, perRow: number): { dx: 
       for (let c = 0; c < perRow; c += 1) {
         const t = perRow === 1 ? 0.5 : c / (perRow - 1);
         const a = -sweep / 2 + t * sweep;
-        out.push({ dx: Math.round(rr * Math.sin(a)), dy: Math.round(rr * (1 - Math.cos(a)) + r * rowSpacing) });
+        out.push({
+          dx: Math.round(rr * Math.sin(a)),
+          dy: Math.round(rr * (1 - Math.cos(a)) + r * rowSpacing),
+        });
       }
     }
     return out;
@@ -247,7 +257,7 @@ export function regenerateBlock(
   if (!block.params || !isSeatBearing(block.kind)) return block;
   const p = block.params;
 
-  const rows = block.kind === 'single-row' ? 1 : Math.max(1, Math.floor(p.rowsCount ?? 1));
+  const rows = block.kind === "single-row" ? 1 : Math.max(1, Math.floor(p.rowsCount ?? 1));
   const perRow = Math.max(1, Math.floor(p.seatsPerRow ?? 1));
   const offsets = seatOffsets(block, rows, perRow);
 
@@ -264,10 +274,19 @@ export function regenerateBlock(
     const r = Math.floor(i / perRow);
     const c = i % perRow;
     const rowLabel = rowLabelFor(
-      r, rows, p.rowLabelScheme, p.rowLabelPrefix ?? '', p.startRowIndex ?? 0, p.rowLabelSuffix ?? '',
+      r,
+      rows,
+      p.rowLabelScheme,
+      p.rowLabelPrefix ?? "",
+      p.startRowIndex ?? 0,
+      p.rowLabelSuffix ?? "",
     );
     const seatNumber = seatNumberFor(
-      c, perRow, p.seatLabelScheme, p.startSeatNumber ?? 1, p.seatNumberStep ?? 1,
+      c,
+      perRow,
+      p.seatLabelScheme,
+      p.startSeatNumber ?? 1,
+      p.seatNumberStep ?? 1,
     );
     const kept = existing.get(`${rowLabel}|${seatNumber}`);
     seats.push({
@@ -282,6 +301,11 @@ export function regenerateBlock(
       sectionId: kept?.sectionId,
       isAccessible: kept?.isAccessible,
       seatType: kept?.seatType,
+      // Carried through when the seat keeps its label (and therefore its id). If a regeneration
+      // changes the TARGET's label, the pointer is left naming a seat that no longer exists under
+      // that id — and that is the honest answer: the validator's `companion_wrong_target` will say
+      // so at publish time, which is better than silently inventing a new pairing (0036).
+      companionSeatId: kept?.companionSeatId,
     });
   }
   return { ...block, seats };
@@ -334,7 +358,7 @@ export function projectDocument(doc: ChartDocument): ProjectedLayout {
     label: r.label,
     displayOrder: r.displayOrder,
   }));
-  const rowKey = (sectionId: number | null, label: string) => `${sectionId ?? 'none'}|${label}`;
+  const rowKey = (sectionId: number | null, label: string) => `${sectionId ?? "none"}|${label}`;
   const rowIdByKey = new Map(rows.map((r) => [rowKey(r.sectionId, r.label), r.id]));
   let nextRowPlaceholder = -1;
 
@@ -367,7 +391,7 @@ export function projectDocument(doc: ChartDocument): ProjectedLayout {
         rotation: normaliseRotation(block.rotation),
         label: block.label ?? null,
         points: block.points ?? null,
-        capacity: block.kind === 'ga-zone' ? (block.capacity ?? null) : null,
+        capacity: block.kind === "ga-zone" ? (block.capacity ?? null) : null,
         color: block.color ?? null,
         geometry: block.geometry ?? null,
         sectionId: block.sectionId,
@@ -378,9 +402,9 @@ export function projectDocument(doc: ChartDocument): ProjectedLayout {
 
     // A ga-zone draws its outline here; its standing positions come from the standing-area endpoint.
     // Any it already owns fall through to the seat loop below, so a save never drops them.
-    if (block.kind === 'ga-zone') {
+    if (block.kind === "ga-zone") {
       elements.push({
-        kind: 'area',
+        kind: "area",
         x: clampCoord(block.x),
         y: clampCoord(block.y),
         width: Math.max(1, Math.round(block.width)),
@@ -413,12 +437,19 @@ export function projectDocument(doc: ChartDocument): ProjectedLayout {
         categoryId: s.categoryId ?? block.categoryId,
         rowLabel: s.rowLabel,
         seatNumber: s.seatNumber,
-        seatType: s.seatType ?? 'single',
+        seatType: s.seatType ?? "single",
         x: clampCoord(block.x + s.dx * cos - s.dy * sin),
         y: clampCoord(block.y + s.dx * sin + s.dy * cos),
         rotation: normaliseRotation(s.rotation + block.rotation),
         isAccessible: s.isAccessible ?? false,
         rowId: rowIdFor(s.sectionId ?? block.sectionId, s.rowLabel),
+        // The accessible seat this one accompanies (0036) passes through unchanged. It is a pointer
+        // into the document's own seat ids, not a per-showtime fact: `saveLayout` resolves it onto
+        // `seats.companion_seat_id` and `generateSeatMap` copies it onto `showtime_seats`, so both
+        // halves of a pair read the same row. A dangling pointer is not refused here — the publish
+        // gate's `companion_wrong_target` says so, because a draft may legitimately pair seats the
+        // editor has not minted yet.
+        companionSeatId: s.companionSeatId,
       });
       seatOrigin.push({ blockKey: block.key, index });
     }
@@ -441,7 +472,7 @@ export function projectDocument(doc: ChartDocument): ProjectedLayout {
  */
 export function stitchRows(
   doc: ChartDocument,
-  projected: Pick<ProjectedLayout, 'rows' | 'seats' | 'seatOrigin'>,
+  projected: Pick<ProjectedLayout, "rows" | "seats" | "seatOrigin">,
   resolve: (placeholderOrRealId: number) => number,
 ): ChartDocument {
   const rows: DocumentRow[] = projected.rows.map((r) => ({

@@ -17,6 +17,7 @@ import AiListingPanel from "./AiListingPanel";
 import { CancelEventModal } from "./CancelEventModal";
 import EventPreviewOverlay from "./EventPreviewOverlay";
 import EventFlowRail from "./EventFlowRail";
+import FlowProgressStrip from "./FlowProgressStrip";
 import { flowSteps, type FlowStep } from "./flowSteps";
 import ShowtimeList from "./ShowtimeList";
 import { Refusal } from "./states";
@@ -287,6 +288,10 @@ export default function EventEditor({
         </div>
       </div>
 
+      {/* The glance, above the work: one line saying what still blocks this event and the button
+          that fixes it. The rail beside the content below remains the detailed reading. */}
+      <FlowProgressStrip steps={steps} onAction={runAction} />
+
       {/*
         Rail beside the work, not above it: the steps stay legible while the organizer edits, which is
         the whole point of a rail rather than a banner. It collapses to a scrolling strip under `lg`.
@@ -297,76 +302,78 @@ export default function EventEditor({
         </div>
 
         <div className="space-y-5 lg:order-2">
-      <div className="border-2 border-beige-kem bg-surface-2 p-5">
-        <h3 className="mb-3 font-display text-lg font-bold">{event.title}</h3>
+          <div className="border-2 border-beige-kem bg-surface-2 p-5">
+            <h3 className="mb-3 font-display text-lg font-bold">{event.title}</h3>
 
-        <label className="block">
-          <span className={label}>Tiêu đề</span>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} className={input} />
-        </label>
+            <label className="block">
+              <span className={label}>Tiêu đề</span>
+              <input value={title} onChange={(e) => setTitle(e.target.value)} className={input} />
+            </label>
 
-        <label className="mt-3 block">
-          <span className={label}>Mô tả (để trống nếu không đổi)</span>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={4}
-            className={`${input} h-auto py-2`}
+            <label className="mt-3 block">
+              <span className={label}>Mô tả (để trống nếu không đổi)</span>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={4}
+                className={`${input} h-auto py-2`}
+              />
+            </label>
+
+            <label className="mt-3 block">
+              <span className={label}>Danh mục</span>
+              <select
+                value={categoryCode}
+                onChange={(e) => setCategoryCode(e.target.value)}
+                className={input}
+              >
+                {categories.map((c) => (
+                  <option key={c.code} value={c.code} className="bg-xanh-pho">
+                    {c.labelVi}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {isLive && changedFields().length > 0 && isMaterialEdit(changedFields()) && (
+              <p className="mt-3 font-mono text-[11px] text-cam-dat">
+                Thay đổi này cần duyệt lại: sự kiện sẽ tạm ẩn khỏi trang công khai cho đến khi được
+                duyệt.
+              </p>
+            )}
+
+            <button
+              onClick={save}
+              disabled={busy || changedFields().length === 0}
+              className={`${btn} mt-4`}
+            >
+              Lưu thay đổi
+            </button>
+
+            {notice && <p className="mt-3 font-mono text-[11px] text-la-co">{notice}</p>}
+            <Refusal message={refusal} />
+          </div>
+
+          {/* Never on a critical path: the whole editor above works with this panel broken (FR-029). */}
+          <AiListingPanel
+            eventId={isLive ? undefined : event.id}
+            onAccept={(field, value) =>
+              field === "title" ? setTitle(value) : setDescription(value)
+            }
           />
-        </label>
 
-        <label className="mt-3 block">
-          <span className={label}>Danh mục</span>
-          <select
-            value={categoryCode}
-            onChange={(e) => setCategoryCode(e.target.value)}
-            className={input}
-          >
-            {categories.map((c) => (
-              <option key={c.code} value={c.code} className="bg-xanh-pho">
-                {c.labelVi}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {isLive && changedFields().length > 0 && isMaterialEdit(changedFields()) && (
-          <p className="mt-3 font-mono text-[11px] text-cam-dat">
-            Thay đổi này cần duyệt lại: sự kiện sẽ tạm ẩn khỏi trang công khai cho đến khi được
-            duyệt.
-          </p>
-        )}
-
-        <button
-          onClick={save}
-          disabled={busy || changedFields().length === 0}
-          className={`${btn} mt-4`}
-        >
-          Lưu thay đổi
-        </button>
-
-        {notice && <p className="mt-3 font-mono text-[11px] text-la-co">{notice}</p>}
-        <Refusal message={refusal} />
-      </div>
-
-      {/* Never on a critical path: the whole editor above works with this panel broken (FR-029). */}
-      <AiListingPanel
-        eventId={isLive ? undefined : event.id}
-        onAccept={(field, value) => (field === "title" ? setTitle(value) : setDescription(value))}
-      />
-
-      <div ref={showtimesRef} className="border-2 border-beige-kem bg-surface-2 p-5">
-        <h3 className="mb-3 font-display text-base font-bold">Suất chiếu</h3>
-        <ShowtimeList
-          eventId={event.id}
-          venues={venues}
-          onChanged={() => {
-            onRefresh();
-            // The rail reads showtimes, tiers and the chart binding — all of which this list edits.
-            loadRows();
-          }}
-        />
-      </div>
+          <div ref={showtimesRef} className="border-2 border-beige-kem bg-surface-2 p-5">
+            <h3 className="mb-3 font-display text-base font-bold">Suất chiếu</h3>
+            <ShowtimeList
+              eventId={event.id}
+              venues={venues}
+              onChanged={() => {
+                onRefresh();
+                // The rail reads showtimes, tiers and the chart binding — all of which this list edits.
+                loadRows();
+              }}
+            />
+          </div>
         </div>
       </div>
 
