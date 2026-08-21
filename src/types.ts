@@ -49,7 +49,14 @@ export interface MovieEvent {
   trailerUrl: string; // fallback or streaming video url
   times: string[]; // showtimes
   dates: string[]; // calendar dates
-  city: "TP.HCM" | "Hà Nội" | "Đà Nẵng";
+  /**
+   * The province, free text — the same shape `venues.city` holds on the server.
+   *
+   * This was a three-way union, which made every other province in the country unrepresentable:
+   * `toCity` had to coerce anything it did not recognise, and it coerced to "TP.HCM", so an event
+   * in Nghệ An arrived in the browser claiming to be in Ho Chi Minh City.
+   */
+  city: string;
   location: string;
   venueName: string;
   venueMapUrl: string;
@@ -189,7 +196,7 @@ export interface OrganizerEvent {
   videoUrl?: string;
   venueName: string;
   venueAddress: string;
-  city: "TP.HCM" | "Hà Nội" | "Đà Nẵng";
+  city: string;
   startDatetime: string;
   endDatetime: string;
   salesStartDatetime: string;

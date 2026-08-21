@@ -6,9 +6,14 @@
 import type { EventCard, EventDetail, Showtime } from '@/shared/catalog/types';
 import type { MovieEvent } from '../types';
 
-const CITY = new Set(['TP.HCM', 'Hà Nội', 'Đà Nẵng']);
-const toCity = (c: string | null): MovieEvent['city'] =>
-  c && CITY.has(c) ? (c as MovieEvent['city']) : 'TP.HCM';
+/**
+ * The province as stored, or empty.
+ *
+ * This used to check the value against a set of three and fall back to 'TP.HCM' for everything
+ * else, which is not a fallback — it is a wrong answer written confidently. An event with no venue
+ * yet has no city, and that is worth saying.
+ */
+const toCity = (c: string | null): string => c ?? '';
 
 const AGE: Record<string, MovieEvent['ageRating']> = { all: 'P', '13+': 'T13', '16+': 'T16', '18+': 'T18' };
 

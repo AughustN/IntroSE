@@ -23,97 +23,15 @@
  */
 import { pool } from "./pool.js";
 
-/** Accent- and case-insensitive, punctuation-free. `Tp. Hồ Chí Minh` → `tp ho chi minh`. */
-function fold(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/đ/gi, "d")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-/** Every province, and the spellings and towns that should file under it. */
-const PROVINCES: Record<string, string[]> = {
-  "Tp. Hồ Chí Minh": ["ho chi minh", "tp hcm", "hcm", "saigon", "sai gon", "thu duc", "go vap", "binh thanh", "tan binh", "phu nhuan", "cu chi"],
-  "Hà Nội": ["ha noi", "hanoi", "hoan kiem", "cau giay", "dong da", "ba dinh", "tay ho", "long bien", "ha dong", "nam tu liem", "bac tu liem", "thanh xuan", "my dinh"],
-  "Đà Nẵng": ["da nang", "danang", "son tra", "hai chau", "thanh khe", "ngu hanh son"],
-  "Hải Phòng": ["hai phong", "haiphong", "le chan", "hong bang", "ngo quyen"],
-  "Cần Thơ": ["can tho", "ninh kieu", "cai rang"],
-  "Đồng Nai": ["dong nai", "bien hoa", "long khanh", "trang bom"],
-  "Bình Dương": ["binh duong", "thu dau mot", "di an", "thuan an", "tan uyen"],
-  "Khánh Hòa": ["khanh hoa", "nha trang", "cam ranh"],
-  "Lâm Đồng": ["lam dong", "da lat", "dalat", "bao loc"],
-  "Thừa Thiên Huế": ["thua thien hue", "thua thien", "hue"],
-  "Bà Rịa - Vũng Tàu": ["ba ria", "vung tau"],
-  "Quảng Ninh": ["quang ninh", "ha long", "halong", "cam pha", "mong cai"],
-  "Hưng Yên": ["hung yen", "ocean park", "ecopark"],
-  "Tây Ninh": ["tay ninh", "ben luc"],
-  "Long An": ["long an", "tan an"],
-  "Nghệ An": ["nghe an", "vinh"],
-  "Thanh Hóa": ["thanh hoa", "sam son"],
-  "Bắc Ninh": ["bac ninh", "tu son", "que vo"],
-  "Bắc Giang": ["bac giang"],
-  "Thái Nguyên": ["thai nguyen"],
-  "Nam Định": ["nam dinh"],
-  "Ninh Bình": ["ninh binh"],
-  "Hải Dương": ["hai duong"],
-  "Vĩnh Phúc": ["vinh phuc", "vinh yen"],
-  "Phú Thọ": ["phu tho", "viet tri"],
-  "Quảng Nam": ["quang nam", "tam ky", "hoi an"],
-  "Quảng Ngãi": ["quang ngai"],
-  "Quảng Bình": ["quang binh", "dong hoi"],
-  "Quảng Trị": ["quang tri"],
-  "Bình Định": ["binh dinh", "quy nhon"],
-  "Phú Yên": ["phu yen", "tuy hoa"],
-  "Ninh Thuận": ["ninh thuan", "phan rang"],
-  "Bình Thuận": ["binh thuan", "phan thiet"],
-  "Đắk Lắk": ["dak lak", "buon ma thuot", "ban me thuot"],
-  "Gia Lai": ["gia lai", "pleiku"],
-  "Kon Tum": ["kon tum"],
-  "Lào Cai": ["lao cai", "sa pa", "sapa"],
-  "Sơn La": ["son la"],
-  "Lạng Sơn": ["lang son"],
-  "Tuyên Quang": ["tuyen quang"],
-  "Hòa Bình": ["hoa binh"],
-  "Yên Bái": ["yen bai"],
-  "Thái Bình": ["thai binh"],
-  "Hà Nam": ["ha nam", "phu ly"],
-  "Hà Tĩnh": ["ha tinh"],
-  "An Giang": ["an giang", "long xuyen", "chau doc"],
-  "Kiên Giang": ["kien giang", "rach gia", "phu quoc"],
-  "Cà Mau": ["ca mau"],
-  "Bạc Liêu": ["bac lieu"],
-  "Sóc Trăng": ["soc trang"],
-  "Trà Vinh": ["tra vinh"],
-  "Vĩnh Long": ["vinh long"],
-  "Bến Tre": ["ben tre"],
-  "Tiền Giang": ["tien giang", "my tho"],
-  "Đồng Tháp": ["dong thap", "cao lanh", "hong ngu"],
-  "Hậu Giang": ["hau giang"],
-  "Bình Phước": ["binh phuoc", "dong xoai", "chon thanh"],
-  "Seoul": ["seoul"],
-};
-
-/**
- * The province a piece of text names, or null.
+/*
+ * The province list and the matcher both live in `shared/catalog/provinces.ts`.
  *
- * The LAST match wins, because a Vietnamese address runs small to large — "628 Phạm Văn Thuận, Tam
- * Hiệp, Biên Hòa, Đồng Nai" names the district before the province, and the province is the answer.
- * Matching is on folded text with word boundaries, so "Vinh" cannot be found inside "Vĩnh Long".
+ * They were written out here as well, and the two had already parted company: this file knew 58
+ * provinces on the pre-2025 map while the organizer's own city picker offered three. One list means
+ * a place an organizer can choose is a place an address can be filed under, which is the only way
+ * the filter and the form can agree.
  */
-function provinceOf(text: string): string | null {
-  const hay = ` ${fold(text)} `;
-  let best: { province: string; at: number } | null = null;
-  for (const [province, needles] of Object.entries(PROVINCES)) {
-    for (const needle of needles) {
-      const at = hay.lastIndexOf(` ${needle} `);
-      if (at !== -1 && (!best || at > best.at)) best = { province, at };
-    }
-  }
-  return best?.province ?? null;
-}
+import { provinceOf } from "@shared/catalog/provinces.js";
 
 const UNKNOWN = "Chưa xác định";
 

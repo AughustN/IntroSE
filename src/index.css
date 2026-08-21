@@ -46,6 +46,25 @@
 }
 
 /*
+ * Public Sans, for the things a reader has to act on rather than read.
+ *
+ * The two VNM faces are the brand, and they are the right choice for a heading somebody scans once.
+ * They are the wrong choice at 11–14px on a control: the letterforms are rounded and geometric, so
+ * at label size and uppercase with wide tracking — which is how nearly every button in this product
+ * is set — `Đ`/`D`, `O`/`Ơ` and `l`/`I` come apart slowly, and readers said so.
+ *
+ * Public Sans is drawn for exactly this: open apertures, unambiguous letterforms, a real weight
+ * axis instead of a synthesised bold. One variable file covers 100–900.
+ */
+@font-face {
+  font-family: "Public Sans";
+  src: url("./fonts/PublicSans-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/*
  * Token names are the pre-redesign ones (`xanh-pho`, `beige-kem`, …) so this palette swap stays a
  * single-file change; the semantic rename happens as its own pass. Read them by role, not by name:
  *   xanh-pho = surface   beige-kem = ink (foreground)
@@ -70,6 +89,14 @@
    * digits still line up in a column, which is the one property they really depended on.
    */
   --font-meta: "VNM Sans Std", ui-sans-serif, system-ui, sans-serif;
+  /**
+   * The interface face: controls, and the boxes built out of them.
+   *
+   * Separate from `--font-sans` on purpose. Prose and a button are read differently — one is read
+   * along, the other is scanned for a single word — and the face that suits the first at 17px is
+   * not the one that suits the second at 11px in caps.
+   */
+  --font-ui: "Public Sans", var(--font-sans);
 
   /*
    * The bottom of the type scale, raised.
@@ -288,11 +315,19 @@ body {
  * inherits `body`'s 16px/400 instead. Moving the rule into `@layer base` restores the utilities,
  * but that resizes every button in the app at once — so it is left as-is deliberately, since the
  * current look was tuned with this in effect.
+ *
+ * The family is then set back over the top, which is the one part that must NOT inherit. `font:
+ * inherit` is here so a control takes its size and weight from the box it sits in; the face is a
+ * different question, and every control wants the same answer — the interface face, which is drawn
+ * to stay legible at 11px in caps where the brand face is not. Declared second so it wins, and
+ * inside the same unlayered rule so it beats the utilities the way `font: inherit` already does.
  */
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
+  font-family: var(--font-ui);
 }
 
 /* Peach is too pale against cream to read as a focus ring — tomato is the only accent that does. */
@@ -932,8 +967,20 @@ select:focus-visible {
   --text-title-l: 50px;
 }
 
+/*
+ * The interface face here, not the headline one.
+ *
+ * This is the hardest thing in the product to read and it is used 119 times: 14px, uppercase, 0.16em
+ * of tracking. The headline face is drawn to be read once at 50px, and at a seventh of that size,
+ * in caps, with the letters pushed apart, its rounded geometric forms stop separating — `Đ`/`D` and
+ * `O`/`Ơ` differ by a mark small enough to lose, and every letter arrives as an isolated shape with
+ * no word to sit in. That is the complaint readers actually made.
+ *
+ * Public Sans is drawn for this size and this job. Everything else about the label is unchanged, so
+ * nothing moves on the page — only the shapes get clearer.
+ */
 @utility label-eyebrow {
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   /* The scale's floor. 11px, then 12px, were both under it for a condensed face at 0.16em. */
   font-size: var(--text-eyebrow);
   font-weight: 700;

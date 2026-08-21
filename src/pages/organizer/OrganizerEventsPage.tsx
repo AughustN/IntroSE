@@ -26,10 +26,8 @@ import {
   type CreateEventDraft,
 } from "./createEventDraft";
 import Select from "../../components/Select";
-
-/** The cities an event can be created in — one list, where there were two that had to agree. */
-const CITIES = ["TP.HCM", "Hà Nội", "Đà Nẵng"] as const;
-type City = (typeof CITIES)[number];
+import Combobox from "../../components/Combobox";
+import { PROVINCE_NAMES } from "@/shared/catalog/provinces";
 
 export const OrganizerEventsPage: React.FC<{
   /** From `/organizer/events/:id` — which event the console should open at, if the URL names one. */
@@ -154,7 +152,7 @@ export const OrganizerEventsPage: React.FC<{
   const [isCreating, setIsCreating] = useState(false);
   const [createVenueName, setCreateVenueName] = useState("");
   const [createVenueAddress, setCreateVenueAddress] = useState("");
-  const [createCity, setCreateCity] = useState<City>(CITIES[0]);
+  const [createCity, setCreateCity] = useState<string>(PROVINCE_NAMES[0]);
   const [createDescription, setCreateDescription] = useState("");
 
   const [toastMsg, setToastMsg] = useState<{ type: "success" | "error"; text: string } | null>(
@@ -546,7 +544,7 @@ export const OrganizerEventsPage: React.FC<{
                         setCreateEventType(recoverable.eventType);
                         setCreateVenueName(recoverable.venueName);
                         setCreateVenueAddress(recoverable.venueAddress);
-                        setCreateCity(recoverable.city as "TP.HCM" | "Hà Nội" | "Đà Nẵng");
+                        setCreateCity(recoverable.city);
                         setRecoverable(null);
                       }}
                       className="border border-la-co bg-la-co/25 px-3 py-1.5 text-xs font-bold text-beige-kem"
@@ -719,11 +717,23 @@ export const OrganizerEventsPage: React.FC<{
                     <label className="block font-meta text-beige-kem font-semibold mb-1">
                       Thành phố
                     </label>
-                    <Select
+                    {/*
+                      Type to narrow, or open and pick.
+                      
+                      This offered three cities — Hà Nội, Đà Nẵng and TP.HCM — so an organizer
+                      anywhere else in the country simply could not say where their event was. The
+                      list is now all 34 provinces and centrally-governed cities as they stand after
+                      the 2025 reorganisation, which is too many to scan, hence the search. A typed
+                      name that matches nothing is still accepted: the list will go stale at the
+                      next reorganisation and an organizer should not be locked out by that.
+                    */}
+                    <Combobox
                       value={createCity}
-                      options={CITIES.map((c) => ({ value: c, label: c }))}
-                      onChange={(c) => setCreateCity(c as City)}
-                      triggerClassName="w-full border border-beige-kem/30 bg-xanh-pho p-3"
+                      options={PROVINCE_NAMES}
+                      onChange={setCreateCity}
+                      allowCustom
+                      placeholder="Nhập hoặc chọn tỉnh/thành"
+                      className="w-full border border-beige-kem/30 bg-xanh-pho p-3"
                     />
                   </div>
                 </div>

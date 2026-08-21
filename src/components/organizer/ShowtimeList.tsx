@@ -8,6 +8,7 @@ import { ManageShowtime, MyVenue, organizerApi, studioApi } from "../../services
 import TierPanel from "./TierPanel";
 import { Empty, ErrorRetry, Loading, Refusal } from "./states";
 import Select from "../Select";
+import DateTimeField from "../DateTimeField";
 
 const input =
   "h-10 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
@@ -135,12 +136,13 @@ export default function ShowtimeList({
               onChange={(v) => setAddVenue(Number(v) || "")}
               triggerClassName={input}
             />
-            <input
-              type="datetime-local"
-              value={addDate}
-              onChange={(e) => setAddDate(e.target.value)}
-              className={input}
-            />
+            {/*
+              The site's own date-and-time control. A native `datetime-local` is drawn by the
+              browser and formatted from ITS language, not the page's — `mm/dd/yyyy` on an English
+              Chrome, and `lang="vi"` does not change it — and the calendar it opens belongs to the
+              operating system. Same wire format, so nothing downstream notices.
+            */}
+            <DateTimeField value={addDate} onChange={setAddDate} className={input} />
           </div>
 
           {addTiers.map((t, i) => (
@@ -222,11 +224,16 @@ export default function ShowtimeList({
         return (
           <div key={st.id} className="border-2 border-beige-kem p-3">
             <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-              <input
-                type="datetime-local"
-                defaultValue={toLocalInput(st.startsAt)}
-                onBlur={(e) => {
-                  const next = new Date(e.target.value);
+              {/*
+                Saves on change rather than on blur. The native input was committed when focus left
+                it, which a control that closes its own panel never guarantees — the reader clicks
+                "Xong" and the field still holds focus.
+              */}
+              <DateTimeField
+                value={toLocalInput(st.startsAt)}
+                disabled={locked}
+                onChange={(v) => {
+                  const next = new Date(v);
                   if (
                     !Number.isNaN(next.getTime()) &&
                     next.toISOString() !== new Date(st.startsAt).toISOString()

@@ -593,7 +593,8 @@ export interface CreateEventInput {
   videoUrl?: string; // Optional video
   venueName: string;
   venueAddress: string;
-  city: "TP.HCM" | "Hà Nội" | "Đà Nẵng";
+  /** The province, free text — see `MovieEvent.city`. */
+  city: string;
   startDatetime: string;
   endDatetime: string;
   salesStartDatetime?: string;
