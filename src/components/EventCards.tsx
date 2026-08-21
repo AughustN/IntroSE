@@ -16,6 +16,11 @@ import { Heart } from "lucide-react";
 import { MovieEvent } from "../types";
 import { formatEventDate } from "../services/formatDate";
 import { formatVnd } from "../services/currency";
+import { sectionOfCategory } from "../services/eventSections";
+
+/** Whether an event is a cinema/movie event (which spans multiple venues and cinemas). */
+export const isMovieEvent = (evt: MovieEvent): boolean =>
+  sectionOfCategory(evt.category, evt.categoryLabel || "") === "movie";
 
 /**
  * Status now reads as a word in the card's meta line rather than a coloured sticker.
@@ -237,15 +242,17 @@ export function RuledCard({
               .join(" · ")}
           </p>
           {/*
-            Joined, not interpolated. `venueName` is a detail-only field, and the hardcoded
-            separator was printing "TP.HCM ·" with nothing after it on every card in the catalogue.
+            Omit location for movie events because each movie spans multiple cinema branches
+            and locations, which are selected on the event details page.
           */}
-          <p
-            className="truncate font-meta text-body leading-snug text-ink-soft"
-            title={evt.location || undefined}
-          >
-            {[evt.city, evt.venueName].filter(Boolean).join(" · ")}
-          </p>
+          {!isMovieEvent(evt) && (
+            <p
+              className="truncate font-meta text-body leading-snug text-ink-soft"
+              title={evt.location || undefined}
+            >
+              {[evt.city, evt.venueName].filter(Boolean).join(" · ")}
+            </p>
+          )}
         </div>
 
         <div className="mt-auto flex items-end justify-between gap-4 pt-5">
@@ -393,9 +400,9 @@ export function PlainCard({
         <div className="mt-0.5 flex items-baseline justify-between gap-3">
           <p
             className="truncate font-meta text-meta text-ink-soft"
-            title={evt.location || undefined}
+            title={!isMovieEvent(evt) ? evt.location || undefined : undefined}
           >
-            {[evt.genre[0], evt.city].filter(Boolean).join(" · ")}
+            {[evt.genre[0], !isMovieEvent(evt) ? evt.city : null].filter(Boolean).join(" · ")}
           </p>
           <p className="shrink-0 font-meta text-meta text-beige-kem">{formatVnd(evt.price)}</p>
         </div>

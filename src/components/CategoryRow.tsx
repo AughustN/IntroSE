@@ -68,14 +68,7 @@ export default function CategoryRow({
 
       <div className={BAND}>
         <SectionHead
-          /*
-            A stack of bands, so no rules: the burgundy stroke down the left of the title is what
-            says a new band has started. See `SectionHead`.
-
-            The cinema band is the exception. It is held between two rails, so it is already marked
-            off from its neighbours, and the head centres inside that frame instead.
-          */
-          variant={film ? "reel" : "bar"}
+          variant="bar"
           eyebrow={eyebrow}
           title={title}
           actionLabel={onViewMore ? "Xem thêm" : undefined}

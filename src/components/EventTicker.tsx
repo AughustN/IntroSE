@@ -112,7 +112,7 @@ export default function EventTicker({ events, onSelect, onViewAll }: EventTicker
             />
           }
           title="Đang được quan tâm"
-          actionLabel="Xem tất cả"
+          actionLabel="Xem thêm"
           onAction={onViewAll}
         />
       </div>

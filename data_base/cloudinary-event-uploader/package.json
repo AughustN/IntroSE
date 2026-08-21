@@ -1,0 +1,19 @@
+{
+  "name": "tixhub-cloudinary-event-uploader",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bulk upload event images from a CSV file to Cloudinary.",
+  "scripts": {
+    "start": "node upload.js",
+    "upload:organizers": "node upload-organizers.js",
+    "upload:movies": "node upload-movies.js"
+  },
+  "dependencies": {
+    "cloudinary": "^2.7.0",
+    "csv-parse": "^5.6.0",
+    "csv-stringify": "^6.5.2",
+    "dotenv": "^17.4.2",
+    "p-limit": "^3.1.0",
+    "pg": "^8.23.0"
+  }
+}
