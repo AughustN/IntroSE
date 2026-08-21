@@ -15,6 +15,7 @@ import {
 import { useEventCategories } from "../../hooks/useEventCategories";
 import AiListingPanel from "./AiListingPanel";
 import { CancelEventModal } from "./CancelEventModal";
+import CheckInPanel from "./CheckInPanel";
 import EventPreviewOverlay from "./EventPreviewOverlay";
 import EventFlowRail from "./EventFlowRail";
 import { flowSteps, type FlowStep } from "./flowSteps";
@@ -289,6 +290,15 @@ export default function EventEditor({
           )}
         </div>
       </div>
+
+      {/*
+        Its own row, not another chip in the bar above: collapsed it is one button, but open it is a
+        camera, a running log and a card, and a flex item cannot hold that.
+
+        Shown only while the event is selling. A draft has no tickets to admit and a cancelled one
+        has none still good — a scanner there is a door onto an empty room.
+      */}
+      {onSale && <CheckInPanel eventTitle={event.title} onCheckedIn={onRefresh} />}
 
       {/*
         Rail beside the work, not above it: the steps stay legible while the organizer edits, which is

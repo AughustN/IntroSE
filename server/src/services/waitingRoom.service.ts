@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import { config } from '../config.js';
+import { HOLD_TTL_MS } from '../config.js';
+import { pushWaitingRoomAdmit, pushWaitingRoomPosition } from '../realtime/io.js';
 import type { WaitingRoomJoinResponse, WaitingRoomStatusResponse } from '../../../shared/types/botDefense.js';
 
 export interface WaitingRoomSettings {
@@ -38,12 +39,62 @@ class WaitingRoomState {
     this.showtimeId = showtimeId;
     this.settings = {
       enabled: true,
-      batchSize: 20,
-      admissionIntervalMs: 3000,
-      tokenTtlMs: 3 * 60 * 1000, // 3 minutes
+      /*
+       * Five, not twenty.
+       *
+       * Nothing in the product ever calls `setWaitingRoomConfig`, so this default is what every real
+       * drop runs on — and at twenty, the first twenty positions were admitted in the same instant.
+       * Inside a batch there is no order at all: whoever clicks fastest wins, which is the thing a
+       * numbered queue exists to stop, and the number on screen described a fairness the room was
+       * not providing. A smaller batch is the whole of what makes the position mean something.
+       *
+       * Five every three seconds is 100 buyers a minute, which is the shape of demand this feature
+       * is for. It does not make the room a seat allocator: admission is still permission to try,
+       * and nothing here reserves inventory.
+       */
+      batchSize: 5,
+      /*
+       * One second, not three.
+       *
+       * Batch size and interval are separate knobs and were being confused for one. The batch sets
+       * how coarse the ordering is — inside one there is no order at all — and `batch / interval`
+       * sets throughput. Twenty every three seconds was 400 a minute with the ordering blurred
+       * twenty deep; dropping the batch alone fixed the ordering and quietly cut throughput to a
+       * hundred. Five every second keeps the fine ordering and gives back most of the rate.
+       *
+       * The tick is a splice on an in-memory array plus a handful of socket emits, so running it
+       * three times as often costs nothing worth measuring. The server was never the constraint
+       * here — 100 holds a minute is nothing to Postgres — and 3000 carried no reasoning with it.
+       */
+      admissionIntervalMs: 1000,
+      /*
+       * A pass lasts as long as a seat hold, because it is gating the same session.
+       *
+       * It was three minutes against a `seat_hold_ttl_minutes` of seven, and the two numbers meet
+       * on the PATCH route: adding a seat re-checks the pass. So a buyer who spent four minutes
+       * over a large chart — ordinary, not slow — was thrown back into the waiting room while the
+       * seats they had already taken were still legitimately theirs, holding inventory they could
+       * no longer add to.
+       *
+       * `HOLD_TTL_MS` is the default; the join route overrides it with the live admin setting,
+       * which is adjustable from 1 to 30 minutes and would otherwise drift away from this again.
+       */
+      tokenTtlMs: HOLD_TTL_MS,
       ...settings,
     };
     this.startAdmissionLoop();
+  }
+
+  /**
+   * How long a place in line is worth in seconds, given the batch size and the interval.
+   *
+   * The same expression was written out at three call sites; the push added a fourth, which is one
+   * too many for a formula that has to agree with itself everywhere it appears.
+   */
+  private waitSecondsFor(position: number): number {
+    return Math.ceil(
+      (position / this.settings.batchSize) * (this.settings.admissionIntervalMs / 1000),
+    );
   }
 
   startAdmissionLoop() {
@@ -59,18 +110,15 @@ class WaitingRoomState {
   }
 
   enqueue(userId: number): WaitingRoomJoinResponse {
-    // If user already has a valid admitted token, return it
-    const existingTokenStr = this.userTokenLookup.get(userId);
-    if (existingTokenStr) {
-      const token = this.admittedTokens.get(existingTokenStr);
-      if (token && token.expiresAt > Date.now() && !token.consumed) {
-        return {
-          status: 'admitted',
-          queueToken: token.token,
-          expiresAt: token.expiresAt,
-          showtimeId: this.showtimeId,
-        };
-      }
+    // Already through the door — rejoining is a refresh, not a new place in line.
+    const live = this.tokenFor(userId);
+    if (live) {
+      return {
+        status: 'admitted',
+        queueToken: live.token,
+        expiresAt: live.expiresAt,
+        showtimeId: this.showtimeId,
+      };
     }
 
     // Check if already in queue
@@ -79,7 +127,7 @@ class WaitingRoomState {
       return {
         status: 'waiting',
         queuePosition: existingIdx + 1,
-        estimatedWaitSeconds: Math.ceil(((existingIdx + 1) / this.settings.batchSize) * (this.settings.admissionIntervalMs / 1000)),
+        estimatedWaitSeconds: this.waitSecondsFor(existingIdx + 1),
         showtimeId: this.showtimeId,
       };
     }
@@ -100,13 +148,33 @@ class WaitingRoomState {
     const item: QueuedUser = { userId, enqueuedAt: Date.now(), priorityScore: this.nextTicket++ };
     this.queue.push(item);
 
+    /*
+     * No short cut for an arrival that finds the room empty, deliberately.
+     *
+     * Admitting them on the spot was tried: the loop returns early on an empty queue, so the first
+     * person at a quiet showtime waits out whatever is left of the current cycle with nobody ahead
+     * of them. It bought at most one interval and cost a second admission path — two places that
+     * mint passes, two places to keep the batch bound honest — and it broke the contract this
+     * room's own tests are written against, which is that joining puts you in line and the loop is
+     * what lets people out of it. At a one-second cycle the wait it saved is not worth the second
+     * way in.
+     */
     const position = this.queue.length;
     return {
       status: 'waiting',
       queuePosition: position,
-      estimatedWaitSeconds: Math.ceil((position / this.settings.batchSize) * (this.settings.admissionIntervalMs / 1000)),
+      estimatedWaitSeconds: this.waitSecondsFor(position),
       showtimeId: this.showtimeId,
     };
+  }
+
+  /** This user's live pass, if they hold one that is neither expired nor already spent. */
+  private tokenFor(userId: number): AdmittedToken | null {
+    const tokenStr = this.userTokenLookup.get(userId);
+    if (!tokenStr) return null;
+    const token = this.admittedTokens.get(tokenStr);
+    if (!token || token.expiresAt <= Date.now() || token.consumed) return null;
+    return token;
   }
 
   processAdmissions() {
@@ -129,21 +197,35 @@ class WaitingRoomState {
       this.admittedTokens.set(tokenString, tokenObj);
       this.userTokenLookup.set(user.userId, tokenString);
       indexQueueToken(tokenString, this.showtimeId);
+      // Pushed, not waited for: the client used to learn this on its own two-second poll, which
+      // spread one instant of admission across a window wider than the queue's own ordering.
+      pushWaitingRoomAdmit(user.userId, {
+        showtimeId: this.showtimeId,
+        queueToken: tokenString,
+        expiresAt,
+      });
+    }
+
+    // And everyone still waiting has moved up. Sent from here rather than left to the poll for the
+    // same reason: a position that updates on someone else's timer is not a position.
+    for (const [index, waiting] of this.queue.entries()) {
+      pushWaitingRoomPosition(waiting.userId, {
+        showtimeId: this.showtimeId,
+        queuePosition: index + 1,
+        estimatedWaitSeconds: this.waitSecondsFor(index + 1),
+      });
     }
   }
 
   getStatus(userId: number): WaitingRoomStatusResponse {
-    const existingTokenStr = this.userTokenLookup.get(userId);
-    if (existingTokenStr) {
-      const token = this.admittedTokens.get(existingTokenStr);
-      if (token && token.expiresAt > Date.now() && !token.consumed) {
-        return {
-          status: 'admitted',
-          queueToken: token.token,
-          expiresAt: token.expiresAt,
-          validitySecondsRemaining: Math.ceil((token.expiresAt - Date.now()) / 1000),
-        };
-      }
+    const live = this.tokenFor(userId);
+    if (live) {
+      return {
+        status: 'admitted',
+        queueToken: live.token,
+        expiresAt: live.expiresAt,
+        validitySecondsRemaining: Math.ceil((live.expiresAt - Date.now()) / 1000),
+      };
     }
 
     const pos = this.queue.findIndex((q) => q.userId === userId);
@@ -152,7 +234,7 @@ class WaitingRoomState {
       return {
         status: 'waiting',
         queuePosition: position,
-        estimatedWaitSeconds: Math.ceil((position / this.settings.batchSize) * (this.settings.admissionIntervalMs / 1000)),
+        estimatedWaitSeconds: this.waitSecondsFor(position),
       };
     }
 
@@ -243,8 +325,18 @@ export function setWaitingRoomConfig(
   room.startAdmissionLoop();
 }
 
-export function joinWaitingRoom(showtimeId: number, userId: number): WaitingRoomJoinResponse {
-  const room = getOrCreateWaitingRoom(showtimeId);
+export function joinWaitingRoom(
+  showtimeId: number,
+  userId: number,
+  /**
+   * How long the pass this join may earn should live, in ms — the caller reads it from the live
+   * `seat_hold_ttl_minutes` setting. Applied to the existing room too, not only a new one: an admin
+   * who changes the hold window mid-sale should not leave a long-lived room minting the old length.
+   */
+  tokenTtlMs?: number,
+): WaitingRoomJoinResponse {
+  const room = getOrCreateWaitingRoom(showtimeId, tokenTtlMs ? { tokenTtlMs } : undefined);
+  if (tokenTtlMs) room.settings.tokenTtlMs = tokenTtlMs;
   return room.enqueue(userId);
 }
 

@@ -106,7 +106,7 @@ function requireQueuePass(showtimeId: number, userId: number, queueToken?: strin
   const result = verifyQueueToken(showtimeId, userId, queueToken);
   if (result.valid) return;
   if (result.error === 'queue_token_expired') {
-    throw err.forbidden('queue_token_expired', 'Lượt phòng chờ đã hết hạn (quá 3 phút). Vui lòng xếp hàng lại.');
+    throw err.forbidden('queue_token_expired', 'Lượt phòng chờ đã hết hạn. Vui lòng xếp hàng lại.');
   }
   throw err.forbidden('queue_token_invalid', 'Lượt phòng chờ không hợp lệ. Vui lòng xếp hàng lại.');
 }
@@ -152,7 +152,7 @@ reservationsRouter.post(
      * seats, changing their mind about one, and picking another is the ordinary case, not abuse.
      *
      * What bounds the pass is its three-minute TTL and the `userId` it is minted against, which is
-     * what the feature always claimed ("3-minute queue tokens"). Consumption on top of that bought
+     * what the feature always claimed. Consumption on top of that bought
      * nothing: the reservation itself is already one-per-user, and every later change goes through
      * PATCH, which the same pass gates.
      */

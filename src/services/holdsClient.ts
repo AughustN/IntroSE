@@ -27,7 +27,7 @@ const MESSAGES: Record<string, string> = {
   unauthenticated: "Vui lòng đăng nhập để giữ ghế.",
   inhuman_interaction_speed: "Thao tác quá nhanh. Vui lòng tương tác bình thường để giữ vé.",
   queue_token_required: "Sự kiện đang mở bán vé hot. Vui lòng tham gia phòng chờ để nhận lượt giữ vé.",
-  queue_token_expired: "Lượt phòng chờ đã hết hạn (quá 3 phút). Vui lòng xếp hàng lại.",
+  queue_token_expired: "Lượt phòng chờ đã hết hạn. Vui lòng xếp hàng lại.",
   queue_token_invalid: "Lượt phòng chờ không hợp lệ. Vui lòng xếp hàng lại.",
   captcha_failed: "Xác thực CAPTCHA thất bại, vui lòng thử lại.",
 };

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { Users, Clock, ShieldCheck } from 'lucide-react';
 import { joinWaitingRoom, getWaitingRoomStatus } from '../../services/waitingRoomClient.js';
+import { watchWaitingRoom } from '../../services/waitingRoomSocket.js';
 import { TurnstileWidget } from './TurnstileWidget.js';
 
 interface WaitingRoomModalProps {
@@ -37,6 +38,8 @@ export const WaitingRoomModal: React.FC<WaitingRoomModalProps> = ({
   const turnstileTokenRef = useRef<string | null>(null);
   /** An admission that arrived before the challenge did, replayed by the effect below. */
   const pendingAdmitRef = useRef<string | null>(null);
+  /** Through the queue, held at the door until Cloudflare answers. */
+  const [heldForChallenge, setHeldForChallenge] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -56,9 +59,23 @@ export const WaitingRoomModal: React.FC<WaitingRoomModalProps> = ({
         return;
       }
       pendingAdmitRef.current = queueToken;
+      // Say so. The server has already taken this buyer out of the line, so leaving the queue box
+      // on screen reports a place they no longer occupy and a wait that is not what they are
+      // waiting for — the hold-up is the challenge below, and it is the thing they can act on.
+      setHeldForChallenge(true);
     },
     [onAdmitted],
   );
+
+  /*
+   * Stable across renders, so the challenge below is mounted once and left alone. `TurnstileWidget`
+   * no longer tears itself down when this identity changes, but handing it a fresh arrow on every
+   * one-second tick is still the wrong thing to do.
+   */
+  const handleChallengeSolved = useCallback((token: string) => {
+    turnstileTokenRef.current = token;
+    setTurnstileToken(token);
+  }, []);
 
   // The other order: the challenge came back after the queue did, so release the parked admission.
   useEffect(() => {
@@ -86,6 +103,9 @@ export const WaitingRoomModal: React.FC<WaitingRoomModalProps> = ({
     let isMounted = true;
 
     async function initQueue() {
+      // Re-entrant: the `expired` branch below calls this from inside the running poll, and a second
+      // `setInterval` assigned over the first would leave the first ticking with no handle on it.
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
       try {
         const joinRes = await joinWaitingRoom(showtimeId);
         if (!isMounted) return;
@@ -100,7 +120,16 @@ export const WaitingRoomModal: React.FC<WaitingRoomModalProps> = ({
         setQueuePosition(pos);
         setDisplayWaitSeconds(waitSec);
 
-        // Start active polling every 2 seconds
+        /*
+         * The poll is the safety net now, not the mechanism.
+         *
+         * Admission and every move up the line arrive over the socket subscribed below, within a
+         * few milliseconds of the server deciding them. What is left for the poll is the case the
+         * push cannot cover: a socket that never connected, or one that was down when the message
+         * went out — nothing is replayed on reconnect. Ten seconds is chosen for that job. At two
+         * it was doing the work, and doing it with a spread wider than the queue order it was
+         * reporting.
+         */
         pollIntervalRef.current = setInterval(async () => {
           try {
             const statusRes = await getWaitingRoomStatus(showtimeId);
@@ -113,11 +142,24 @@ export const WaitingRoomModal: React.FC<WaitingRoomModalProps> = ({
               setQueuePosition(statusRes.queuePosition ?? 1);
               const nextWait = statusRes.estimatedWaitSeconds ?? 3;
               setDisplayWaitSeconds((prev) => (prev === null || prev <= 0 ? nextWait : prev));
+            } else if (statusRes.status === 'expired') {
+              /*
+               * Neither holding a pass nor standing in the line.
+               *
+               * The server answers this when a pass ran out unused, and after a restart, which
+               * takes every queue with it. Nothing used to read the case: the modal kept the last
+               * position it had been told on screen and polled a room it was no longer in, so the
+               * number stayed put and the turn never came. Rejoining is the only move that leads
+               * anywhere, and it is what the reader would ask for if the screen told them.
+               */
+              setQueuePosition(null);
+              setDisplayWaitSeconds(null);
+              void initQueue();
             }
           } catch (err: unknown) {
             console.error('Polling waiting room failed:', err);
           }
-        }, 2000);
+        }, 10_000);
       } catch (err: unknown) {
         if (isMounted) {
           setError((err as Error).message || 'Không thể tham gia phòng chờ.');
@@ -127,8 +169,24 @@ export const WaitingRoomModal: React.FC<WaitingRoomModalProps> = ({
 
     initQueue();
 
+    // Subscribed before the join resolves, so an admission decided while `initQueue` is still in
+    // flight is not missed.
+    const unwatch = watchWaitingRoom(showtimeId, {
+      onAdmitted: (push) => {
+        if (!isMounted) return;
+        if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+        admit(push.queueToken);
+      },
+      onPosition: (push) => {
+        if (!isMounted) return;
+        setQueuePosition(push.queuePosition);
+        setDisplayWaitSeconds(push.estimatedWaitSeconds);
+      },
+    });
+
     return () => {
       isMounted = false;
+      unwatch();
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     };
   }, [isOpen, showtimeId, admit]);
@@ -160,11 +218,24 @@ export const WaitingRoomModal: React.FC<WaitingRoomModalProps> = ({
           <h3 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
             Phòng Chờ Giữ Vé
           </h3>
+          {/*
+            What this room does, said plainly.
+
+            It used to promise a "hàng đợi công bằng" and "phân phối công bằng", and it does not
+            allocate anything: admission is permission to try, and nothing here reserves a seat for
+            the person holding a pass. Everyone let in at the same moment still competes for the
+            same seats. Saying otherwise sets a reader up to feel cheated by working software.
+          */}
           <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-            Sự kiện đang có lượng truy cập rất cao. Bạn đang ở trong hàng đợi công bằng của TixHub.
+            Sự kiện đang có lượng truy cập rất cao. Chúng tôi cho từng nhóm nhỏ vào chọn vé lần
+            lượt, theo đúng thứ tự đến.
           </p>
 
-          {error ? (
+          {heldForChallenge ? (
+            <div className="mb-6 rounded-2xl border border-indigo-200 bg-indigo-50 p-5 text-sm text-indigo-700 dark:border-indigo-900/50 dark:bg-indigo-950/30 dark:text-indigo-300">
+              Đã tới lượt bạn. Đang chờ xác minh bảo mật bên dưới hoàn tất để mở trang chọn vé.
+            </div>
+          ) : error ? (
             <div className="p-4 mb-4 text-sm text-rose-600 bg-rose-50 dark:bg-rose-950/30 rounded-2xl border border-rose-200 dark:border-rose-900/50">
               {error}
             </div>
@@ -201,21 +272,22 @@ export const WaitingRoomModal: React.FC<WaitingRoomModalProps> = ({
 
           {/* Cloudflare Turnstile Verification in background / inline */}
           <div className="my-3">
-            <TurnstileWidget
-              onSuccess={(token) => {
-                turnstileTokenRef.current = token;
-                setTurnstileToken(token);
-              }}
-            />
+            <TurnstileWidget onSuccess={handleChallengeSolved} />
           </div>
 
           <div className="flex items-center justify-center gap-2 text-xs text-emerald-600 dark:text-emerald-400 py-2 px-3 bg-emerald-50 dark:bg-emerald-950/40 rounded-full w-fit mx-auto border border-emerald-200/60 dark:border-emerald-800/40">
             <ShieldCheck className="w-4 h-4" />
-            <span>Chống bot & phân phối công bằng cho người thật</span>
+            <span>Đang xác minh người thật để chặn bot mua vé tự động</span>
           </div>
 
+          {/*
+            This line used to warn that reloading loses your place. It does not: `enqueue` looks the
+            caller up by user id and hands back the position they already hold, so a refresh returns
+            to the same spot. The warning frightened people out of an action that was always safe —
+            and the true caveat is the opposite one, which is worth saying instead.
+          */}
           <p className="text-xs text-slate-400 dark:text-slate-500 mt-4">
-            Vui lòng không tải lại trang để tránh mất vị trí ưu tiên.
+            Bạn có thể tải lại trang mà không mất vị trí.
           </p>
         </div>
       </div>

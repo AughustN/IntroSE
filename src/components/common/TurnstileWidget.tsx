@@ -43,11 +43,35 @@ export const TurnstileWidget: React.FC<TurnstileWidgetProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  /*
+   * The three callbacks, held where a re-render cannot reach them.
+   *
+   * They used to sit in the effect's dependency list, and the effect's cleanup calls
+   * `turnstile.remove()`. Callers pass inline arrows — every parent render makes new function
+   * identities, so the effect re-ran, tore the challenge down and built a fresh one. In the waiting
+   * room that parent re-renders on a 1-second countdown and a 2-second poll, which meant the widget
+   * was destroyed and rebuilt about once a second: "Verifying…" over and over, and a solved
+   * challenge thrown away before the queue could use it.
+   *
+   * A ref is the fix rather than asking every caller to memoise, because the widget cannot know how
+   * often it will be re-rendered and should not break when it is. The effect now depends only on
+   * the two things that genuinely require a different widget.
+   */
+  const onSuccessRef = useRef(onSuccess);
+  const onErrorRef = useRef(onError);
+  const onExpireRef = useRef(onExpire);
+  useEffect(() => {
+    onSuccessRef.current = onSuccess;
+    onErrorRef.current = onError;
+    onExpireRef.current = onExpire;
+  });
+
   useEffect(() => {
     // If no sitekey provided (e.g. dev environment without Turnstile keys), provide mock bypass
     if (!siteKey) {
-      setIsLoading(false);
-      onSuccess('mock-turnstile-token');
+      // No spinner to put away: with no key the component renders its fixed "protection is on" line
+      // and never reads `isLoading`, so setting it here only cost a render.
+      onSuccessRef.current('mock-turnstile-token');
       return;
     }
 
@@ -64,19 +88,19 @@ export const TurnstileWidget: React.FC<TurnstileWidgetProps> = ({
           callback: (token: string) => {
             if (isMounted) {
               setIsLoading(false);
-              onSuccess(token);
+              onSuccessRef.current(token);
             }
           },
           'error-callback': (err: unknown) => {
             if (isMounted) {
               setIsLoading(false);
               setLoadError('Không thể tải mã bảo mật. Vui lòng thử lại.');
-              onError?.(String(err));
+              onErrorRef.current?.(String(err));
             }
           },
           'expired-callback': () => {
             if (isMounted) {
-              onExpire?.();
+              onExpireRef.current?.();
             }
           },
           theme,
@@ -87,7 +111,7 @@ export const TurnstileWidget: React.FC<TurnstileWidgetProps> = ({
         if (isMounted) {
           setIsLoading(false);
           setLoadError('Lỗi khởi tạo xác thực bảo mật.');
-          onError?.(String(err));
+          onErrorRef.current?.(String(err));
         }
       }
     };
@@ -129,7 +153,7 @@ export const TurnstileWidget: React.FC<TurnstileWidgetProps> = ({
         widgetIdRef.current = null;
       }
     };
-  }, [siteKey, theme, onSuccess, onError, onExpire]);
+  }, [siteKey, theme]);
 
   if (!siteKey) {
     return (

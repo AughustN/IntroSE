@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requireAuth } from '../../middleware/requireAuth.js';
 import { joinWaitingRoom, getWaitingRoomStatus } from '../../services/waitingRoom.service.js';
 import { pool } from '../../db/pool.js';
+import { getSettings } from '../admin/settings.service.js';
 
 export const waitingRoomRouter = Router();
 
@@ -38,7 +39,10 @@ waitingRoomRouter.post('/join', requireAuth, async (req, res) => {
     });
   }
 
-  const result = joinWaitingRoom(showtimeId, userId);
+  // The pass has to expire with the hold it will be used to make, and that window is an admin
+  // setting rather than a constant. `getSettings` is cached for 15s, so this costs nothing per join.
+  const settings = await getSettings();
+  const result = joinWaitingRoom(showtimeId, userId, settings.seat_hold_ttl_minutes * 60_000);
   return res.json(result);
 });
 
