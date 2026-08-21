@@ -157,6 +157,19 @@ function byRelevance(a: MovieEvent, b: MovieEvent): number {
  * statement about the catalogue, and a band that disappears when it has no events is a band the
  * reader cannot tell from one that was never there.
  */
+/**
+ * How many films a cinema row holds, and therefore how many the band asks for.
+ *
+ * Five, where the other bands take four: a poster is about half the width of a still at the same
+ * height, so five fit across before the row starts to tower over its neighbours. The band was being
+ * sliced to four while its grid was already five wide, which left the fifth column empty on every
+ * load — a gap that reads as a missing card rather than as a deliberate margin.
+ *
+ * `CategoryRow` hardcodes the matching `lg:grid-cols-5`, because Tailwind compiles class names it
+ * can see in the source and cannot build one from a variable. The two have to be changed together.
+ */
+export const CINEMA_PER_ROW = 5;
+
 export function buildLandingSections(events: MovieEvent[], perSection = 4): LandingSection[] {
   const grouped = new Map<SectionId, MovieEvent[]>();
   const codes = new Map<SectionId, Set<string>>();
@@ -170,11 +183,13 @@ export function buildLandingSections(events: MovieEvent[], perSection = 4): Land
 
   return BANDS.map((band) => {
     const all = [...(grouped.get(band.id) ?? [])].sort(byRelevance);
+    const cinema = band.id === "movie";
+    const take = cinema ? CINEMA_PER_ROW : perSection;
     return {
       ...band,
       codes: [...(codes.get(band.id) ?? [])],
-      events: all.slice(0, perSection),
-      tabs: band.id === "movie" ? cinemaTabs(all, perSection) : undefined,
+      events: all.slice(0, take),
+      tabs: cinema ? cinemaTabs(all, take) : undefined,
     };
   });
 }

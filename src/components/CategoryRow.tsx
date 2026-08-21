@@ -96,14 +96,32 @@ export default function CategoryRow({
         */}
         {tabs && tabs.length > 1 ? (
           <div className="flex flex-col items-center gap-3 text-center">
-            <p className="label-eyebrow text-ink-soft">{eyebrow}</p>
+{/*
+              Set exactly as every other band's title — "Ca nhạc", "Sân khấu & Nghệ thuật" — because
+              it is doing that job here. The bar variant's eyebrow is a caption above a title; this
+              band has no title line of its own, so the same 14px label left the band unnamed next
+              to neighbours announcing themselves at 50px.
+            */}
+            <h2 className="font-display text-title-l font-black leading-none text-beige-kem">
+              {eyebrow}
+            </h2>
             {/*
               The two names, at heading size, because that is what they are — the band's title, in
               two halves, one of which is currently true. Drawing them as small pills under a
               separate `<h2>` would make the heading the loudest thing and the actual choice a
               footnote to it.
             */}
-            <div role="tablist" aria-label={eyebrow} className="flex items-end gap-6 sm:gap-10">
+{/*
+              `flex-wrap` is the guard, not the plan: the pair is meant to sit on one line, and two
+              ten-character words at 50px plus the gap come to about 480px. It fits the band and
+              would not fit a phone, so the size steps down there and the wrap catches whatever is
+              left — a longer label in another language, say.
+            */}
+            <div
+              role="tablist"
+              aria-label={eyebrow}
+              className="flex flex-wrap items-end justify-center gap-6 sm:gap-10"
+            >
               {tabs.map((tab, index) => {
                 const active = index === activeTab;
                 return (
@@ -113,7 +131,7 @@ export default function CategoryRow({
                     role="tab"
                     aria-selected={active}
                     onClick={() => setActiveTab(index)}
-                    className={`font-display text-title-l font-black leading-none transition ${
+                    className={`font-display text-title-m font-black leading-none transition sm:text-title-l ${
                       active
                         ? "border-b-4 border-burgundy pb-1 text-beige-kem"
                         : "border-b-4 border-transparent pb-1 text-ink-soft hover:text-beige-kem"
@@ -155,7 +173,9 @@ export default function CategoryRow({
           <div
             className={`grid grid-flow-dense grid-cols-1 border-l border-t border-beige-kem/45 sm:grid-cols-2 ${
               // Posters are half the width of a still at the same height, so more of them fit
-              // across before the row starts to tower over the bands around it.
+              // across before the row starts to tower over the bands around it. Five here has to
+              // stay in step with `CINEMA_PER_ROW`, which is how many the band is given — Tailwind
+              // only compiles class names it can read in the source, so this cannot be a variable.
               film ? "lg:grid-cols-5" : "lg:grid-cols-4"
             }`}
           >
