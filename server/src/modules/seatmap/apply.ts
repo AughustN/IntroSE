@@ -1,6 +1,7 @@
 import type { ApplyChange, ApplyPreview, ApplyRefusal } from "@shared/catalog/seatmap.js";
 import { clampCoord, normaliseRotation } from "@shared/catalog/seatmap-validate.js";
 import { type Db, pool, withTransaction } from "../../db/pool.js";
+import { err } from "../../http.js";
 
 /**
  * Applying a map edit to a showtime that already has bookable seats (FR-027..FR-029).
@@ -95,24 +96,45 @@ function positionChanged(desired: DesiredSeat, current: CurrentSeat): boolean {
   );
 }
 
+/**
+ * Which current seat does this desired line refer to?
+ *
+ * The direct id wins. When the line carries no showtime_seat id — or one this map does not have —
+ * it falls back to the PHYSICAL seat, so an existing row can never be classified as an addition
+ * and then swept away by the removal pass while its INSERT no-ops on the (showtime_id, seat_id)
+ * conflict. The fallback is what makes a client that lost track of ids degrade into an edit of
+ * the right seat instead of a silent delete; both callers (classify and apply's write loop) go
+ * through this one function so preview and write can never resolve differently.
+ */
+function resolveCurrent(
+  d: DesiredSeat,
+  byId: Map<number, CurrentSeat>,
+  bySeatId: Map<number, CurrentSeat>,
+): CurrentSeat | undefined {
+  const direct = d.showtimeSeatId !== null ? byId.get(d.showtimeSeatId) : undefined;
+  return direct ?? bySeatId.get(d.seatId);
+}
+
 /** Classify an edit without writing anything. Pure — used by both the preview and the apply. */
 export function classify(desired: DesiredSeat[], current: CurrentSeat[]): ApplyPreview {
   const changes: ApplyChange[] = [];
   const refusals: ApplyRefusal[] = [];
   const byId = new Map(current.map((c) => [c.id, c]));
+  const bySeatId = new Map(current.map((c) => [c.seat_id, c]));
   const keptIds = new Set<number>();
+  // A line that resolves to a current seat ANOTHER line already claimed is an addition: two lines
+  // cannot both edit one row, and the second's INSERT then no-ops harmlessly on the unique
+  // (showtime_id, seat_id) conflict instead of double-writing it.
+  const matched = new Set<number>();
 
   for (const d of desired) {
-    if (d.showtimeSeatId === null) {
+    const c = resolveCurrent(d, byId, bySeatId);
+    if (!c || matched.has(c.id)) {
+      // Refers to nothing on this map (or to a seat another line already edits) — an addition.
       changes.push({ kind: "add", showtimeSeatId: null, seatLabel: labelOf(d) });
       continue;
     }
-    const c = byId.get(d.showtimeSeatId);
-    if (!c) {
-      // Refers to a seat this showtime does not have — treat as an addition rather than failing.
-      changes.push({ kind: "add", showtimeSeatId: null, seatLabel: labelOf(d) });
-      continue;
-    }
+    matched.add(c.id);
     keptIds.add(c.id);
 
     const movedOnly = positionChanged(d, c);
@@ -191,10 +213,13 @@ export async function apply(showtimeId: number, desired: DesiredSeat[]): Promise
     if (!outcome.wouldSucceed) return outcome; // caller turns this into 409; the txn wrote nothing
 
     const byId = new Map(current.map((c) => [c.id, c]));
+    const bySeatId = new Map(current.map((c) => [c.seat_id, c]));
     const keptIds = new Set<number>();
 
     for (const d of desired) {
-      const c = d.showtimeSeatId === null ? undefined : byId.get(d.showtimeSeatId);
+      // Same resolution classify used, so the writes land exactly where the preview said they
+      // would — including a line that names an existing physical seat without its row id.
+      const c = resolveCurrent(d, byId, bySeatId);
       if (c) {
         keptIds.add(c.id);
         await client.query(
@@ -482,11 +507,24 @@ export async function setTier(
   ticketTierId: number,
 ): Promise<{ refusals: ApplyRefusal[]; tier: { label: string; price: number } | null }> {
   return withTransaction(async (client) => {
-    const tier = await client.query<{ id: number; label: string; price: string }>(
-      `SELECT id, label, price_amount::text AS price FROM ticket_tiers WHERE id = $1 AND showtime_id = $2`,
+    const tier = await client.query<{
+      id: number;
+      label: string;
+      price: string;
+      archived_at: Date | null;
+    }>(
+      `SELECT id, label, price_amount::text AS price, archived_at
+         FROM ticket_tiers WHERE id = $1 AND showtime_id = $2`,
       [ticketTierId, showtimeId],
     );
     if (!tier.rows[0]) return { refusals: [], tier: null };
+    // An archived class is a retired price: it has left every buyer-facing read, so binding seats
+    // to it would make them unsellable while looking assigned. Refused with its own code rather
+    // than the generic not-belonging error, so the organizer can tell the two apart — the same
+    // rule `desiredFromLayout` applies when matching new seats to a tier.
+    if (tier.rows[0].archived_at !== null) {
+      throw err.badRequest("tier_archived", "Hạng vé đã được lưu trữ, không thể gán cho ghế.");
+    }
 
     const { rows } = await client.query<CurrentSeat>(
       `SELECT id, seat_id, row_label, seat_number, section_name, ticket_tier_id, status, pos_x, pos_y, rotation,

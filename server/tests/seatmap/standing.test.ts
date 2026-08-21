@@ -200,3 +200,176 @@ describe("no showtime is both seated and general admission (SC-026)", () => {
     expect(await isMixedShowtime(seated.showtimeId, pool)).toBe(false);
   });
 });
+
+describe("a reshape claims only the seats inside its own polygon", () => {
+  /** Two disjoint squares — far enough apart that even their bounding boxes never touch. */
+  const LEFT_SQUARE = [
+    { x: 1000, y: 1000 },
+    { x: 3000, y: 1000 },
+    { x: 3000, y: 3000 },
+    { x: 1000, y: 3000 },
+  ];
+  const RIGHT_SQUARE = [
+    { x: 5000, y: 1000 },
+    { x: 7000, y: 1000 },
+    { x: 7000, y: 3000 },
+    { x: 5000, y: 3000 },
+  ];
+
+  /**
+   * Two standing areas sharing the row label the editor always sends ("ĐỨNG"), in different
+   * sections. Under the old label-only matching these two could destroy each other.
+   */
+  async function twoAreas(o: { h: Record<string, string> }) {
+    const { layoutId, section, venue } = await layoutWithSection(o);
+    const sectionB = (
+      await request(app)
+        .post(`/api/organizer/venues/${venue}/sections`)
+        .set(o.h)
+        .send({ name: "Khu đứng B" })
+        .expect(201)
+    ).body.id;
+    await request(app)
+      .post(`/api/organizer/layouts/${layoutId}/standing-area`)
+      .set(o.h)
+      .send({ sectionId: section, rowLabel: "ĐỨNG", count: 20, points: LEFT_SQUARE })
+      .expect(201);
+    await request(app)
+      .post(`/api/organizer/layouts/${layoutId}/standing-area`)
+      .set(o.h)
+      .send({ sectionId: sectionB, rowLabel: "ĐỨNG", count: 20, points: RIGHT_SQUARE })
+      .expect(201);
+    const areas = (
+      await pool.query<{ id: number }>(
+        `SELECT id FROM layout_elements WHERE layout_id = $1 AND kind = 'area' ORDER BY id`,
+        [layoutId],
+      )
+    ).rows;
+    return { layoutId, section, sectionB, leftArea: areas[0].id, rightArea: areas[1].id };
+  }
+
+  const seatsOf = (layoutId: number) =>
+    pool.query<{ id: number; section_id: number | null; pos_x: number; pos_y: number }>(
+      `SELECT id, section_id, pos_x, pos_y FROM seats
+        WHERE layout_id = $1 AND seat_type = 'standing' ORDER BY id`,
+      [layoutId],
+    );
+
+  /** Sell one physical seat on an otherwise unrelated showtime, the way a purchase would leave it. */
+  async function sellSeat(seatId: number) {
+    const seeded = await seedSeatedShowtime(1);
+    await pool.query(
+      `INSERT INTO showtime_seats (showtime_id, seat_id, ticket_tier_id, status, pos_x, pos_y, rotation, row_label, seat_number)
+       SELECT $1, s.id, $3, 'sold', s.pos_x, s.pos_y, 0, s.row_label, s.seat_number
+         FROM seats s WHERE s.id = $2`,
+      [seeded.showtimeId, seatId, seeded.tierId],
+    );
+  }
+
+  it("reshaping one area leaves the other area's seats byte-identical", async () => {
+    const o = await organizer();
+    const m = await twoAreas(o);
+    const before = (await seatsOf(m.layoutId)).rows;
+
+    // Shrink the LEFT area to 8 places inside a smaller polygon.
+    await request(app)
+      .patch(`/api/organizer/layouts/${m.layoutId}/areas/${m.leftArea}`)
+      .set(o.h)
+      .send({
+        points: [
+          { x: 1200, y: 1200 },
+          { x: 2400, y: 1200 },
+          { x: 2400, y: 2400 },
+          { x: 1200, y: 2400 },
+        ],
+        capacity: 8,
+      })
+      .expect(200);
+
+    const after = (await seatsOf(m.layoutId)).rows;
+    // The right area's seats are untouched — same ids, same positions, same section.
+    expect(after.filter((s) => s.pos_x > 4000)).toEqual(before.filter((s) => s.pos_x > 4000));
+    // The left area was regenerated: 8 seats, all still in its own section.
+    const left = after.filter((s) => s.pos_x <= 4000);
+    expect(left).toHaveLength(8);
+    expect(left.every((s) => s.section_id === m.section)).toBe(true);
+  });
+
+  it("a sale in the OTHER area neither blocks the reshape nor is disturbed by it", async () => {
+    const o = await organizer();
+    const m = await twoAreas(o);
+    const rightSeat = (
+      await pool.query<{ id: number }>(
+        `SELECT id FROM seats WHERE layout_id = $1 AND seat_type = 'standing' AND pos_x > 4000 LIMIT 1`,
+        [m.layoutId],
+      )
+    ).rows[0];
+    await sellSeat(rightSeat.id);
+
+    // The old label-only guard refused here; the polygon-scoped one does not.
+    await request(app)
+      .patch(`/api/organizer/layouts/${m.layoutId}/areas/${m.leftArea}`)
+      .set(o.h)
+      .send({ points: LEFT_SQUARE, capacity: 10 })
+      .expect(200);
+
+    const sold = await pool.query(`SELECT status FROM showtime_seats WHERE seat_id = $1`, [
+      rightSeat.id,
+    ]);
+    expect(sold.rows[0].status).toBe("sold");
+  });
+
+  it("still refuses when THIS area holds a sold seat", async () => {
+    const o = await organizer();
+    const m = await twoAreas(o);
+    const leftSeat = (
+      await pool.query<{ id: number }>(
+        `SELECT id FROM seats WHERE layout_id = $1 AND seat_type = 'standing' AND pos_x <= 4000 LIMIT 1`,
+        [m.layoutId],
+      )
+    ).rows[0];
+    await sellSeat(leftSeat.id);
+
+    const res = await request(app)
+      .patch(`/api/organizer/layouts/${m.layoutId}/areas/${m.leftArea}`)
+      .set(o.h)
+      .send({ points: LEFT_SQUARE, capacity: 10 })
+      .expect(409);
+    expect(res.body.error).toBe("seat_sold");
+  });
+
+  it("refuses creating an area that overlaps an existing one", async () => {
+    const o = await organizer();
+    const { layoutId, section } = await layoutWithSection(o);
+    await request(app)
+      .post(`/api/organizer/layouts/${layoutId}/standing-area`)
+      .set(o.h)
+      .send({ sectionId: section, rowLabel: "ĐỨNG", count: 10, points: LEFT_SQUARE })
+      .expect(201);
+
+    // Overlaps the first square's bounding box (its minX 2000 is below the first's maxX 3000).
+    const res = await request(app)
+      .post(`/api/organizer/layouts/${layoutId}/standing-area`)
+      .set(o.h)
+      .send({
+        sectionId: section,
+        rowLabel: "ĐỨNG",
+        count: 10,
+        points: [
+          { x: 2000, y: 1000 },
+          { x: 4000, y: 1000 },
+          { x: 4000, y: 3000 },
+          { x: 2000, y: 3000 },
+        ],
+      })
+      .expect(409);
+    expect(res.body.error).toBe("area_overlaps");
+
+    // Refused whole: no second shape, no orphan seats.
+    const els = await pool.query(
+      `SELECT count(*)::int AS n FROM layout_elements WHERE layout_id = $1 AND kind = 'area'`,
+      [layoutId],
+    );
+    expect(els.rows[0].n).toBe(1);
+  });
+});

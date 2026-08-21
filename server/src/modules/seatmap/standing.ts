@@ -13,17 +13,17 @@
  * position rather than a headcount; the honest gain is that it needs no new concurrency work at all.
  */
 
-import { pointInPolygon } from '@shared/catalog/seatmap-validate.js';
-import { defaultCategoryId, forgetDocument } from './layouts.repo.js';
-import type { ShapePoint } from '@shared/catalog/seatmap.js';
+import { pointInPolygon } from "@shared/catalog/seatmap-validate.js";
+import { defaultCategoryId, forgetDocument } from "./layouts.repo.js";
+import type { ShapePoint } from "@shared/catalog/seatmap.js";
 import {
   LAYOUT_MAX_SEATS,
   POLYGON_MAX_POINTS,
   POLYGON_MIN_POINTS,
   SEAT_DIAMETER,
-} from '../../config.js';
-import { withTransaction, type Db } from '../../db/pool.js';
-import { err } from '../../http.js';
+} from "../../config.js";
+import { withTransaction, type Db } from "../../db/pool.js";
+import { err } from "../../http.js";
 
 export interface StandingAreaInput {
   sectionId: number;
@@ -66,21 +66,53 @@ export function standingPositions(points: ShapePoint[], count: number): { x: num
  * The shape is stored as an ordinary `area` element carrying the same points, so the drawn area and
  * the positions inside it cannot drift apart: both are written in one transaction from one polygon.
  */
-export async function createStandingArea(layoutId: number, input: StandingAreaInput): Promise<number> {
+export async function createStandingArea(
+  layoutId: number,
+  input: StandingAreaInput,
+): Promise<number> {
   if (input.points.length < POLYGON_MIN_POINTS || input.points.length > POLYGON_MAX_POINTS) {
     throw err.badRequest(
-      'invalid_polygon',
+      "invalid_polygon",
       `Vùng đứng cần từ ${POLYGON_MIN_POINTS} đến ${POLYGON_MAX_POINTS} điểm.`,
     );
   }
 
   return withTransaction(async (client) => {
+    // Two overlapping areas cannot share space honestly: whichever reshaped second would claim the
+    // seats the first generated, because ownership is decided by polygon containment. Refused at
+    // creation with a bounding-box test — cheap, and conservative in the safe direction (it may
+    // flag two areas that merely have nearby corners, never one that truly intersects).
+    const { rows: others } = await client.query<{ points: ShapePoint[] }>(
+      `SELECT points FROM layout_elements
+        WHERE layout_id = $1 AND kind = 'area' AND points IS NOT NULL`,
+      [layoutId],
+    );
+    const box = (pts: ShapePoint[]) => ({
+      minX: Math.min(...pts.map((p) => p.x)),
+      maxX: Math.max(...pts.map((p) => p.x)),
+      minY: Math.min(...pts.map((p) => p.y)),
+      maxY: Math.max(...pts.map((p) => p.y)),
+    });
+    const a = box(input.points);
+    for (const o of others) {
+      const b = box(o.points);
+      if (a.minX <= b.maxX && b.minX <= a.maxX && a.minY <= b.maxY && b.minY <= a.maxY) {
+        throw err.conflict(
+          "area_overlaps",
+          "Vùng đứng chồng lên một khu đã vẽ. Hãy vẽ vùng không giao nhau với khu khác.",
+        );
+      }
+    }
+
     const { rows: cur } = await client.query<{ n: string }>(
       `SELECT count(*)::text AS n FROM seats WHERE layout_id = $1`,
       [layoutId],
     );
     if (Number(cur[0].n) + input.count > LAYOUT_MAX_SEATS) {
-      throw err.conflict('seat_limit_reached', `Một sơ đồ chỉ chứa tối đa ${LAYOUT_MAX_SEATS} ghế.`);
+      throw err.conflict(
+        "seat_limit_reached",
+        `Một sơ đồ chỉ chứa tối đa ${LAYOUT_MAX_SEATS} ghế.`,
+      );
     }
 
     const positions = standingPositions(input.points, input.count);
@@ -88,7 +120,7 @@ export async function createStandingArea(layoutId: number, input: StandingAreaIn
     // would only discover it when 60 buyers could not stand anywhere (Principle I).
     if (positions.length < input.count) {
       throw err.conflict(
-        'area_too_small',
+        "area_too_small",
         `Vùng đã vẽ chỉ chứa được ${positions.length} chỗ đứng, cần ${input.count}. Hãy vẽ vùng rộng hơn.`,
       );
     }
@@ -123,8 +155,14 @@ export async function createStandingArea(layoutId: number, input: StandingAreaIn
        VALUES ($1, 'area', $2, $3, $4, $5, 0, $6, $7::jsonb, $8)`,
       [
         layoutId,
-        Math.round((Math.min(...input.points.map((p) => p.x)) + Math.max(...input.points.map((p) => p.x))) / 2),
-        Math.round((Math.min(...input.points.map((p) => p.y)) + Math.max(...input.points.map((p) => p.y))) / 2),
+        Math.round(
+          (Math.min(...input.points.map((p) => p.x)) + Math.max(...input.points.map((p) => p.x))) /
+            2,
+        ),
+        Math.round(
+          (Math.min(...input.points.map((p) => p.y)) + Math.max(...input.points.map((p) => p.y))) /
+            2,
+        ),
         Math.max(...input.points.map((p) => p.x)) - Math.min(...input.points.map((p) => p.x)),
         Math.max(...input.points.map((p) => p.y)) - Math.min(...input.points.map((p) => p.y)),
         input.rowLabel,
@@ -158,66 +196,94 @@ export async function reshapeStandingArea(
 ): Promise<number> {
   if (input.points.length < POLYGON_MIN_POINTS || input.points.length > POLYGON_MAX_POINTS) {
     throw err.badRequest(
-      'invalid_polygon',
+      "invalid_polygon",
       `Vùng đứng cần từ ${POLYGON_MIN_POINTS} đến ${POLYGON_MAX_POINTS} điểm.`,
     );
   }
 
   return withTransaction(async (client) => {
-    const { rows: el } = await client.query<{ label: string | null }>(
-      `SELECT label FROM layout_elements WHERE id = $1 AND layout_id = $2 AND kind = 'area' FOR UPDATE`,
+    const { rows: el } = await client.query<{ label: string | null; points: ShapePoint[] | null }>(
+      `SELECT label, points FROM layout_elements WHERE id = $1 AND layout_id = $2 AND kind = 'area' FOR UPDATE`,
       [elementId, layoutId],
     );
-    if (!el[0]) throw err.notFound('not_found', 'Không tìm thấy vùng đứng.');
-    const rowLabel = el[0].label ?? 'ĐỨNG';
+    if (!el[0]) throw err.notFound("not_found", "Không tìm thấy vùng đứng.");
+    const rowLabel = el[0].label ?? "ĐỨNG";
+    // The STORED polygon decides which seats belong to this area — they were generated inside it.
+    // Matching by row label alone would let two areas sharing a label (the editor sends "ĐỨNG" for
+    // every one, even across sections) destroy each other's seats on reshape.
+    const polygon = el[0].points;
+    if (!Array.isArray(polygon) || polygon.length < POLYGON_MIN_POINTS) {
+      throw err.badRequest("invalid_polygon", "Vùng đứng này chưa có hình vẽ hợp lệ.");
+    }
 
-    // Nothing here may disturb a seat someone has bought or is holding.
-    const { rows: committed } = await client.query<{ status: 'sold' | 'held'; n: number }>(
-      `SELECT ss.status, count(*)::int AS n
-         FROM showtime_seats ss
-         JOIN seats s ON s.id = ss.seat_id
-        WHERE s.layout_id = $1 AND s.row_label = $2 AND s.seat_type = 'standing'
-          AND (ss.status = 'sold' OR (ss.status = 'held' AND ss.hold_expires_at > now()))
-        GROUP BY ss.status`,
+    // This area's seats: standing seats carrying its row label whose position falls inside its
+    // polygon. A sibling area with the same label in another section is invisible here — a sale or
+    // hold on one can neither block this reshape nor be disturbed by it.
+    const { rows: candidates } = await client.query<{
+      id: number;
+      section_id: number | null;
+      category_id: number | null;
+      pos_x: number;
+      pos_y: number;
+    }>(
+      `SELECT id, section_id, category_id, pos_x, pos_y FROM seats
+        WHERE layout_id = $1 AND row_label = $2 AND seat_type = 'standing'`,
       [layoutId, rowLabel],
     );
-    if (committed.length > 0) {
-      const sold = committed.find((r) => r.status === 'sold');
-      const row = sold ?? committed[0];
-      throw err.conflict(
-        row.status === 'sold' ? 'seat_sold' : 'seat_held',
-        `Không thể sửa vùng này: ${row.n} chỗ ${row.status === 'sold' ? 'đã bán' : 'đang được giữ'}.`,
+    const mineIds = candidates
+      .filter((s) => pointInPolygon({ x: s.pos_x, y: s.pos_y }, polygon))
+      .map((s) => s.id);
+
+    // Nothing here may disturb a seat someone has bought or is holding.
+    if (mineIds.length > 0) {
+      const { rows: committed } = await client.query<{ status: "sold" | "held"; n: number }>(
+        `SELECT ss.status, count(*)::int AS n
+           FROM showtime_seats ss
+          WHERE ss.seat_id = ANY($1::bigint[])
+            AND (ss.status = 'sold' OR (ss.status = 'held' AND ss.hold_expires_at > now()))
+          GROUP BY ss.status`,
+        [mineIds],
       );
+      if (committed.length > 0) {
+        const sold = committed.find((r) => r.status === "sold");
+        const row = sold ?? committed[0];
+        throw err.conflict(
+          row.status === "sold" ? "seat_sold" : "seat_held",
+          `Không thể sửa vùng này: ${row.n} chỗ ${row.status === "sold" ? "đã bán" : "đang được giữ"}.`,
+        );
+      }
     }
 
     const positions = standingPositions(input.points, input.capacity);
     if (positions.length < input.capacity) {
       throw err.conflict(
-        'area_too_small',
+        "area_too_small",
         `Vùng đã vẽ chỉ chứa được ${positions.length} chỗ đứng, cần ${input.capacity}. Hãy vẽ vùng rộng hơn.`,
       );
     }
 
+    // The area's own seats come out of the budget while being replaced, so everything ELSE is what
+    // the new capacity has to fit alongside.
     const { rows: cur } = await client.query<{ n: string }>(
-      `SELECT count(*)::text AS n FROM seats WHERE layout_id = $1 AND NOT (row_label = $2 AND seat_type = 'standing')`,
-      [layoutId, rowLabel],
+      `SELECT count(*)::text AS n FROM seats WHERE layout_id = $1 AND NOT (id = ANY($2::bigint[]))`,
+      [layoutId, mineIds],
     );
     if (Number(cur[0].n) + input.capacity > LAYOUT_MAX_SEATS) {
-      throw err.conflict('seat_limit_reached', `Một sơ đồ chỉ chứa tối đa ${LAYOUT_MAX_SEATS} ghế.`);
+      throw err.conflict(
+        "seat_limit_reached",
+        `Một sơ đồ chỉ chứa tối đa ${LAYOUT_MAX_SEATS} ghế.`,
+      );
     }
 
-    const { rows: keep } = await client.query<{ section_id: number | null; category_id: number | null }>(
-      `SELECT section_id, category_id FROM seats
-        WHERE layout_id = $1 AND row_label = $2 AND seat_type = 'standing' LIMIT 1`,
-      [layoutId, rowLabel],
-    );
-    const sectionId = keep[0]?.section_id ?? null;
-    const categoryId = keep[0]?.category_id ?? (await defaultCategoryId(layoutId, client));
+    // The replacement inherits the section and class of what it replaced (first row wins should a
+    // legacy pair of areas have straddled sections), falling back to the layout's default class.
+    const keep = candidates.find((s) => mineIds.includes(s.id));
+    const sectionId = keep?.section_id ?? null;
+    const categoryId = keep?.category_id ?? (await defaultCategoryId(layoutId, client));
 
-    await client.query(
-      `DELETE FROM seats WHERE layout_id = $1 AND row_label = $2 AND seat_type = 'standing'`,
-      [layoutId, rowLabel],
-    );
+    if (mineIds.length > 0) {
+      await client.query(`DELETE FROM seats WHERE id = ANY($1::bigint[])`, [mineIds]);
+    }
     const res = await client.query(
       `INSERT INTO seats (layout_id, section_id, category_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation)
        SELECT $1, $2, $3, $4, i, 'standing', p.x, p.y, 0
