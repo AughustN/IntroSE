@@ -141,12 +141,19 @@ async function organizerAction(
   id: number,
   next: "approved" | "rejected" | "suspended",
   reason: string | null,
+  fromStatus?: "pending" | "suspended",
 ) {
   return withTransaction(async (db) => {
     const current = await lockOrganizer(id, db);
     if (!current) throw err.notFound("not_found");
     const allowed =
-      next === "suspended" ? current.status === "approved" : current.status === "pending";
+      fromStatus !== undefined
+        ? current.status === fromStatus && (next === "approved" || next === "rejected" || next === "suspended")
+        : next === "suspended"
+          ? current.status === "approved"
+          : next === "approved"
+            ? current.status === "pending" || current.status === "suspended"
+            : current.status === "pending";
     if (!allowed) throw err.conflict("moderation_conflict", "Trạng thái đã thay đổi.");
     const result = await updateOrganizer(id, next, reason, actorUserId, db);
     await insertNotification(db, {
@@ -164,6 +171,14 @@ async function organizerAction(
       outcome: "applied",
       detail: { before: current.status, after: next, reason },
     });
+    if (next === "approved" && current.status === "suspended") {
+      await db.query(
+        `UPDATE organizer_appeals
+            SET status = 'approved', reviewed_by = $1, reviewed_at = now(), review_note = $2, updated_at = now()
+          WHERE organizer_id = $3 AND status = 'pending'`,
+        [actorUserId, reason, id],
+      );
+    }
     return result;
   });
 }
@@ -174,6 +189,41 @@ export const rejectOrganizer = (actor: number, id: number, reason: string) =>
   organizerAction(actor, id, "rejected", reason);
 export const suspendOrganizer = (actor: number, id: number, reason: string) =>
   organizerAction(actor, id, "suspended", reason);
+export const unsuspendOrganizer = (actor: number, id: number, reason: string | null = null) =>
+  organizerAction(actor, id, "approved", reason, "suspended");
+
+export async function rejectOrganizerAppeal(actorUserId: number, id: number, reason: string) {
+  return withTransaction(async (db) => {
+    const current = await lockOrganizer(id, db);
+    if (!current) throw err.notFound("not_found", "Không tìm thấy ban tổ chức.");
+    const { rows } = await db.query<{ id: number; user_id: number }>(
+      `UPDATE organizer_appeals
+          SET status = 'rejected', reviewed_by = $1, reviewed_at = now(), review_note = $2, updated_at = now()
+        WHERE organizer_id = $3 AND status = 'pending'
+        RETURNING id, user_id`,
+      [actorUserId, reason, id],
+    );
+    if (rows.length === 0) {
+      throw err.conflict("no_pending_appeal", "Không có đơn khiếu nại nào đang chờ duyệt cho ban tổ chức này.");
+    }
+    await insertNotification(db, {
+      recipientUserId: current.user_id,
+      kind: "organizer_appeal_rejected",
+      targetType: "organizer",
+      targetId: id,
+      payload: { reason },
+    });
+    await insertAudit(db, {
+      actorUserId,
+      action: "organizer_appeal_rejected",
+      targetType: "organizer",
+      targetId: id,
+      outcome: "applied",
+      detail: { reason },
+    });
+    return { ok: true, message: "Đã từ chối đơn khiếu nại." };
+  });
+}
 
 export async function moderateEvent(
   actorUserId: number,

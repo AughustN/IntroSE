@@ -63,6 +63,8 @@ export default function OrganizerPreview({
     `organizer-${organizerId}`,
   );
 
+  const pendingAppeal = data?.appeals?.find((a) => a.status === "pending");
+
   const decisions: DecisionOption[] = !data
     ? []
     : data.status === "pending"
@@ -95,7 +97,32 @@ export default function OrganizerPreview({
               run: (reason) => adminClient.suspendOrganizer(data.id, reason),
             },
           ]
-        : [];
+        : data.status === "suspended"
+          ? [
+              {
+                id: "unsuspend",
+                label: pendingAppeal ? "Chấp thuận & Mở lại" : "Mở lại",
+                effect: pendingAppeal
+                  ? "Chấp thuận giải trình khiếu nại và khôi phục quyền hoạt động cho ban tổ chức."
+                  : "Mở lại quyền tổ chức sự kiện và bán vé cho ban tổ chức này.",
+                reason: "optional",
+                primary: true,
+                run: (reason) => adminClient.unsuspendOrganizer(data.id, reason),
+              },
+              ...(pendingAppeal
+                ? [
+                    {
+                      id: "reject-appeal",
+                      label: "Bác đơn khiếu nại",
+                      effect:
+                        "Từ chối giải trình khiếu nại và giữ nguyên trạng thái đình chỉ của ban tổ chức. Người nộp sẽ nhận được lý do phản hồi.",
+                      reason: "required" as const,
+                      run: (reason: string) => adminClient.rejectOrganizerAppeal(data.id, reason),
+                    },
+                  ]
+                : []),
+            ]
+          : [];
 
   return (
     <>
@@ -151,6 +178,22 @@ export default function OrganizerPreview({
                   Ghi chú kiểm duyệt: {data.reviewNote}
                 </p>
               )}
+
+              {pendingAppeal && (
+                <div className="border-l-4 border-amber-500 bg-amber-500/15 p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-amber-300 uppercase tracking-wide text-xs">
+                      Đơn khiếu nại trực tuyến đang chờ xử lý
+                    </span>
+                    <span className="font-meta text-eyebrow text-ink-soft">
+                      Nộp ngày {day(pendingAppeal.createdAt)}
+                    </span>
+                  </div>
+                  <p className="font-medium text-beige-kem whitespace-pre-line text-body">
+                    &ldquo;{pendingAppeal.reason}&rdquo;
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -192,6 +235,60 @@ export default function OrganizerPreview({
                   )}
                 </div>
               ))}
+            </div>
+          )}
+
+          {data.appeals && data.appeals.length > 0 && (
+            <div className={`${PANEL} space-y-3`}>
+              <p className="label-eyebrow text-ink-soft">
+                Lịch sử khiếu nại của ban tổ chức · {data.appeals.length} lần gửi
+              </p>
+              <div className="space-y-3">
+                {data.appeals.map((appeal) => (
+                  <div
+                    key={appeal.id}
+                    className={`border-b border-beige-kem/15 pb-3 space-y-1.5 ${
+                      appeal.status === "pending" ? "text-beige-kem" : "text-ink-soft"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Pill
+                          tone={
+                            appeal.status === "approved"
+                              ? "good"
+                              : appeal.status === "pending"
+                                ? "warn"
+                                : "bad"
+                          }
+                        >
+                          {appeal.status === "pending"
+                            ? "Chờ duyệt"
+                            : appeal.status === "approved"
+                              ? "Đã chấp thuận"
+                              : "Đã từ chối"}
+                        </Pill>
+                        <span className="font-meta text-meta">
+                          Nộp ngày {day(appeal.createdAt)}
+                        </span>
+                      </div>
+                      {appeal.reviewedAt && (
+                        <span className="font-meta text-eyebrow text-ink-soft">
+                          Xử lý: {day(appeal.reviewedAt)}
+                        </span>
+                      )}
+                    </div>
+                    <p className="font-meta text-body text-beige-kem whitespace-pre-line italic">
+                      &ldquo;{appeal.reason}&rdquo;
+                    </p>
+                    {appeal.reviewNote && (
+                      <p className="font-meta text-eyebrow text-cam-dat">
+                        Phản hồi của Admin: {appeal.reviewNote}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

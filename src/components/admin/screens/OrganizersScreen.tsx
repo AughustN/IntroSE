@@ -267,40 +267,64 @@ export default function OrganizersScreen() {
                     )}
                   </Td>
                   <Td nowrap>
-                    <Pill tone={TONE[organizer.status] ?? "neutral"}>
-                      {STATUS_LABEL[organizer.status] ?? organizer.status}
-                    </Pill>
+                    <div className="flex flex-col items-start gap-1">
+                      <Pill tone={TONE[organizer.status] ?? "neutral"}>
+                        {STATUS_LABEL[organizer.status] ?? organizer.status}
+                      </Pill>
+                      {organizer.latestAppeal?.status === "pending" && (
+                        <Pill tone="warn">Có khiếu nại</Pill>
+                      )}
+                    </div>
                   </Td>
                   <Td>{organizer.reviewNote ?? "—"}</Td>
                   <Td nowrap>{organizer.appliedAt.slice(0, 10)}</Td>
                   <Td nowrap>
                     <div className="flex flex-wrap gap-2">
-                      <button
-                        className={ACTION_ROW_PRIMARY}
-                        disabled={busy}
-                        onClick={() =>
-                          void run(
-                            () => adminClient.approveOrganizer(organizer.id),
-                            `Đã duyệt “${organizer.displayName}”.`,
-                          )
-                        }
-                      >
-                        Duyệt
-                      </button>
-                      <button
-                        className={ACTION_ROW_GHOST}
-                        disabled={busy}
-                        onClick={() => setPending({ id: organizer.id, action: "reject" })}
-                      >
-                        Từ chối
-                      </button>
-                      <button
-                        className={ACTION_ROW_GHOST}
-                        disabled={busy}
-                        onClick={() => setPending({ id: organizer.id, action: "suspend" })}
-                      >
-                        Đình chỉ
-                      </button>
+                      {organizer.status === "suspended" ? (
+                        <button
+                          className={ACTION_ROW_PRIMARY}
+                          disabled={busy}
+                          onClick={() =>
+                            void run(
+                              () => adminClient.unsuspendOrganizer(organizer.id),
+                              `Đã mở lại “${organizer.displayName}”.`,
+                            )
+                          }
+                        >
+                          Mở lại
+                        </button>
+                      ) : (
+                        <button
+                          className={ACTION_ROW_PRIMARY}
+                          disabled={busy}
+                          onClick={() =>
+                            void run(
+                              () => adminClient.approveOrganizer(organizer.id),
+                              `Đã duyệt “${organizer.displayName}”.`,
+                            )
+                          }
+                        >
+                          Duyệt
+                        </button>
+                      )}
+                      {organizer.status !== "suspended" && (
+                        <button
+                          className={ACTION_ROW_GHOST}
+                          disabled={busy}
+                          onClick={() => setPending({ id: organizer.id, action: "reject" })}
+                        >
+                          Từ chối
+                        </button>
+                      )}
+                      {organizer.status === "approved" && (
+                        <button
+                          className={ACTION_ROW_GHOST}
+                          disabled={busy}
+                          onClick={() => setPending({ id: organizer.id, action: "suspend" })}
+                        >
+                          Đình chỉ
+                        </button>
+                      )}
                     </div>
                   </Td>
                 </tr>

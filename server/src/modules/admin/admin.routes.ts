@@ -20,6 +20,8 @@ import {
   renameCategory,
   resolveReportedEvent,
   suspendOrganizer,
+  unsuspendOrganizer,
+  rejectOrganizerAppeal,
 } from "./admin.service.js";
 import {
   analytics,
@@ -150,6 +152,20 @@ adminRouter.post(
   validate(reason),
   asyncH(async (req, res) => {
     res.json(await suspendOrganizer(req.auth!.userId, id(req), req.body.reason));
+  }),
+);
+adminRouter.post(
+  "/organizers/:id/unsuspend",
+  validate(optionalReason),
+  asyncH(async (req, res) => {
+    res.json(await unsuspendOrganizer(req.auth!.userId, id(req), req.body.reason ?? null));
+  }),
+);
+adminRouter.post(
+  "/organizers/:id/reject-appeal",
+  validate(reason),
+  asyncH(async (req, res) => {
+    res.json(await rejectOrganizerAppeal(req.auth!.userId, id(req), req.body.reason));
   }),
 );
 adminRouter.post(

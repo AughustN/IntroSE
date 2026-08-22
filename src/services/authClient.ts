@@ -24,9 +24,23 @@ export interface OrganizerApplicationView {
   applied_at: string;
 }
 
+export interface OrganizerAppealView {
+  id: number;
+  organizer_id: number;
+  user_id: number;
+  reason: string;
+  status: "pending" | "approved" | "rejected";
+  review_note: string | null;
+  reviewed_by: number | null;
+  reviewed_at: string | null;
+  created_at: string;
+}
+
 export interface OrganizerStatusResponse {
   isOrganizer: boolean;
   applications: OrganizerApplicationView[];
+  latestAppeal?: OrganizerAppealView | null;
+  appeals?: OrganizerAppealView[];
 }
 
 let accessToken: string | null = null;
@@ -232,5 +246,12 @@ export const authClient = {
 
   organizerStatus(): Promise<OrganizerStatusResponse> {
     return authed("/organizers/me");
+  },
+
+  submitOrganizerAppeal(reason: string): Promise<{ ok: true; message: string; appeal: OrganizerAppealView }> {
+    return authed("/organizers/appeal", {
+      method: "POST",
+      body: { reason },
+    });
   },
 };

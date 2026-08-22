@@ -34,6 +34,7 @@ let disposableDomainsSet = FALLBACK_DISPOSABLE_DOMAINS;
 
 // Dynamically import disposable-email-domains package if available
 try {
+  // @ts-ignore - untyped npm package
   const mod = await import('disposable-email-domains');
   const domainsList = (mod.default || mod) as unknown as string[];
   if (Array.isArray(domainsList) && domainsList.length > 0) {
