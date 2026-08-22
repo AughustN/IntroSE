@@ -95,32 +95,76 @@ export default function CategoryRow({
           shoulder puts the heading back off-axis by the width of the link.
         */}
         {tabs && tabs.length > 1 ? (
-          <div className="flex flex-col items-center gap-3 text-center">
-{/*
-              Set exactly as every other band's title — "Ca nhạc", "Sân khấu & Nghệ thuật" — because
-              it is doing that job here. The bar variant's eyebrow is a caption above a title; this
-              band has no title line of its own, so the same 14px label left the band unnamed next
-              to neighbours announcing themselves at 50px.
-            */}
-            <h2 className="font-display text-title-l font-black leading-none text-beige-kem">
-              {eyebrow}
-            </h2>
+          <div className="flex flex-col items-center gap-5 text-center">
             {/*
-              The two names, at heading size, because that is what they are — the band's title, in
-              two halves, one of which is currently true. Drawing them as small pills under a
-              separate `<h2>` would make the heading the loudest thing and the actual choice a
-              footnote to it.
+              The marquee, built from the reference: a gabled red plate, bulbs round the border, a
+              cream letterboard, CINEMA in black.
+
+              Three lines at one size read as flat, and the fix is not another size step but two
+              different KINDS of object — the name is a fixed sign, the tabs are tickets you choose
+              between. A reader sorts those by shape before reading a word of either.
+
+              The two colours are literals rather than palette tokens, which is the one place in
+              this file that is true. Every token flips with the theme, and a sign hanging over a
+              door does not: a cinema hoarding is a painted object, and repainting it cream-on-dark
+              at night would make it a different object rather than the same one after dark.
             */}
-{/*
+            <div className="inline-flex flex-col items-center">
+              {/*
+                The pediment and its finial. `clip-path` rather than a border trick, so the slope
+                stays a slope at any width and the shape can carry the plate's own red.
+              */}
+              <span
+                aria-hidden="true"
+                className="-mb-1 h-4 w-4 rotate-45 rounded-[3px] bg-[#c0261f]"
+              />
+              <span
+                aria-hidden="true"
+                className="h-8 w-[84%] bg-[#c0261f]"
+                style={{ clipPath: "polygon(50% 0, 100% 100%, 0 100%)" }}
+              />
+
+              <span className="relative -mt-px block bg-[#c0261f] p-3.5 shadow-[0_10px_28px_rgba(0,0,0,0.3)]">
+                {/*
+                  The bulbs, as their own layer rather than on the plate itself. The ring is cut with
+                  `mask-composite: exclude`, and a mask applies to an element's children as well as
+                  its background — put it on the plate and the plate's own letterboard is what the
+                  hole in the middle removes. Measured: the board rendered as a black void.
+                */}
+                <span
+                  aria-hidden="true"
+                  className="marquee-bulb-ring pointer-events-none absolute inset-0 text-[#ffe9b8]"
+                />
+                {/*
+                  The letterboard: cream, ruled the way the slats of a real one are, with the name
+                  set heavy and black across it.
+                */}
+                <span
+                  className="relative block border border-black/20 bg-[#f4ead6] px-6 py-2.5 sm:px-8"
+                  style={{
+                    backgroundImage:
+                      "repeating-linear-gradient(to bottom, rgba(0,0,0,0.07) 0 1px, transparent 1px 9px)",
+                  }}
+                >
+                  <h2 className="font-display text-title-m font-black uppercase leading-none tracking-[0.06em] text-[#141110]">
+                    {eyebrow}
+                  </h2>
+                </span>
+              </span>
+            </div>
+
+            {/*
+              Two torn stubs. `ticket-punch` bites a semicircle out of each side, which is the shape
+              the nav's own account ticket already uses — so the control reads as a ticket without
+              a single new drawing.
+
               `flex-wrap` is the guard, not the plan: the pair is meant to sit on one line, and two
-              ten-character words at 50px plus the gap come to about 480px. It fits the band and
-              would not fit a phone, so the size steps down there and the wrap catches whatever is
-              left — a longer label in another language, say.
+              ten-character words at this size plus the gap fit the band but not a phone.
             */}
             <div
               role="tablist"
               aria-label={eyebrow}
-              className="flex flex-wrap items-end justify-center gap-6 sm:gap-10"
+              className="flex flex-wrap items-stretch justify-center gap-5 sm:gap-8"
             >
               {tabs.map((tab, index) => {
                 const active = index === activeTab;
@@ -131,21 +175,17 @@ export default function CategoryRow({
                     role="tab"
                     aria-selected={active}
                     onClick={() => setActiveTab(index)}
-                    className={`block pb-1 transition ${
+                    className={`ticket-punch block px-7 py-3 transition sm:px-9 ${
                       active
-                        ? "border-b-4 border-burgundy text-beige-kem"
-                        : "border-b-4 border-transparent text-ink-soft hover:text-beige-kem"
+                        ? "bg-burgundy text-white"
+                        : "bg-beige-kem/10 text-ink-soft hover:bg-beige-kem/20 hover:text-beige-kem"
                     }`}
+                    style={{ "--punch-r": "10px" } as React.CSSProperties}
                   >
                     {/*
-                      The type lives on a span, not on the button.
-                      
-                      `index.css` sets `button, input, select { font: inherit }` OUTSIDE any layer,
-                      which outranks every Tailwind utility — a `text-title-l` written on a button
-                      is silently dropped and the control inherits body's 16px. The rule is
-                      deliberate and documented there; moving it into `@layer base` would resize
-                      every control in the app at once. A span inside the button is not a button, so
-                      the utilities apply to it normally.
+                      The type lives on a span, not on the button: `index.css` sets
+                      `button, input, select { font: inherit }` OUTSIDE any layer, which outranks
+                      every Tailwind utility, so a size written on the button itself is dropped.
                     */}
                     <span className="font-display text-title-m font-black leading-none sm:text-title-l">
                       {tab.label}
@@ -182,8 +222,20 @@ export default function CategoryRow({
             and right edge and the container supplies the missing top and left, so neighbours share
             a single rule the way a printed listing page is ruled.
           */
+          /*
+            Cinema drops the ruling and the other bands keep it.
+
+            Every band drew the same hairline card, so the cinema row looked like the music row with
+            different pictures in it — which is why a bigger heading could not make it stand out:
+            the heading is a tenth of the band and the cards are the rest. MUBI and A24 both run
+            their films with no card chrome at all, and it is the single thing they have in common.
+
+            The gap replaces the rules as the thing that separates one film from the next.
+          */
           <div
-            className={`grid grid-flow-dense border-l border-t border-beige-kem/45 ${
+            className={`grid grid-flow-dense ${
+              film ? "gap-x-5 gap-y-8" : "border-l border-t border-beige-kem/45"
+            } ${
               /*
                * Posters go two-up on a phone; stills stay one.
                *
@@ -202,11 +254,21 @@ export default function CategoryRow({
                 : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4"
             }`}
           >
-            {shownEvents.map((evt) => (
+            {shownEvents.map((evt, index) => (
               <RuledCard
                 key={evt.id}
                 evt={evt}
                 portrait={film}
+                chromeless={film}
+                /*
+                  Every other column sits lower, breaking the level line four other bands hold to.
+                  A reader registers the broken rhythm before reading a word — it is the cheapest
+                  difference on the page, and the one A24 leans on hardest.
+
+                  Only from `lg`, where there are five columns and the stagger reads as intent. At
+                  two columns it would just look like one card failed to align.
+                */
+                offsetRow={film && index % 2 === 1}
                 isActiveHero={selectedEvent?.id === evt.id}
                 isWishlisted={wishlistedIds.includes(evt.id)}
                 onSelectEvent={onSelectEvent}

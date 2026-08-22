@@ -3,9 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useRef, useState } from "react";
-import QrCameraScan from "../QrCameraScan";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { organizerApi, type ScanTicket } from "../../services/catalogClient";
+
+/*
+ * The scanner, and its 316KB of `jsqr`, fetched when the camera is switched on.
+ *
+ * Door staff open this panel; everybody else on the organizer console never does, and before the
+ * split the decoder shipped to every visitor of the landing page. It is behind a button that the
+ * reader has to press, which is as good a load trigger as exists.
+ */
+const QrCameraScan = lazy(() => import("../QrCameraScan"));
 
 /**
  * Door staff admitting guests, on the organizer's own event (US6).
@@ -233,11 +241,17 @@ export default function CheckInPanel({
 
       {cameraOn && (
         <div className="overflow-hidden border border-beige-kem/30">
-          <QrCameraScan
-            onDetect={(scanned) => void detect(scanned)}
-            onError={(message) => setError(message)}
-            onClose={() => setCameraOn(false)}
-          />
+          <Suspense
+            fallback={
+              <p className="p-6 text-center font-meta text-body text-ink-soft">Đang mở camera…</p>
+            }
+          >
+            <QrCameraScan
+              onDetect={(scanned) => void detect(scanned)}
+              onError={(message) => setError(message)}
+              onClose={() => setCameraOn(false)}
+            />
+          </Suspense>
         </div>
       )}
 

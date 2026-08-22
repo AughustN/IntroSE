@@ -3,16 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { SAMPLE_MOVIES } from "./data";
 import { Booking, CheckoutPayload, HoldSession, MovieEvent, Seat } from "./types";
-import AdminConsole from "./components/admin/AdminConsole";
 import AuthModal from "./components/AuthModal";
 import AccountPage from "./components/account/AccountPage";
-import { OrganizerEventsPage } from "./pages/organizer/OrganizerEventsPage";
 import SeatMapLibrary from "./components/seatmap/SeatMapLibrary";
-import ChartEditor from "./components/seatmap/ChartEditor";
 import ResetPassword from "./components/ResetPassword";
 import type { Me } from "@/shared/auth/types";
 import { UNKNOWN_CITY, type EventDetail as CatalogEventDetail, type Showtime } from "@/shared/catalog/types";
@@ -70,7 +67,6 @@ import Header from "./components/Header";
 import HeroVideo from "./components/HeroVideo";
 import SeatLayout from "./components/SeatLayout";
 import TicketTicket from "./components/TicketTicket";
-import LegalPage from "./components/LegalPage";
 import NotificationsPage from "./components/NotificationsPage";
 import {
   notificationsClient,
@@ -137,6 +133,17 @@ const LEAVE_FLOW_WARNING =
   "Bạn đang giữ chỗ cho suất này. Thoát khỏi quy trình đặt vé sẽ hủy chỗ đang giữ " +
   "và mất tiến trình thanh toán — ghế sẽ được trả lại cho người khác ngay lập tức.";
 
+/*
+ * The private caches are keyed by account, and the unscoped keys below are treated as poison.
+ *
+ * `tixhub_bookings_cache_v2` was one key for the whole browser, written on every ticket load and
+ * cleared only when somebody pressed "Đăng xuất". A shared machine — a library, a lab, two flatmates
+ * — therefore showed the previous account's ticket list, by name and seat, for as long as the fetch
+ * took. Signing out cleaned up; a session that merely EXPIRED did not, and that is the common case.
+ *
+ * Suffixing the email makes the wrong data unreachable rather than merely short-lived: a reader who
+ * is not that account never builds the key that holds it.
+ */
 const BOOKINGS_CACHE_KEY = "tixhub_bookings_cache_v2";
 // Pre-rebrand keys, still read (and cleared) so existing local data survives the TixHub rename.
 const LEGACY_BOOKINGS_CACHE_KEYS = ["ticketbox_bookings_cache_v2", "ticketbox_bookings_cache_v1"];
@@ -178,6 +185,17 @@ function getInitialEmail(): string | null {
 }
 
 /** Keeps a cache entry in step with its state; `null` clears it. */
+/**
+ * The storage key for one account's copy of something private, or null when nobody is known.
+ *
+ * Null is the important half: with no identity there is no such thing as "the cached tickets", and
+ * the honest response is to show nothing until the session resolves. Painting whatever was left
+ * behind is how the previous reader's data reaches this one.
+ */
+function accountScopedKey(base: string, email: string | null): string | null {
+  return email ? `${base}:${email}` : null;
+}
+
 function cacheValue(key: string, value: string | null): void {
   try {
     if (value) localStorage.setItem(key, value);
@@ -192,6 +210,25 @@ function cacheValue(key: string, value: string | null): void {
  * selected event, the booking being shown — without listing any of it as a dependency, which would
  * make it re-run on things that have nothing to do with the address bar.
  */
+/*
+ * The four screens nobody sees on the way in.
+ *
+ * Everything was one 2.4MB bundle, so a visitor who opened the landing page to look at concerts
+ * downloaded the admin console, the seat-map designer, the organizer studio and a Markdown renderer
+ * before the first card painted — `recharts` alone is 1.37MB and is read by three analytics
+ * components, `react-markdown` is 330KB for one legal page nobody visits twice.
+ *
+ * Each of these already renders behind a route guard, so splitting them costs nothing at the call
+ * site: the import happens when the screen does. `OrganizerEventsPage` needs the `.then` because it
+ * is a named export and `lazy` only takes a default.
+ */
+const AdminConsole = lazy(() => import("./components/admin/AdminConsole"));
+const ChartEditor = lazy(() => import("./components/seatmap/ChartEditor"));
+const LegalPage = lazy(() => import("./components/LegalPage"));
+const OrganizerEventsPage = lazy(() =>
+  import("./pages/organizer/OrganizerEventsPage").then((m) => ({ default: m.OrganizerEventsPage })),
+);
+
 function useLatest<T>(value: T) {
   const ref = useRef(value);
   useEffect(() => {
@@ -509,6 +546,14 @@ export default function App() {
   const bookingShowtimeIdRef = useLatest(bookingShowtimeId);
   const finalBookingRef = useLatest(finalBooking);
   const bookingsHistoryRef = useLatest(bookingsHistory);
+  /**
+   * Whose data is being written, for the cache writers.
+   *
+   * A ref rather than a dependency: `reloadTickets` is deliberately built once, and rebuilding it
+   * every time the identity settles would re-run the effect that calls it. What it needs is the
+   * value at the moment it writes, which is what this holds.
+   */
+  const userEmailRef = useLatest(userEmail);
   /*
    * Read by the ticket loader, which must not re-run when the catalog arrives.
    *
@@ -600,7 +645,8 @@ export default function App() {
         );
         setBookingsHistory(rebuilt);
         try {
-          localStorage.setItem(BOOKINGS_CACHE_KEY, JSON.stringify(rebuilt));
+          const key = accountScopedKey(BOOKINGS_CACHE_KEY, userEmailRef.current);
+          if (key) localStorage.setItem(key, JSON.stringify(rebuilt));
         } catch (err) {
           console.error("Failed to cache the ticket list:", err);
         }
@@ -926,11 +972,29 @@ export default function App() {
 
   useEffect(() => {
     try {
-      const cachedBookings =
-        localStorage.getItem(BOOKINGS_CACHE_KEY) ||
-        LEGACY_BOOKINGS_CACHE_KEYS.map((key) => localStorage.getItem(key)).find(Boolean);
-      const cachedWishlist =
-        localStorage.getItem(WISHLIST_CACHE_KEY) || localStorage.getItem(LEGACY_WISHLIST_CACHE_KEY);
+      /*
+       * Whose browser this is, as far as the last visit knew.
+       *
+       * Everything private below hangs off it. With no cached email there is nothing to hydrate —
+       * not "hydrate the shared copy", which is what produced somebody else's tickets on screen.
+       */
+      const cachedEmail = localStorage.getItem(EMAIL_CACHE_KEY);
+      const bookingsKey = accountScopedKey(BOOKINGS_CACHE_KEY, cachedEmail);
+      const wishlistKey = accountScopedKey(WISHLIST_CACHE_KEY, cachedEmail);
+
+      /*
+       * The old unscoped keys are deleted, never read.
+       *
+       * They were written before this was per-account, so there is no way to tell whose they are —
+       * and a ticket list of unknown ownership is exactly the thing this change exists to stop
+       * showing. Losing a cache costs one fetch; guessing wrong costs somebody's privacy.
+       */
+      [BOOKINGS_CACHE_KEY, WISHLIST_CACHE_KEY, ...LEGACY_BOOKINGS_CACHE_KEYS, LEGACY_WISHLIST_CACHE_KEY].forEach(
+        (key) => localStorage.removeItem(key),
+      );
+
+      const cachedBookings = bookingsKey ? localStorage.getItem(bookingsKey) : null;
+      const cachedWishlist = wishlistKey ? localStorage.getItem(wishlistKey) : null;
       const cachedUser =
         localStorage.getItem(USER_CACHE_KEY) || localStorage.getItem(LEGACY_USER_CACHE_KEY);
 
@@ -1530,7 +1594,8 @@ export default function App() {
     const updated = [newBooking, ...bookingsHistory];
     setBookingsHistory(updated);
     try {
-      localStorage.setItem(BOOKINGS_CACHE_KEY, JSON.stringify(updated));
+      const key = accountScopedKey(BOOKINGS_CACHE_KEY, userEmailRef.current);
+      if (key) localStorage.setItem(key, JSON.stringify(updated));
     } catch (err) {
       console.error("Failed to save bookings history:", err);
     }
@@ -1550,7 +1615,8 @@ export default function App() {
             : [...current, eventId]
           : current.filter((id) => id !== eventId);
         try {
-          localStorage.setItem(WISHLIST_CACHE_KEY, JSON.stringify(next));
+          const key = accountScopedKey(WISHLIST_CACHE_KEY, userEmailRef.current);
+          if (key) localStorage.setItem(key, JSON.stringify(next));
         } catch (err) {
           console.error("Failed to save wishlist:", err);
         }
@@ -2147,10 +2213,19 @@ export default function App() {
     // writing state synchronously inside an effect is what the loader must not do.
     setNotifications([]);
     try {
-      localStorage.removeItem(BOOKINGS_CACHE_KEY);
-      LEGACY_BOOKINGS_CACHE_KEYS.forEach((key) => localStorage.removeItem(key));
-      localStorage.removeItem(WISHLIST_CACHE_KEY);
-      localStorage.removeItem(LEGACY_WISHLIST_CACHE_KEY);
+      // This account's copies, by the key they were written under. The unscoped names are swept too
+      // — anything left there predates the split and belongs to nobody in particular.
+      const email = userEmailRef.current;
+      [
+        accountScopedKey(BOOKINGS_CACHE_KEY, email),
+        accountScopedKey(WISHLIST_CACHE_KEY, email),
+        BOOKINGS_CACHE_KEY,
+        WISHLIST_CACHE_KEY,
+        LEGACY_WISHLIST_CACHE_KEY,
+        ...LEGACY_BOOKINGS_CACHE_KEYS,
+      ].forEach((key) => {
+        if (key) localStorage.removeItem(key);
+      });
     } catch (err) {
       console.error("Failed to clear cached account data on sign-out:", err);
     }
@@ -2250,6 +2325,20 @@ export default function App() {
         so it clips without capturing the page's scroll.
       */}
       <main className="w-full max-w-full flex-grow overflow-x-clip">
+        {/*
+          One boundary for every split screen.
+          
+          The fallback is deliberately quiet — a line of type, not a spinner or a skeleton of a
+          layout nobody has seen yet. These chunks arrive in well under a second on any connection
+          that got this far, and a spinner that flashes for 200ms reads as a fault rather than as
+          progress. Wrapping all of them together rather than one boundary each keeps a screen from
+          being able to suspend a sibling that is already on the page.
+        */}
+        <Suspense
+          fallback={
+            <p className="px-6 py-24 text-center font-meta text-body text-ink-soft">Đang tải…</p>
+          }
+        >
         {activeScreen === "home" && (
           <>
             <HeroVideo
@@ -2655,6 +2744,7 @@ export default function App() {
         {activeScreen === "refund-policy" && (
           <LegalPage title="Chính sách hoàn vé" content={refundPolicyMd} onBack={goHome} />
         )}
+        </Suspense>
       </main>
 
       {/*

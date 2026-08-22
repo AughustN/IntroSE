@@ -91,7 +91,23 @@ export function RuledCard({
   onBookNow,
   onToggleWishlist,
   portrait,
-}: CardProps & { isActiveHero: boolean; portrait?: boolean }) {
+  chromeless,
+  offsetRow,
+}: CardProps & {
+  isActiveHero: boolean;
+  portrait?: boolean;
+  /**
+   * Drop the card entirely: no rule, no fill, no inset — the poster sits on the page.
+   *
+   * Cinema only. Everywhere else the ruled card IS the separation between one event and the next,
+   * and taking it away would leave four stills running edge to edge as one unbroken band. A poster
+   * does not need it: it is already a bounded object with its own frame printed into the artwork,
+   * and the gap around it says the rest.
+   */
+  chromeless?: boolean;
+  /** Sit this card lower than its neighbours — the staggered rhythm, cinema only. */
+  offsetRow?: boolean;
+}) {
   const meta = statusMeta[evt.status];
   const bookingDisabled = isUnbookable(evt.status);
 
@@ -113,8 +129,10 @@ export function RuledCard({
        * 294px and keeps every size it has today, while the same card on a 1280px window is 243px
        * and takes the compact set. Nothing about the wider layouts moves.
        */
-      className={`group @container flex cursor-pointer flex-col border-b border-r border-beige-kem/45 transition-colors ${
-        isActiveHero ? "bg-bubblegum/25" : "bg-surface-2 hover:bg-bubblegum/20"
+      className={`group @container flex cursor-pointer flex-col transition-colors ${ chromeless
+          ? `bg-transparent ${offsetRow ? "lg:mt-10" : ""}`
+          : `border-b border-r border-beige-kem/45 ${ isActiveHero ? "bg-bubblegum/25" : "bg-surface-2 hover:bg-bubblegum/20"
+            }`
       }`}
     >
       {/*
@@ -126,7 +144,7 @@ export function RuledCard({
         parted by 40px of page instead of by a line drawn on top of them, and the same gap appears
         between rows. It also aligns the still's left edge with the title beneath it.
       */}
-      <div className="p-5 pb-0">
+      <div className={chromeless ? "" : "p-5 pb-0"}>
         {/*
           `2/3` for a film poster, `16/9` for everything else.
 
@@ -216,7 +234,7 @@ export function RuledCard({
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col p-5">
+      <div className={`flex flex-1 flex-col ${chromeless ? "pt-3" : "p-5"}`}>
         {/*
           A `button` wrapping the `h3`, not the other way round: the heading has to stay a heading
           for the document outline, and a control may contain one but not the reverse. This is the
@@ -272,10 +290,28 @@ export function RuledCard({
           overflow at ANY width — including ones nobody has measured — and the smaller type below
           288px means it rarely has to.
         */}
-        <div className="mt-auto flex flex-wrap items-end justify-between gap-x-4 gap-y-2 pt-5">
-          <div>
-            <p className="label-eyebrow text-ink-soft">Từ</p>
-            <p className="mt-1 font-display text-title-s font-black leading-none text-beige-kem @2xs:text-title-m">
+        {/*
+          Chromeless: one quiet line, not a price block.
+          
+          The "Từ / 105.000đ / ĐẶT VÉ" row is the loudest thing on a card, and on a poster it fights
+          the artwork it sits under — the thing a reader is actually looking at. Both references put
+          price nowhere at all; a ticketing site cannot do that, so it goes small and stays on one
+          line. Everywhere else the row is unchanged.
+        */}
+        <div
+          className={ chromeless
+              ? "mt-auto flex flex-wrap items-baseline gap-x-2 gap-y-1 pt-2 font-meta text-eyebrow text-ink-soft"
+              : "mt-auto flex flex-wrap items-end justify-between gap-x-4 gap-y-2 pt-5"
+          }
+        >
+          <div className={chromeless ? "contents" : undefined}>
+            <p className={chromeless ? "text-ink-soft" : "label-eyebrow text-ink-soft"}>Từ</p>
+            <p
+              className={ chromeless
+                  ? "font-meta text-body font-bold leading-none text-beige-kem"
+                  : "mt-1 font-display text-title-s font-black leading-none text-beige-kem @2xs:text-title-m"
+              }
+            >
               {formatVnd(evt.price)}
             </p>
           </div>

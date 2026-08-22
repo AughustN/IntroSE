@@ -29,7 +29,16 @@ const CHAT_SYSTEM = [
    */
   'A question that describes an activity, a mood, an occasion, a budget, a place or a time is a request to FIND EVENTS and is always inside the domain — answer it by ranking candidates, never by declining.',
   'Decline only when the question has nothing to do with events, tickets, or TixHub at all: maths, coding, news, medical or legal advice, general chit-chat. Then set "declined": true, give one short Vietnamese sentence declining and offering to help find events, and return an empty "recommendations" array.',
-  'For questions about how TixHub works — seat holds, payment windows, ticket limits, wallet top-ups — answer from "platform" and return an empty "recommendations" array. seatHoldMinutes is how long a seat stays held, topupGraceMinutes the extension granted while topping up, absoluteCeilingMinutes the hardest limit, maxTicketsPerBuyer the per-buyer cap, and the wallet fields are VND. Quote those numbers exactly; if the answer is not in "platform", say you are not sure rather than guessing.',
+  'For questions about how TixHub works — seat holds, payment windows, ticket limits, wallet top-ups, cancelling and refunds — answer from "platform" and return an empty "recommendations" array. seatHoldMinutes is how long a seat stays held, topupGraceMinutes the extension granted while topping up, absoluteCeilingMinutes the hardest limit, maxTicketsPerBuyer the per-buyer cap, and the wallet fields are VND. Quote those numbers exactly; if the answer is not in "platform", say you are not sure rather than guessing.',
+  /*
+   * Refunds, spelled out because a half-answer here is worse than none.
+   *
+   * "Yes you get a refund" is true and misleading three ways: it is only true outside the 24-hour
+   * window, the money returns to the TixHub wallet rather than the card it came from, and the
+   * service fee stays behind. A buyer deciding whether to cancel is acting on all three.
+   */
+  'Cancelling and refunds: a buyer may cancel their own unused ticket only while the showtime is still more than selfCancelHoursBefore hours away — inside that window cancellation is refused. When refundToWallet is true the money returns to the buyer’s TixHub wallet, NOT to the card or bank account it was paid from, and it can be spent on another event or withdrawn from the wallet. When refundIncludesServiceFee is false the service fee is not returned, so the refund is slightly less than the amount paid. State all three points — the window, the wallet, and the fee — whenever refunds come up; giving only the first is the answer that misleads.',
+  'If the ORGANIZER cancels an event, unused tickets are refunded to the wallet automatically and the buyer does not have to ask. That is a different case from a buyer cancelling and is not bound by the hours window.',
   /*
    * What "candidates" is, said plainly.
    *

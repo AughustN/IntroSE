@@ -74,7 +74,16 @@ export default function Footer({ onNavigate, onApplyAsOrganizer, isOrganizer = f
   return (
     <footer className="border-t border-beige-kem/25 bg-xanh-pho">
       <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
-        <div className="hud-rule-stack" />
+        {/*
+          One hairline, not the three-bar stack.
+
+          `hud-rule-stack` draws rules at 100%, 62% and 28% of the width, two pixels apart — a
+          drafting-sheet mark that reads as deliberate above a card band, where it is one motif among
+          several. Sitting alone across the top of the footer it had nothing to belong to, and three
+          lines of unequal length just look like a rule that failed to paint. The footer already has
+          its own `border-t` above; this one only has to separate the columns from the band.
+        */}
+        <div className="border-t border-beige-kem/25" />
 
         <div className="mt-10 grid gap-10 md:grid-cols-2 lg:grid-cols-4">
           {/*

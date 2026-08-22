@@ -74,6 +74,33 @@ export interface PlatformFacts {
   maxTicketsPerBuyer: number;
   walletTopupMin: number;
   walletTopupMax: number;
+  /**
+   * How many hours before a showtime a buyer may still cancel their own ticket.
+   *
+   * The assistant is told it may answer questions about refunds, and had nothing to answer them
+   * with: asked "huỷ vé có được hoàn tiền không" it said it did not know and sent the reader to
+   * support — for a rule the platform enforces in code on every cancellation. The prompt's own
+   * instruction to say "not sure" rather than guess was working exactly as written; what was
+   * missing was the fact.
+   *
+   * Mirrors the guard in `tickets.service.ts`, which refuses inside this window.
+   */
+  selfCancelHoursBefore: number;
+  /**
+   * Whether a refund goes back to the TixHub wallet rather than to the original payment method.
+   *
+   * Worth stating rather than implying: "được hoàn tiền" and "được hoàn vào ví" are different
+   * answers to a buyer deciding whether to cancel, and only one of them is true here.
+   */
+  refundToWallet: boolean;
+  /**
+   * Whether the service fee comes back with the ticket price.
+   *
+   * `tickets.refundable_amount` is post-discount and PRE-fee, so a self-cancel returns what the
+   * ticket was worth and keeps the fee. A reader told "you get a refund" and then shown a smaller
+   * number than they paid has been misled by an answer that was technically true.
+   */
+  refundIncludesServiceFee: boolean;
 }
 
 /** What the model is asked to rank over. Assembled server-side from the session identity. */

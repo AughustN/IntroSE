@@ -111,7 +111,10 @@ const BANDS: ReadonlyArray<Pick<LandingSection, "id" | "title" | "eyebrow" | "em
   {
     id: "movie",
     title: "Phim sắp chiếu",
-    eyebrow: "Điện ảnh",
+    // The word on the marquee. English on purpose: "CINEMA" is what is written on the sign outside a
+    // cinema in Vietnam too, it sets wide and evenly in caps, and it is six letters rather than the
+    // eight of "ĐIỆN ẢNH" — which matters on a plate that has to stay narrower than the tabs below.
+    eyebrow: "Cinema",
     emptyNote: "Chưa có suất chiếu nào được mở bán. Mời bạn quay lại sau.",
   },
   {

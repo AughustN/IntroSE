@@ -144,6 +144,18 @@ export async function chat(
       maxTicketsPerBuyer: settings.max_tickets_per_buyer,
       walletTopupMin: settings.wallet_topup_min,
       walletTopupMax: settings.wallet_topup_max,
+      /*
+       * Constants rather than settings, because that is what they are today.
+       *
+       * The 24-hour window is written into `cancelTicket`, and the refund amount comes from
+       * `tickets.refundable_amount`, which the checkout allocates post-discount and pre-fee. Neither
+       * is adjustable from Admin, so reading them from `getSettings()` would only invent a
+       * configurability the product does not have. If either becomes a setting, this is the line
+       * that has to follow it — the assistant must never be the last place a rule is true.
+       */
+      selfCancelHoursBefore: 24,
+      refundToWallet: true,
+      refundIncludesServiceFee: false,
     },
   };
 

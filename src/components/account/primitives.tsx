@@ -179,7 +179,20 @@ export function AvatarWithBadge({
 }) {
   // A stored avatar can outlive its file. Falling back to the initial beats a broken-image icon.
   const [broken, setBroken] = useState(false);
-  useEffect(() => setBroken(false), [url]);
+  /*
+   * Reset during render when the picture changes, not from an effect.
+   *
+   * `useEffect(() => setBroken(false), [url])` painted the stale `broken` first and corrected it in
+   * a second pass — so swapping to a working avatar showed the letter placeholder for one frame
+   * before the image appeared. React's own answer to "adjust state when a prop changes" is to
+   * compare the prop with what was last seen and set during render: no extra commit, nothing on
+   * screen that is already known to be wrong.
+   */
+  const [seenUrl, setSeenUrl] = useState(url);
+  if (seenUrl !== url) {
+    setSeenUrl(url);
+    setBroken(false);
+  }
 
   return (
     <div className="relative shrink-0">

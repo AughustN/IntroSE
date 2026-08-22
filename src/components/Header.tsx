@@ -28,8 +28,20 @@ function AccountAvatar({
   size?: number;
 }) {
   const [broken, setBroken] = useState(false);
-
-  useEffect(() => setBroken(false), [avatarUrl]);
+  /*
+   * Reset during render when the picture changes, not from an effect.
+   *
+   * `useEffect(() => setBroken(false), [url])` painted the stale `broken` first and corrected it in
+   * a second pass — so swapping to a working avatar showed the letter placeholder for one frame
+   * before the image appeared. React's own answer to "adjust state when a prop changes" is to
+   * compare the prop with what was last seen and set during render: no extra commit, nothing on
+   * screen that is already known to be wrong.
+   */
+  const [seenUrl, setSeenUrl] = useState(avatarUrl);
+  if (seenUrl !== avatarUrl) {
+    setSeenUrl(avatarUrl);
+    setBroken(false);
+  }
 
   if (avatarUrl && !broken) {
     return (

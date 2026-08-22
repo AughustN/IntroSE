@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { Suspense, lazy, useEffect, useState } from "react";
 import {
   Loader2,
   AlertCircle,
@@ -15,12 +15,24 @@ import type {
 import { fetchOrganizerAnalytics } from "../../services/organizerAnalyticsClient";
 import { KPICards } from "./analytics/KPICards";
 import { AnalyticsFilterBar } from "./analytics/AnalyticsFilterBar";
-import { TimeSeriesChart } from "./analytics/TimeSeriesChart";
 import { TopEventsChart } from "./analytics/TopEventsChart";
-import { RevenueDonutCharts } from "./analytics/RevenueDonutCharts";
 import { CapacityGauge } from "./analytics/CapacityGauge";
 import { RecentTransactionsTable } from "./analytics/RecentTransactionsTable";
 import { InfoCard } from "./primitives";
+
+/*
+ * The charts, and the 1.37MB of `recharts` behind them.
+ *
+ * Three components in the whole product read that library and all three are analytics; before the
+ * split every visitor of the landing page downloaded it to look at concert posters. Both of these
+ * sit below the fold of a screen only an organizer opens, so the import can wait for the screen.
+ */
+const TimeSeriesChart = lazy(() =>
+  import("./analytics/TimeSeriesChart").then((m) => ({ default: m.TimeSeriesChart })),
+);
+const RevenueDonutCharts = lazy(() =>
+  import("./analytics/RevenueDonutCharts").then((m) => ({ default: m.RevenueDonutCharts })),
+);
 
 function formatVND(amount: number): string {
   return new Intl.NumberFormat("vi-VN", {
@@ -217,6 +229,17 @@ export function OrganizerBusinessAnalytics() {
             {/* Top Row: 4 Icon-based KPI Stat Cards */}
             <KPICards overview={dashboardData.overview} />
 
+            {/*
+              One boundary around the grid, not one per chart: they arrive in the same chunk, so two
+              boundaries would only give the reader two separate flickers of the same wait.
+            */}
+            <Suspense
+              fallback={
+                <p className="py-16 text-center font-meta text-body text-ink-soft">
+                  Đang tải biểu đồ…
+                </p>
+              }
+            >
             {/* Main Content Grid: 2 Columns */}
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
               {/* Left Column (Wide): Main Sales Analytics Chart, Upcoming Events Gauge, Recent Activity Feed */}
@@ -246,6 +269,7 @@ export function OrganizerBusinessAnalytics() {
                 <TopEventsChart data={dashboardData.top_events} />
               </div>
             </div>
+            </Suspense>
           </div>
         )}
       </div>

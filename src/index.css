@@ -804,6 +804,54 @@ select:focus-visible {
 }
 
 /* The small filled square Doron uses instead of a disc bullet. */
+/*
+ * A rail of bulbs, for the cinema band's sign.
+ *
+ * Drawn as a repeating radial-gradient rather than as elements: a `<span>` per bulb would be dozens
+ * of spans that mean nothing to a reader and have to be counted against the box's width. A
+ * background paints as many as fit and stops.
+ *
+ * A RAIL, not a frame. Framed on all four sides the pitch ran independently of the box's width, so
+ * every corner ended on a half-gap and the short sides had room for two bulbs each — which reads as
+ * a misprint rather than as a sign. Two horizontal rails have no corners to disagree about, and a
+ * ragged end on a straight run is invisible.
+ */
+@utility marquee-bulbs {
+  --bulb-r: 3px;
+  --bulb-gap: 18px;
+  background-image: radial-gradient(circle var(--bulb-r) at center, currentColor 98%, transparent);
+  background-size: var(--bulb-gap) var(--bulb-gap);
+  background-repeat: repeat-x;
+  background-position: center;
+  height: var(--bulb-gap);
+}
+
+/*
+ * The same bulbs, carried all the way round a plate.
+ *
+ * The rail above is for a bare edge; this is for the cinema sign, where the red band between the
+ * plate's outline and the letterboard inside it is thick enough to hold a ring. `exclude` between
+ * the padding box and the border box keeps exactly that band.
+ *
+ * The corners land where the pitch puts them rather than being placed one by one, which on a thin
+ * frame reads as a misprint — here the band is wide, the bulbs are the dominant feature, and the
+ * reference this is drawn from spaces its own bulbs by hand and unevenly. Ragged is right.
+ */
+@utility marquee-bulb-ring {
+  --bulb-r: 2.5px;
+  --bulb-gap: 13px;
+  --bulb-ring: 13px;
+  background-image: radial-gradient(circle var(--bulb-r) at center, currentColor 98%, transparent);
+  background-size: var(--bulb-gap) var(--bulb-gap);
+  background-repeat: repeat;
+  padding: var(--bulb-ring);
+  mask:
+    linear-gradient(#000, #000) content-box,
+    linear-gradient(#000, #000);
+  mask-composite: exclude;
+  -webkit-mask-composite: xor;
+}
+
 @utility hud-dot {
   display: inline-block;
   width: 6px;
@@ -1082,6 +1130,22 @@ select:focus-visible {
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
+}
+
+/*
+ * A rail that scrolls without saying so.
+ *
+ * The global bar above is 8px and painted, which is right for a thread or a table where the reader
+ * needs to know how much is left. On a one-line rail of chips it is a quarter of the row's height
+ * and it lands ON the chips — the assistant's suggestions were being struck through by their own
+ * scrollbar. The content is still scrollable by wheel, drag and keyboard; only the bar goes.
+ */
+@utility no-scrollbar {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 ::-webkit-scrollbar-track {
