@@ -38,15 +38,16 @@ export function ipKey(ip: string | undefined): string {
 /**
  * Progressive per-identifier delay (FR-048/049): the first few failures are free,
  * then each subsequent one is answered more slowly, capped. Applied EQUALLY to
- * unknown identifiers so the delay curve cannot enumerate accounts. There is NO
- * lockout — a correct password is always accepted regardless of this count (D-E).
+ * unknown identifiers so the delay curve cannot enumerate accounts. One layer of
+ * several: the temporary identifier lockout itself is enforced by the login route
+ * from `auth_events` (schema decision D6), not here.
  */
 export function identifierDelayMs(failures: number): number {
   if (failures < 3) return 0;
   return Math.min((failures - 2) * 250, 5000);
 }
 
-// Real sleeps are skipped under vitest so the suite stays fast; the no-lockout and
+// Real sleeps are skipped under vitest so the suite stays fast; the delay and
 // per-source invariants are asserted behaviourally, not by wall-clock.
 const DELAYS_ENABLED = process.env.VITEST !== 'true';
 
