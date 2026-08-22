@@ -15,7 +15,7 @@ import SeatMapLibrary from "./components/seatmap/SeatMapLibrary";
 import ChartEditor from "./components/seatmap/ChartEditor";
 import ResetPassword from "./components/ResetPassword";
 import type { Me } from "@/shared/auth/types";
-import { UNKNOWN_CITY, type EventDetail as CatalogEventDetail, type Showtime } from "@/shared/catalog/types";
+import { UNKNOWN_CITY, type EventCard, type EventDetail as CatalogEventDetail, type Showtime } from "@/shared/catalog/types";
 import { authClient } from "./services/authClient";
 import { catalogClient } from "./services/catalogClient";
 import { aiClient } from "./services/aiClient";
@@ -24,7 +24,7 @@ import { adsClient } from "./services/adsClient";
 import type { ActiveAdPlacement, AdPlacement } from "@shared/ads/types.js";
 import { applyEventSeo, clearEventSeo } from "./services/seo";
 import { matchesDateFilter, type DateFilter } from "./services/dateFilter";
-import { matchesQuery, searchEvents } from "./services/eventSearch";
+import { fold, matchesQuery, searchEvents } from "./services/eventSearch";
 import { formatEventDate } from "./services/formatDate";
 import { formatVnd } from "./services/currency";
 import {
@@ -297,6 +297,7 @@ export default function App() {
   const [showtimes, setShowtimes] = useState<Showtime[]>([]);
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [semanticEvents, setSemanticEvents] = useState<EventCard[]>([]);
   /**
    * The three list filters, each as the set of values in force. Empty means the filter is off.
    *
@@ -1264,31 +1265,69 @@ export default function App() {
   );
 
   /*
+   * Semantic vector search: queries the AI retrieval pipeline with 300ms debounce
+   * when the query has at least 3 characters.
+   */
+  useEffect(() => {
+    const term = searchQuery.trim();
+    if (term.length < 3) {
+      setSemanticEvents([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      catalogClient
+        .searchSemantic(term, SEARCH_SUGGESTION_COUNT)
+        .then((res) => setSemanticEvents(res.events || []))
+        .catch(() => setSemanticEvents([]));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const semanticSlugs = useMemo(() => new Set(semanticEvents.map((e) => e.slug)), [semanticEvents]);
+
+  /*
    * What the nav's search dropdown shows while the reader types.
    *
    * Deliberately off `events` rather than off `filteredEvents`: the box is asked a question about
    * the whole catalogue, and answering it through whatever filters happen to be set on `/events`
    * would hide matching events for reasons the reader cannot see from the nav.
    */
-  const searchMatchCount = useMemo(
-    () =>
-      searchQuery.trim() ? events.filter((event) => matchesQuery(event, searchQuery)).length : 0,
-    [events, searchQuery],
-  );
+  const searchMatchCount = useMemo(() => {
+    if (!searchQuery.trim()) return 0;
+    const localCount = events.filter((event) => matchesQuery(event, searchQuery)).length;
+    return Math.max(localCount, semanticEvents.length);
+  }, [events, searchQuery, semanticEvents]);
 
-  const searchSuggestions = useMemo(
-    () =>
-      searchEvents(events, searchQuery, SEARCH_SUGGESTION_COUNT).map((event) => ({
-        id: event.id,
-        title: event.title,
-        imageUrl: event.imageUrl,
-        meta: [event.dates[0] && formatEventDate(event.dates[0], true), event.city, event.venueName]
-          .filter(Boolean)
-          .join(" · "),
-        price: event.price > 0 ? formatVnd(event.price) : "",
-      })),
-    [events, searchQuery],
-  );
+  const searchSuggestions = useMemo(() => {
+    const localMatches = searchEvents(events, searchQuery, SEARCH_SUGGESTION_COUNT);
+    const seenSlugs = new Set<string>(localMatches.map((m) => m.id));
+    const seenTitles = new Set<string>(localMatches.map((m) => m.title.trim().toLowerCase()));
+
+    // Append semantic matches found by vector embeddings
+    const semanticMatches: MovieEvent[] = [];
+    for (const card of semanticEvents) {
+      const slug = card.slug;
+      const titleLower = card.title.trim().toLowerCase();
+      if (!seenSlugs.has(slug) && !seenTitles.has(titleLower)) {
+        seenSlugs.add(slug);
+        seenTitles.add(titleLower);
+        const found = events.find((e) => e.id === slug);
+        semanticMatches.push(found || cardToMovie(card));
+      }
+    }
+
+    const combined = [...localMatches, ...semanticMatches].slice(0, SEARCH_SUGGESTION_COUNT);
+
+    return combined.map((event) => ({
+      id: event.id,
+      title: event.title,
+      imageUrl: event.imageUrl,
+      meta: [event.dates[0] && formatEventDate(event.dates[0], true), event.city, event.venueName]
+        .filter(Boolean)
+        .join(" · "),
+      price: event.price > 0 ? formatVnd(event.price) : "",
+    }));
+  }, [events, searchQuery, semanticEvents]);
 
   /**
    * Everything that survives every filter except the price one.
@@ -1299,15 +1338,21 @@ export default function App() {
    * filter has to be excluded from its own scale or it eats itself.
    */
   const eventsBeforePriceFilter = useMemo(() => {
-    return events.filter((movie) => {
+    // Merge semantic events so all candidate events exist in memory for catalog grid
+    const allCatalog = [...events];
+    const existingSlugs = new Set(events.map((e) => e.id));
+    for (const card of semanticEvents) {
+      if (!existingSlugs.has(card.slug)) {
+        existingSlugs.add(card.slug);
+        allCatalog.push(cardToMovie(card));
+      }
+    }
+
+    return allCatalog.filter((movie) => {
       /*
-       * The same test the nav's dropdown runs, imported rather than written twice.
-       *
-       * It was written out here, accent-sensitive and lowercase-only, which is now a difference
-       * that shows: the dropdown offers a row, the reader presses "Xem tất cả", and the grid it
-       * lands on is missing the very event they were pointing at.
+       * The same test the nav's dropdown runs, augmented with semantic embeddings.
        */
-      const matchesSearch = matchesQuery(movie, searchQuery);
+      const matchesSearch = matchesQuery(movie, searchQuery) || semanticSlugs.has(movie.id);
       const matchesCategory =
         activeCategories.length === 0 || activeCategories.includes(movie.category);
       const matchesDate = matchesDateFilter(movie.dates, activeDate);
@@ -1317,7 +1362,7 @@ export default function App() {
 
       return matchesSearch && matchesCategory && matchesDate && matchesCity && matchesAvailability;
     });
-  }, [events, activeCategories, activeCities, activeDate, availabilities, searchQuery]);
+  }, [events, activeCategories, activeCities, activeDate, availabilities, searchQuery, semanticSlugs, semanticEvents]);
 
   /**
    * How far the price slider reaches: the dearest ticket still on the table.
@@ -1341,10 +1386,43 @@ export default function App() {
     return dearest > 0 ? dearest : PRICE_CEILING_BEFORE_CATALOG;
   }, [eventsBeforePriceFilter]);
 
-  const filteredEvents = useMemo(
-    () => eventsBeforePriceFilter.filter((movie) => maxPrice === null || movie.price <= maxPrice),
-    [eventsBeforePriceFilter, maxPrice],
-  );
+  const filteredEvents = useMemo(() => {
+    const list = eventsBeforePriceFilter.filter(
+      (movie) => maxPrice === null || movie.price <= maxPrice,
+    );
+
+    const q = searchQuery.trim();
+    if (!q) return list;
+
+    const needle = fold(q);
+    const semanticRankMap = new Map<string, number>();
+    semanticEvents.forEach((card, idx) => semanticRankMap.set(card.slug, idx));
+
+    return [...list].sort((a, b) => {
+      // 1. Direct Title Match priority (title contains query)
+      const titleA = fold(a.title).includes(needle);
+      const titleB = fold(b.title).includes(needle);
+      if (titleA !== titleB) return titleA ? -1 : 1;
+
+      // 2. Cast / Lineup Match priority
+      const castA = fold(a.cast.join(" ")).includes(needle);
+      const castB = fold(b.cast.join(" ")).includes(needle);
+      if (castA !== castB) return castA ? -1 : 1;
+
+      // 3. Semantic Embedding Rank priority
+      const semRankA = semanticRankMap.has(a.id) ? semanticRankMap.get(a.id)! : 9999;
+      const semRankB = semanticRankMap.has(b.id) ? semanticRankMap.get(b.id)! : 9999;
+      if (semRankA !== semRankB) return semRankA - semRankB;
+
+      // 4. Bookability (available before sold out)
+      const bookableA = a.status === "available";
+      const bookableB = b.status === "available";
+      if (bookableA !== bookableB) return bookableA ? -1 : 1;
+
+      // 5. Soonest upcoming date
+      return (a.dates[0] ?? "").localeCompare(b.dates[0] ?? "");
+    });
+  }, [eventsBeforePriceFilter, maxPrice, searchQuery, semanticEvents]);
 
   /**
    * The date filter's options, taken from the catalog itself. They are compared verbatim against
