@@ -142,23 +142,30 @@ in either direction is refused with an instruction, never linked.
 discouraged; password reset is refused for Google accounts, since granting one would be the same
 link by another route; Google lookups go through `(provider, provider_user_id)`, never email.
 
-### D6 — No account lockout; throttle the source, slow the identifier
+### D6 — Lockout is temporary and derived from `auth_events`, never stored on the account
 
-Failed sign-ins never put an account into a locked state. Abuse is answered by rate-limiting the
-**source** and by answering a repeatedly-failing identifier more slowly. A correct password is always
-accepted.
+Sign-in abuse is answered in layers, all derived from the immutable `auth_events` log rather than any
+column on the account: a **per-source** limit (15 login attempts per IP per 15 minutes), a
+**progressive per-identifier delay**, an **adaptive CAPTCHA** required from the third consecutive
+failure, and a **temporary lockout** — ten consecutive failures for one identifier inside a
+15-minute window make every further attempt answer `429 account_locked_temporarily`, correct password
+included, until the failures age out of the window.
 
-- Locking after N failures is a denial-of-service anyone can aim at anyone whose email they know.
-  The victim, not the attacker, is the one who loses access.
-- A lockout can only fire on an account that exists, so watching which identifiers lock out
-  enumerates the user base — defeating the equal-response and equal-timing rules the login path is
-  built around.
-- The progressive delay applies to unknown identifiers too, or the delay curve leaks the same
-  information the lockout would have.
+- A permanent lock would be a denial-of-service anyone can aim at anyone whose email they know. A
+  self-expiring 15-minute window bounds that damage to minutes without admin intervention, and
+  "Quên mật khẩu" gives the real owner an immediate way back in.
+- The counter keys on the hashed identifier and treats unknown identifiers identically — same delay
+  curve, same CAPTCHA gate, same lockout threshold, same response shape — so probing cannot tell a
+  live account from a dead one, preserving the equal-response rule the login path is built around.
+- Failure messages disclose only how many attempts remain before the lockout, never whether the
+  identifier exists.
 
-*Consequences:* no `failed_attempts` or `locked_until` column on `users`; the throttle reads
-`auth_events` by `source_ip`, which is why that partial index exists; a distributed attacker is
-slowed rather than stopped, accepted deliberately because the alternative punishes the victim.
+*Consequences:* there are still no `failed_attempts` or `locked_until` columns on `users`; the
+throttle reads `auth_events` — by `source_ip` for the per-source limit (which is why that partial
+index exists) and by `identifier_hash` for the delay, CAPTCHA gate, and lockout. A successful sign-in
+resets the counter, and the lockout expires by itself as events age out of the window; a distributed
+attacker is slowed rather than stopped, accepted deliberately because the alternative punishes the
+victim.
 
 ### D7 — Sessions are stored and rotated, not self-contained
 
