@@ -146,7 +146,7 @@ export default function ShowtimeList({
           </div>
 
           {addTiers.map((t, i) => (
-            <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-2">
+            <div key={i} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
               <input
                 value={t.label}
                 onChange={(e) =>
@@ -172,7 +172,7 @@ export default function ShowtimeList({
                 type="button"
                 onClick={() => setAddTiers((rows) => rows.filter((_, j) => j !== i))}
                 disabled={addTiers.length <= 1}
-                className={ghost}
+                className={`${ghost} w-full sm:w-auto`}
               >
                 Xoá
               </button>
@@ -223,7 +223,7 @@ export default function ShowtimeList({
         const locked = committed > 0;
         return (
           <div key={st.id} className="border-2 border-beige-kem p-3">
-            <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
               {/*
                 Saves on change rather than on blur. The native input was committed when focus left
                 it, which a control that closes its own panel never guarantees — the reader clicks
@@ -254,7 +254,7 @@ export default function ShowtimeList({
                 }
                 triggerClassName={input}
               />
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button
                   onClick={() => setOpenTiers(openTiers === st.id ? null : st.id)}
                   className={ghost}

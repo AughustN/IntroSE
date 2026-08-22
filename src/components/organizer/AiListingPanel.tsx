@@ -72,9 +72,9 @@ export default function AiListingPanel({
 
   return (
     <div className="border-2 border-dashed border-beige-kem/50 p-4">
-      <div className="flex items-center justify-between">
-        <h4 className="font-display text-sm font-bold">Trợ lý viết nội dung (tuỳ chọn)</h4>
-        <span className="font-mono text-[10px] text-beige-kem/45">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <h4 className="min-w-0 font-display text-sm font-bold">Trợ lý viết nội dung (tuỳ chọn)</h4>
+        <span className="text-right font-mono text-[10px] text-beige-kem/45 sm:text-left">
           Gợi ý — bạn luôn sửa được trước khi dùng
         </span>
       </div>

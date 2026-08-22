@@ -66,8 +66,8 @@ export default function EventList({
               {/* ONE statement of where this event stands. The raw `ev.status` used to sit here in
                   mono beside the badge, so an organizer read "draft" and "Chờ duyệt" side by side —
                   two answers to one question, one of them a database enum they never chose. */}
-              <div>
-                <span className="font-bold">{ev.title}</span>
+              <div className="min-w-0">
+                <span className="break-words font-bold">{ev.title}</span>
                 <span className={`ml-2 border px-2 py-0.5 font-mono text-[10px] ${badge.cls}`}>
                   {badge.text}
                 </span>
