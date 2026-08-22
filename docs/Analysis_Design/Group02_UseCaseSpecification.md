@@ -239,17 +239,17 @@ Group 02 · SoE
 **Alternative flows**
 - **A1 — Wrong credentials:** verification fails; system shows a generic "invalid email or password" (no account enumeration), in time indistinguishable from A2.
 - **A2 — Account not found:** treated as A1 — same message, same response time.
-- **A3 — Repeated failures:** the **source** is throttled once its rate is exceeded (15 attempts per IP per 15 minutes). Once an **identifier** accumulates 3 failures within a 15-minute window, further attempts must solve a CAPTCHA challenge before the credentials are even evaluated; at 10 failures within the window the identifier is **temporarily locked out for 15 minutes** — even a correct password is refused until the window lapses. On top of both, the response to a repeatedly-failing identifier is progressively delayed — applied identically to identifiers that match no account, so the delay curve cannot enumerate accounts `[SEC-10]`.
+- **A3 — Repeated failures:** the **source** is throttled once its rate is exceeded (15 attempts per IP per 15 minutes). Once an **identifier/source pair** accumulates 3 failures within a 15-minute window, further attempts from that source must solve a CAPTCHA challenge before the credentials are even evaluated. The response to a repeatedly-failing identifier/source pair is progressively delayed — applied identically to identifiers that match no account, so the delay curve cannot enumerate accounts `[SEC-10]`. Failures from one source never lock the account out for its owner on another source.
 - **A4 — Suspended / banned account:** login refused with a suspension notice, checked only **after** the password verifies `[SEC-03]`.
 - **A5 — User has no password (Google account):** system says this account uses Google sign-in (UC-02).
 - **A6 — User forgot password:** user clicks "forgot password" → UC-05.
 
 **Postconditions**
 - **Success:** the user is authenticated; an access token and a refresh-token family are issued; the identifier's rolling failure count no longer counts against it.
-- **Failure:** no session; a `login_failure` auth event is recorded against a **hashed** form of the attempted identifier (which may match no account). Failures are counted per identifier in a rolling 15-minute window and drive the CAPTCHA challenge and the temporary lockout of A3.
+- **Failure:** no session; a `login_failure` auth event is recorded against a **hashed** form of the attempted identifier (which may match no account). Failures are counted per identifier/source pair in a rolling 15-minute window and drive the source throttle, CAPTCHA challenge, and progressive delay of A3.
 
 **Special requirements**
-- Per-source throttle, adaptive CAPTCHA challenge, progressive per-identifier delay, and a bounded 15-minute temporary lockout after repeated failures — never a permanent lockout `[SEC-10]`; HTTPS `[SEC-01]`.
+- Per-source throttle, adaptive CAPTCHA challenge, and progressive per-identifier/source delay — never an account lockout `[SEC-10]`; HTTPS `[SEC-01]`.
 
 **Prototype.** Screens: *Login form*, *Invalid-credentials state*, *Throttled-source notice*.
 `![UC-03 prototype](../prototypes/uc-03-login.png)`

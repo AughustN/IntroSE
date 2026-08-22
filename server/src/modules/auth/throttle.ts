@@ -36,11 +36,10 @@ export function ipKey(ip: string | undefined): string {
 }
 
 /**
- * Progressive per-identifier delay (FR-048/049): the first few failures are free,
- * then each subsequent one is answered more slowly, capped. Applied EQUALLY to
- * unknown identifiers so the delay curve cannot enumerate accounts. One layer of
- * several: the temporary identifier lockout itself is enforced by the login route
- * from `auth_events` (schema decision D6), not here.
+ * Progressive delay for an identifier/source pair (FR-048/049): the first few failures are free,
+ * then each subsequent one is answered more slowly, capped. Applied EQUALLY to unknown identifiers
+ * so the delay curve cannot enumerate accounts. Source scope prevents one attacker from locking an
+ * account out for its owner; the separate per-source limiter throttles the attacking IP.
  */
 export function identifierDelayMs(failures: number): number {
   if (failures < 3) return 0;
