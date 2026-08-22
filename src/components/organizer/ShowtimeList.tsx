@@ -11,7 +11,7 @@ import Select from "../Select";
 import DateTimeField from "../DateTimeField";
 
 const input =
-  "h-10 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
+  "h-10 min-w-0 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
 const btn =
   " bg-burgundy px-3 py-2 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-50";
 const ghost =
@@ -115,7 +115,7 @@ export default function ShowtimeList({
   };
 
   const addForm = (
-    <div className="border-2 border-dashed border-beige-kem/40 p-3">
+    <div className="min-w-0 border-2 border-dashed border-beige-kem/40 p-3">
       {!adding ? (
         <button onClick={() => setAdding(true)} className={btn}>
           + Thêm suất chiếu
@@ -146,7 +146,10 @@ export default function ShowtimeList({
           </div>
 
           {addTiers.map((t, i) => (
-            <div key={i} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+            <div
+              key={i}
+              className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
+            >
               <input
                 value={t.label}
                 onChange={(e) =>
@@ -222,8 +225,8 @@ export default function ShowtimeList({
         const committed = st.tiers.reduce((n, t) => n + t.sold + t.held, 0);
         const locked = committed > 0;
         return (
-          <div key={st.id} className="border-2 border-beige-kem p-3">
-            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+          <div key={st.id} className="min-w-0 border-2 border-beige-kem p-3">
+            <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
               {/*
                 Saves on change rather than on blur. The native input was committed when focus left
                 it, which a control that closes its own panel never guarantees — the reader clicks

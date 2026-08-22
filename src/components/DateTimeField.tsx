@@ -116,7 +116,7 @@ export default function DateTimeField({
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className={`flex w-full items-center justify-between gap-2 text-left text-beige-kem transition disabled:cursor-not-allowed disabled:opacity-50 ${className ?? ""}`}
+        className={`flex min-w-0 w-full items-center justify-between gap-2 text-left text-beige-kem transition disabled:cursor-not-allowed disabled:opacity-50 ${className ?? ""}`}
       >
         <span className={parsed ? "truncate" : "truncate text-ink-soft"}>
           {parsed ? display(parsed) : placeholder}
@@ -155,7 +155,10 @@ export default function DateTimeField({
 
             <div className="mt-2 grid grid-cols-7 gap-px">
               {WEEKDAYS.map((w) => (
-                <span key={w} className="grid h-7 place-items-center font-meta text-eyebrow text-ink-soft">
+                <span
+                  key={w}
+                  className="grid h-7 place-items-center font-meta text-eyebrow text-ink-soft"
+                >
                   {w}
                 </span>
               ))}
@@ -172,7 +175,8 @@ export default function DateTimeField({
                     type="button"
                     aria-pressed={picked}
                     onClick={() => pickDay(day)}
-                    className={`grid h-8 w-9 place-items-center font-meta text-body transition ${ picked
+                    className={`grid h-8 w-9 place-items-center font-meta text-body transition ${
+                      picked
                         ? "bg-burgundy font-bold text-white"
                         : "text-beige-kem hover:bg-bubblegum/40"
                     }`}

@@ -121,10 +121,11 @@ export default function Select({
         // A form that already labels the field in its own markup passes no `label`; the placeholder
         // is then the only description a screen reader has to go on.
         aria-label={label ?? placeholder}
-        className={`flex w-full items-center justify-between gap-2 text-left text-beige-kem transition disabled:cursor-not-allowed disabled:opacity-50 ${triggerClassName ?? UNDERLINE_TRIGGER}`}
+        className={`flex min-w-0 w-full items-center justify-between gap-2 text-left text-beige-kem transition disabled:cursor-not-allowed disabled:opacity-50 ${triggerClassName ?? UNDERLINE_TRIGGER}`}
       >
         <span
-          className={`truncate ${ multiple
+          className={`truncate ${
+            multiple
               ? selectedValues.length === 0
                 ? "text-ink-soft"
                 : ""
@@ -136,7 +137,8 @@ export default function Select({
           {multiple ? multiLabel : (current?.label ?? placeholder ?? "—")}
         </span>
         <ChevronDown
-          className={`h-3.5 w-3.5 shrink-0 text-ink-soft transition-transform duration-300 ${ open ? "rotate-180" : ""
+          className={`h-3.5 w-3.5 shrink-0 text-ink-soft transition-transform duration-300 ${
+            open ? "rotate-180" : ""
           }`}
         />
       </button>
@@ -192,7 +194,8 @@ export default function Select({
                       // three round trips through the trigger.
                       if (!multiple) setOpen(false);
                     }}
-                    className={`flex w-full items-center justify-between gap-3 overflow-clip px-4 py-2 text-left font-meta text-eyebrow transition-colors ${ selected
+                    className={`flex w-full items-center justify-between gap-3 overflow-clip px-4 py-2 text-left font-meta text-eyebrow transition-colors ${
+                      selected
                         ? "bg-bubblegum/50 text-on-tint"
                         : "text-beige-kem hover:bg-bubblegum/30"
                     }`}
@@ -222,7 +225,8 @@ export default function Select({
                     {multiple ? (
                       <Check
                         aria-hidden="true"
-                        className={`h-3.5 w-3.5 shrink-0 text-burgundy ${ selected ? "opacity-100" : "opacity-0"
+                        className={`h-3.5 w-3.5 shrink-0 text-burgundy ${
+                          selected ? "opacity-100" : "opacity-0"
                         }`}
                       />
                     ) : (

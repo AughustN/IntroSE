@@ -25,7 +25,7 @@ import ShowtimeList from "./ShowtimeList";
 import { Refusal } from "./states";
 
 const input =
-  "h-10 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
+  "h-10 min-w-0 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
 const label = "mb-1 block font-mono text-[11px] text-beige-kem/70";
 const btn =
   " bg-burgundy px-4 py-2 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-50";
