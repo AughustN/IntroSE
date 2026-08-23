@@ -1,6 +1,7 @@
 import { withAuthRetry } from "./authClient";
 import { apiUrl } from "./api";
 import { readApiError } from "./apiError";
+import type { ConcessionVoucher, OrderConcessionLine } from "../../shared/types/fnb";
 
 export interface CheckoutOrder {
   id: number;
@@ -18,6 +19,10 @@ export interface CheckoutOrder {
     seatLabel: string | null;
     unitPriceAmount: number;
   }>;
+  /** Snapshot snack lines of this order — absent when the buyer bought none (feature 014). */
+  concessions?: OrderConcessionLine[];
+  /** The one scannable voucher covering every concession line — present only when lines exist. */
+  voucher?: ConcessionVoucher;
 }
 
 /**

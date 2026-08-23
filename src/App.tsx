@@ -276,6 +276,16 @@ function bookingFromOrder(order: OrderListItem, known?: MovieEvent): Booking {
       label: ticket.seatLabel ?? ticket.tierLabel,
       status: ticket.status,
     })),
+    ...(order.concessions?.length
+      ? {
+          concessions: order.concessions.map((line) => ({
+            label: line.label,
+            quantity: line.quantity,
+            unitPriceAmount: line.unitPriceAmount,
+          })),
+          voucher: order.voucher,
+        }
+      : {}),
   };
 }
 
@@ -2008,6 +2018,16 @@ export default function App() {
           timeZone: "Asia/Ho_Chi_Minh",
         }),
         qrPayload: ticket.ticketCode,
+        ...(order.concessions?.length
+          ? {
+              concessions: order.concessions.map((line) => ({
+                label: line.label,
+                quantity: line.quantity,
+                unitPriceAmount: line.unitPriceAmount,
+              })),
+              voucher: order.voucher,
+            }
+        : {}),
       };
 
       saveBookingToHistory(newBooking);

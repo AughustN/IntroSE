@@ -10,6 +10,8 @@ import {
   queueOrderConfirmation,
 } from "../notifications/notifications.service.js";
 import { UPCOMING_SHOWTIME, VISIBLE_JOIN, VISIBLE_WHERE } from "../catalog/visibility.js";
+import * as concessionRepo from "../concessions/concessions.repo.js";
+import { mintConcessionVoucher } from "./tickets.service.js";
 
 export interface WalletView {
   balanceAmount: number;
@@ -88,6 +90,14 @@ export interface OrderView {
   status: "paid" | "refunded";
   createdAt: string;
   tickets: PurchasedTicket[];
+  /** Snapshot snack lines — absent when none were bought (014). */
+  concessions?: import("@shared/types/fnb.js").OrderConcessionLine[];
+  /** The one voucher covering every line above; present iff concessions are. */
+  voucher?: {
+    code: string;
+    status: "unredeemed" | "redeemed" | "void";
+    redeemedAt: string | null;
+  };
 }
 
 export async function getWallet(userId: number, db: Db = pool): Promise<WalletView> {
@@ -410,7 +420,30 @@ export async function checkout(userId: number, reservationId: number): Promise<O
       )
     ).rows;
     if (items.length === 0) throw err.conflict("empty_reservation", "Đơn giữ chỗ không có vé.");
-    const total = items.reduce((sum, item) => sum + item.quantity * item.unit_price_amount, 0);
+
+    /*
+     * The snack cart (014) rides in the SAME transaction, the SAME balance check and the SAME
+     * single debit as the tickets — there is no second payment step to get out of sync. Lines are
+     * read under row locks on both the line and its item, so a stop-selling or price edit cannot
+     * commit between this read and the money moving.
+     */
+    const cartLines = await concessionRepo.cartLinesForCheckout(client, reservationId);
+    for (const line of cartLines) {
+      if (line.state !== "listed") {
+        throw err.conflict(
+          "concession_unavailable",
+          `Món "${line.label}" vừa ngừng bán. Vui lòng xóa món này khỏi đơn rồi thử lại.`,
+        );
+      }
+    }
+    // Live prices: what the buyer saw on the checkout screen is what gets charged (research D2).
+    const concessionsTotal = cartLines.reduce(
+      (sum, line) => sum + line.quantity * line.priceAmount,
+      0,
+    );
+
+    const total = items.reduce((sum, item) => sum + item.quantity * item.unit_price_amount, 0) +
+      concessionsTotal;
     /**
      * Vouchers are a separate feature and no order carries one yet, so the discount is zero and
      * `refundable_amount` equals face value. It is threaded through as a variable rather than
@@ -528,6 +561,29 @@ export async function checkout(userId: number, reservationId: number): Promise<O
       }
     }
 
+    /*
+     * Snapshot the snack lines and mint the voucher inside this same transaction, AFTER the
+     * tickets are issued and BEFORE the money moves — so any failure above rolls the whole thing
+     * back and any failure here leaves no paid order carrying snacks it did not record.
+     */
+    const concessionLines: NonNullable<OrderView["concessions"]> = [];
+    for (const line of cartLines) {
+      const inserted = await client.query<{ id: number }>(
+        `INSERT INTO order_concessions
+           (order_id, concession_item_id, item_label, unit_price_amount, quantity)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        [order.id, line.concessionItemId, line.label, line.priceAmount, line.quantity],
+      );
+      concessionLines.push({
+        id: inserted.rows[0].id,
+        concessionItemId: line.concessionItemId,
+        label: line.label,
+        quantity: line.quantity,
+        unitPriceAmount: line.priceAmount,
+      });
+    }
+    const voucher = cartLines.length > 0 ? await mintConcessionVoucher(client, order.id) : null;
+
     const balanceAfter = wallet.balance_amount - total;
     await client.query(`UPDATE wallets SET balance_amount = $2, updated_at = now() WHERE id = $1`, [
       wallet.id,
@@ -557,6 +613,16 @@ export async function checkout(userId: number, reservationId: number): Promise<O
       createdAt: order.created_at.toISOString(),
       tickets: ticketRows,
     };
+    if (concessionLines.length > 0) {
+      orderView.concessions = concessionLines;
+      if (voucher) {
+        orderView.voucher = {
+          code: voucher.code,
+          status: voucher.status,
+          redeemedAt: voucher.redeemedAt ? voucher.redeemedAt.toISOString() : null,
+        };
+      }
+    }
     const tiers = await client.query<{ id: number; remaining: number | null }>(
       `SELECT id, CASE WHEN total_quantity IS NULL THEN NULL
                        ELSE total_quantity - sold_quantity - reserved_quantity END AS remaining
@@ -693,22 +759,41 @@ export async function listOrders(userId: number, db: Db = pool): Promise<OrderLi
     else byOrder.set(orderId, [ticket]);
   }
 
-  return rows.map((row) => ({
-    id: row.id,
-    reservationId: row.reservation_id,
-    showtimeId: row.showtime_id,
-    totalAmount: row.total_amount,
-    paymentMethod: row.payment_method,
-    status: row.status,
-    createdAt: row.created_at.toISOString(),
-    tickets: byOrder.get(row.id) ?? [],
-    eventSlug: row.event_slug,
-    eventTitle: row.event_title,
-    eventImageUrl: row.event_image_url,
-    startsAt: row.starts_at.toISOString(),
-    venueName: row.venue_name,
-    city: row.city,
-  }));
+  // Snacks ride the same batch pattern: two queries for ALL orders rather than one per order.
+  const concessionLines = await concessionRepo.linesForOrders(db, rows.map((r) => r.id));
+  const vouchers = await concessionRepo.vouchersForOrders(db, rows.map((r) => r.id));
+
+  return rows.map((row) => {
+    const lines = concessionLines.get(row.id) ?? [];
+    const voucher = vouchers.get(row.id);
+    const view: OrderListItem = {
+      id: row.id,
+      reservationId: row.reservation_id,
+      showtimeId: row.showtime_id,
+      totalAmount: row.total_amount,
+      paymentMethod: row.payment_method,
+      status: row.status,
+      createdAt: row.created_at.toISOString(),
+      tickets: byOrder.get(row.id) ?? [],
+      eventSlug: row.event_slug,
+      eventTitle: row.event_title,
+      eventImageUrl: row.event_image_url,
+      startsAt: row.starts_at.toISOString(),
+      venueName: row.venue_name,
+      city: row.city,
+    };
+    if (lines.length > 0) {
+      view.concessions = lines;
+      if (voucher) {
+        view.voucher = {
+          code: voucher.code,
+          status: voucher.status,
+          redeemedAt: voucher.redeemedAt ? voucher.redeemedAt.toISOString() : null,
+        };
+      }
+    }
+    return view;
+  });
 }
 
 export async function getOrder(userId: number, orderId: number, db: Db = pool): Promise<OrderView> {
@@ -759,7 +844,11 @@ async function readOrderById(db: Db, userId: number, orderId: number): Promise<O
       [row.id],
     )
   ).rows;
-  return {
+  // Snapshot lines + the voucher, read ONLY from their own tables — never joined back to the menu,
+  // so a stopped or re-priced item cannot rewrite what this order shows (014 FR-010).
+  const concessionLines = await concessionRepo.linesForOrder(db, row.id);
+  const voucher = concessionLines.length > 0 ? await concessionRepo.voucherForOrder(db, row.id) : null;
+  const view: OrderView = {
     id: row.id,
     reservationId: row.reservation_id,
     showtimeId: row.showtime_id,
@@ -769,4 +858,15 @@ async function readOrderById(db: Db, userId: number, orderId: number): Promise<O
     createdAt: row.created_at.toISOString(),
     tickets,
   };
+  if (concessionLines.length > 0) {
+    view.concessions = concessionLines;
+    if (voucher) {
+      view.voucher = {
+        code: voucher.code,
+        status: voucher.status,
+        redeemedAt: voucher.redeemedAt ? voucher.redeemedAt.toISOString() : null,
+      };
+    }
+  }
+  return view;
 }

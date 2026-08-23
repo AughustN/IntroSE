@@ -1,5 +1,7 @@
 // Public catalog data layer plus authed organizer/admin calls.
 import type { ChartDocument } from "@/shared/catalog/seatmap-document";
+import type { ConcessionItem } from "../../shared/types/fnb";
+import type { ApiErrorBody } from "./apiError";
 import type {
   EventCard,
   EventDetail,
@@ -33,6 +35,22 @@ import { withAuthRetry } from "./authClient";
 import { apiUrl } from "./api";
 import { readApiError } from "./apiError";
 
+/**
+ * A refusal that keeps the API's own error CODE, not just its prose.
+ *
+ * The check-in scanner needs it: a code that is not one of this organizer's tickets must fall
+ * through to the concession-voucher endpoint, and only `ticket_not_found` means "try the other
+ * kind" — a void ticket's refusal must be shown as-is, not buried under a second lookup.
+ */
+export class ApiError extends Error {
+  constructor(
+    readonly apiCode: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(apiUrl(`/api${path}`), { headers: { Accept: "application/json" } });
   if (!res.ok) {
@@ -57,8 +75,8 @@ async function authed<T>(path: string, opts: { method?: string; body?: unknown }
     });
   });
   if (!res.ok) {
-    const e = await readApiError(res);
-    throw new Error(e.message ?? e.code);
+    const e: ApiErrorBody = await readApiError(res);
+    throw new ApiError(e.code, e.message ?? e.code);
   }
   return (res.status === 204 ? undefined : await res.json()) as T;
 }
@@ -249,8 +267,51 @@ export const organizerApi = {
       method: "POST",
       body: { code },
     }),
+  /*
+   * Bắp nước at the same counter (014 US3). One scan of the order's voucher hands over every
+   * line; a rescan answers `already: true` and changes nothing, exactly like ticket check-in.
+   */
+  concessionsRedeem: (code: string) =>
+    authed<ConcessionRedemption>("/checkin/concessions/redeem", {
+      method: "POST",
+      body: { code },
+    }),
   completeEvent: (id: string) =>
     authed<{ ok: true; message: string }>(`/organizer/events/${id}/complete`, { method: 'POST' }),
+
+  /*
+   * Bắp nước (014 US2): the event's snack menu, owned wholesale by this organizer account.
+   * The list is the OWNER view — stopped items are present with their state so the tab can
+   * re-list them; the buyer-facing menu is a different endpoint that hides them.
+   */
+  concessions: (eventId: number) =>
+    authed<{ items: ConcessionItem[] }>(`/organizer/events/${eventId}/concessions`),
+  createConcession: (
+    eventId: number,
+    b: { label: string; description?: string | null; priceAmount: number },
+  ) =>
+    authed<{ item: ConcessionItem }>(`/organizer/events/${eventId}/concessions`, {
+      method: "POST",
+      body: b,
+    }),
+  updateConcession: (
+    eventId: number,
+    concessionId: number,
+    b: { label?: string; description?: string | null; priceAmount?: number },
+  ) =>
+    authed<{ item: ConcessionItem }>(
+      `/organizer/events/${eventId}/concessions/${concessionId}`,
+      { method: "PUT", body: b },
+    ),
+  setConcessionState: (eventId: number, concessionId: number, state: "listed" | "stopped") =>
+    authed<{ item: ConcessionItem }>(
+      `/organizer/events/${eventId}/concessions/${concessionId}`,
+      { method: "PATCH", body: { state } },
+    ),
+  removeConcession: (eventId: number, concessionId: number) =>
+    authed<void>(`/organizer/events/${eventId}/concessions/${concessionId}`, {
+      method: "DELETE",
+    }),
 };
 
 // ---- Seat map designer (feature 005) ----
@@ -419,6 +480,15 @@ export interface ScanTicket {
   startsAt: string;
   venueName: string;
   venueAddress: string;
+}
+
+/** What a concession voucher scan answers (014) — the whole order's snack lines in one go. */
+export interface ConcessionRedemption {
+  already: boolean;
+  orderId: number;
+  eventTitle: string;
+  buyerName: string;
+  lines: { label: string; quantity: number; unitPriceAmount: number }[];
 }
 
 export const adminApi = {

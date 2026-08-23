@@ -3,6 +3,7 @@ import { pool, withTransaction } from "../../db/pool.js";
 import { err } from "../../http.js";
 import { broadcastSeatUpdate } from "../../realtime/io.js";
 import { getSettings } from "../admin/settings.service.js";
+import * as concessionRepo from "../concessions/concessions.repo.js";
 import * as repo from "./holds.repo.js";
 import { notifyWaitlistForShowtime } from "../notifications/notifications.service.js";
 
@@ -32,11 +33,19 @@ export interface HoldResult {
  */
 const ttlMs = (minutes: number): number => minutes * 60 * 1000;
 
-/** Load the caller's reservation as the API returns it. */
+/** Load the caller's reservation as the API returns it — ticket items plus any snack cart lines. */
+async function fullView(row: repo.ReservationRow): Promise<Reservation> {
+  return repo.toReservationView(
+    row,
+    await repo.listItems(pool, row.id),
+    await concessionRepo.listedCartLines(pool, row.id),
+  );
+}
+
 async function view(reservationId: number): Promise<Reservation> {
   const row = await repo.findReservation(pool, reservationId);
   if (!row) throw err.notFound("not_found", "Không tìm thấy đơn giữ chỗ.");
-  return repo.toReservationView(row, await repo.listItems(pool, reservationId));
+  return fullView(row);
 }
 
 function assertSelection(
@@ -406,9 +415,7 @@ export async function extendOnce(userId: number, reservationId: number): Promise
   });
 
   // Already spent: not an error, just no extra time — the window stands as it is.
-  return extended
-    ? repo.toReservationView(extended, await repo.listItems(pool, reservation.id))
-    : view(reservation.id);
+  return extended ? fullView(extended) : view(reservation.id);
 }
 
 // ---- Read -----------------------------------------------------------------
@@ -418,7 +425,7 @@ export async function getReservation(userId: number, reservationId: number): Pro
   if (!row) throw err.notFound("not_found", "Không tìm thấy đơn giữ chỗ.");
   if (row.user_id !== userId)
     throw err.forbidden("not_owner", "Đơn giữ chỗ này không phải của bạn.");
-  return repo.toReservationView(row, await repo.listItems(pool, reservationId));
+  return fullView(row);
 }
 
 /** The caller's live selection for a showtime, if any — what the map shows a returning owner (FR-022). */
@@ -428,7 +435,75 @@ export async function getActiveForShowtime(
 ): Promise<Reservation | null> {
   const row = await repo.findActiveReservation(pool, userId, showtimeId);
   if (!row || row.expired) return null;
-  return repo.toReservationView(row, await repo.listItems(pool, row.id));
+  return fullView(row);
+}
+
+/**
+ * Replace the caller's concession cart wholesale (014 FR-004/FR-005).
+ *
+ * Replacement-set semantics keep the client dumb: it sends the whole desired list, the server
+ * makes that the truth. Every rule is checked against rows, never the request's word — the
+ * reservation must be the caller's and alive, the showtime still sellable, each named item
+ * LISTED on that showtime's own event at its CURRENT price (which is what gets stored, so the
+ * checkout screen's number is the number the money path will charge).
+ */
+export async function setConcessions(
+  userId: number,
+  reservationId: number,
+  items: { concessionItemId: number; quantity: number }[],
+): Promise<Reservation> {
+  const reservation = await requireOwnedActive(userId, reservationId);
+
+  const updatedRow = await withTransaction(async (client) => {
+    const locked = await repo.findReservation(client, reservation.id, true);
+    if (!locked || locked.user_id !== userId || locked.status !== "active" || locked.expired) {
+      throw err.notFound("not_found", "Đơn giữ chỗ đã hết hạn hoặc đã kết thúc.");
+    }
+
+    const showtime = await repo.getShowtimeInfo(locked.showtime_id, client);
+    if (!showtime?.sellable) {
+      throw err.conflict("showtime_unavailable", "Suất diễn này không còn mở bán.");
+    }
+
+    const eventRow = await client.query<{ event_id: number }>(
+      `SELECT event_id FROM showtimes WHERE id = $1`,
+      [locked.showtime_id],
+    );
+    const eventId = eventRow.rows[0]?.event_id;
+
+    const stored: { concessionItemId: number; quantity: number; unitPriceAmount: number }[] = [];
+    // Deduplicate first: two entries for one item would fight the UNIQUE constraint instead of
+    // reading as one bigger line.
+    const wanted = new Map<number, number>();
+    for (const item of items) {
+      wanted.set(item.concessionItemId, (wanted.get(item.concessionItemId) ?? 0) + item.quantity);
+    }
+    for (const [concessionItemId, quantity] of wanted) {
+      const item = await concessionRepo.getItem(client, concessionItemId);
+      if (!item || item.eventId !== eventId || item.state !== "listed") {
+        throw err.notFound(
+          "concession_unavailable",
+          "Món này không còn trong thực đơn của sự kiện.",
+        );
+      }
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10) {
+        throw err.unprocessable(
+          "concession_quantity_limit",
+          "Mỗi món tối đa 10 phần cho một đơn.",
+        );
+      }
+      stored.push({ concessionItemId, quantity, unitPriceAmount: item.priceAmount });
+    }
+
+    await concessionRepo.replaceCartLines(client, locked.id, stored);
+    return locked;
+  });
+
+  return repo.toReservationView(
+    updatedRow,
+    await repo.listItems(pool, updatedRow.id),
+    await concessionRepo.listedCartLines(pool, updatedRow.id),
+  );
 }
 
 async function requireOwnedActive(

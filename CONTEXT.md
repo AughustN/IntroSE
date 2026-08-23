@@ -101,6 +101,28 @@ number, buyer-facing name.
 _Avoid_: ticket type, price band, category (that's the event classification); "deleted tier" (say
 archived).
 
+**Món bán kèm (Concession item)**:
+What an Organizer sells alongside tickets — bắp rang bơ, nước suối — as one menu per Event,
+offered on every public Showtime of it. Carries a label and a whole-đồng price; is **listed** or
+**stopped**. Unlimited stock by design: there is no sold/held counter because nothing can sell out.
+Stopped is the archived-but-resolvable move (same shape as a tier): hidden from buyers immediately,
+kept forever so paid lines still show what they bought. Distinct from a **Ticket tier**: a tier is
+a price class of seats/quantity within ONE Showtime with finite inventory; a concession item is
+event-scoped, stockless, and never occupies a tier slot. Editing label or price reaches only future
+purchases — paid lines are snapshots; an item any cart or order references can be stopped but never
+deleted.
+_Avoid_: snack (say món bán kèm in prose), add-on service, combo, product.
+
+**Concession voucher**:
+The ONE scannable proof per paid order that carries concessions — minted inside checkout when at
+least one line was bought, UNIQUE per order. One scan at the Organizer's counter hands over every
+line of the order; a rescan answers `already` and changes nothing. **Unredeemed**, **redeemed**, or
+**void** — void means the order was refunded (self-cancelled or event cancelled), and a voided
+voucher must never hand over snacks again. Its code/hash pair mirrors the ticket QR's, but it is
+not a ticket: it admits nobody through a door, only feeds someone at a counter.
+_Avoid__: meal ticket, coupon (a coupon discounts; a voucher redeems), F&B order (the order is the
+payment record; the voucher is its claim check).
+
 **Venue / Layout / Seat / Showtime seat**:
 **Venue** = a reusable physical place (name, city, address). A **Layout** is one named arrangement of
 that venue ("Nhạc hội đứng", "Kịch có ghế ngồi"); a venue owns several, which is how one place hosts

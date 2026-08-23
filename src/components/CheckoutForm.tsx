@@ -7,7 +7,13 @@ import { FormEvent, useEffect, useState } from "react";
 import { loadCheckoutDetails, saveCheckoutDetails } from "../services/checkoutDetails";
 import { CheckoutPayload, MovieEvent, Seat } from "../types";
 import { walletClient, type WalletLimits } from "../services/walletClient";
+import {
+  concessionsClient,
+  ConcessionError,
+} from "../services/concessionsClient";
+import type { PublicConcession, ReservationConcessionLine } from "../../shared/types/fnb";
 import TopUpSheet from "./wallet/TopUpSheet";
+import ConcessionMenu from "./ConcessionMenu";
 import {
   type BookingStep,
   BookingHeader,
@@ -90,6 +96,17 @@ export default function CheckoutForm({
   const [limits, setLimits] = useState<WalletLimits | null>(null);
   const [showTopUp, setShowTopUp] = useState(false);
 
+  /*
+   * The snack cart (014). Menu is read once per event; quantities are optimistic — a step updates
+   * the screen immediately and reconciles with the server in the background, because the hold
+   * window is short and waiting on a round trip per click would burn it. A failed sync reverts
+   * that step and says why: the buyer is never left believing a line the server refused.
+   */
+  const [menu, setMenu] = useState<PublicConcession[]>([]);
+  const [cartLines, setCartLines] = useState<ReservationConcessionLine[]>([]);
+  const [cartBusy, setCartBusy] = useState(false);
+  const [cartError, setCartError] = useState<string | null>(null);
+
   // The balance belongs on the order summary: UC-12 step 1 says the buyer reviews the total
   // *alongside* what they have, so a shortfall is visible before they commit rather than after.
   useEffect(() => {
@@ -130,10 +147,83 @@ export default function CheckoutForm({
     }
   }, [shortfall]);
 
+  // The menu exists only for a real catalogue event with a live reservation to attach to.
+  useEffect(() => {
+    let cancelled = false;
+    const eventId = event.eventId;
+    if (eventId === null || reservationId === null) return;
+    concessionsClient
+      .menu(eventId)
+      .then(({ items }) => {
+        if (!cancelled) setMenu(items);
+      })
+      .catch(() => {
+        /* A menu that cannot load must not block buying tickets — snacks stay absent. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [event.eventId, reservationId]);
+
+  /** Restore whatever cart survived the VNPay detour, so the summary never lies. */
+  useEffect(() => {
+    if (reservationId === null) return;
+    let cancelled = false;
+    import("../services/holdsClient").then(({ holdsClient }) =>
+      holdsClient
+        .get(reservationId)
+        .then((reservation) => {
+          if (!cancelled) setCartLines(reservation.concessions ?? []);
+        })
+        .catch(() => {}),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [reservationId]);
+
+  const handleConcessionChange = (concessionItemId: number, quantity: number) => {
+    if (reservationId === null || cartBusy) return;
+    const previous = cartLines;
+    const merged = new Map(previous.map((line) => [line.concessionItemId, line.quantity]));
+    if (quantity <= 0) merged.delete(concessionItemId);
+    else merged.set(concessionItemId, quantity);
+    const optimistic: ReservationConcessionLine[] = [...merged].map(([id, qty]) => ({
+      concessionItemId: id,
+      label: menu.find((item) => item.id === id)?.label ?? "",
+      quantity: qty,
+      unitPriceAmount: menu.find((item) => item.id === id)?.priceAmount ?? 0,
+    }));
+    setCartLines(optimistic);
+    setCartBusy(true);
+    setCartError(null);
+    concessionsClient
+      .putCart(
+        reservationId,
+        optimistic.map((line) => ({
+          concessionItemId: line.concessionItemId,
+          quantity: line.quantity,
+        })),
+      )
+      .then((reservation) => setCartLines(reservation.concessions ?? []))
+      .catch((e) => {
+        setCartLines(previous); // the step that failed is undone, visibly
+        if (e instanceof ConcessionError) setCartError(e.message);
+        else setCartError("Không cập nhật được bắp nước. Vui lòng thử lại.");
+      })
+      .finally(() => setCartBusy(false));
+  };
+
   const isSeated = event.eventType === "seated";
   const serviceFee = 0;
   const discount = 0;
-  const finalPrice = totalPrice;
+  // The charge is tickets PLUS whatever snacks are in the cart — one number everywhere on screen
+  // and one debit on the server (FR-006).
+  const concessionTotal = cartLines.reduce(
+    (sum, line) => sum + line.quantity * line.unitPriceAmount,
+    0,
+  );
+  const finalPrice = totalPrice + concessionTotal;
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -160,12 +250,19 @@ export default function CheckoutForm({
    * the map they just clicked. General admission has no seat to name, so the same rows read as the
    * tickets they are.
    */
-  const summaryLines: SummaryLine[] = selectedSeats.map((seat, index) => ({
-    key: String(seat.showtimeSeatId ?? `${seat.id}-${index}`),
-    label: isSeated ? `Ghế ${seat.id}` : seat.id,
-    detail: isSeated && seat.row ? `Hàng ${seat.row}` : undefined,
-    amount: seat.price,
-  }));
+  const summaryLines: SummaryLine[] = [
+    ...selectedSeats.map((seat, index) => ({
+      key: String(seat.showtimeSeatId ?? `${seat.id}-${index}`),
+      label: isSeated ? `Ghế ${seat.id}` : seat.id,
+      detail: isSeated && seat.row ? `Hàng ${seat.row}` : undefined,
+      amount: seat.price,
+    })),
+    ...cartLines.map((line) => ({
+      key: `concession-${line.concessionItemId}`,
+      label: `${line.label} ×${line.quantity}`,
+      amount: line.quantity * line.unitPriceAmount,
+    })),
+  ];
 
   const canSubmit = Boolean(name && email && phone && agreeTerms) && !submitting;
 
@@ -223,6 +320,23 @@ export default function CheckoutForm({
         }
       >
         <form id={formId} onSubmit={handleSubmit} className="space-y-10">
+          {/* Snacks ride this same checkout — one cart, one debit, one confirmation (FR-004/006). */}
+          <div className="space-y-3">
+            <ConcessionMenu
+              items={menu}
+              quantities={Object.fromEntries(
+                cartLines.map((line) => [line.concessionItemId, line.quantity]),
+              )}
+              busy={cartBusy}
+              onChange={handleConcessionChange}
+            />
+            {cartError && (
+              <p className="font-meta text-meta leading-5 text-burgundy-ink" role="alert">
+                {cartError}
+              </p>
+            )}
+          </div>
+
           <BookingSection
             step="03"
             title="Người nhận vé"
