@@ -79,14 +79,15 @@ function assertEditableWindow(ctx: ShowtimeContext): void {
 
 export interface UpdateShowtimeInput {
   startsAt?: string;
-  venueId?: number;
+  // `venueId` is GONE on purpose (0039): an event is bound to one venue, so "relocating" was the
+  // one edit that could contradict that binding. The zod schema no longer names the key either —
+  // an old client sending it gets it stripped silently rather than earning a refusal message.
 }
 
 export async function updateShowtime(
   actorUserId: number,
   ctx: ShowtimeContext,
   input: UpdateShowtimeInput,
-  isAdmin: boolean,
 ): Promise<ShowtimeMutationResult> {
   assertEditableWindow(ctx);
 
@@ -99,64 +100,18 @@ export async function updateShowtime(
     }
   }
 
-  if (input.venueId !== undefined && input.venueId !== ctx.venue_id) {
-    const { rows } = await pool.query<{ created_by: number }>(
-      `SELECT created_by FROM venues WHERE id = $1`,
-      [input.venueId],
-    );
-    if (!rows[0]) throw err.badRequest("validation_failed", "Địa điểm không tồn tại.");
-    if (rows[0].created_by !== actorUserId && !isAdmin) {
-      throw err.forbidden("not_owner", "Bạn không sở hữu địa điểm này.");
-    }
-  }
-
   return withTransaction(async (client) => {
-    const inv = await showtimeInventory(ctx.id, client);
-
-    // Relocating is the strict one: a buyer bought a place as much as a date.
-    if (input.venueId !== undefined && input.venueId !== ctx.venue_id) {
-      if (inv.sold > 0) {
-        throw new HttpError(
-          409,
-          "showtime_has_sales",
-          `Suất này đã bán ${inv.sold} vé, không thể đổi địa điểm.`,
-          {
-            sold: inv.sold,
-          },
-        );
-      }
-      if (inv.held > 0) {
-        throw new HttpError(
-          409,
-          "showtime_has_holds",
-          `Đang có ${inv.held} vé được giữ ở suất này, không thể đổi địa điểm.`,
-          {
-            held: inv.held,
-          },
-        );
-      }
-      // A seated showtime's map is snapshotted from a layout belonging to the OLD venue. Re-pointing
-      // it is a seat-map lifecycle operation owned by feature 005's re-apply, not an edit here.
-      if (inv.hasSeatMap) {
-        throw err.conflict(
-          "seat_map_locks_venue",
-          "Suất này đã có sơ đồ ghế lấy từ địa điểm cũ. Hãy dùng trình thiết kế sơ đồ để áp dụng lại bố cục cho địa điểm mới.",
-        );
-      }
-    }
-
     const changed: string[] = [];
     if (input.startsAt !== undefined) changed.push("showtime.startsAt");
-    if (input.venueId !== undefined && input.venueId !== ctx.venue_id)
-      changed.push("showtime.venue");
 
+    // Venue is deliberately NOT in this UPDATE: the event's venue (`events.venue_id`, 0039) owns
+    // that fact now, and a showtime inherits it rather than carrying its own opinion.
     const { rows } = await client.query<{ starts_at: Date; venue_id: number }>(
       `UPDATE showtimes
-          SET starts_at = COALESCE($2::timestamptz, starts_at),
-              venue_id = COALESCE($3::bigint, venue_id)
+          SET starts_at = COALESCE($2::timestamptz, starts_at)
         WHERE id = $1
         RETURNING starts_at, venue_id`,
-      [ctx.id, input.startsAt ?? null, input.venueId ?? null],
+      [ctx.id, input.startsAt ?? null],
     );
 
     const { returnedToReview } = await applyOrganizerEdit(

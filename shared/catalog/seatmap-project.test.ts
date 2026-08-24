@@ -22,7 +22,7 @@ import {
   seatNumberFor,
   stitchSeatIds,
 } from "./seatmap-project.js";
-import { LAYOUT_MAX_SEATS, blockingIssues, validateLayout } from "./seatmap-validate.js";
+import { LAYOUT_MAX, LAYOUT_MAX_SEATS, LAYOUT_MIN, LAYOUT_SPACE, blockingIssues, validateLayout } from "./seatmap-validate.js";
 
 // The document → rows projection, tested where it lives. Every assertion is either a database
 // constraint (`pos_x`/`pos_y` 0–10000, `rotation` 0–359, `UNIQUE (section, row, number)`) or the rule
@@ -163,8 +163,8 @@ describe("label schemes", () => {
 describe("projection produces storable, uniquely-labelled seats", () => {
   const storable = (seats: { x: number; y: number; rotation: number }[]) => {
     for (const s of seats) {
-      expect(Number.isInteger(s.x) && s.x >= 0 && s.x <= 10000).toBe(true);
-      expect(Number.isInteger(s.y) && s.y >= 0 && s.y <= 10000).toBe(true);
+      expect(Number.isInteger(s.x) && s.x >= LAYOUT_MIN && s.x <= LAYOUT_MAX).toBe(true);
+      expect(Number.isInteger(s.y) && s.y >= LAYOUT_MIN && s.y <= LAYOUT_MAX).toBe(true);
       expect(Number.isInteger(s.rotation) && s.rotation >= 0 && s.rotation <= 359).toBe(true);
     }
   };
@@ -190,9 +190,12 @@ describe("projection produces storable, uniquely-labelled seats", () => {
   });
 
   it("clamps a block dragged past the edge rather than emitting an unstorable row", () => {
-    const p = projectDocument(doc([regenerateBlock(block({ x: 9950, y: 9950 }), mint)]));
+    // 50 units short of the corner, wherever the corner is. A literal put the block in open floor
+    // the moment the space grew, and the clamp this asserts then never fired.
+    const near = LAYOUT_MAX - 50;
+    const p = projectDocument(doc([regenerateBlock(block({ x: near, y: near }), mint)]));
     storable(p.seats);
-    expect(p.seats.some((s) => s.x === 10000)).toBe(true);
+    expect(p.seats.some((s) => s.x === LAYOUT_MAX)).toBe(true);
   });
 
   it("bends a curved row without leaving the space, and keeps labels unique", () => {
@@ -273,6 +276,8 @@ describe("adopting a layout that has no document", () => {
     status: "draft",
     isTemplate: false,
     orphanRule: "balanced",
+    focalPoint: null,
+    floors: [],
     version: 3,
     sections: [{ id: 1, name: "Khu A", seatShape: "circle", seatSizeMultiplier: 1 }],
     rows: [],

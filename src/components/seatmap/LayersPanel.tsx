@@ -9,6 +9,7 @@ import { isSeatBearing } from "@/shared/catalog/seatmap-document";
 import { BLOCK_LABEL } from "./documentOps";
 import { rowLabelsOf } from "./rowOps";
 
+import { RAIL_PANEL } from "./panelSurface";
 /**
  * The chart's structure as a tree, and the search over it (§5, §36).
  *
@@ -40,7 +41,7 @@ const ICON: Record<string, string> = {
 };
 
 const chip =
-  " px-1 font-mono text-[10px] leading-4 text-beige-kem/45 transition hover:text-beige-kem";
+  " px-1 font-mono text-[10px] leading-4 text-beige-kem/70 transition hover:text-beige-kem";
 
 export default function LayersPanel({
   doc,
@@ -55,7 +56,7 @@ export default function LayersPanel({
   selected: ReadonlySet<string>;
   selectedRowKey: string | null;
   onSelectBlock: (key: string, additive: boolean) => void;
-  onSelectRow: (sectionName: string | null, label: string) => void;
+  onSelectRow: (blockKey: string, sectionName: string | null, label: string) => void;
   onToggleLock: (key: string, locked: boolean) => void;
   onToggleHidden: (key: string, hidden: boolean) => void;
 }) {
@@ -78,7 +79,10 @@ export default function LayersPanel({
         .toLowerCase();
       // A bare seat number is a common thing to search for; the row labels above cover "B", and the
       // seat numbers themselves are cheap to include for a block of any realistic size.
-      return haystack.includes(q) || (b.seats ?? []).some((s) => `${s.rowLabel}${s.seatNumber}`.toLowerCase() === q);
+      return (
+        haystack.includes(q) ||
+        (b.seats ?? []).some((s) => `${s.rowLabel}${s.seatNumber}`.toLowerCase() === q)
+      );
     };
 
     const bySection = new Map<number | null, DocumentBlock[]>();
@@ -100,30 +104,55 @@ export default function LayersPanel({
   const shown = groups.reduce((n, [, list]) => n + list.length, 0);
 
   return (
-    <div className="border-2 border-beige-kem bg-surface-2 p-4">
+    <div className={RAIL_PANEL}>
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">
           Cấu trúc
         </h3>
-        <span className="font-mono text-[10px] text-beige-kem/45">
+        <span aria-live="polite" className="font-mono text-[10px] text-beige-kem/70">
           {query ? `${shown}/${total}` : `${total} khối`}
         </span>
       </div>
 
-      <input
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Tìm khu, khối, hàng, ghế (VD B12)"
-        className="mt-2 h-8 w-full border-2 border-beige-kem/40 bg-surface-2 px-2 text-[11px] text-beige-kem outline-none focus:border-burgundy"
-      />
+      <div className="relative mt-2">
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            const first = groups[0]?.[1][0];
+            if (e.key === "Enter" && first) onSelectBlock(first.key, false);
+            if (e.key === "Escape") setQuery("");
+          }}
+          aria-label="Tìm trong cấu trúc sơ đồ"
+          placeholder="Tìm khu, khối, hàng, ghế (VD B12)"
+          className="h-8 w-full border-2 border-beige-kem/40 bg-surface-2 px-2 pr-8 text-[11px] text-beige-kem outline-none focus:border-burgundy"
+        />
+        {query && (
+          <button
+            type="button"
+            onClick={() => setQuery("")}
+            aria-label="Xoá nội dung tìm kiếm"
+            className="absolute right-0 top-0 grid h-8 w-8 place-items-center font-mono text-xs text-beige-kem/70 hover:text-beige-kem"
+          >
+            ×
+          </button>
+        )}
+      </div>
+
+      {query && shown > 0 && (
+        <p className="mt-1 font-mono text-[9px] text-beige-kem/60">
+          Enter để chọn và vừa khung kết quả đầu tiên
+        </p>
+      )}
 
       {total === 0 && (
-        <p className="mt-3 text-[11px] leading-4 text-beige-kem/50">
+        <p className="mt-3 text-[11px] leading-4 text-beige-kem/70">
           Sơ đồ trống. Thêm khối đầu tiên từ bảng bên dưới.
         </p>
       )}
       {total > 0 && shown === 0 && (
-        <p className="mt-3 text-[11px] leading-4 text-beige-kem/50">Không tìm thấy gì khớp.</p>
+        <p className="mt-3 text-[11px] leading-4 text-beige-kem/70">Không tìm thấy gì khớp.</p>
       )}
 
       <div className="mt-2 max-h-80 space-y-2 overflow-y-auto">
@@ -131,7 +160,7 @@ export default function LayersPanel({
           const sectionName = sectionId === null ? null : (nameOfSection.get(sectionId) ?? null);
           return (
             <div key={sectionId ?? "none"}>
-              <p className="font-mono text-[10px] uppercase tracking-wider text-beige-kem/45">
+              <p className="font-mono text-[10px] uppercase tracking-wider text-beige-kem/70">
                 {sectionName ?? "Chưa thuộc khu nào"}
               </p>
               <ul className="mt-0.5 space-y-0.5">
@@ -141,7 +170,8 @@ export default function LayersPanel({
                   return (
                     <li key={b.key}>
                       <div
-                        className={`flex items-center gap-1 px-1 py-0.5 ${ selected.has(b.key) ? "bg-burgundy/25" : "hover:bg-beige-kem/10"
+                        className={`flex items-center gap-1 px-1 py-0.5 ${
+                          selected.has(b.key) ? "bg-burgundy/25" : "hover:bg-beige-kem/10"
                         }`}
                       >
                         <button
@@ -155,7 +185,7 @@ export default function LayersPanel({
                               return next;
                             })
                           }
-                          className="w-3 shrink-0 font-mono text-[10px] text-beige-kem/45 disabled:opacity-0"
+                          className="w-3 shrink-0 font-mono text-[10px] text-beige-kem/70 disabled:opacity-0"
                           aria-label={expanded ? "Thu gọn" : "Mở rộng"}
                         >
                           {expanded ? "▾" : "▸"}
@@ -163,18 +193,17 @@ export default function LayersPanel({
                         <button
                           type="button"
                           onClick={(e) => onSelectBlock(b.key, e.shiftKey)}
-                          className={`min-w-0 flex-1 truncate text-left text-[11px] ${ b.hidden ? "text-beige-kem/35 line-through" : "text-beige-kem/85"
+                          className={`min-w-0 flex-1 truncate text-left text-[11px] ${
+                            b.hidden ? "text-beige-kem/70 line-through" : "text-beige-kem/85"
                           }`}
-                          title={`${BLOCK_LABEL[b.kind]} — bấm để chọn`}
+                          title={`${BLOCK_LABEL[b.kind]} — bấm để chọn và vừa khung`}
                         >
-                          <span aria-hidden="true" className="mr-1 text-beige-kem/45">
+                          <span aria-hidden="true" className="mr-1 text-beige-kem/70">
                             {ICON[b.kind] ?? "◇"}
                           </span>
                           {b.title}
                           {rows.length > 0 && (
-                            <span className="ml-1 text-beige-kem/40">
-                              ({b.seats?.length ?? 0})
-                            </span>
+                            <span className="ml-1 text-beige-kem/70">({b.seats?.length ?? 0})</span>
                           )}
                         </button>
                         <button
@@ -205,10 +234,11 @@ export default function LayersPanel({
                               <li key={label}>
                                 <button
                                   type="button"
-                                  onClick={() => onSelectRow(sectionName, label)}
-                                  className={`border px-1 font-mono text-[10px] transition ${ selectedRowKey === key
+                                  onClick={() => onSelectRow(b.key, sectionName, label)}
+                                  className={`border px-1 font-mono text-[10px] transition ${
+                                    selectedRowKey === key
                                       ? "border-burgundy bg-burgundy/25 text-beige-kem"
-                                      : "border-beige-kem/30 text-beige-kem/60 hover:border-beige-kem"
+                                      : "border-beige-kem/30 text-beige-kem/70 hover:border-beige-kem"
                                   }`}
                                   title={`Hàng ${label}`}
                                 >

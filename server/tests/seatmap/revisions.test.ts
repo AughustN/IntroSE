@@ -88,7 +88,17 @@ describe('chart history', () => {
     expect(restored.status).toBe('draft');
   });
 
-  it('REFUSES a restore that would delete a seat somebody has bought', async () => {
+  // Restoring a SMALLER chart drops seats that have been sold. That used to be refused outright with
+  // `seat_in_use`; it is now allowed, because the seats are ARCHIVED rather than deleted (see the note
+  // above `saveLayout` in layouts.service.ts). The refusal only ever protected the booking, and told
+  // the organizer to "cancel or edit that showtime first" — not something the owner of a show that is
+  // already selling can reasonably do. Archiving keeps every guarantee that mattered, so this test now
+  // asserts the two halves of that promise: the chart moves on, and nothing sold is lost.
+  //
+  // Worth knowing why this went unnoticed: the assertion below was never reached. The save path wrote
+  // one query per seat, which took this test past its timeout every run, so it failed as a timeout
+  // rather than as a wrong status. Batching those writes is what made it fast enough to get here.
+  it('ARCHIVES a sold seat a restore drops, rather than refusing the whole restore', async () => {
     const o = await organizer();
     const { venue, layoutId } = await chart(o, 6);
     // History: a 6-seat version, then a 4-seat one.
@@ -117,14 +127,22 @@ describe('chart history', () => {
     await bindAndGenerate(o.h, { showtime, layoutId });
     await pool.query(`UPDATE showtime_seats SET status = 'sold' WHERE showtime_id = $1`, [showtime]);
 
-    // Going back to the SMALL chart would delete two seats that are sold. That is the refusal.
-    const refused = await request(app)
-      .post(`/api/organizer/layouts/${layoutId}/revisions/${smaller.id}/restore`).set(o.h).expect(409);
-    expect(refused.body.error).toBe('seat_in_use');
+    // Going back to the SMALL chart drops two seats that are sold. The restore is allowed.
+    await request(app)
+      .post(`/api/organizer/layouts/${layoutId}/revisions/${smaller.id}/restore`).set(o.h).expect(200);
 
-    // Refused whole: all six survive.
+    // Half one: the chart really is the smaller one. Reads filter `archived_at IS NULL`, so the two
+    // dropped seats have left it — an archived seat must not come back as one the organizer can edit.
     const after = (await request(app).get(`/api/organizer/layouts/${layoutId}`).set(o.h).expect(200)).body;
-    expect(after.seats).toHaveLength(6);
+    expect(after.seats).toHaveLength(4);
+
+    // Half two, and the reason archiving is safe where deleting would not be: the showtime still holds
+    // all six, still sold. The rows were archived, never removed, so no ticket lost the seat it names.
+    const sold = await pool.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM showtime_seats WHERE showtime_id = $1 AND status = 'sold'`,
+      [showtime],
+    );
+    expect(sold.rows[0].n).toBe(6);
   });
 
   it('never restores a revision belonging to another chart, or another organizer’s', async () => {

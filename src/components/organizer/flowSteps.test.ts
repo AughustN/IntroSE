@@ -11,6 +11,7 @@ const event = (over: Partial<MyEvent> = {}): MyEvent => ({
   id: 1,
   slug: "e",
   title: "Đêm nhạc Indie",
+  description: "",
   status: "draft",
   moderation: "pending_review",
   reviewNote: null,
@@ -24,6 +25,8 @@ const event = (over: Partial<MyEvent> = {}): MyEvent => ({
   totalRevenueVnd: 0,
   nextShowtimeAt: null,
   venueName: null,
+  // `flowSteps` reads none of these — here only because the fixture builds a whole MyEvent.
+  venueId: null,
   ...over,
 });
 
@@ -303,21 +306,55 @@ describe("the four states events.status can hold", () => {
 });
 
 describe("an on-sale event whose showtimes have all passed", () => {
+  const past = () =>
+    showtime({
+      startsAt: new Date(Date.now() - 2 * HOUR).toISOString(),
+      hasSeatMap: true,
+      bookableSeats: 12,
+      tiers: [tier()],
+    });
+
   it("does not mark the selling step as not-yet-started", () => {
     // `upcoming()` filters on startsAt > now, so once the last showtime passes every earlier step
     // goes todo and `ready` is false. If readiness is consulted before liveness, the rail renders
     // label "Đang bán" with state "todo" — grey, not-started, on an event that is selling. Reachable
     // in the window between the last showtime passing and status being flipped to 'finished'.
-    const past = showtime({
-      startsAt: new Date(Date.now() - 2 * HOUR).toISOString(),
-      hasSeatMap: true,
-      bookableSeats: 12,
-    });
-    const steps = flowSteps(event({ status: "on_sale", moderation: "approved" }), [past]);
+    const steps = flowSteps(event({ status: "on_sale", moderation: "approved" }), [past()]);
     const submit = steps.find((s) => s.id === "submit")!;
 
     expect(submit.label).toBe("Đang bán");
     expect(submit.state).toBe("done");
+  });
+
+  it("does not demand a NEW showtime from an event that is already selling", () => {
+    // The bug as reported: entering a published event whose dates have played out rendered step 2
+    // blocked — "Chưa có suất chiếu sắp diễn…" with a "Thêm suất chiếu →" button — under a submit
+    // step that correctly read Đang bán. Its history proves every setup step; the calendar does not
+    // re-open gates the publish check already passed.
+    const steps = flowSteps(event({ status: "on_sale", moderation: "approved" }), [past()]);
+
+    expect(byId(steps, "showtime").state).toBe("done");
+    expect(byId(steps, "tiers").state).toBe("done");
+    expect(byId(steps, "chart").state).toBe("done");
+    expect(byId(steps, "chart-ready").state).toBe("done");
+    expect(byId(steps, "apply").state).toBe("done");
+  });
+
+  it("gives an event waiting for admin review the same treatment", () => {
+    // pending_review passed the same server gates at submission time; only the admin's yes differs.
+    const steps = flowSteps(event({ status: "on_sale", moderation: "pending_review" }), [past()]);
+    expect(byId(steps, "showtime").state).toBe("done");
+    expect(byId(steps, "apply").state).toBe("done");
+  });
+
+  it("keeps judging a DRAFT by what is ahead of it — a past showtime fixes nothing", () => {
+    // The regression guard for the fix above: scoping by submission must not leak to events nobody
+    // has submitted, where a date in the past genuinely cannot be repaired and the rail's job is to
+    // say so.
+    const steps = flowSteps(event({ status: "draft" }), [past()]);
+    expect(byId(steps, "showtime").state).toBe("blocked");
+    expect(byId(steps, "showtime").reason).toContain("Chưa có suất chiếu sắp diễn");
+    expect(byId(steps, "showtime").action).toBe("showtimes");
   });
 });
 

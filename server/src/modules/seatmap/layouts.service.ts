@@ -314,6 +314,8 @@ export async function validate(
       name: s.name,
       color: s.color,
       seatSizeMultiplier: s.seatSizeMultiplier,
+      // Without this the overlap rule cannot tell a stacked balcony from two seats in one spot.
+      floorId: s.floorId ?? null,
     })),
     categories: layout.categories.map((c) => ({ id: c.id ?? 0, name: c.name })),
     // `capacity` and `categoryId` come too, or a capacity zone is invisible to the validator and a
@@ -325,6 +327,10 @@ export async function validate(
       points: e.points,
       capacity: e.capacity,
       categoryId: e.categoryId,
+      // A zone drawn as a plain rectangle has no `points`, so `zone_over_seats` has nothing to ask
+      // "what stands inside this?" with unless its box comes too.
+      width: e.width,
+      height: e.height,
     })),
     categoriesWithTier,
   });

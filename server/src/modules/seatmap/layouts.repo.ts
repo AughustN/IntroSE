@@ -88,11 +88,30 @@ export async function listAllLayouts(userId: number, db: Db = pool): Promise<Lay
     seat_count: string;
     usage_count: string;
     updated_at: Date;
+    has_published: boolean;
+    thumbnail: { x: number; y: number; w: number; h: number; kind: string }[] | null;
   }>(
+    // `has_published` uses EXISTS, not a count: the question is boolean and a chart with a long
+    // history should not pay for counting it.
+    //
+    // The thumbnail is projected IN SQL rather than by shipping the document and reducing it here —
+    // the whole point is that the document never crosses the wire for a list view. Capped at 60
+    // blocks, which is far past the point where a two-centimetre picture can show another one.
     `SELECT l.id, l.venue_id, v.name AS venue_name, l.name, l.status, l.is_template, l.updated_at,
             (SELECT count(*) FROM seats s WHERE s.layout_id = l.id) AS seat_count,
             (SELECT count(*) FROM showtimes st
-              WHERE st.layout_id = l.id AND st.status NOT IN ('finished', 'cancelled')) AS usage_count
+              WHERE st.layout_id = l.id AND st.status NOT IN ('finished', 'cancelled')) AS usage_count,
+            EXISTS (SELECT 1 FROM layout_revisions r WHERE r.layout_id = l.id) AS has_published,
+            (SELECT jsonb_agg(t.box)
+               FROM (
+                 SELECT jsonb_build_object(
+                          'x', (b->>'x')::int, 'y', (b->>'y')::int,
+                          'w', (b->>'width')::int, 'h', (b->>'height')::int,
+                          'kind', b->>'kind') AS box
+                   FROM jsonb_array_elements(l.document->'blocks') b
+                  WHERE jsonb_typeof(l.document->'blocks') = 'array'
+                  LIMIT 60
+               ) t) AS thumbnail
        FROM venue_layouts l
        JOIN venues v ON v.id = l.venue_id
       WHERE v.created_by = $1
@@ -109,6 +128,8 @@ export async function listAllLayouts(userId: number, db: Db = pool): Promise<Lay
     seatCount: Number(r.seat_count),
     usageCount: Number(r.usage_count),
     updatedAt: r.updated_at.toISOString(),
+    hasPublishedVersion: r.has_published,
+    thumbnail: r.thumbnail ?? [],
   }));
 }
 
@@ -159,12 +180,14 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
     reference_offset_y: number;
     reference_opacity: string;
     orphan_rule: "balanced" | "strict";
+    focal_x: number | null;
+    focal_y: number | null;
     document: unknown;
   }>(`SELECT * FROM venue_layouts WHERE id = $1`, [layoutId]);
   const l = head.rows[0];
   if (!l) return null;
 
-  const [sections, categories, rows, seats, elements, tables] = await Promise.all([
+  const [sections, categories, rows, seats, elements, tables, floors] = await Promise.all([
     db.query<{
       id: number;
       name: string;
@@ -172,8 +195,9 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
       color: string | null;
       seat_shape: "circle" | "square";
       seat_size_multiplier: string;
+      floor_id: number | null;
     }>(
-      `SELECT id, name, description, color, seat_shape, seat_size_multiplier
+      `SELECT id, name, description, color, seat_shape, seat_size_multiplier, floor_id
          FROM sections WHERE layout_id = $1 ORDER BY name`,
       [layoutId],
     ),
@@ -252,6 +276,14 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
          FROM layout_tables WHERE layout_id = $1 ORDER BY id`,
       [layoutId],
     ),
+    // Floors (0044). Ordered by `display_order` then name so the editor's list, the buyer's strip and
+    // the document all present the same sequence — a picker whose order shifts between reads is worse
+    // than no picker.
+    db.query<{ id: number; name: string; display_order: number }>(
+      `SELECT id, name, display_order FROM layout_floors WHERE layout_id = $1
+        ORDER BY display_order, name`,
+      [layoutId],
+    ),
   ]);
 
   const layout: Layout = {
@@ -268,7 +300,9 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
       color: s.color,
       seatShape: s.seat_shape,
       seatSizeMultiplier: Number(s.seat_size_multiplier),
+      floorId: s.floor_id,
     })),
+    floors: floors.rows.map((f) => ({ id: f.id, name: f.name, displayOrder: f.display_order })),
     categories: categories.rows.map((c) => ({ id: c.id, name: c.name, color: c.color })),
     rows: rows.rows.map((r) => ({
       id: r.id,
@@ -340,6 +374,7 @@ export async function getLayout(layoutId: number, db: Db = pool): Promise<Layout
       opacity: Math.round(Number(l.reference_opacity) * 100),
     },
     orphanRule: l.orphan_rule,
+    focalPoint: l.focal_x === null || l.focal_y === null ? null : { x: l.focal_x, y: l.focal_y },
     document: null,
   };
 
@@ -518,6 +553,9 @@ export async function saveLayout(
     const inElements = projected ? projected.elements : (body.elements ?? []);
     // Rows only ever come from a projection: the deprecated array form of the request predates them.
     const inRows = projected ? projected.rows : [];
+    // Floors reach the writer only through a document. The deprecated pre-document shape never gains
+    // them: it exists to keep the old editor working while it is ported, not to grow new features.
+    const inFloors = projected ? projected.floors : [];
 
     if (body.name !== undefined || body.isTemplate !== undefined) {
       await client.query(
@@ -526,61 +564,184 @@ export async function saveLayout(
       );
     }
 
-    // --- sections: upsert by id, delete the rest. Seats keep their section by id, so a section that
-    // survives keeps its seats; deleting one leaves its seats sectionless, which validation catches.
-    const keptSections: number[] = [];
-    const sectionIdMap = new Map<number, number>(); // client-side id → real id
-    for (const s of inSections) {
-      // `s.id > 0` and not merely `s.id`: a negative id is a placeholder the editor minted this
-      // session, and treating it as existing ran an UPDATE that matched nothing, never inserted the
-      // section, and left every seat pointing at a section id that does not exist — a foreign-key
-      // error on the seat INSERT. The categories loop below has always tested the sign; this one did
-      // not, and nothing exercised it because the tests only ever sent sections that already existed.
-      if (s.id && s.id > 0) {
+    /*
+     * Which ids the document names that THIS LAYOUT ACTUALLY STILL HAS.
+     *
+     * A positive id is normally an existing row, and the three loops below upsert on that basis. It
+     * is not always true: `restoreRevision` replays a document captured before later saves deleted
+     * some of what it names, so an old revision can carry section, category and row ids that are
+     * gone. `UPDATE ... WHERE id = $1` matches nothing and raises nothing, so the id was recorded as
+     * kept and mapped to itself anyway — and the seats naming it then failed the foreign key with
+     * `23503 ... is not present in table "layout_rows"`, which surfaces as a 500 rather than as
+     * anything an organizer can act on.
+     *
+     * This is the same failure the sections loop below already documents for NEGATIVE ids, arrived
+     * at from the other direction: an id that does not exist must be INSERTED, not updated, whether
+     * it is negative because the editor minted it or positive because it has since been deleted.
+     * Reading the three sets once here is what lets each loop tell those apart.
+     */
+    const idsOf = async (
+      table: "sections" | "layout_categories" | "layout_rows" | "layout_floors",
+    ) => {
+      const { rows } = await client.query<{ id: number }>(
+        `SELECT id FROM ${table} WHERE layout_id = $1`,
+        [layoutId],
+      );
+      return new Set(rows.map((r) => r.id));
+    };
+    const liveSectionIds = await idsOf("sections");
+    const liveCategoryIds = await idsOf("layout_categories");
+    const liveRowIds = await idsOf("layout_rows");
+    const liveFloorIds = await idsOf("layout_floors");
+
+    /*
+     * --- floors (0044): BEFORE sections, because a section points at one.
+     *
+     * Same upsert-by-id/delete-the-rest shape as sections, and the same placeholder protocol: a
+     * negative id is one the editor minted this session, so it is inserted and recorded here — a
+     * section created in the same save as its floor can then resolve it.
+     *
+     * Deleting a floor leaves its sections with `floor_id` NULL (ON DELETE SET NULL in 0044), which
+     * is the implicit single floor. It never touches a seat: removing a level must not remove the
+     * inventory standing on it.
+     */
+    const keptFloors: number[] = [];
+    const floorIdMap = new Map<number, number>();
+    for (const f of inFloors) {
+      if (f.id && f.id > 0 && liveFloorIds.has(f.id)) {
         await client.query(
-          `UPDATE sections SET name = $2, description = $3,
-                               color = $5, seat_shape = COALESCE($6, seat_shape),
-                               seat_size_multiplier = COALESCE($7, seat_size_multiplier)
-             WHERE id = $1 AND layout_id = $4`,
-          [
-            s.id,
-            s.name,
-            s.description ?? null,
-            layoutId,
-            s.color ?? null,
-            s.seatShape ?? null,
-            s.seatSizeMultiplier ?? null,
-          ],
+          `UPDATE layout_floors SET name = $2, display_order = $3 WHERE id = $1 AND layout_id = $4`,
+          [f.id, f.name, f.displayOrder, layoutId],
         );
-        keptSections.push(s.id);
-        sectionIdMap.set(s.id, s.id);
+        keptFloors.push(f.id);
+        floorIdMap.set(f.id, f.id);
       } else {
         const { rows } = await client.query<{ id: number }>(
-          // A new section gets a palette colour by position unless the organizer chose one. FR-066
-          // makes a colourless section block publishing, so defaulting here is what stops the gate
-          // from blocking work the organizer was never asked to do — it still catches a colour that
-          // was explicitly cleared.
-          `INSERT INTO sections (layout_id, name, description, color, seat_shape, seat_size_multiplier)
-           VALUES ($1, $2, $3,
-                   COALESCE($4, (${PALETTE_SQL})[(SELECT count(*) FROM sections WHERE layout_id = $1)::int % ${PALETTE_LEN} + 1]),
-                   COALESCE($5, 'circle'), COALESCE($6, 1.0)) RETURNING id`,
-          [
-            layoutId,
-            s.name,
-            s.description ?? null,
-            s.color ?? null,
-            s.seatShape ?? null,
-            s.seatSizeMultiplier ?? null,
-          ],
+          `INSERT INTO layout_floors (layout_id, name, display_order) VALUES ($1, $2, $3)
+             ON CONFLICT (layout_id, name) DO UPDATE SET display_order = EXCLUDED.display_order
+             RETURNING id`,
+          [layoutId, f.name, f.displayOrder],
         );
-        keptSections.push(rows[0].id);
-        // Record placeholder → real, exactly as the categories loop does. Without it `resolveRef`
-        // cannot find the new section, so every seat drawn into a brand-new section was saved
-        // SECTIONLESS — which validation then reports as `seat_without_section` and which blocks
-        // publishing, for a section the organizer had just created.
-        if (s.id) sectionIdMap.set(s.id, rows[0].id);
+        keptFloors.push(rows[0].id);
+        if (f.id) floorIdMap.set(f.id, rows[0].id);
       }
     }
+    await client.query(
+      `DELETE FROM layout_floors WHERE layout_id = $1 AND NOT (id = ANY($2::bigint[]))`,
+      [layoutId, keptFloors],
+    );
+
+    /**
+     * A section's floor id, translated through this save's placeholders.
+     *
+     * Returns null for an id no floor answers to, rather than passing it through: a dangling
+     * `floor_id` would fail the foreign key and take the whole save with it, and "no floor" is a
+     * meaningful, harmless answer — the section lands on the implicit single floor where the
+     * organizer can see it and move it.
+     */
+    const resolveFloor = (id: number | null | undefined): number | null => {
+      if (id === null || id === undefined) return null;
+      const mapped = floorIdMap.get(id);
+      if (mapped !== undefined) return mapped;
+      return keptFloors.includes(id) ? id : null;
+    };
+
+    // --- sections: upsert by id, delete the rest. Seats keep their section by id, so a section that
+    // survives keeps its seats; deleting one leaves its seats sectionless, which validation catches.
+    /*
+     * Written in TWO statements, not one per section — same reason as rows below, see the note there.
+     *
+     * `s.id > 0` and not merely `s.id`: a negative id is a placeholder the editor minted this
+     * session, and treating it as existing ran an UPDATE that matched nothing, never inserted the
+     * section, and left every seat pointing at a section id that does not exist — a foreign-key error
+     * on the seat INSERT. `liveSectionIds` extends the same guard to an id that is positive but no
+     * longer there.
+     */
+    const keptSections: number[] = [];
+    const sectionIdMap = new Map<number, number>(); // client-side id → real id
+    type SecIn = (typeof inSections)[number];
+    const secUpdates: SecIn[] = [];
+    const secInserts: SecIn[] = [];
+    for (const s of inSections) {
+      if (s.id && s.id > 0 && liveSectionIds.has(s.id)) secUpdates.push(s);
+      else secInserts.push(s);
+    }
+
+    if (secUpdates.length > 0) {
+      await client.query(
+        // `floor_id` assigns unconditionally rather than through COALESCE: null is a MEANING here
+        // (the implicit single floor), so a section moved back off a balcony has to be able to say
+        // so. COALESCE would make that edit unrepresentable.
+        `UPDATE sections AS t
+            SET name = s.name, description = s.description, color = s.color,
+                seat_shape = COALESCE(s.seat_shape, t.seat_shape),
+                seat_size_multiplier = COALESCE(s.multiplier, t.seat_size_multiplier),
+                floor_id = s.floor_id
+           FROM unnest($2::bigint[], $3::text[], $4::text[], $5::text[], $6::text[],
+                       $7::numeric[], $8::bigint[])
+                AS s(id, name, description, color, seat_shape, multiplier, floor_id)
+          WHERE t.id = s.id AND t.layout_id = $1`,
+        [
+          layoutId,
+          secUpdates.map((x) => x.id as number),
+          secUpdates.map((x) => x.name),
+          secUpdates.map((x) => x.description ?? null),
+          secUpdates.map((x) => x.color ?? null),
+          secUpdates.map((x) => x.seatShape ?? null),
+          secUpdates.map((x) => x.seatSizeMultiplier ?? null),
+          secUpdates.map((x) => resolveFloor(x.floorId)),
+        ],
+      );
+      for (const x of secUpdates) {
+        keptSections.push(x.id as number);
+        sectionIdMap.set(x.id as number, x.id as number);
+      }
+    }
+
+    if (secInserts.length > 0) {
+      const { rows } = await client.query<{ id: number; name: string }>(
+        /*
+         * A new section gets a palette colour by position unless the organizer chose one. FR-066
+         * makes a colourless section block publishing, so defaulting here is what stops the gate from
+         * blocking work the organizer was never asked to do — it still catches a colour explicitly
+         * cleared.
+         *
+         * `WITH ORDINALITY` carries the position the old loop got for free from running one row at a
+         * time: the count subquery is evaluated once for the whole statement, so without the offset
+         * every section inserted in one save would be handed the SAME palette colour.
+         */
+        `INSERT INTO sections (layout_id, name, description, color, seat_shape, seat_size_multiplier, floor_id)
+         SELECT $1, s.name, s.description,
+                COALESCE(s.color, (${PALETTE_SQL})[
+                  (((SELECT count(*) FROM sections WHERE layout_id = $1) + s.ord - 1)::int
+                    % ${PALETTE_LEN}) + 1]),
+                COALESCE(s.seat_shape, 'circle'), COALESCE(s.multiplier, 1.0), s.floor_id
+           FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::numeric[], $7::bigint[])
+                WITH ORDINALITY AS s(name, description, color, seat_shape, multiplier, floor_id, ord)
+         RETURNING id, name`,
+        [
+          layoutId,
+          secInserts.map((x) => x.name),
+          secInserts.map((x) => x.description ?? null),
+          secInserts.map((x) => x.color ?? null),
+          secInserts.map((x) => x.seatShape ?? null),
+          secInserts.map((x) => x.seatSizeMultiplier ?? null),
+          secInserts.map((x) => resolveFloor(x.floorId)),
+        ],
+      );
+      // Mapped back by NAME, which `sections_layout_name_key` makes unique per layout — so this is
+      // exact without depending on RETURNING order, which Postgres does not promise.
+      const idByName = new Map(rows.map((r) => [r.name, r.id]));
+      for (const x of secInserts) {
+        const id = idByName.get(x.name);
+        if (id === undefined) continue;
+        keptSections.push(id);
+        // Record placeholder → real. Without it `resolveRef` cannot find the new section, so every
+        // seat drawn into a brand-new section was saved SECTIONLESS.
+        if (x.id) sectionIdMap.set(x.id, id);
+      }
+    }
+
     await client.query(
       `DELETE FROM sections WHERE layout_id = $1 AND NOT (id = ANY($2::bigint[]))`,
       [layoutId, keptSections],
@@ -592,7 +753,7 @@ export async function saveLayout(
     const keptCategories: number[] = [];
     const categoryIdMap = new Map<number, number>();
     for (const c of inCategories) {
-      if (c.id && c.id > 0) {
+      if (c.id && c.id > 0 && liveCategoryIds.has(c.id)) {
         await client.query(
           `UPDATE layout_categories SET name = $2, color = $3 WHERE id = $1 AND layout_id = $4`,
           [c.id, c.name, c.color, layoutId],
@@ -636,7 +797,12 @@ export async function saveLayout(
      * onto them, and the keep-list does not depend on the loop: a row is kept iff the projection names
      * its id.
      */
-    const keptRows: number[] = inRows.filter((r) => r.id > 0).map((r) => r.id);
+    // `liveRowIds` for the same reason the branch below tests it: a revision being restored can name
+    // rows that later saves deleted, and keeping such an id would both spare a row that is not there
+    // and hand `resolveRef` a mapping to nothing.
+    const keptRows: number[] = inRows
+      .filter((r) => r.id > 0 && liveRowIds.has(r.id))
+      .map((r) => r.id);
     // Deleting a row does NOT delete its seats: `seats.row_id` is ON DELETE SET NULL, so a seat whose
     // row is gone stays sellable and simply stops naming one. The seat's own delete rule is unchanged.
     await client.query(
@@ -644,24 +810,75 @@ export async function saveLayout(
       [layoutId, keptRows],
     );
 
+    /*
+     * Rows are written in TWO statements, not one per row.
+     *
+     * This loop used to issue an UPDATE or an INSERT per row, and the database is not on this
+     * machine: measured against the live branch, a bare round trip to Neon is ~36 ms, while the
+     * statement itself runs in ~0.1 ms. A stadium chart has 104 rows, so the loop spent about four
+     * seconds waiting on the network to do a fraction of a millisecond of work. The seats beside it
+     * were already batched through `unnest`; rows, sections, categories and floors were not, and
+     * together they were 125 of the 164 round trips one save made.
+     *
+     * The insert maps its new ids back by `(section_id, label)` rather than by the order rows come
+     * back in. That key is unique per layout (`layout_rows_label_idx`) AND unique within the payload,
+     * because the projection derives rows keyed on exactly it — so the mapping is exact without
+     * relying on RETURNING order, which Postgres does not promise.
+     */
     const rowIdMap = new Map<number, number>();
+    const rowUpdates: { id: number; label: string; sectionId: number | null; order: number }[] = [];
+    const rowInserts: { docId: number; label: string; sectionId: number | null; order: number }[] =
+      [];
     for (const r of inRows) {
       const sectionId = resolveRef(r.sectionId, sectionIdMap, keptSections);
-      if (r.id && r.id > 0) {
-        await client.query(
-          `UPDATE layout_rows SET label = $2, section_id = $3, display_order = $4, updated_at = now()
-             WHERE id = $1 AND layout_id = $5`,
-          [r.id, r.label, sectionId, r.displayOrder, layoutId],
-        );
-        rowIdMap.set(r.id, r.id);
-      } else {
-        const { rows } = await client.query<{ id: number }>(
-          `INSERT INTO layout_rows (layout_id, section_id, label, display_order)
-           VALUES ($1, $2, $3, $4) RETURNING id`,
-          [layoutId, sectionId, r.label, r.displayOrder],
-        );
-        keptRows.push(rows[0].id);
-        if (r.id) rowIdMap.set(r.id, rows[0].id);
+      const entry = { label: r.label, sectionId, order: r.displayOrder };
+      if (r.id && r.id > 0 && liveRowIds.has(r.id)) rowUpdates.push({ id: r.id, ...entry });
+      else rowInserts.push({ docId: r.id, ...entry });
+    }
+
+    if (rowUpdates.length > 0) {
+      await client.query(
+        `UPDATE layout_rows AS t
+            SET label = s.label, section_id = s.section_id,
+                display_order = s.display_order, updated_at = now()
+           FROM unnest($2::bigint[], $3::text[], $4::bigint[], $5::int[])
+                AS s(id, label, section_id, display_order)
+          WHERE t.id = s.id AND t.layout_id = $1`,
+        [
+          layoutId,
+          rowUpdates.map((r) => r.id),
+          rowUpdates.map((r) => r.label),
+          rowUpdates.map((r) => r.sectionId),
+          rowUpdates.map((r) => r.order),
+        ],
+      );
+      for (const r of rowUpdates) rowIdMap.set(r.id, r.id);
+    }
+
+    if (rowInserts.length > 0) {
+      const { rows } = await client.query<{
+        id: number;
+        section_id: number | null;
+        label: string;
+      }>(
+        `INSERT INTO layout_rows (layout_id, section_id, label, display_order)
+         SELECT $1, s.section_id, s.label, s.display_order
+           FROM unnest($2::bigint[], $3::text[], $4::int[])
+                AS s(section_id, label, display_order)
+         RETURNING id, section_id, label`,
+        [
+          layoutId,
+          rowInserts.map((r) => r.sectionId),
+          rowInserts.map((r) => r.label),
+          rowInserts.map((r) => r.order),
+        ],
+      );
+      const key = (sectionId: number | null, label: string) => `${sectionId ?? "none"}|${label}`;
+      const idByKey = new Map(rows.map((r) => [key(r.section_id, r.label), r.id]));
+      for (const r of rows) keptRows.push(r.id);
+      for (const r of rowInserts) {
+        const id = idByKey.get(key(r.sectionId, r.label));
+        if (id !== undefined && r.docId) rowIdMap.set(r.docId, id);
       }
     }
 
@@ -760,56 +977,186 @@ export async function saveLayout(
       [layoutId, keptSeats],
     );
 
-    for (const seat of inSeats) {
-      const x = clampCoord(seat.x);
-      const y = clampCoord(seat.y);
-      const rot = normaliseRotation(seat.rotation);
-      const sectionId = resolveRef(seat.sectionId, sectionIdMap, keptSections);
-      const categoryId = resolveRef(seat.categoryId ?? null, categoryIdMap, keptCategories);
-      const rowId = resolveRef(seat.rowId ?? null, rowIdMap, keptRows);
-      if (seat.id) {
-        await client.query(
-          `UPDATE seats SET section_id = $2, row_label = $3, seat_number = $4, seat_type = $5,
-                            pos_x = $6, pos_y = $7, rotation = $8, category_id = $10,
-                            is_accessible = $11, row_id = $12, companion_seat_id = NULL
-             WHERE id = $1 AND layout_id = $9`,
+    /*
+     * Seats are written in a fixed number of statements, not one per seat.
+     *
+     * The loop this replaces `await`-ed a query for every seat in the document, inside this
+     * transaction — one network round trip each, serialised. A save of a 2,000-seat chart spent
+     * that many round trips before it could commit, which made an ordinary "Lưu" the slowest thing
+     * in the editor and put a ceiling on seat count that had nothing to do with rendering.
+     *
+     * The one thing that must survive the rewrite is POSITION. `savedIds` is read back by index
+     * against `projected.seatOrigin` below, so a seat's id has to land at the index its document
+     * seat occupies in `inSeats` — which is why the ids are stitched back in the original walk
+     * order at the end rather than in whatever order the two batches happen to write.
+     */
+    /*
+     * Tables a DOCUMENT describes (0048).
+     *
+     * Until now `layout_tables` rows were minted only by the table endpoints, so a `table` block in a
+     * document drew an outline with nothing behind it: the block's seats pointed at no table, the
+     * buyer saw no table, and whole-table booking had nothing to gather. That is what stopped a
+     * built-in banquet starter from being a real banquet.
+     *
+     * Keyed by BLOCK KEY, not by table id: a block the document has never saved has no id to map
+     * from. A block that already carries a positive `tableId` was written through the endpoint and is
+     * left exactly as it is — this creates, it does not take ownership.
+     *
+     * Deliberately does NOT delete tables the document has dropped. `layout_tables` rows are pointed
+     * at by `seats.table_id` and copied onto `showtime_seats`, so removing one is an inventory
+     * operation with its own endpoint and its own guards; doing it silently as a side effect of a save
+     * is how a sold table stops existing. A dropped block leaves its table behind, which is visible
+     * and reversible.
+     */
+    const tableIdByBlockKey = new Map<string, number>();
+    if (projected && body.document) {
+      for (const b of body.document.blocks) {
+        if (b.kind !== "table") continue;
+        if (typeof b.tableId === "number" && b.tableId > 0) {
+          tableIdByBlockKey.set(b.key, b.tableId);
+          continue;
+        }
+        const made = await client.query<{ id: number }>(
+          `INSERT INTO layout_tables (layout_id, section_id, category_id, name, shape,
+                                      pos_x, pos_y, width, height, rotation, seat_count,
+                                      side_counts, booking_mode)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+           RETURNING id`,
           [
-            seat.id,
-            sectionId,
-            seat.rowLabel,
-            seat.seatNumber,
-            seat.seatType,
-            x,
-            y,
-            rot,
             layoutId,
-            categoryId,
-            seat.isAccessible ?? false,
-            rowId,
+            resolveRef(b.sectionId, sectionIdMap, keptSections),
+            resolveRef(b.categoryId ?? null, categoryIdMap, keptCategories),
+            b.title,
+            b.tableShape ?? "round",
+            clampCoord(b.x),
+            clampCoord(b.y),
+            Math.max(1, Math.round(b.width)),
+            Math.max(1, Math.round(b.height)),
+            normaliseRotation(b.rotation),
+            Math.max(0, Math.floor(b.tableSeatCount ?? 0)),
+            b.sideCounts ?? null,
+            b.bookingMode ?? "per_seat",
           ],
         );
-        savedIds.push(seat.id);
+        tableIdByBlockKey.set(b.key, made.rows[0].id);
+      }
+    }
+
+    const resolved = inSeats.map((seat, i) => ({
+      seat,
+      x: clampCoord(seat.x),
+      y: clampCoord(seat.y),
+      rot: normaliseRotation(seat.rotation),
+      sectionId: resolveRef(seat.sectionId, sectionIdMap, keptSections),
+      categoryId: resolveRef(seat.categoryId ?? null, categoryIdMap, keptCategories),
+      rowId: resolveRef(seat.rowId ?? null, rowIdMap, keptRows),
+      // Through the block the seat came from — `seatOrigin` is index-parallel to `inSeats`, and a
+      // brand-new table has no id for the seat itself to have carried.
+      tableId:
+        (projected ? tableIdByBlockKey.get(projected.seatOrigin[i]?.blockKey ?? "") : undefined) ??
+        seat.tableId ??
+        null,
+    }));
+    const toUpdate = resolved.filter((r) => r.seat.id);
+    const toInsert = resolved.filter((r) => !r.seat.id);
+
+    if (toUpdate.length > 0) {
+      await client.query(
+        `UPDATE seats AS s
+            SET section_id = v.section_id, row_label = v.row_label, seat_number = v.seat_number,
+                seat_type = v.seat_type, pos_x = v.pos_x, pos_y = v.pos_y, rotation = v.rotation,
+                category_id = v.category_id, is_accessible = v.is_accessible, row_id = v.row_id,
+                table_id = v.table_id,
+                companion_seat_id = NULL
+           FROM unnest($2::bigint[], $3::bigint[], $4::text[], $5::int[], $6::text[], $7::int[],
+                       $8::int[], $9::smallint[], $10::bigint[], $11::boolean[], $12::bigint[],
+                       $13::bigint[])
+                AS v(id, section_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation,
+                     category_id, is_accessible, row_id, table_id)
+          WHERE s.id = v.id AND s.layout_id = $1`,
+        [
+          layoutId,
+          toUpdate.map((r) => r.seat.id),
+          toUpdate.map((r) => r.sectionId),
+          toUpdate.map((r) => r.seat.rowLabel),
+          toUpdate.map((r) => r.seat.seatNumber),
+          toUpdate.map((r) => r.seat.seatType),
+          toUpdate.map((r) => r.x),
+          toUpdate.map((r) => r.y),
+          toUpdate.map((r) => r.rot),
+          toUpdate.map((r) => r.categoryId),
+          toUpdate.map((r) => r.seat.isAccessible ?? false),
+          toUpdate.map((r) => r.rowId),
+          toUpdate.map((r) => r.tableId),
+        ],
+      );
+    }
+
+    /*
+     * Ids are drawn from the sequence BEFORE the insert rather than read back from `RETURNING`.
+     *
+     * `RETURNING` makes no promise about the order it emits rows in — the SQL standard does not
+     * define one and Postgres is free to change it — and this call site cannot tolerate a guess,
+     * because a mis-ordered id silently pairs a companion seat with the wrong neighbour. Taking the
+     * ids up front makes the mapping something this code decides rather than something it infers.
+     */
+    const newIds: number[] = [];
+    if (toInsert.length > 0) {
+      /*
+       * `COALESCE` because `pg_get_serial_sequence` returns NULL on this schema: `seats.id` still
+       * defaults to `nextval('seats_id_seq')`, but the sequence's OWNERSHIP link to the column was
+       * lost somewhere in the table's migration history, and that lookup reads ownership rather
+       * than the default. Asking for the owned sequence first keeps this correct if the link is
+       * ever restored; naming it second is what makes it work today. A wrong name fails loudly on
+       * the next insert rather than silently minting nulls.
+       */
+      const minted = await client.query<{ id: number }>(
+        `SELECT nextval(COALESCE(pg_get_serial_sequence('seats', 'id'), 'seats_id_seq')) AS id
+           FROM generate_series(1, $1)`,
+        [toInsert.length],
+      );
+      for (const r of minted.rows) newIds.push(r.id);
+
+      await client.query(
+        `INSERT INTO seats (id, layout_id, section_id, row_label, seat_number, seat_type,
+                            pos_x, pos_y, rotation, category_id, is_accessible, row_id,
+                            companion_seat_id, table_id)
+         SELECT v.id, $1, v.section_id, v.row_label, v.seat_number, v.seat_type,
+                v.pos_x, v.pos_y, v.rotation, v.category_id, v.is_accessible, v.row_id, NULL,
+                v.table_id
+           FROM unnest($2::bigint[], $3::bigint[], $4::text[], $5::int[], $6::text[], $7::int[],
+                       $8::int[], $9::smallint[], $10::bigint[], $11::boolean[], $12::bigint[],
+                       $13::bigint[])
+                AS v(id, section_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation,
+                     category_id, is_accessible, row_id, table_id)`,
+        [
+          layoutId,
+          newIds,
+          toInsert.map((r) => r.sectionId),
+          toInsert.map((r) => r.seat.rowLabel),
+          toInsert.map((r) => r.seat.seatNumber),
+          toInsert.map((r) => r.seat.seatType),
+          toInsert.map((r) => r.x),
+          toInsert.map((r) => r.y),
+          toInsert.map((r) => r.rot),
+          toInsert.map((r) => r.categoryId),
+          toInsert.map((r) => r.seat.isAccessible ?? false),
+          toInsert.map((r) => r.rowId),
+          toInsert.map((r) => r.tableId),
+        ],
+      );
+    }
+
+    // Back into document order — see the note on `savedIds` above.
+    let mintedAt = 0;
+    for (const r of resolved) {
+      if (r.seat.id) {
+        savedIds.push(r.seat.id);
       } else {
-        const { rows } = await client.query<{ id: number }>(
-          `INSERT INTO seats (layout_id, section_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation,
-                              category_id, is_accessible, row_id, companion_seat_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL) RETURNING id`,
-          [
-            layoutId,
-            sectionId,
-            seat.rowLabel,
-            seat.seatNumber,
-            seat.seatType,
-            x,
-            y,
-            rot,
-            categoryId,
-            seat.isAccessible ?? false,
-            rowId,
-          ],
-        );
-        keptSeats.push(rows[0].id);
-        savedIds.push(rows[0].id);
+        const id = newIds[mintedAt];
+        mintedAt += 1;
+        keptSeats.push(id);
+        savedIds.push(id);
       }
     }
 
@@ -913,6 +1260,9 @@ export async function saveLayout(
         {
           sections: sectionIdMap,
           categories: categoryIdMap,
+          // Placeholder floor id → the real row, or the stored document keeps addressing levels that
+          // only ever existed in the editor session that drew them.
+          floors: floorIdMap,
           // Identity for tables: they are written through their own endpoints, so any id already in
           // the document is real and must be preserved rather than re-minted.
           tables: new Map(
@@ -926,9 +1276,28 @@ export async function saveLayout(
         },
         () => (temp -= 1),
       );
+      /*
+       * The new tables' ids, written back onto their blocks.
+       *
+       * Without this the stored document still describes them with no `tableId`, so the NEXT save
+       * would take them for new tables again and insert a second row for each — a chart gaining a
+       * duplicate set of tables every time it is saved. `stitchSeatIds` cannot carry these: it maps
+       * OLD id to new, and a table the document has never saved has no old id to map from.
+       */
+      const withTables =
+        tableIdByBlockKey.size === 0
+          ? stitched
+          : {
+              ...stitched,
+              blocks: stitched.blocks.map((b) =>
+                b.kind === "table" && tableIdByBlockKey.has(b.key)
+                  ? { ...b, tableId: tableIdByBlockKey.get(b.key) as number }
+                  : b,
+              ),
+            };
       await client.query(`UPDATE venue_layouts SET document = $2::jsonb WHERE id = $1`, [
         layoutId,
-        JSON.stringify(stitched),
+        JSON.stringify(withTables),
       ]);
     }
 
@@ -1005,12 +1374,14 @@ export async function generateSeatRow(
     );
     const spacing = Math.round(SEAT_DIAMETER * 1.5);
     const y = clampCoord((existing[0].max_y ?? 1200 - spacing) + spacing);
-    const startX = clampCoord(5000 - ((count - 1) * spacing) / 2);
+    // Centred on the map and clamped to its edge, both read from LAYOUT_SPACE. A literal 10000 here
+    // survived a widening of the space and quietly kept generating rows against the old boundary.
+    const startX = clampCoord(LAYOUT_SPACE / 2 - ((count - 1) * spacing) / 2);
 
     const res = await client.query(
       `INSERT INTO seats (layout_id, section_id, category_id, row_label, seat_number, seat_type, pos_x, pos_y, rotation)
        SELECT $1, $2, $8, $3, gs, 'single',
-              LEAST(10000, $4::int + (gs - 1) * $5::int), $6, 0
+              LEAST($9::int, $4::int + (gs - 1) * $5::int), $6, 0
          FROM generate_series(1, $7) AS gs
        ON CONFLICT (section_id, row_label, seat_number) DO NOTHING`,
       [
@@ -1022,6 +1393,7 @@ export async function generateSeatRow(
         y,
         count,
         await defaultCategoryId(layoutId, client),
+        LAYOUT_SPACE,
       ],
     );
     return res.rowCount ?? 0;
@@ -1072,6 +1444,27 @@ export async function updatePlanAlignment(
  * the layout a new draft — and it reaches buyers only through the next apply, which is deliberate.
  * A show that is already selling keeps the rule it was applied with.
  */
+/**
+ * Set or clear the chart's focal point (0043).
+ *
+ * `null` restores the inference — a stage's centre, else the centroid of the seating — which is what
+ * every chart drawn before this does. Both coordinates move together; the `venue_layouts_focal_pair`
+ * CHECK refuses half a point, because every reader would otherwise have to invent the other half.
+ *
+ * Deliberately does NOT bump `version`. Like the orphan rule, this changes how seats are RANKED and
+ * not where any of them is, so a concurrent geometry edit has nothing to conflict with.
+ */
+export async function updateFocalPoint(
+  layoutId: number,
+  point: { x: number; y: number } | null,
+  db: Db = pool,
+): Promise<void> {
+  await db.query(
+    `UPDATE venue_layouts SET focal_x = $2, focal_y = $3, updated_at = now() WHERE id = $1`,
+    [layoutId, point ? clampCoord(point.x) : null, point ? clampCoord(point.y) : null],
+  );
+}
+
 export async function updateOrphanRule(
   layoutId: number,
   rule: "balanced" | "strict",

@@ -84,7 +84,67 @@ catalogPublicRouter.get(
     if (!Number.isInteger(id)) throw err.notFound('not_found');
     const map = await getSeatMap(id);
     if (!map) throw err.notFound('not_found', 'Không tìm thấy suất chiếu.');
+    /*
+     * `no-cache` is "revalidate before every use", NOT "do not store" — that is `no-store`.
+     *
+     * Express already answers this route with a weak ETag, so a conditional GET costs a 304 with no
+     * body. What was missing is the half that makes the browser ASK: with no `Cache-Control` at all
+     * a `fetch()` response is not kept, so `If-None-Match` never goes out and the whole map is
+     * downloaded again on every reload and every back-navigation. On a large chart that is close to
+     * two megabytes of seat JSON, which is a real cost on the phone most buyers use.
+     *
+     * Deliberately NOT a max-age. This payload still carries seat STATUS, and a buyer served a stale
+     * copy would be looking at seats that are already gone with nothing to correct them: the live
+     * socket only reports changes that happen while it is connected, so it cannot repair a map that
+     * arrived stale. Revalidation keeps the saving without ever showing yesterday's availability —
+     * and it is what makes this step safe to ship before geometry and status are split apart.
+     */
+    res.set('Cache-Control', 'no-cache');
     res.json(map);
+  }),
+);
+
+/*
+ * GET /api/showtimes/:id/seat-map/geometry — the half of the map that does not move.
+ *
+ * Additive: the route above is untouched and still answers with everything, so no client changes and
+ * nothing existing behaves differently. This exists so a reader can fetch the expensive, rarely
+ * changing half on its own and revalidate it cheaply, instead of pulling the whole map — most of
+ * which is seat coordinates — every time availability moves.
+ *
+ * Derived from `getSeatMap` rather than from a second query ON PURPOSE. Two queries over the same
+ * rows are two things to keep in step, and the failure would be silent: a geometry endpoint that
+ * drifted from the map endpoint would draw seats in places the buyer cannot click. Sharing the read
+ * costs a little work here and makes divergence impossible.
+ *
+ * `no-cache`, NOT `max-age`/`immutable`, and that is a deliberate refusal. Serving this from a
+ * long-lived cache needs a version that changes whenever geometry does, and this schema has none:
+ * `showtimes.updated_at` is not bumped by `refreshSnapshot` (it writes only `layout_snapshot` and
+ * `layout_id`), `apply()` rewrites seat coordinates in `showtime_seats` without touching `showtimes`
+ * at all, and there is no trigger. Pinning a long TTL to that column would cache a chart the
+ * organizer has already moved, with nothing to correct it — the live socket carries status, never
+ * geometry. Revalidation gives the saving that is actually available today without inventing a
+ * freshness guarantee the data cannot keep.
+ */
+catalogPublicRouter.get(
+  '/showtimes/:id/seat-map/geometry',
+  asyncH(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) throw err.notFound('not_found');
+    const map = await getSeatMap(id);
+    if (!map) throw err.notFound('not_found', 'Không tìm thấy suất chiếu.');
+
+    // Everything that moves is dropped: `status` is what the socket already reports per seat, and
+    // price/tier follow the tier table rather than the chart. What is left is what a renderer needs
+    // to draw the room — and the ETag over it stays stable while seats are being sold.
+    const { seats, tiers: _tiers, tierLegend: _tierLegend, ...rest } = map;
+    res.set('Cache-Control', 'no-cache');
+    res.json({
+      ...rest,
+      seats: seats?.map(
+        ({ status: _s, price: _p, tier: _t, tierId: _ti, ...geometry }) => geometry,
+      ),
+    });
   }),
 );
 

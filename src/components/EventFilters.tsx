@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Check, Tag, X } from "lucide-react";
 import { formatVnd } from "../services/currency";
 import { formatEventDate } from "../services/formatDate";
+import { VN_PROVINCES } from "../vnProvinces";
 import DatePicker from "./DatePicker";
 import Disclosure from "./Disclosure";
 import type { DateFilter } from "../services/dateFilter";
@@ -61,7 +62,7 @@ interface EventFiltersProps {
   categoryOptions: ReadonlyArray<{ id: string; label: string }>;
 }
 
-const cityOptions = ["TP.HCM", "Hà Nội", "Đà Nẵng"];
+const cityOptions = VN_PROVINCES;
 
 const availabilityOptions = [
   ["available", "Còn vé"],

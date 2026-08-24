@@ -39,6 +39,22 @@ export function createApp(): Express {
     }
     next();
   });
+  /*
+   * Seat-map writes parse a larger body, and this MUST come before the global parser below.
+   *
+   * `express.json` marks a request as parsed and every later instance skips it, so registering the
+   * looser limit afterwards would do nothing at all — the 1 MB cap would already have run and
+   * already have refused. Order is the whole mechanism here.
+   *
+   * A chart save carries the whole authoring document: about 0.78 MB for a 10,000-seat chart at the
+   * raised ceiling, which fits inside 1 MB with no room for long row prefixes or a chart that grows.
+   * Raising the GLOBAL cap to suit one route would widen what every unauthenticated endpoint
+   * accepts, which is what that cap is for. Looser is safe here because `seatmapRouter` requires auth
+   * and then organizer ownership on every route, so a body this size can only come from someone
+   * already entitled to write the chart it describes.
+   */
+  app.use("/api/organizer/layouts", express.json({ limit: "4mb" }));
+  app.use("/api/organizer/venues", express.json({ limit: "4mb" }));
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
 

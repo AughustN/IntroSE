@@ -150,9 +150,15 @@ export async function createStandingArea(
       ],
     );
 
+    // NO `capacity`. That column means ONE thing — "sold by head count against this class's tier"
+    // (0027) — and a standing area is the opposite: its inventory is the seat rows just written, one
+    // per person. Writing the generated count there made the same floor sellable twice, because
+    // generation turns a zone's capacity into its tier's quantity while every seat under it stays its
+    // own row: a 200-place area came out as 400 tickets. It also left the area with a capacity and no
+    // class, which `zone_without_category` refuses — so a standing area could not be published at all.
     await client.query(
-      `INSERT INTO layout_elements (layout_id, kind, pos_x, pos_y, width, height, rotation, label, points, capacity)
-       VALUES ($1, 'area', $2, $3, $4, $5, 0, $6, $7::jsonb, $8)`,
+      `INSERT INTO layout_elements (layout_id, kind, pos_x, pos_y, width, height, rotation, label, points)
+       VALUES ($1, 'area', $2, $3, $4, $5, 0, $6, $7::jsonb)`,
       [
         layoutId,
         Math.round(
@@ -167,7 +173,6 @@ export async function createStandingArea(
         Math.max(...input.points.map((p) => p.y)) - Math.min(...input.points.map((p) => p.y)),
         input.rowLabel,
         JSON.stringify(input.points),
-        input.count,
       ],
     );
 
@@ -301,8 +306,9 @@ export async function reshapeStandingArea(
     const xs = input.points.map((p) => p.x);
     const ys = input.points.map((p) => p.y);
     await client.query(
+      // `capacity` is left alone for the same reason creation never sets it — see the INSERT above.
       `UPDATE layout_elements
-          SET pos_x = $2, pos_y = $3, width = $4, height = $5, points = $6::jsonb, capacity = $7
+          SET pos_x = $2, pos_y = $3, width = $4, height = $5, points = $6::jsonb
         WHERE id = $1`,
       [
         elementId,
@@ -311,7 +317,6 @@ export async function reshapeStandingArea(
         Math.max(1, Math.max(...xs) - Math.min(...xs)),
         Math.max(1, Math.max(...ys) - Math.min(...ys)),
         JSON.stringify(input.points),
-        input.capacity,
       ],
     );
 

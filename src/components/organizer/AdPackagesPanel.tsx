@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, Flame, Loader2, Megaphone, PlayCircle } from "lucide-react";
 import {
   AD_PLACEMENT_LABELS,
@@ -19,10 +19,14 @@ import type { OrganizerEventStatus, OrganizerPortfolioSummary } from "../../type
 /**
  * Buying promotion for an event (the organizer half of the advertising feature).
  *
- * A package is a COMBO of placements, and the card leads with that combo rather than with the
- * price: "what will this actually do for my event" is the question a seller has to answer before
- * the number means anything. The placements are the two slots the landing page really has, so
- * nothing here promises a position that renders nowhere.
+ * The card follows the upgrade-sheet pattern buyers already know from every subscription UI: plan
+ * name, the PRICE as the loudest element with its run length beside it, a one-line tagline, the CTA
+ * button, and only then the itemised benefits. The priciest package carries a "Phổ biến nhất" badge
+ * and the accented frame — one recommended card, like Plus in ChatGPT's sheet, rather than three
+ * equally shouty ones.
+ *
+ * A package is a COMBO of placements plus a run length; those are the two slots the landing page
+ * really has, so nothing here promises a position that renders nowhere.
  *
  * The money leaves the same wallet the organizer already tops up — there is no second payment
  * surface to learn, and an empty balance fails with the exact shortfall rather than a generic
@@ -103,6 +107,15 @@ export default function AdPackagesPanel() {
     (event) => PROMOTABLE.has(event.status) && !promoted.has(Number(event.eventId)),
   );
 
+  /** The upgrade-sheet's one highlighted plan: the priciest package, recomputed only when they load. */
+  const recommendedId = useMemo(
+    () =>
+      packages.length === 0
+        ? null
+        : packages.reduce((best, p) => (p.price > best.price ? p : best), packages[0]).id,
+    [packages],
+  );
+
   const buy = async () => {
     if (!choosing || !eventId) return;
     setBusy(true);
@@ -152,37 +165,46 @@ export default function AdPackagesPanel() {
         </p>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {packages.map((pkg) => (
-          <div
-            key={pkg.id}
-            className="flex flex-col gap-4 border-2 border-beige-kem/25 bg-surface-2 p-5 transition hover:border-beige-kem/60"
-          >
-            <div>
+      {/* Four packages, two-by-two: the upgrade-sheet grid reads as a ladder, cheapest first. */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        {packages.map((pkg) => {
+          const recommended = pkg.id === recommendedId;
+          return (
+            <div
+              key={pkg.id}
+              className={`flex flex-col rounded-2xl border-2 p-6 transition ${
+                recommended
+                  ? "border-burgundy bg-burgundy/5 shadow-lg shadow-burgundy/25"
+                  : "border-beige-kem/25 bg-surface-2 hover:border-beige-kem/60"
+              }`}
+            >
+              {/*
+                Solid burgundy with white type — the one fill this palette reserves for "press me /
+                look here". The old olive pill sat on an olive-tinted card and vanished into it.
+              */}
+              {recommended && (
+                <span className="mb-3 w-fit rounded-full bg-burgundy px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-widest text-white shadow-md shadow-burgundy/30">
+                  Phổ biến nhất
+                </span>
+              )}
+
               <h3 className="font-display text-base font-black text-beige-kem">{pkg.name}</h3>
-              <p className="mt-1.5 text-xs leading-relaxed text-ink-soft">{pkg.description}</p>
-            </div>
 
-            <ul className="space-y-2">
-              {pkg.placements.map((slot) => {
-                const Icon = PLACEMENT_ICON[slot];
-                return (
-                  <li key={slot} className="flex items-start gap-2 text-xs text-beige-kem">
-                    <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-la-co" />
-                    <span>{AD_PLACEMENT_LABELS[slot]}</span>
-                  </li>
-                );
-              })}
-              <li className="flex items-start gap-2 text-xs text-beige-kem">
-                <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-la-co" />
-                <span>Hiển thị trong {pkg.durationDays} ngày</span>
-              </li>
-            </ul>
-
-            <div className="mt-auto space-y-3 border-t border-beige-kem/20 pt-4">
-              <p className="font-display text-xl font-black tabular-nums text-beige-kem">
-                {formatVnd(pkg.price)}
+              {/*
+                The ChatGPT-sheet hierarchy: the price is the loudest line, its duration rides
+                beside it like "/month", and everything else on the card is quieter than it.
+              */}
+              <p className="mt-3 flex flex-wrap items-baseline gap-x-2">
+                <span className="font-display text-4xl font-black tabular-nums text-beige-kem">
+                  {formatVnd(pkg.price)}
+                </span>
+                <span className="font-mono text-[11px] text-ink-soft">
+                  / {pkg.durationDays} ngày
+                </span>
               </p>
+
+              <p className="mt-2 text-xs leading-relaxed text-ink-soft">{pkg.description}</p>
+
               <button
                 type="button"
                 onClick={() => {
@@ -190,13 +212,34 @@ export default function AdPackagesPanel() {
                   setEventId("");
                   setNotice(null);
                 }}
-                className="w-full bg-burgundy px-4 py-2.5 text-xs font-bold text-white transition hover:bg-burgundy/85"
+                className={`mt-5 w-full rounded-xl px-4 py-2.5 text-xs font-bold transition ${
+                  recommended
+                    ? "bg-burgundy text-white hover:brightness-110"
+                    : "border-2 border-burgundy/70 text-burgundy hover:bg-burgundy hover:text-white"
+                }`}
               >
-                Mua gói này
+                Chọn gói này
               </button>
+
+              {/* Benefits BELOW the button, checkmarked — what the plan includes, not why to buy. */}
+              <ul className="mt-6 space-y-2.5 border-t border-beige-kem/15 pt-5">
+                {pkg.placements.map((slot) => {
+                  const Icon = PLACEMENT_ICON[slot];
+                  return (
+                    <li key={slot} className="flex items-start gap-2 text-xs text-beige-kem">
+                      <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-la-co" />
+                      <span>{AD_PLACEMENT_LABELS[slot]}</span>
+                    </li>
+                  );
+                })}
+                <li className="flex items-start gap-2 text-xs text-beige-kem">
+                  <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-la-co" />
+                  <span>Hiển thị trong {pkg.durationDays} ngày</span>
+                </li>
+              </ul>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {choosing && (

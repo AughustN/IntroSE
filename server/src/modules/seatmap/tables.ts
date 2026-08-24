@@ -1,5 +1,6 @@
 import type { LayoutTable } from "@shared/catalog/seatmap.js";
 import { clampCoord, normaliseRotation } from "@shared/catalog/seatmap-validate.js";
+import { tableSeatOffsets } from "@shared/catalog/seatmap-tables.js";
 import type pg from "pg";
 import {
   LAYOUT_MAX_SEATS,
@@ -41,14 +42,13 @@ export interface TableInput {
   sideCounts?: number[] | null;
 }
 
-/** How far outside the table edge a seat sits, in layout units. */
-const SEAT_GAP = 90;
-
 /**
- * Where each seat goes. Round tables space evenly around the circumference; rectangular tables walk
- * the per-side counts around the perimeter, clockwise from the top (FR-048).
+ * Where each seat goes, in ABSOLUTE coordinates — the shape from `shared/catalog/seatmap-tables.ts`
+ * with the table's own position and rotation applied.
  *
- * Returns absolute coordinates plus a rotation that faces each seat toward the table.
+ * The shape itself moved to `shared/` so the document projection can lay a `table` block out the same
+ * way (Principle VI). A table drawn through this endpoint and the same table expressed in a document
+ * must land in the same place, or re-saving a chart would move every table seat.
  */
 export function distributeSeats(t: {
   shape: "round" | "rect";
@@ -60,81 +60,14 @@ export function distributeSeats(t: {
   seatCount: number;
   sideCounts?: number[] | null;
 }): { x: number; y: number; rotation: number }[] {
-  const spots: { x: number; y: number; rotation: number }[] = [];
-
-  if (t.shape === "round") {
-    const radius = t.width / 2 + SEAT_GAP;
-    for (let i = 0; i < t.seatCount; i++) {
-      const angle = (2 * Math.PI * i) / t.seatCount;
-      spots.push({
-        x: t.x + radius * Math.sin(angle),
-        y: t.y - radius * Math.cos(angle),
-        // Face the centre: a seat at the top looks down, one at the bottom looks up.
-        rotation: (angle * 180) / Math.PI + 180,
-      });
-    }
-  } else {
-    // Sides clockwise from the top: [top, right, bottom, left]. Absent counts spread as evenly as
-    // the count allows, so a bare `seatCount` on a rectangle still produces a sensible table.
-    const sides = normaliseSideCounts(t.seatCount, t.sideCounts);
-    const halfW = t.width / 2 + SEAT_GAP;
-    const halfH = t.height / 2 + SEAT_GAP;
-
-    const place = (n: number, fn: (k: number) => { x: number; y: number; rotation: number }) => {
-      for (let k = 0; k < n; k++) spots.push(fn(k));
-    };
-    // Each seat sits at the (k+1)/(n+1) point along its side, so a side is symmetric about its centre.
-    const along = (n: number, k: number) => (k + 1) / (n + 1) - 0.5;
-
-    place(sides[0], (k) => ({
-      x: t.x + along(sides[0], k) * t.width,
-      y: t.y - halfH,
-      rotation: 180,
-    }));
-    place(sides[1], (k) => ({
-      x: t.x + halfW,
-      y: t.y + along(sides[1], k) * t.height,
-      rotation: 270,
-    }));
-    place(sides[2], (k) => ({
-      x: t.x - along(sides[2], k) * t.width,
-      y: t.y + halfH,
-      rotation: 0,
-    }));
-    place(sides[3], (k) => ({
-      x: t.x - halfW,
-      y: t.y - along(sides[3], k) * t.height,
-      rotation: 90,
-    }));
-  }
-
-  // The table's own rotation turns the whole arrangement about its centre.
   const rot = (t.rotation * Math.PI) / 180;
-  return spots.map((s) => {
-    const dx = s.x - t.x;
-    const dy = s.y - t.y;
-    return {
-      x: clampCoord(Math.round(t.x + dx * Math.cos(rot) - dy * Math.sin(rot))),
-      y: clampCoord(Math.round(t.y + dx * Math.sin(rot) + dy * Math.cos(rot))),
-      rotation: normaliseRotation(Math.round(s.rotation + t.rotation)),
-    };
-  });
-}
-
-/** Spread `total` over four sides when the organizer did not say how. */
-function normaliseSideCounts(
-  total: number,
-  given?: number[] | null,
-): [number, number, number, number] {
-  if (given && given.length === 4 && given.reduce((a, b) => a + b, 0) === total) {
-    return [given[0], given[1], given[2], given[3]];
-  }
-  // Long sides first — that is how a banquet table actually seats people.
-  const perLong = Math.ceil((total - 2) / 2);
-  const top = Math.min(perLong, total);
-  const bottom = Math.min(perLong, total - top);
-  const remaining = total - top - bottom;
-  return [top, remaining > 0 ? 1 : 0, bottom, remaining > 1 ? 1 : 0];
+  const cos = Math.cos(rot);
+  const sin = Math.sin(rot);
+  return tableSeatOffsets(t).map((s) => ({
+    x: clampCoord(Math.round(t.x + s.dx * cos - s.dy * sin)),
+    y: clampCoord(Math.round(t.y + s.dx * sin + s.dy * cos)),
+    rotation: normaliseRotation(Math.round(s.rotation + t.rotation)),
+  }));
 }
 
 // ---- guards ---------------------------------------------------------------

@@ -22,15 +22,15 @@ import { useEffect, useRef } from "react";
 const STEPS: { title: string; body: string }[] = [
   {
     title: "Vẽ một khối chỗ ngồi",
-    body: 'Chọn công cụ "Khối ghế" trên bảng bên trái rồi kéo một vùng trên bản vẽ. Mỗi vùng kéo ra là một khối, và ghế được tạo theo lưới.',
+    body: 'Mở chế độ "Thêm" ở bên trái, chọn "Khối ghế", rồi bấm hoặc kéo khối vào bản vẽ. Mỗi khối giữ số hàng, số ghế và khoảng cách để bạn có thể chỉnh lại sau.',
   },
   {
-    title: "Khu vực & hạng vé",
-    body: "Gán các khối vào khu vực (Khu A, Khu VIP…) để gom chúng lại, và xếp mỗi khối vào một hạng vé. Hạng vé là nơi giá được gán ở bước sau.",
+    title: "Khu vực & hạng ghế",
+    body: 'Chọn khối, mở "Khu vực" để gom theo vị trí, rồi mở "Hạng ghế" để phân loại bán. Giá vé vẫn được gán ở bước thiết lập suất chiếu.',
   },
   {
     title: "Lưu, rồi phát hành",
-    body: '"Lưu" giữ bản nháp. Sơ đồ chỉ có thể áp cho suất chiếu sau khi bấm "Phát hành" — hãy sửa hết các vấn đề ở bảng kiểm tra bên phải trước.',
+    body: '"Lưu ngay" giữ bản nháp. Sơ đồ chỉ có thể áp cho suất chiếu sau khi bấm "Phát hành" — mở chế độ "Kiểm tra" bên trái để sửa hết lỗi trước.',
   },
   {
     title: "Áp sơ đồ cho suất chiếu",
@@ -96,13 +96,15 @@ export default function ChartEditorCoachmarks({ onDone }: { onDone: () => void }
         </ol>
 
         <div className="mt-5 flex shrink-0 items-center justify-between gap-3">
-          <p className="font-meta text-meta text-beige-kem/50">Bảng này chỉ hiện một lần.</p>
+          <p className="font-meta text-meta text-beige-kem/70">
+            Có thể mở lại bằng nút Hướng dẫn trên thanh công cụ.
+          </p>
           <button
             ref={firstBtn}
             onClick={onDone}
             className="bg-burgundy px-5 py-2.5 font-meta text-body font-bold text-white transition hover:brightness-95"
           >
-            Bắt đầu vẽ
+            Mở trình thiết kế
           </button>
         </div>
       </div>

@@ -19,7 +19,6 @@ import type {
   LayoutSummary,
   SaveLayoutRequest,
   ShowtimeMap,
-  ValidateResponse,
 } from "../../shared/catalog/seatmap";
 import type {
   ListingResponse,
@@ -31,7 +30,7 @@ import type {
 } from "@/shared/catalog/types";
 import { withAuthRetry } from "./authClient";
 import { apiUrl } from "./api";
-import { readApiError } from "./apiError";
+import { ApplyRefusalView, RefusedEditError, readApiError } from "./apiError";
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(apiUrl(`/api${path}`), { headers: { Accept: "application/json" } });
@@ -58,6 +57,11 @@ async function authed<T>(path: string, opts: { method?: string; body?: unknown }
   });
   if (!res.ok) {
     const e = await readApiError(res);
+    // A refused whole-edit keeps its per-seat reasons: the panel renders the list, not just the
+    // one-line summary, exactly like the dry-run preview does.
+    if (e.code === "map_edit_refused" && Array.isArray(e.details?.refusals)) {
+      throw new RefusedEditError(e.message ?? e.code, e.details.refusals as ApplyRefusalView[]);
+    }
     throw new Error(e.message ?? e.code);
   }
   return (res.status === 204 ? undefined : await res.json()) as T;
@@ -79,12 +83,18 @@ export interface MyEvent {
   id: number;
   slug: string;
   title: string;
+  description: string;
   status: EventStatus;
   moderation: EventModeration;
   reviewNote: string | null;
   imageUrl: string | null;
   eventType: "general_admission" | "seated";
   category: string;
+  /**
+   * The ONE venue this event is bound to (`events.venue_id`, 0039) — set at creation, pinned on the
+   * first showtime for legacy rows. Null only for a draft that has never scheduled anything.
+   */
+  venueId: number | null;
   /**
    * How the event is selling. `listMyEvents` has always computed and sent these three; the interface
    * stopped declaring them when the components that read them were removed, so they crossed the wire
@@ -227,6 +237,15 @@ export const organizerApi = {
   myVenues: () => authed<MyVenue[]>("/organizer/venues"),
   createVenue: (b: { name: string; city: string; rawAddress: string; guide?: string }) =>
     authed<{ id: number }>("/organizer/venues", { method: "POST", body: b }),
+  /** Bind an unbound DRAFT to one venue; server cascades its showtimes and refuses non-drafts. */
+  bindEventVenue: (eventId: number, venueId: number) =>
+    authed<{ ok: true }>(`/organizer/events/${eventId}/venue`, {
+      method: "PUT",
+      body: { venueId },
+    }),
+  /** Display details only, and only while the venue serves no published event (server-enforced). */
+  updateVenue: (venueId: number, b: { name?: string; city?: string; rawAddress?: string }) =>
+    authed<{ ok: true }>(`/organizer/venues/${venueId}`, { method: "PATCH", body: b }),
   addShowtime: (
     eventId: number,
     b: {
@@ -247,7 +266,7 @@ export const organizerApi = {
       body: { code },
     }),
   completeEvent: (id: string) =>
-    authed<{ ok: true; message: string }>(`/organizer/events/${id}/complete`, { method: 'POST' }),
+    authed<{ ok: true; message: string }>(`/organizer/events/${id}/complete`, { method: "POST" }),
 };
 
 // ---- Seat map designer (feature 005) ----
@@ -263,16 +282,6 @@ export const layoutApi = {
   save: (id: number, body: SaveLayoutRequest) =>
     authed<Layout>(`/organizer/layouts/${id}`, { method: "PUT", body }),
   remove: (id: number) => authed<void>(`/organizer/layouts/${id}`, { method: "DELETE" }),
-  generateSeats: (
-    id: number,
-    b: { sectionId: number; rowLabel: string; count: number; replaceExisting?: boolean },
-  ) =>
-    authed<{ created: number; layout: Layout }>(`/organizer/layouts/${id}/generate-seats`, {
-      method: "POST",
-      body: b,
-    }),
-  validate: (id: number) =>
-    authed<ValidateResponse>(`/organizer/layouts/${id}/validate`, { method: "POST" }),
   publish: (id: number) => authed<Layout>(`/organizer/layouts/${id}/publish`, { method: "POST" }),
   clone: (id: number, b: { targetVenueId: number; name: string }) =>
     authed<Layout>(`/organizer/layouts/${id}/clone`, { method: "POST", body: b }),
@@ -300,17 +309,18 @@ export const layoutApi = {
   // Tables (feature 005 amendment). Placing one generates its seats server-side, where the sold/held
   // guards can see them; moving, re-counting or deleting is refused whole if any seat is committed.
   addTable: (layoutId: number, body: Record<string, unknown>) =>
-    authed<LayoutTable>(`/organizer/layouts/${layoutId}/tables`, { method: 'POST', body }),
+    authed<LayoutTable>(`/organizer/layouts/${layoutId}/tables`, { method: "POST", body }),
   updateTable: (tableId: number, body: Record<string, unknown>) =>
-    authed<LayoutTable>(`/organizer/tables/${tableId}`, { method: 'PATCH', body }),
-  deleteTable: (tableId: number) => authed<{ ok: true }>(`/organizer/tables/${tableId}`, { method: 'DELETE' }),
+    authed<LayoutTable>(`/organizer/tables/${tableId}`, { method: "PATCH", body }),
+  deleteTable: (tableId: number) =>
+    authed<{ ok: true }>(`/organizer/tables/${tableId}`, { method: "DELETE" }),
 
   // Standing area (FR-080) — the fan-zone substitute. Positions are generated server-side inside the
   // drawn shape, as ordinary seats of type `standing`; a shape too small to hold the count is refused
   // rather than quietly generating fewer.
   addStandingArea: (layoutId: number, body: Record<string, unknown>) =>
     authed<{ created: number; layout: Layout }>(`/organizer/layouts/${layoutId}/standing-area`, {
-      method: 'POST',
+      method: "POST",
       body,
     }),
 
@@ -337,6 +347,12 @@ export const layoutApi = {
   alignPlan: (id: number, b: Omit<LayoutFloorPlan, "url">) =>
     authed<LayoutFloorPlan>(`/organizer/layouts/${id}/floorplan`, { method: "PATCH", body: b }),
   /** How hard "best available" avoids stranding a lone seat on this chart (0037). */
+  /** `null` clears it and restores the inferred focal point — see `focalPoint` in bestAvailable. */
+  setFocalPoint: (id: number, focalPoint: { x: number; y: number } | null) =>
+    authed<{ focalPoint: { x: number; y: number } | null }>(
+      `/organizer/layouts/${id}/focal-point`,
+      { method: "PATCH", body: { focalPoint } },
+    ),
   setOrphanRule: (id: number, orphanRule: OrphanRule) =>
     authed<{ orphanRule: OrphanRule }>(`/organizer/layouts/${id}/orphan-rule`, {
       method: "PATCH",
@@ -363,15 +379,12 @@ export const layoutApi = {
     return (await res.json()) as LayoutReferenceChart;
   },
   alignReference: (id: number, b: Omit<LayoutReferenceChart, "url">) =>
-    authed<LayoutReferenceChart>(`/organizer/layouts/${id}/reference`, { method: "PATCH", body: b }),
-  removeReference: (id: number) =>
-    authed<void>(`/organizer/layouts/${id}/reference`, { method: "DELETE" }),
-  /** Re-shape a standing area and regenerate its positions. Refused whole if any is sold or held. */
-  reshapeArea: (id: number, elementId: number, b: { points: { x: number; y: number }[]; capacity: number }) =>
-    authed<{ created: number; layout: Layout }>(`/organizer/layouts/${id}/areas/${elementId}`, {
+    authed<LayoutReferenceChart>(`/organizer/layouts/${id}/reference`, {
       method: "PATCH",
       body: b,
     }),
+  removeReference: (id: number) =>
+    authed<void>(`/organizer/layouts/${id}/reference`, { method: "DELETE" }),
   removePlan: (id: number) =>
     authed<void>(`/organizer/layouts/${id}/floorplan`, { method: "DELETE" }),
 
@@ -558,15 +571,15 @@ export const studioApi = {
   updateTier: (
     tierId: number,
     b: { label?: string; price?: number; capacity?: number; categoryId?: number | null },
-  ) =>
-    authed<TierMutationResult>(`/organizer/tiers/${tierId}`, { method: "PATCH", body: b }),
+  ) => authed<TierMutationResult>(`/organizer/tiers/${tierId}`, { method: "PATCH", body: b }),
   removeTier: (tierId: number) =>
     authed<TierRemovalResult>(`/organizer/tiers/${tierId}`, { method: "DELETE" }),
   restoreTier: (tierId: number) =>
     authed<TierMutationResult>(`/organizer/tiers/${tierId}/restore`, { method: "POST" }),
 
   // Showtimes (UC-23). Each refusal names what blocked it; render the message as-is.
-  updateShowtime: (showtimeId: number, b: { startsAt?: string; venueId?: number }) =>
+  // `venueId` is not a field anymore (0039): an event is bound to one venue, server-side too.
+  updateShowtime: (showtimeId: number, b: { startsAt?: string }) =>
     authed<ShowtimeMutationResult>(`/organizer/showtimes/${showtimeId}`, {
       method: "PATCH",
       body: b,
@@ -591,7 +604,10 @@ export const studioApi = {
     authed<void>(`/organizer/events/${eventId}`, { method: "DELETE" }),
 
   // Media (012-cloudinary-media-upload)
-  uploadBanner: async (eventId: number, file: File): Promise<{ bannerUrl: string; imageUrl: string }> => {
+  uploadBanner: async (
+    eventId: number,
+    file: File,
+  ): Promise<{ bannerUrl: string; imageUrl: string }> => {
     const form = new FormData();
     form.append("banner", file);
     const res = await withAuthRetry((token) =>

@@ -112,6 +112,24 @@ export interface DocumentSection {
   name: string;
   seatShape?: SeatShape;
   seatSizeMultiplier?: number;
+  /**
+   * The level this section sits on (0044). Optional and nullable, both meaning the single implicit
+   * floor — so every document written before floors parses unchanged and draws exactly as it did.
+   */
+  floorId?: number | null;
+}
+
+/**
+ * A level of the venue (0044).
+ *
+ * Modelled like `DocumentRow`: an id the editor may mint negative before the first save, a name, and
+ * an explicit order. Deriving floors from a label on the section was the shape rows had before 0032
+ * and it fails the same way here — a floor could not exist before something stood on it.
+ */
+export interface DocumentFloor {
+  id: number;
+  name: string;
+  displayOrder: number;
 }
 
 /**
@@ -166,6 +184,12 @@ export interface DocumentSeat {
   companionSeatId?: number;
 }
 
+/** Resolve a seat's section without collapsing explicit `null` into block inheritance. */
+export const resolvedSeatSectionId = (
+  seat: Pick<DocumentSeat, "sectionId">,
+  block: Pick<DocumentBlock, "sectionId">,
+): number | null => (seat.sectionId === undefined ? block.sectionId : seat.sectionId);
+
 /**
  * A row of seats, as a thing rather than as a string repeated on each of its seats.
  *
@@ -211,6 +235,23 @@ export interface BlockParams {
   rowSpacing?: number;
   /** Curved rows only. */
   radius?: number;
+  /**
+   * Lay a curved block out as CONCENTRIC arcs about one focus, rows receding away from it (0044).
+   *
+   * The default — false, and the only behaviour before this — offsets each row by `rowSpacing` in the
+   * block's own +y as well as growing its radius. The result is a stack of parallel arcs that drift
+   * TOWARD the centre of curvature, which is right for a bowed theatre tier and wrong for a stadium
+   * stand: whichever way such a block is rotated, either its front row ends up furthest from the
+   * pitch or its ends bow away from it. The two cannot both be right, because the row offset and the
+   * arc direction are coupled.
+   *
+   * Concentric decouples them: every row is an arc about the SAME focus, so the ends bend toward the
+   * focus and the rows recede from it at once — which is what a stand around a pitch actually is.
+   *
+   * Off by default on purpose. Turning it on moves every seat of a curved block, and doing that to
+   * charts already drawn would relocate rows under tickets that are already sold.
+   */
+  concentric?: boolean;
   /** Total sweep in degrees. Capped at `MAX_ARC_ANGLE` — see that constant before widening it. */
   arcAngle?: number;
   rowLabelScheme?: RowLabelScheme;
@@ -323,6 +364,11 @@ export interface ChartDocument {
    * exactly what they did before.
    */
   rows?: DocumentRow[];
+  /**
+   * The chart's levels (0044). Optional: absent means the chart is on one floor, which is what every
+   * chart drawn before floors is and what most charts will always be.
+   */
+  floors?: DocumentFloor[];
 }
 
 /** An empty document, for a layout that has just been created. */
@@ -389,6 +435,11 @@ export function upgradeDocument(input: unknown): ChartDocument | null {
     // `?? []` rather than left undefined: a document written before rows existed reads back as a
     // chart with no rows declared, which is exactly what it is, and the projection derives them.
     rows: Array.isArray(raw.rows) ? raw.rows : [],
+    // Floors (0044) — and this line is exactly what the note above is about. The field was added to
+    // the type and to every writer, but not here, so every read rebuilt the document WITHOUT it: a
+    // two-tier chart came back to the editor with no levels, no layer picker, and a section pointing
+    // at a floor the document no longer declared.
+    floors: Array.isArray(raw.floors) ? raw.floors : [],
   };
 }
 
@@ -465,6 +516,8 @@ export interface IdRemap {
   tables: Map<number, number>;
   /** Rows (0032). Optional: on the save path `stitchRows` has already made them real. */
   rows?: Map<number, number>;
+  /** Floors (0044). Optional for the same reason rows are, and absent on a single-floor chart. */
+  floors?: Map<number, number>;
 }
 
 /**
@@ -482,7 +535,32 @@ export function remapDocument(doc: ChartDocument, ids: IdRemap, mint: () => numb
   return {
     ...doc,
     schemaVersion: CHART_DOCUMENT_SCHEMA,
-    sections: doc.sections.map((s) => ({ ...s, id: ids.sections.get(s.id) ?? mint() })),
+    /*
+     * A section's FLOOR is remapped for the same reason its own id is: a clone that kept the source's
+     * floor ids would point its sections at another layout's levels, and the floor picker would then
+     * filter a chart by rows that belong to a different venue entirely.
+     */
+    sections: doc.sections.map((s) => ({
+      ...s,
+      id: ids.sections.get(s.id) ?? mint(),
+      /*
+       * Remapped ONLY when the floors themselves are, and never minted.
+       *
+       * `via` mints a fresh placeholder for anything the map does not answer, which is right for a
+       * section or a category — a clone must not address the source's rows. It is wrong here: a
+       * minted floor id points at a level that exists nowhere, so the section silently left the floor
+       * it was on. Every caller that does not remap floors leaves both `floors` and `floorId` alone,
+       * which keeps the document internally consistent either way.
+       */
+      floorId: ids.floors
+        ? s.floorId === null || s.floorId === undefined
+          ? s.floorId
+          : (ids.floors.get(s.floorId) ?? null)
+        : s.floorId,
+    })),
+    floors: ids.floors
+      ? doc.floors?.map((f) => ({ ...f, id: ids.floors!.get(f.id) ?? f.id }))
+      : doc.floors,
     categories: doc.categories.map((c) => ({ ...c, id: ids.categories.get(c.id) ?? mint() })),
     /*
      * Rows carry a section id too, and it has to be remapped for exactly the reason the blocks' is.
@@ -627,6 +705,10 @@ export function adoptLayout(layout: Layout, gridSize = 50): ChartDocument {
       name: s.name,
       seatShape: s.seatShape,
       seatSizeMultiplier: s.seatSizeMultiplier,
+      // Carried for the same reason the style fields are: adoption happens whenever the rows change
+      // outside the document, and handing back a section with no floor would drop it onto the ground
+      // level on the next save — silently flattening a balcony an organizer had already built.
+      floorId: s.floorId ?? null,
     }));
   const categories: DocumentCategory[] = layout.categories
     .filter((c) => c.id !== undefined)
@@ -769,5 +851,18 @@ export function adoptLayout(layout: Layout, gridSize = 50): ChartDocument {
     displayOrder: r.displayOrder,
   }));
 
-  return { schemaVersion: CHART_DOCUMENT_SCHEMA, gridSize, sections, categories, rows, blocks };
+  /** The chart's levels, verbatim. A single-floor chart simply has none. */
+  const floors: DocumentFloor[] = layout.floors
+    .filter((f) => f.id !== undefined)
+    .map((f) => ({ id: f.id as number, name: f.name, displayOrder: f.displayOrder }));
+
+  return {
+    schemaVersion: CHART_DOCUMENT_SCHEMA,
+    gridSize,
+    sections,
+    categories,
+    rows,
+    floors,
+    blocks,
+  };
 }

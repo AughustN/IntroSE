@@ -73,16 +73,19 @@ const upcoming = (rows: ManageShowtime[]) =>
   rows.filter((s) => new Date(s.startsAt).getTime() > Date.now());
 
 /**
- * The upcoming showtime that is FURTHEST from being sellable, or the first if they all are.
+ * The candidate showtime FURTHEST from being sellable, or the first if they all are.
  *
- * Charts are per venue, and an event may run at more than one. Reading only `upcoming(rows)[0]` meant
+ * Charts are per venue, and an event may run at more than one. Reading only the first candidate meant
  * a two-venue event went green the moment the first venue had a chart, while the second had none —
  * the rail reported ready and the publish gate then refused. Reporting the laggard makes the rail say
  * what is actually missing, and naming its venue says where.
+ *
+ * The caller decides WHICH showtimes count as candidates: an unsubmitted event scans its upcoming
+ * ones, because a date that has already passed can no longer be fixed; a submitted one scans them
+ * all, because its gates were judged once at submission time and history must not re-open them.
  */
-const worstChart = (rows: ManageShowtime[]): ManageShowtime | null => {
-  const up = upcoming(rows);
-  if (up.length === 0) return null;
+const worstChart = (candidates: ManageShowtime[]): ManageShowtime | null => {
+  if (candidates.length === 0) return null;
   const rank = (s: ManageShowtime) => {
     const drawn = s.sections.reduce((n, sec) => n + sec.seatCount, 0);
     if (s.layoutId === null || drawn === 0) return 0; // no chart drawn
@@ -90,7 +93,7 @@ const worstChart = (rows: ManageShowtime[]): ManageShowtime | null => {
     if (!s.hasSeatMap || s.bookableSeats === 0) return 2; // published but not applied here
     return 3; // fully sellable
   };
-  return up.reduce((worst, s) => (rank(s) < rank(worst) ? s : worst), up[0]);
+  return candidates.reduce((worst, s) => (rank(s) < rank(worst) ? s : worst), candidates[0]);
 };
 
 /**
@@ -100,7 +103,7 @@ const worstChart = (rows: ManageShowtime[]): ManageShowtime | null => {
  * names. With two venues equally unready that sent the organizer to fix one while the other, in the
  * same state, went unmentioned — the step stayed blocked afterwards for a reason it had not given.
  */
-const venuesAtWorstRank = (rows: ManageShowtime[], worst: ManageShowtime | null): string => {
+const venuesAtWorstRank = (candidates: ManageShowtime[], worst: ManageShowtime | null): string => {
   if (!worst) return "";
   const rankOf = (s: ManageShowtime) => {
     const drawn = s.sections.reduce((n, sec) => n + sec.seatCount, 0);
@@ -111,11 +114,7 @@ const venuesAtWorstRank = (rows: ManageShowtime[], worst: ManageShowtime | null)
   };
   const target = rankOf(worst);
   const names = [
-    ...new Set(
-      upcoming(rows)
-        .filter((s) => rankOf(s) === target)
-        .map((s) => s.venueName),
-    ),
+    ...new Set(candidates.filter((s) => rankOf(s) === target).map((s) => s.venueName)),
   ];
   return names.join(", ");
 };
@@ -149,6 +148,19 @@ export function flowSteps(event: MyEvent, rows: ManageShowtime[] | null): FlowSt
   const up = upcoming(list);
   const loaded = rows !== null;
 
+  /*
+   * Which showtimes the setup steps judge.
+   *
+   * An unsubmitted event is judged by what is still AHEAD of it — a date that has passed can no
+   * longer be fixed, so only upcoming ones prove a step done. A SUBMITTED event (on sale, or waiting
+   * on an admin) has already cleared every server gate at submission time; judging it by the calendar
+   * again made the rail demand a new showtime from an event that was selling — its last dates played
+   * out and steps 2–6 flipped to blocked under a submit step that correctly read "Đang bán". Its
+   * history counts: all of its showtimes are evidence.
+   */
+  const submitted = event.status === "on_sale";
+  const basis = submitted ? list : up;
+
   // ---- 1. the draft itself
   const drafted = event.title.trim().length > 0;
   const steps: FlowStep[] = [
@@ -164,14 +176,16 @@ export function flowSteps(event: MyEvent, rows: ManageShowtime[] | null): FlowSt
   // ---- 2. a showtime, because a ticket belongs to one
   //
   // `ticket_tiers.showtime_id`: there is nowhere to hang a price until a date exists. This is the
-  // step most often missed, because "create tickets" sounds like an event-level act.
+  // step most often missed, because "create tickets" sounds like an event-level act. Judged on the
+  // basis above: a submitted event with only past dates stays done instead of being told to add
+  // showtimes it does not need.
   steps.push({
     id: "showtime",
     n: 2,
     label: "Suất chiếu",
-    state: !loaded ? "todo" : up.length > 0 ? "done" : "blocked",
+    state: !loaded ? "todo" : basis.length > 0 ? "done" : "blocked",
     reason:
-      !loaded || up.length > 0
+      !loaded || basis.length > 0
         ? undefined
         : "Chưa có suất chiếu sắp diễn. Thêm địa điểm và giờ bắt đầu — suất đã qua không tính.",
     action: "showtimes",
@@ -182,29 +196,29 @@ export function flowSteps(event: MyEvent, rows: ManageShowtime[] | null): FlowSt
   // Matches the publish gate's own test (`tt.archived_at IS NULL`): an archived class is not a way
   // to buy. Stricter than the gate on coverage — the gate accepts ONE priced showtime, this asks for
   // all of them, because a showtime with no ticket sells nothing and the organizer meant to sell it.
-  const withTiers = up.filter((s) => s.tiers.some((t) => !t.archived));
-  const tiersDone = loaded && up.length > 0 && withTiers.length === up.length;
+  const withTiers = basis.filter((s) => s.tiers.some((t) => !t.archived));
+  const tiersDone = loaded && basis.length > 0 && withTiers.length === basis.length;
   steps.push({
     id: "tiers",
     n: 3,
     label: "Hạng vé",
-    state: !loaded || up.length === 0 ? "todo" : tiersDone ? "done" : "blocked",
+    state: !loaded || basis.length === 0 ? "todo" : tiersDone ? "done" : "blocked",
     reason: tiersDone
       ? undefined
-      : `${withTiers.length}/${up.length} suất có hạng vé đang bán. Mở suất còn thiếu và thêm một hạng.`,
+      : `${withTiers.length}/${basis.length} suất có hạng vé đang bán. Mở suất còn thiếu và thêm một hạng.`,
     action: "tiers",
   });
 
   if (!seated) {
     // General admission stops here: tiers carry their own quantity, and there is no chart to draw.
-    steps.push(submitStep(4, event, loaded, tiersDone && up.length > 0));
+    steps.push(submitStep(4, event, loaded, tiersDone && basis.length > 0));
     return loaded ? steps : untilLoaded(steps);
   }
 
-  const st = worstChart(list);
+  const st = worstChart(basis);
   /** Named in the reasons, so a multi-venue event says WHICH venues are holding it up — all of the
    *  ones in the same state, not the first that happened to be checked. */
-  const where = venuesAtWorstRank(list, st);
+  const where = venuesAtWorstRank(basis, st);
 
   // ---- 4. the venue's chart
   //
@@ -321,7 +335,7 @@ function submitStep(n: number, event: MyEvent, loaded: boolean, ready: boolean):
     label: live ? "Đang bán" : submitted ? "Chờ duyệt" : "Gửi duyệt",
     // Submission is checked BEFORE readiness, not after. Readiness is a precondition for sending an
     // event, not a description of one that already went: an on-sale event whose last showtime has
-    // passed has `ready` false (every step reads `upcoming()`), and consulting that first rendered
+    // passed used to compute `ready` false from its calendar, and consulting that first rendered
     // "Đang bán" against a grey not-started marker — and handed it the rail's "you are here" edge.
     state: submitted ? "done" : !loaded || !ready ? "todo" : "blocked",
     reason: live

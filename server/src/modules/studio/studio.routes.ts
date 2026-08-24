@@ -6,8 +6,8 @@ import { requireAuth } from "../../middleware/requireAuth.js";
 import { requireOrganizer } from "../../middleware/authz.js";
 import { validate } from "../../middleware/validate.js";
 import { draftListing } from "./ai/listing.service.js";
-import multer from 'multer';
-import { uploadEventBanner, uploadEventTrailer, deleteEventTrailer } from '../media/eventMedia.js';
+import multer from "multer";
+import { uploadEventBanner, uploadEventTrailer, deleteEventTrailer } from "../media/eventMedia.js";
 import { deleteEvent, updateEvent } from "./events.service.js";
 import {
   deleteShowtime,
@@ -108,7 +108,9 @@ const updateTierSchema = z
 const updateShowtimeSchema = z
   .object({
     startsAt: z.string().datetime().optional(),
-    venueId: z.number().int().positive().optional(),
+    // `venueId` removed (0039): an event is bound to one venue. Non-strict zod strips the key
+    // from old clients' bodies instead of refusing them — a silent no-op is kinder here than a
+    // second error message about a field this screen no longer has.
   })
   .refine((v) => Object.keys(v).length > 0, { message: "empty" });
 
@@ -177,7 +179,7 @@ studioRouter.patch(
   asyncH(async (req, res) => {
     const ctx = await ownedShowtime(req);
     const body = req.body as z.infer<typeof updateShowtimeSchema>;
-    res.json(await updateShowtime(req.auth!.userId, ctx, body, Boolean(req.auth!.user.isAdmin)));
+    res.json(await updateShowtime(req.auth!.userId, ctx, body));
   }),
 );
 
@@ -251,7 +253,10 @@ studioRouter.post(
     const eventId = await ownedEvent(req);
     if (!req.file?.buffer) throw err.badRequest("validation_failed", "Thiếu tệp hình ảnh banner.");
     const bannerUrl = await uploadEventBanner(eventId, req.file.buffer);
-    await pool.query(`UPDATE events SET image_url = $1, updated_at = now() WHERE id = $2`, [bannerUrl, eventId]);
+    await pool.query(`UPDATE events SET image_url = $1, updated_at = now() WHERE id = $2`, [
+      bannerUrl,
+      eventId,
+    ]);
     res.json({ bannerUrl, imageUrl: bannerUrl });
   }),
 );
@@ -263,7 +268,10 @@ studioRouter.post(
     const eventId = await ownedEvent(req);
     if (!req.file?.buffer) throw err.badRequest("validation_failed", "Thiếu tệp video trailer.");
     const trailerUrl = await uploadEventTrailer(eventId, req.file.buffer);
-    await pool.query(`UPDATE events SET trailer_url = $1, updated_at = now() WHERE id = $2`, [trailerUrl, eventId]);
+    await pool.query(`UPDATE events SET trailer_url = $1, updated_at = now() WHERE id = $2`, [
+      trailerUrl,
+      eventId,
+    ]);
     res.json({ trailerUrl });
   }),
 );
@@ -273,8 +281,9 @@ studioRouter.delete(
   asyncH(async (req, res) => {
     const eventId = await ownedEvent(req);
     await deleteEventTrailer(eventId);
-    await pool.query(`UPDATE events SET trailer_url = NULL, updated_at = now() WHERE id = $1`, [eventId]);
+    await pool.query(`UPDATE events SET trailer_url = NULL, updated_at = now() WHERE id = $1`, [
+      eventId,
+    ]);
     res.json({ trailerUrl: null });
   }),
 );
-

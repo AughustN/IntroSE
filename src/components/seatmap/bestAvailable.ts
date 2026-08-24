@@ -64,7 +64,17 @@ export interface BestSeatChoice {
 export function focalPoint(
   seats: SeatMapSeat[],
   elements: SeatMapElement[] | undefined,
+  /**
+   * The chart's own answer, snapshotted onto the showtime (0043). Wins outright when present.
+   *
+   * The two fallbacks below are INFERENCES, and both can be wrong in ways nothing surfaces: a stage
+   * is not always where the event is (an arena's is the pitch), and the centroid of the seating is
+   * the middle of the room rather than the front of it. Where an organizer has stated the answer,
+   * guessing over the top of them would make the control decorative.
+   */
+  explicit?: { x: number; y: number } | null,
 ): { x: number; y: number } | null {
+  if (explicit) return explicit;
   const stage = elements?.find((el) => el.kind === "stage");
   if (stage) return { x: stage.x + stage.width / 2, y: stage.y + stage.height / 2 };
   if (seats.length === 0) return null;
@@ -256,9 +266,11 @@ export function bestSeats(
   count: number,
   heldIds: ReadonlySet<number> = new Set(),
   orphanRule: OrphanRule = "balanced",
+  /** The chart's stated focal point, when it has one — see `focalPoint`. */
+  explicitFocal?: { x: number; y: number } | null,
 ): BestSeatChoice {
   const want = Math.max(1, Math.floor(count));
-  const focal = focalPoint(seats, elements);
+  const focal = focalPoint(seats, elements, explicitFocal);
   if (focal === null) return { seats: [], reason: "none_available", match: null };
 
   const free = (s: SeatMapSeat) => s.status === "available" && !heldIds.has(s.id);

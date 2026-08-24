@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
-import { LAYOUT_MAX_SEATS, VENUE_MAX_LAYOUTS } from '../../src/config.js';
+import { LAYOUT_MAX_SEATS, LAYOUT_SPACE, VENUE_MAX_LAYOUTS } from '../../src/config.js';
 import { pool } from '../../src/db/pool.js';
 import { app } from '../helpers/app.js';
 import { bearer, makeApprovedOrganizer, registerUser } from '../helpers/authFixture.js';
@@ -159,7 +159,7 @@ describe('the Section / Row / Count generator (US1, FR-010)', () => {
     expect(new Set(seats.map((s) => s.x)).size).toBe(10);
     for (const s of seats) {
       expect(s.x).toBeGreaterThanOrEqual(0);
-      expect(s.x).toBeLessThanOrEqual(10_000);
+      expect(s.x).toBeLessThanOrEqual(LAYOUT_SPACE);
     }
   });
 

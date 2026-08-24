@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   LAYOUT_MAX_SEATS,
+  LAYOUT_MAX,
+  LAYOUT_MIN,
   LAYOUT_SPACE,
   POLYGON_MAX_POINTS,
   ZONE_MAX_CAPACITY,
@@ -17,11 +19,14 @@ import {
 // the service reports it as `409 seat_limit_reached` naming the limit. A `.max()` here would shadow
 // that with a generic 400 (the same reasoning as `saveLayoutSchema`'s uncapped `seats`).
 
+// Deliberately looser than the wall: a document block's anchor is projected and then clamped, so a
+// value slightly outside is a position to correct, not a payload to reject. The margin is one frame
+// either side of the wall, which is what the pre-wall version meant by `-LAYOUT_SPACE..2×`.
 const coord = z
   .number()
   .int()
-  .min(-LAYOUT_SPACE)
-  .max(LAYOUT_SPACE * 2);
+  .min(LAYOUT_MIN - LAYOUT_SPACE)
+  .max(LAYOUT_MAX + LAYOUT_SPACE);
 /** Seat offsets are block-relative and may be negative — a round table's seats sit outside its box. */
 const offset = z.number().int().min(-LAYOUT_SPACE).max(LAYOUT_SPACE);
 
@@ -55,6 +60,7 @@ const blockParams = z.object({
   seatSpacing: z.number().int().min(1).max(LAYOUT_SPACE).optional(),
   rowSpacing: z.number().int().min(1).max(LAYOUT_SPACE).optional(),
   radius: z.number().int().min(1).max(LAYOUT_SPACE).optional(),
+  concentric: z.boolean().optional(),
   arcAngle: z.number().min(1).max(360).optional(),
   rowLabelScheme: z.enum(["alpha-asc", "alpha-desc", "num-asc", "num-desc"]).optional(),
   seatLabelScheme: z.enum(["num-asc", "num-desc", "even", "odd"]).optional(),
@@ -140,9 +146,31 @@ export const documentSchema = z.object({
         name: z.string().trim().min(1).max(60),
         seatShape: z.enum(["circle", "square"]).optional(),
         seatSizeMultiplier: z.number().min(0.5).max(2).optional(),
+        // The level this section is on (0044). Any int at parse time, including a negative
+        // placeholder the editor minted this session — `saveLayout` resolves it, and an id no floor
+        // answers to lands the section on the implicit single floor rather than failing the save.
+        floorId: z.number().int().nullable().optional(),
       }),
     )
     .max(200),
+  /*
+   * Floors (0044). Optional, because a chart with none is a chart on one floor — which is every
+   * chart written before this and most charts after it.
+   *
+   * Capped low on purpose. A venue with more than a few dozen levels is not a venue, and the picker
+   * is a strip the buyer reads at a glance: the bound is a product statement, not just a guard
+   * against an unbounded array.
+   */
+  floors: z
+    .array(
+      z.object({
+        id: z.number().int(),
+        name: z.string().trim().min(1).max(40),
+        displayOrder: z.number().int().min(0).max(1000),
+      }),
+    )
+    .max(40)
+    .optional(),
   /*
    * Rows (0032). Optional, because every document stored before rows existed has none and must still
    * parse — the projection derives them from seat labels in that case.

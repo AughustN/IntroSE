@@ -145,6 +145,12 @@ async function organizerAction(
   return withTransaction(async (db) => {
     const current = await lockOrganizer(id, db);
     if (!current) throw err.notFound("not_found");
+    // The whole application state machine, deliberately closed (FR-059):
+    //   pending  → approved | rejected
+    //   approved → suspended
+    //   suspended → (terminal — no reinstate; re-applying is refused too)
+    // A suspension is a decision about the person, not the paperwork, so it has no exit action.
+    // Reversing one means a new decision on a fresh record, which keeps the review history honest.
     const allowed =
       next === "suspended" ? current.status === "approved" : current.status === "pending";
     if (!allowed) throw err.conflict("moderation_conflict", "Trạng thái đã thay đổi.");

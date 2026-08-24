@@ -1,9 +1,18 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Calendar, BarChart3, Armchair, Megaphone, Plus } from "lucide-react";
+import { Armchair, ArrowLeft, BarChart3, Calendar, Megaphone } from "lucide-react";
 import AdPackagesPanel from "../../components/organizer/AdPackagesPanel";
 import OrganizerConsole from "../../components/organizer/OrganizerConsole";
+import EventFlowRail from "../../components/organizer/EventFlowRail";
+import ShowtimeList from "../../components/organizer/ShowtimeList";
 import SeatMapBuilder from "../../components/SeatMapBuilder";
+import { flowSteps } from "../../components/organizer/flowSteps";
+import {
+  organizerApi,
+  type ManageShowtime,
+  type MyEvent,
+  type MyVenue,
+} from "../../services/catalogClient";
 import {
   createDraftEvent,
   uploadEventBannerFile,
@@ -14,10 +23,10 @@ import { OrganizerBusinessAnalytics } from "../../components/account/OrganizerBu
 import { MediaDropzone } from "../../components/common/MediaDropzone";
 import { useEventCategories } from "../../hooks/useEventCategories";
 import { Refusal } from "../../components/organizer/states";
-import { organizerApi } from "../../services/catalogClient";
 import { formatVnd, formatVndShort } from "../../services/currency";
 import { fetchOrganizerAnalytics } from "../../services/organizerAnalyticsClient";
 import type { OrganizerAnalyticsOverview } from "@/shared/types/analytics";
+import { VN_PROVINCES, type VnProvince } from "../../vnProvinces";
 import {
   clearDraft,
   isWorthSaving,
@@ -25,6 +34,12 @@ import {
   saveDraft,
   type CreateEventDraft,
 } from "./createEventDraft";
+
+const UPCOMING_HINT = "Thêm ít nhất một suất chiếu sắp diễn trước khi tiếp tục.";
+
+/** Future-dated showtimes only — the same definition of "upcoming" the publish rail uses. */
+const upcomingOf = (rows: ManageShowtime[]) =>
+  rows.filter((st) => new Date(st.startsAt).getTime() > Date.now());
 
 export const OrganizerEventsPage: React.FC<{
   /** From `/organizer/events/:id` — which event the console should open at, if the URL names one. */
@@ -67,6 +82,15 @@ export const OrganizerEventsPage: React.FC<{
 
   const handleSectionSwitch = (section: Section) => {
     setActiveSection(section);
+    // Entering the create page always starts a FRESH wizard: a previous session's draft pipeline
+    // (its event id, its loaded showtimes) must not leak into it.
+    if (section === "create") {
+      setCreateStep(0);
+      setCreated(null);
+      setWizardEvent(null);
+      setWizardRows(null);
+      setSetupVenues(null);
+    }
     const url = new URL(window.location.href);
     url.searchParams.set("section", section);
     window.history.replaceState(null, "", url.toString());
@@ -114,6 +138,46 @@ export const OrganizerEventsPage: React.FC<{
   /** The overlay `SeatMapBuilder` runs for this event, or null if closed. */
   const [seatMapEventId, setSeatMapEventId] = useState<number | null>(null);
 
+  /*
+   * The fork a fresh SEATED draft lands on.
+   *
+   * Its real next move is genuinely either half of the chain: dates need no chart, and the venue
+   * chart needs no dates — drawing it is pure geometry over the venue the form just created. The
+   * console used to choose for the organizer (always dates), which left chart design a button they
+   * had to already know about. `chartLayoutFor` carries what option B opened plus the event to land
+   * on when the editor closes.
+   */
+  /*
+   * The draft a finished three-page form produced, and the SETUP data that follows it.
+   *
+   * Non-null turns this page into the rest of creation: showtimes and tiers (stage 4), the seat
+   * chart for a seated event (stage 5), then the readiness summary with its one commit button
+   * (stage 6). The management console used to be where all of that lived — which is why finishing
+   * page three dumped the organizer there to keep working; now it is only where they go to look,
+   * or to come back and edit.
+   */
+  const [created, setCreated] = useState<{
+    eventId: number;
+    venueId: number;
+    eventType: "seated" | "general_admission";
+  } | null>(null);
+  const [setupVenues, setSetupVenues] = useState<MyVenue[] | null>(null);
+  const [wizardEvent, setWizardEvent] = useState<MyEvent | null>(null);
+  const [wizardRows, setWizardRows] = useState<ManageShowtime[] | null>(null);
+  const [publishing, setPublishing] = useState(false);
+
+  /*
+   * The create form is a WIZARD of pages, not one long scroll.
+   *
+   * Every field the old single page asked for sat above the fold's horizon twice over — media and
+   * venue were a full viewport apart from the title they belong with. Pages 1–3 create the DRAFT;
+   * once `created` is set the stepper grows past them into the rest of the chain, each page
+   * gate-checked before "Tiếp tục" so a missing banner surfaces on its own page instead of as a
+   * submit-time refusal three screens later.
+   */
+  const [createStep, setCreateStep] = useState(0);
+  const [stepError, setStepError] = useState<string | null>(null);
+
   // Create Event Form State
   const [createTitle, setCreateTitle] = useState("");
   /**
@@ -148,7 +212,7 @@ export const OrganizerEventsPage: React.FC<{
   const [isCreating, setIsCreating] = useState(false);
   const [createVenueName, setCreateVenueName] = useState("");
   const [createVenueAddress, setCreateVenueAddress] = useState("");
-  const [createCity, setCreateCity] = useState<"TP.HCM" | "Hà Nội" | "Đà Nẵng">("TP.HCM");
+  const [createCity, setCreateCity] = useState<VnProvince>("TP.HCM");
   const [createDescription, setCreateDescription] = useState("");
 
   const [toastMsg, setToastMsg] = useState<{ type: "success" | "error"; text: string } | null>(
@@ -359,18 +423,214 @@ export const OrganizerEventsPage: React.FC<{
       setRecoverable(null);
       clearCreateForm();
 
-      // Stay on this page: open the new event inside the console (level 2), where the rail says what
-      // is still missing before it can go on sale.
-      handleSectionSwitch("events");
-      setSelectedEventId(draft.eventId);
-      setUrlEvent(draft.eventId);
-      setReloadKey((k) => k + 1);
+      if (createEventType === "seated") {
+        // Stay on THIS page: the draft was the entry fee, and stages 4–6 (showtimes → chart →
+        // finish) open right here. The management console is where they go to LOOK later.
+        setCreated({ eventId: draft.eventId, venueId: draft.venueId, eventType: "seated" });
+      } else {
+        setCreated({
+          eventId: draft.eventId,
+          venueId: draft.venueId,
+          eventType: "general_admission",
+        });
+      }
+      setCreateStep(3);
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       showToast("error", (err as Error).message || "Tạo sự kiện thất bại.");
     } finally {
       setIsCreating(false);
     }
   };
+
+  /** The three pages of the wizard, in the order the organizer meets them. */
+  const CREATE_STEP_LABELS = ["Thông tin chung", "Hình ảnh & địa điểm", "Mô tả"] as const;
+
+  /** Forward through the wizard, gate-checking THIS page before the next one shows. */
+  const advanceCreateStep = () => {
+    setStepError(null);
+    if (createStep === 0 && createTitle.trim().length < 3) {
+      setStepError("Tên sự kiện phải từ 3 ký tự trở lên.");
+      return;
+    }
+    // The banner is the submit handler's one hard media requirement; checking it HERE means the
+    // refusal appears on the page where upload lives, not after two more pages of typing.
+    if (createStep === 1 && !stagedBannerFile && !createPictureUrl.trim()) {
+      setStepError("Hãy chọn hình ảnh sự kiện trước khi tiếp tục.");
+      return;
+    }
+    // Same reasoning for the venue pair: their `required` attributes cannot fire from another page,
+    // so this page owns its own completeness before the description page opens.
+    if (createStep === 1 && (!createVenueName.trim() || !createVenueAddress.trim())) {
+      setStepError("Hãy nhập tên địa điểm và địa chỉ chi tiết.");
+      return;
+    }
+    // Stage 4 needs something to sell ON: no upcoming showtime, no point moving on — the chart and
+    // the submit gate both hang off showtimes.
+    if (createStep === 3 && upcomingOf(wizardRows ?? []).length === 0) {
+      setStepError(UPCOMING_HINT);
+      return;
+    }
+    setCreateStep((s) => Math.min(s + 1, wizardSteps.length - 1));
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const retreatCreateStep = () => {
+    setStepError(null);
+    setCreateStep((s) => Math.max(s - 1, 0));
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  /**
+   * The setup stages' data: venues for the showtime form, the draft as MyEvent, and its rows.
+   * `refreshSetup` is for HANDLERS (a showtime saved, a chart applied); the effect owns its own
+   * identical fetch with an `alive` guard, so its dependency list stays [created, reloadKey] and
+   * no unstable identity drags it into re-running every render.
+   */
+  const refreshSetup = () => {
+    if (!created) return;
+    organizerApi
+      .showtimesManage(created.eventId)
+      .then(setWizardRows)
+      .catch(() => setWizardRows(null));
+  };
+
+  useEffect(() => {
+    if (!created) return;
+    let alive = true;
+    organizerApi
+      .showtimesManage(created.eventId)
+      .then((r) => alive && setWizardRows(r))
+      .catch(() => alive && setWizardRows(null));
+    organizerApi
+      .myVenues()
+      .then((v) => alive && setSetupVenues(v))
+      .catch(() => alive && setSetupVenues([]));
+    organizerApi
+      .myEvents()
+      .then((list) => alive && setWizardEvent(list.find((e) => e.id === created.eventId) ?? null))
+      .catch(() => alive && setWizardEvent(null));
+    return () => {
+      alive = false;
+    };
+  }, [created, reloadKey]);
+
+  /** Labels for the whole pipeline — pages 1–3 create the draft; the rest finish it. */
+  const wizardSteps = created
+    ? [
+        ...CREATE_STEP_LABELS,
+        "Suất chiếu & hạng vé",
+        ...(created.eventType === "seated" ? ["Sơ đồ ghế"] : []),
+        "Hoàn tất",
+      ]
+    : [...CREATE_STEP_LABELS];
+
+  const setupSteps = wizardEvent ? flowSteps(wizardEvent, wizardRows) : [];
+  const submitStep = setupSteps.find((s) => s.id === "submit") ?? null;
+  /** Ready = every earlier gate passed AND this event has not been sent already. */
+  const canSubmitForReview = submitStep?.state === "blocked" && submitStep.label === "Gửi duyệt";
+  /** Where the last page sits for the CURRENT event type — seated carries the extra chart page. */
+  const chartStageIndex = created?.eventType === "seated" ? 4 : null;
+  const finishStageIndex = created ? 3 + (created.eventType === "seated" ? 2 : 1) : 5;
+
+  const submitForReviewFromWizard = async () => {
+    if (!created || !canSubmitForReview || publishing) return;
+    setPublishing(true);
+    setStepError(null);
+    try {
+      await organizerApi.publish(created.eventId);
+      showToast("success", "Đã gửi duyệt. Sự kiện sẽ hiển thị sau khi quản trị viên phê duyệt.");
+      setCreated(null);
+      handleSectionSwitch("events");
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      setStepError((err as Error).message || "Gửi duyệt thất bại.");
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  /*
+   * The pinned transport bar, shared by the draft pages AND the setup stages — one definition so
+   * the two halves of the wizard can never drift apart in look or behaviour. Its primary button
+   * changes meaning by position: next / create-draft / send-for-review.
+   */
+  const transport = (
+    <div className="sticky bottom-0 -mx-6 flex flex-wrap items-center justify-end gap-3 border-t border-beige-kem/20 bg-surface-2 px-6 pb-1 pt-4 sm:-mx-8 sm:px-8">
+      {stepError && <p className="mr-auto text-[11px] font-semibold text-burgundy">{stepError}</p>}
+      <button
+        type="button"
+        onClick={() => handleSectionSwitch("events")}
+        disabled={isCreating || publishing}
+        className="px-5 py-2.5 bg-surface-2 hover:bg-beige-kem/10 text-beige-kem font-semibold transition-colors border border-beige-kem/30 disabled:opacity-50"
+      >
+        {/* Past page three nothing is discarded — the draft lives on the server; this just leaves. */}
+        {created ? "Lưu & về quản lý" : "Hủy"}
+      </button>
+      {createStep > 0 && (
+        <button
+          type="button"
+          onClick={retreatCreateStep}
+          disabled={isCreating || publishing}
+          className="px-5 py-2.5 bg-surface-2 hover:bg-beige-kem/10 text-beige-kem font-semibold transition-colors border border-beige-kem/30 disabled:opacity-50"
+        >
+          ← Quay lại
+        </button>
+      )}
+      {createStep < wizardSteps.length - 1 ? (
+        <button
+          type="button"
+          onClick={advanceCreateStep}
+          disabled={isCreating || publishing}
+          className="px-6 py-2.5 bg-burgundy hover:brightness-110 text-white font-bold transition-all disabled:opacity-50"
+        >
+          Tiếp tục →
+        </button>
+      ) : !created ? (
+        <button
+          type="submit"
+          disabled={isCreating}
+          className="px-6 py-2.5 bg-burgundy hover:brightness-110 text-white font-bold transition-all disabled:opacity-50 flex items-center gap-2"
+        >
+          {isCreating ? (
+            <>
+              <span
+                aria-hidden="true"
+                className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent align-middle"
+              />
+              <span>Đang tải lên & tạo bản nháp…</span>
+            </>
+          ) : (
+            "Tạo bản nháp & tiếp tục"
+          )}
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void submitForReviewFromWizard()}
+          disabled={!canSubmitForReview || publishing}
+          title={
+            canSubmitForReview
+              ? undefined
+              : "Hoàn tất các bước còn thiếu (xem danh sách bên trên) trước khi gửi duyệt."
+          }
+          className="px-6 py-2.5 bg-burgundy hover:brightness-110 text-white font-bold transition-all disabled:opacity-50 flex items-center gap-2"
+        >
+          {publishing ? (
+            <>
+              <span
+                aria-hidden="true"
+                className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent align-middle"
+              />
+              <span>Đang gửi duyệt…</span>
+            </>
+          ) : (
+            "Gửi duyệt"
+          )}
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-xanh-pho text-beige-kem p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6 transition-colors duration-200">
@@ -403,115 +663,120 @@ export const OrganizerEventsPage: React.FC<{
         So: identity, then the numbers, then ONE row of sections. Creating an event is a primary
         action rather than a tab, which is how every platform surveyed treats it — and which is what
         lets the second bar disappear entirely.
+
+        And creating now takes a PAGE of its own: while the wizard is up, none of this chrome —
+        identity, numbers, section tabs, even the button that opened it — renders beside it. The only
+        ways out are the wizard's own Hủy and the back arrow on the create page, both landing in the
+        events console.
       */}
-      <header className="space-y-4">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="font-meta text-meta uppercase tracking-widest text-ink-soft">
-              Nhà tổ chức sự kiện
-            </p>
-            <h1 className="font-display text-2xl font-black tracking-tight text-beige-kem sm:text-3xl">
-              Bảng điều khiển
-            </h1>
+      {/*
+        An OPEN EVENT takes a page of its own too (like creating does): the description screen and
+        its editor render without the dashboard's identity, numbers, or section tabs above them —
+        the event IS the page. The overview's "← Danh sách sự kiện" is the way back out.
+      */}
+      {activeSection !== "create" && !(activeSection === "events" && selectedEventId !== null) && (
+        <header className="space-y-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="font-meta text-meta uppercase tracking-widest text-ink-soft">
+                Nhà tổ chức sự kiện
+              </p>
+              <h1 className="font-display text-2xl font-black tracking-tight text-beige-kem sm:text-3xl">
+                Bảng điều khiển
+              </h1>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => handleSectionSwitch("create")}
+              className="inline-flex shrink-0 items-center gap-2 bg-burgundy px-4 py-2.5 text-xs font-bold text-white transition hover:brightness-110"
+            >
+              <span aria-hidden>+</span> Tạo sự kiện
+            </button>
           </div>
 
-          <button
-            type="button"
-            onClick={() => handleSectionSwitch("create")}
-            className="inline-flex shrink-0 items-center gap-2 bg-burgundy px-4 py-2.5 text-xs font-bold text-white transition hover:brightness-110"
-          >
-            <span aria-hidden>+</span> Tạo sự kiện
-          </button>
-        </div>
-
-        {/*
+          {/*
           Account-level, not per-event: the question an organizer opens this page with is "how is it
           selling", and until now the only answer lived one tab away. Absent while loading rather than
           showing zeroes — a dash reads as "not known yet", a 0 reads as "you have sold nothing".
         */}
-        {/* Monitoring, not creation: while filling the form these three numbers answer a question
-            nobody is asking, and push the first field further down. */}
-        <dl
-          className={`grid grid-cols-2 gap-3 sm:grid-cols-3 ${
-            activeSection === "create" ? "hidden" : ""
-          }`}
-        >
-          {[
-            {
-              label: "Doanh thu",
-              value: overview ? formatVnd(overview.gross_revenue_vnd) : "—",
-              shortValue: overview ? formatVndShort(overview.gross_revenue_vnd) : "—",
-            },
-            {
-              label: "Vé đã bán",
-              value: overview ? overview.total_tickets_sold.toLocaleString("vi-VN") : "—",
-              shortValue: null,
-            },
-            { label: "Sự kiện đang mở bán", value: liveEventCount ?? "—", shortValue: null },
-          ].map((k) => (
-            <div key={k.label} className="border border-beige-kem/20 bg-surface-2 p-4">
-              <dt className="font-meta text-meta uppercase tracking-widest text-ink-soft">
-                {k.label}
-              </dt>
-              <dd className="mt-1 font-display text-title-s font-black tabular-nums text-beige-kem">
-                {k.shortValue === null ? (
-                  k.value
-                ) : (
-                  <>
-                    <span className="sm:hidden">{k.shortValue}</span>
-                    <span className="hidden sm:inline">{k.value}</span>
-                  </>
-                )}
-              </dd>
-            </div>
-          ))}
-        </dl>
-
-        {/* One level of navigation. "Sơ đồ ghế" is a peer section, not a button floating beside the
-            title — a chart belongs to a venue and backs many events, exactly like the others here. */}
-        <nav
-          aria-label="Khu vực quản lý"
-          className="flex flex-wrap items-center gap-1 border-b border-beige-kem/20"
-        >
-          {(
-            [
+          <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {[
               {
-                key: "analytics",
-                label: "Thống kê kinh doanh",
-                shortLabel: "Thống kê",
-                Icon: BarChart3,
+                label: "Doanh thu",
+                value: overview ? formatVnd(overview.gross_revenue_vnd) : "—",
+                shortValue: overview ? formatVndShort(overview.gross_revenue_vnd) : "—",
               },
-              { key: "events", label: "Sự kiện", shortLabel: "Sự kiện", Icon: Calendar },
-              { key: "create", label: "Tạo sự kiện", shortLabel: "Tạo", Icon: Plus },
-              { key: "seatmaps", label: "Sơ đồ ghế", shortLabel: "Sơ đồ", Icon: Armchair },
-              { key: "ads", label: "Gói quảng cáo", shortLabel: "Quảng cáo", Icon: Megaphone },
-            ] as const
-          ).map(({ key, label, shortLabel, Icon }) => {
-            const active = key !== "seatmaps" && activeSection === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                aria-current={active ? "page" : undefined}
-                onClick={() =>
-                  key === "seatmaps"
-                    ? navigate("/organizer/seatmaps")
-                    : handleSectionSwitch(key as Section)
-                }
-                className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2.5 text-xs font-bold transition-colors sm:px-4 sm:text-sm ${
-                  active
-                    ? "border-burgundy text-beige-kem"
-                    : "border-transparent text-ink-soft hover:text-beige-kem"
-                } ${key === "ads" ? "hidden sm:flex" : ""}`}
-              >
-                <Icon className="h-4 w-4" />
-                <span className="hidden sm:inline">{label}</span>
-                <span className="sm:hidden">{shortLabel}</span>
-              </button>
-            );
-          })}
-        </nav>
-      </header>
+              {
+                label: "Vé đã bán",
+                value: overview ? overview.total_tickets_sold.toLocaleString("vi-VN") : "—",
+                shortValue: null,
+              },
+              { label: "Sự kiện đang mở bán", value: liveEventCount ?? "—", shortValue: null },
+            ].map((k) => (
+              <div key={k.label} className="bg-surface-2 p-4">
+                <dt className="font-meta text-meta uppercase tracking-widest text-ink-soft">
+                  {k.label}
+                </dt>
+                <dd className="mt-1 font-display text-title-s font-black tabular-nums text-beige-kem">
+                  {k.shortValue === null ? (
+                    k.value
+                  ) : (
+                    <>
+                      <span className="sm:hidden">{k.shortValue}</span>
+                      <span className="hidden sm:inline">{k.value}</span>
+                    </>
+                  )}
+                </dd>
+              </div>
+            ))}
+          </dl>
+
+          {/* One level of navigation. "Sơ đồ ghế" is a peer section, not a button floating beside the
+            title — a chart belongs to a venue and backs many events, exactly like the others here. */}
+          <nav
+            aria-label="Khu vực quản lý"
+            className="flex flex-wrap items-center gap-1 border-b border-beige-kem/20"
+          >
+            {(
+              [
+                {
+                  key: "analytics",
+                  label: "Thống kê kinh doanh",
+                  shortLabel: "Thống kê",
+                  Icon: BarChart3,
+                },
+                { key: "events", label: "Sự kiện", shortLabel: "Sự kiện", Icon: Calendar },
+                { key: "seatmaps", label: "Sơ đồ ghế", shortLabel: "Sơ đồ", Icon: Armchair },
+                { key: "ads", label: "Gói quảng cáo", shortLabel: "Quảng cáo", Icon: Megaphone },
+              ] as const
+            ).map(({ key, label, shortLabel, Icon }) => {
+              const active = key !== "seatmaps" && activeSection === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  aria-current={active ? "page" : undefined}
+                  onClick={() =>
+                    key === "seatmaps"
+                      ? navigate("/organizer/seatmaps")
+                      : handleSectionSwitch(key as Section)
+                  }
+                  className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2.5 text-xs font-bold transition-colors sm:px-4 sm:text-sm ${
+                    active
+                      ? "border-burgundy text-beige-kem"
+                      : "border-transparent text-ink-soft hover:text-beige-kem"
+                  } ${key === "ads" ? "hidden sm:flex" : ""}`}
+                >
+                  <Icon className="h-4 w-4" />
+                  <span className="hidden sm:inline">{label}</span>
+                  <span className="sm:hidden">{shortLabel}</span>
+                </button>
+              );
+            })}
+          </nav>
+        </header>
+      )}
 
       {activeSection === "analytics" ? (
         <OrganizerBusinessAnalytics />
@@ -519,7 +784,7 @@ export const OrganizerEventsPage: React.FC<{
         <AdPackagesPanel />
       ) : activeSection === "events" ? (
         <div className="space-y-6">
-          {/* The server-backed 006 console: events → editor → showtimes → tiers. */}
+          {/* The server-backed 006 console: events → overview/editor → showtimes → tiers. */}
           {
             <OrganizerConsole
               selectedEventId={selectedEventId}
@@ -537,6 +802,24 @@ export const OrganizerEventsPage: React.FC<{
         </div>
       ) : (
         <div className="space-y-6">
+          {/*
+            The standalone page's own furniture: one way back and one title. No dashboard identity, no
+            numbers, no section tabs — while this page is up it is the whole screen.
+          */}
+          <div className="mx-auto flex max-w-3xl items-center justify-between">
+            <button
+              type="button"
+              onClick={() => handleSectionSwitch("events")}
+              disabled={isCreating}
+              className="flex items-center gap-2 text-xs font-bold text-beige-kem/70 transition-colors hover:text-beige-kem disabled:opacity-50"
+            >
+              {/* Borderless, matching `EventEditor`'s back link: an arrow and a label, because this
+                  is navigation and not an action taken on the page. */}
+              <ArrowLeft aria-hidden className="h-3.5 w-3.5" />
+              Quản lý sự kiện
+            </button>
+            <h1 className="font-display text-lg font-black text-beige-kem">Tạo sự kiện mới</h1>
+          </div>
           {
             <div className="bg-surface-2 border border-beige-kem/25 p-6 sm:p-8 max-w-3xl mx-auto space-y-6 transition-colors">
               {/*
@@ -566,7 +849,7 @@ export const OrganizerEventsPage: React.FC<{
                         setCreateEventType(recoverable.eventType);
                         setCreateVenueName(recoverable.venueName);
                         setCreateVenueAddress(recoverable.venueAddress);
-                        setCreateCity(recoverable.city as "TP.HCM" | "Hà Nội" | "Đà Nẵng");
+                        setCreateCity(recoverable.city as VnProvince);
                         setRecoverable(null);
                       }}
                       className="border border-la-co bg-la-co/25 px-3 py-1.5 text-xs font-bold text-beige-kem"
@@ -587,71 +870,113 @@ export const OrganizerEventsPage: React.FC<{
                 </div>
               )}
 
-              <form onSubmit={handleCreateEventSubmit} className="space-y-5 text-xs">
-                {/* Event type — decides which flow the submit follows (see `createEventType`). */}
-                <div>
-                  <label className="block font-meta text-beige-kem font-semibold mb-1">
-                    Hình thức bán vé
-                  </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setCreateEventType("seated")}
-                      aria-pressed={createEventType === "seated"}
-                      className={`border p-3 text-left transition-colors ${
-                        createEventType === "seated"
-                          ? "border-burgundy bg-burgundy/15"
-                          : "border-beige-kem/30 hover:border-burgundy/50"
-                      }`}
-                    >
-                      <span className="block font-bold text-beige-kem">
-                        Có sơ đồ ghế — khách chọn chỗ
-                      </span>
-                      <span className="mt-1 block text-[11px] text-ink-soft">
-                        Tạo bản nháp, rồi thêm suất chiếu, vẽ sơ đồ và gán hạng vé ở màn quản lý.
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCreateEventType("general_admission")}
-                      aria-pressed={createEventType === "general_admission"}
-                      className={`border p-3 text-left transition-colors ${
-                        createEventType === "general_admission"
-                          ? "border-burgundy bg-burgundy/15"
-                          : "border-beige-kem/30 hover:border-burgundy/50"
-                      }`}
-                    >
-                      <span className="block font-bold text-beige-kem">
-                        Vé đại trà — không chọn chỗ
-                      </span>
-                      <span className="mt-1 block text-[11px] text-ink-soft">
-                        Bán theo số lượng từng hạng vé, không cần sơ đồ. Tạo bản nháp, rồi thêm suất
-                        chiếu và hạng vé ở màn quản lý.
-                      </span>
-                    </button>
-                  </div>
-                </div>
+              {!created && (
+                <form onSubmit={handleCreateEventSubmit} className="space-y-5 text-xs">
+                  {/*
+                  The wizard's map. Rendered as numbered markers in EventFlowRail's visual language —
+                  a numeral that becomes a tick — so progress reads the same way everywhere in this
+                  console.
+                */}
+                  <ol
+                    aria-label="Các bước tạo sự kiện"
+                    className="flex flex-wrap items-center gap-x-2 gap-y-1"
+                  >
+                    {wizardSteps.map((label, i) => (
+                      <li key={label} className="flex items-center gap-2">
+                        <span
+                          aria-current={createStep === i ? "step" : undefined}
+                          className={`grid h-6 w-6 place-items-center rounded-full border-2 font-bold ${
+                            i < createStep
+                              ? "border-la-co bg-la-co text-on-tint"
+                              : createStep === i
+                                ? "border-burgundy bg-burgundy/15 text-beige-kem"
+                                : "border-beige-kem/25 text-beige-kem/45"
+                          }`}
+                        >
+                          {i < createStep ? "✓" : i + 1}
+                        </span>
+                        <span
+                          className={`font-semibold ${
+                            createStep === i ? "text-beige-kem" : "text-beige-kem/50"
+                          }`}
+                        >
+                          {label}
+                        </span>
+                        {i < wizardSteps.length - 1 && (
+                          <span aria-hidden className="mx-1 h-px w-6 bg-beige-kem/25 sm:w-10" />
+                        )}
+                      </li>
+                    ))}
+                  </ol>
 
-                {/* Title, then category — one field per row (NN/g: single column completes fastest). */}
-                <div className="space-y-5">
-                  <div>
-                    <label className="block font-meta text-beige-kem font-semibold mb-1">
-                      Tên sự kiện
-                    </label>
-                    <input
-                      type="text"
-                      value={createTitle}
-                      onChange={(e) => setCreateTitle(e.target.value)}
-                      placeholder="Vd: Live Concert Mùa Hè 2026"
-                      required
-                      className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none transition-colors"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-meta text-beige-kem font-semibold mb-1">
-                      Thể loại
-                    </label>
-                    {/*
+                  {/* ── Trang 1 · Thông tin chung ─────────────────────────────────────────────── */}
+                  {createStep === 0 && (
+                    <>
+                      {/* Event type — decides which flow the submit follows (see `createEventType`). */}
+                      <div>
+                        <label className="block font-meta text-beige-kem font-semibold mb-1">
+                          Hình thức bán vé
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setCreateEventType("seated")}
+                            aria-pressed={createEventType === "seated"}
+                            className={`border p-3 text-left transition-colors ${
+                              createEventType === "seated"
+                                ? "border-burgundy bg-burgundy/15"
+                                : "border-beige-kem/30 hover:border-burgundy/50"
+                            }`}
+                          >
+                            <span className="block font-bold text-beige-kem">
+                              Có sơ đồ ghế — khách chọn chỗ
+                            </span>
+                            <span className="mt-1 block text-[11px] text-ink-soft">
+                              Tạo bản nháp, rồi thêm suất chiếu, vẽ sơ đồ và gán hạng vé ở màn quản
+                              lý.
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCreateEventType("general_admission")}
+                            aria-pressed={createEventType === "general_admission"}
+                            className={`border p-3 text-left transition-colors ${
+                              createEventType === "general_admission"
+                                ? "border-burgundy bg-burgundy/15"
+                                : "border-beige-kem/30 hover:border-burgundy/50"
+                            }`}
+                          >
+                            <span className="block font-bold text-beige-kem">
+                              Vé đại trà — không chọn chỗ
+                            </span>
+                            <span className="mt-1 block text-[11px] text-ink-soft">
+                              Bán theo số lượng từng hạng vé, không cần sơ đồ. Tạo bản nháp, rồi
+                              thêm suất chiếu và hạng vé ở màn quản lý.
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Title, then category — one field per row (NN/g: single column completes fastest). */}
+                      <div className="space-y-5">
+                        <div>
+                          <label className="block font-meta text-beige-kem font-semibold mb-1">
+                            Tên sự kiện
+                          </label>
+                          <input
+                            type="text"
+                            value={createTitle}
+                            onChange={(e) => setCreateTitle(e.target.value)}
+                            placeholder="Vd: Live Concert Mùa Hè 2026"
+                            required
+                            className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none transition-colors"
+                          />
+                        </div>
+                        <div>
+                          <label className="block font-meta text-beige-kem font-semibold mb-1">
+                            Thể loại
+                          </label>
+                          {/*
                       Categories come from the database, not from a list typed here.
 
                       The four options this replaced were `music / art / conference / concert`, of
@@ -661,236 +986,323 @@ export const OrganizerEventsPage: React.FC<{
                       more (UC-35); any list compiled into the bundle is a stale second opinion, which
                       is exactly why `useEventCategories` exists.
                     */}
-                    <select
-                      value={createCategory}
-                      onChange={(e) => setCreateCategory(e.target.value)}
-                      className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none transition-colors"
-                    >
-                      {categories.map((c) => (
-                        <option key={c.code} value={c.code} className="bg-xanh-pho">
-                          {c.labelVi}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
+                          <select
+                            value={createCategory}
+                            onChange={(e) => setCreateCategory(e.target.value)}
+                            className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none transition-colors"
+                          >
+                            {categories.map((c) => (
+                              <option key={c.code} value={c.code} className="bg-xanh-pho">
+                                {c.labelVi}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </>
+                  )}
 
-                {/* Media Upload Section: Picture (Required) & Video (Optional) */}
-                <div
-                  id="create-media"
-                  className="scroll-mt-24 space-y-4 border border-beige-kem/25 bg-xanh-pho p-4"
-                >
-                  <h3 className="font-meta text-xs font-bold uppercase tracking-wider text-burgundy">
-                    Hình ảnh & video
-                  </h3>
-                  <Refusal message={mediaRefusal} />
+                  {/* ── Trang 2 · Hình ảnh & địa điểm ──────────────────────────────────────────── */}
+                  {createStep === 1 && (
+                    <>
+                      {/* Media Upload Section: Picture (Required) & Video (Optional) */}
+                      <div
+                        id="create-media"
+                        className="scroll-mt-24 space-y-4 border border-beige-kem/25 bg-xanh-pho p-4"
+                      >
+                        <h3 className="font-meta text-xs font-bold uppercase tracking-wider text-burgundy">
+                          Hình ảnh & video
+                        </h3>
+                        <Refusal message={mediaRefusal} />
 
-                  {/*
+                        {/*
                     No `required` marker. On this form everything is required unless it says
                     "(tùy chọn)" — mark the few optional fields rather than the many required ones.
                     The prop only ever drew an asterisk (no `aria-required`, no input validation), so
                     dropping it costs nothing: the real check is in `handleCreateEventSubmit`, and it
                     reports through the `Refusal` above.
                   */}
-                  <div>
-                    <MediaDropzone
-                      label="Hình ảnh sự kiện"
-                      mediaType="banner"
-                      currentUrl={createPictureUrl}
-                      onFileSelected={(file) => setStagedBannerFile(file)}
-                      helpText="Tỷ lệ 16:9"
-                      aspectRatio="banner"
-                      compact
-                      disabled={isCreating}
-                    />
-                  </div>
-
-                  {/* Optional Video Upload */}
-                  <div>
-                    <MediaDropzone
-                      label="Video giới thiệu (tùy chọn)"
-                      mediaType="trailer"
-                      currentUrl={createVideoUrl}
-                      onFileSelected={(file) => setStagedTrailerFile(file)}
-                      onRemove={() => {
-                        setStagedTrailerFile(null);
-                        setCreateVideoUrl("");
-                      }}
-                      helpText="Tỷ lệ 16:9"
-                      aspectRatio="video"
-                      compact
-                      disabled={isCreating}
-                    />
-                  </div>
-                </div>
-
-                {/* Venue and city stay side by side — the short, related pair NN/g exempts from the
-                    single-column rule, and splitting them would only make the form taller. */}
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                  <div className="sm:col-span-2">
-                    <label className="block font-meta text-beige-kem font-semibold mb-1">
-                      Tên địa điểm / nhà hát
-                    </label>
-                    <input
-                      type="text"
-                      value={createVenueName}
-                      onChange={(e) => setCreateVenueName(e.target.value)}
-                      placeholder="Vd: Nhà hát Hòa Bình"
-                      required
-                      className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-meta text-beige-kem font-semibold mb-1">
-                      Thành phố
-                    </label>
-                    <select
-                      value={createCity}
-                      onChange={(e) => setCreateCity(e.target.value as any)}
-                      className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none"
-                    >
-                      <option value="TP.HCM">TP.HCM</option>
-                      <option value="Hà Nội">Hà Nội</option>
-                      <option value="Đà Nẵng">Đà Nẵng</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Address */}
-                <div>
-                  <label className="block font-meta text-beige-kem font-semibold mb-1">
-                    Địa chỉ chi tiết
-                  </label>
-                  <input
-                    type="text"
-                    value={createVenueAddress}
-                    onChange={(e) => setCreateVenueAddress(e.target.value)}
-                    placeholder="Vd: 240 3 Tháng 2, Phường 12, Quận 10"
-                    required
-                    className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none"
-                  />
-                </div>
-
-                {/* AI Assistant for Recommended Description */}
-                <div className="bg-surface-2 p-4 border border-beige-kem/30 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-meta text-xs font-bold text-burgundy uppercase tracking-wider">
-                      AI Trợ Lý Viết Mô Tả Sự Kiện
-                    </h3>
-                    <span className="text-[10px] font-semibold text-white bg-burgundy px-2 py-0.5">
-                      TixHub AI
-                    </span>
-                  </div>
-                  <p className="font-meta text-[11px] text-ink-soft leading-relaxed">
-                    Nhập ý tưởng ngắn hoặc chủ đề sự kiện (vd:"Đêm nhạc acoustic Trịnh Công Sơn
-                    không gian ấm cúng"), AI sẽ tự động tạo tiêu đề & mô tả hấp dẫn cho bạn!
-                  </p>
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <input
-                      type="text"
-                      value={aiBrief}
-                      onChange={(e) => setAiBrief(e.target.value)}
-                      placeholder="Nhập ý tưởng/tóm tắt nội dung sự kiện..."
-                      className="flex-1 bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-2.5 text-beige-kem outline-none text-xs"
-                    />
-                    <button
-                      type="button"
-                      onClick={askAiDescriptionAssistant}
-                      disabled={aiBusy}
-                      className="px-4 py-2.5 bg-burgundy hover:brightness-110 disabled:opacity-50 text-white font-bold text-xs transition-all shrink-0 flex items-center justify-center space-x-1"
-                    >
-                      {aiBusy ? (
-                        <>
-                          <span
-                            aria-hidden="true"
-                            className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent align-middle"
+                        <div>
+                          <MediaDropzone
+                            label="Hình ảnh sự kiện"
+                            mediaType="banner"
+                            currentUrl={createPictureUrl}
+                            onFileSelected={(file) => setStagedBannerFile(file)}
+                            helpText="Tỷ lệ 16:9"
+                            aspectRatio="banner"
+                            compact
+                            disabled={isCreating}
                           />
-                          <span>AI Đang Tạo…</span>
-                        </>
-                      ) : (
-                        <span>Nhờ AI Gợi Ý Mô Tả</span>
-                      )}
-                    </button>
-                  </div>
+                        </div>
 
-                  {aiSuggestion && (
-                    <div className="mt-3 p-3.5 bg-xanh-pho border border-beige-kem/30 space-y-2 text-xs">
-                      <div className="flex items-center justify-between border-b border-beige-kem/20 pb-2">
-                        <span className="font-bold text-burgundy">Gợi Ý Từ AI:</span>
-                        <button
-                          type="button"
-                          onClick={applyAiSuggestion}
-                          className="px-3 py-1 border border-la-co bg-la-co/25 text-beige-kem font-bold text-[11px] transition-colors"
-                        >
-                          Áp Dụng Tiêu Đề & Mô Tả Này
-                        </button>
+                        {/* Optional Video Upload */}
+                        <div>
+                          <MediaDropzone
+                            label="Video giới thiệu (tùy chọn)"
+                            mediaType="trailer"
+                            currentUrl={createVideoUrl}
+                            onFileSelected={(file) => setStagedTrailerFile(file)}
+                            onRemove={() => {
+                              setStagedTrailerFile(null);
+                              setCreateVideoUrl("");
+                            }}
+                            helpText="Tỷ lệ 16:9"
+                            aspectRatio="video"
+                            compact
+                            disabled={isCreating}
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <span className="text-ink-soft font-semibold">Tiêu đề gợi ý:</span>
-                        {""}
-                        <span className="text-beige-kem font-bold">{aiSuggestion.title}</span>
+
+                      {/* Venue and city stay side by side — the short, related pair NN/g exempts from the
+                    single-column rule, and splitting them would only make the form taller. */}
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                        <div className="sm:col-span-2">
+                          <label className="block font-meta text-beige-kem font-semibold mb-1">
+                            Tên địa điểm / nhà hát
+                          </label>
+                          <input
+                            type="text"
+                            value={createVenueName}
+                            onChange={(e) => setCreateVenueName(e.target.value)}
+                            placeholder="Vd: Nhà hát Hòa Bình"
+                            required
+                            className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block font-meta text-beige-kem font-semibold mb-1">
+                            Thành phố
+                          </label>
+                          <select
+                            value={createCity}
+                            onChange={(e) => setCreateCity(e.target.value as VnProvince)}
+                            className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none"
+                          >
+                            {/* All 34 province-level units (NQ 202/2025/QH15), not the three-city
+                          starter list — an organizer in Pleiku or Vinh used to have to lie. */}
+                            {VN_PROVINCES.map((p) => (
+                              <option key={p} value={p} className="bg-xanh-pho">
+                                {p === "TP.HCM" ? "TP. Hồ Chí Minh" : p}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
+
+                      {/* Address */}
                       <div>
-                        <span className="text-ink-soft font-semibold block mb-1">Mô tả gợi ý:</span>
-                        <p className="text-beige-kem bg-surface-2 p-2.5 border border-beige-kem/20 line-clamp-4 whitespace-pre-line text-[11px]">
-                          {aiSuggestion.description}
+                        <label className="block font-meta text-beige-kem font-semibold mb-1">
+                          Địa chỉ chi tiết
+                        </label>
+                        <input
+                          type="text"
+                          value={createVenueAddress}
+                          onChange={(e) => setCreateVenueAddress(e.target.value)}
+                          placeholder="Vd: 240 3 Tháng 2, Phường 12, Quận 10"
+                          required
+                          className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none"
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {/* ── Trang 3 · Mô tả ───────────────────────────────────────────────────────── */}
+                  {createStep === 2 && (
+                    <>
+                      {/* AI Assistant for Recommended Description */}
+                      <div className="bg-surface-2 p-4 border border-beige-kem/30 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h3 className="font-meta text-xs font-bold text-burgundy uppercase tracking-wider">
+                            AI Trợ Lý Viết Mô Tả Sự Kiện
+                          </h3>
+                          <span className="text-[10px] font-semibold text-white bg-burgundy px-2 py-0.5">
+                            TixHub AI
+                          </span>
+                        </div>
+                        <p className="font-meta text-[11px] text-ink-soft leading-relaxed">
+                          Nhập ý tưởng ngắn hoặc chủ đề sự kiện (vd:"Đêm nhạc acoustic Trịnh Công
+                          Sơn không gian ấm cúng"), AI sẽ tự động tạo tiêu đề & mô tả hấp dẫn cho
+                          bạn!
                         </p>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <input
+                            type="text"
+                            value={aiBrief}
+                            onChange={(e) => setAiBrief(e.target.value)}
+                            placeholder="Nhập ý tưởng/tóm tắt nội dung sự kiện..."
+                            className="flex-1 bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-2.5 text-beige-kem outline-none text-xs"
+                          />
+                          <button
+                            type="button"
+                            onClick={askAiDescriptionAssistant}
+                            disabled={aiBusy}
+                            className="px-4 py-2.5 bg-burgundy hover:brightness-110 disabled:opacity-50 text-white font-bold text-xs transition-all shrink-0 flex items-center justify-center space-x-1"
+                          >
+                            {aiBusy ? (
+                              <>
+                                <span
+                                  aria-hidden="true"
+                                  className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent align-middle"
+                                />
+                                <span>AI Đang Tạo…</span>
+                              </>
+                            ) : (
+                              <span>Nhờ AI Gợi Ý Mô Tả</span>
+                            )}
+                          </button>
+                        </div>
+
+                        {aiSuggestion && (
+                          <div className="mt-3 p-3.5 bg-xanh-pho border border-beige-kem/30 space-y-2 text-xs">
+                            <div className="flex items-center justify-between border-b border-beige-kem/20 pb-2">
+                              <span className="font-bold text-burgundy">Gợi Ý Từ AI:</span>
+                              <button
+                                type="button"
+                                onClick={applyAiSuggestion}
+                                className="px-3 py-1 border border-la-co bg-la-co/25 text-beige-kem font-bold text-[11px] transition-colors"
+                              >
+                                Áp Dụng Tiêu Đề & Mô Tả Này
+                              </button>
+                            </div>
+                            <div>
+                              <span className="text-ink-soft font-semibold">Tiêu đề gợi ý:</span>
+                              {""}
+                              <span className="text-beige-kem font-bold">{aiSuggestion.title}</span>
+                            </div>
+                            <div>
+                              <span className="text-ink-soft font-semibold block mb-1">
+                                Mô tả gợi ý:
+                              </span>
+                              <p className="text-beige-kem bg-surface-2 p-2.5 border border-beige-kem/20 line-clamp-4 whitespace-pre-line text-[11px]">
+                                {aiSuggestion.description}
+                              </p>
+                            </div>
+                          </div>
+                        )}
                       </div>
+
+                      {/* Description */}
+                      <div>
+                        <label className="block font-meta text-beige-kem font-semibold mb-1">
+                          Mô tả chi tiết
+                        </label>
+                        <textarea
+                          rows={4}
+                          value={createDescription}
+                          onChange={(e) => setCreateDescription(e.target.value)}
+                          placeholder="Nhập mô tả sự kiện (hoặc dùng AI gợi ý ở trên)..."
+                          required
+                          className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none"
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {transport}
+                </form>
+              )}
+
+              {/*
+                ── Các trang thiết lập sau khi bản nháp đã tồn tại ──
+                Stage 4 sells dates and prices; stage 5 draws the chart a seated event needs; the
+                last page reads the SAME server gates the console's rail uses and offers the one
+                commit. Everything here talks to real ids — nothing is simulated.
+              */}
+              {created && (
+                <div className="space-y-5 text-xs">
+                  {/* ── Trang 4 · Suất chiếu & hạng vé ── */}
+                  {createStep === 3 && (
+                    <div className="space-y-3">
+                      <p className="font-meta text-[11px] leading-relaxed text-ink-soft">
+                        Thêm ngày diễn và giá vé. Mỗi suất cần ít nhất một hạng vé — một suất không
+                        có vé là một suất bán không được gì.
+                      </p>
+                      {setupVenues ? (
+                        <ShowtimeList
+                          eventId={created.eventId}
+                          venues={setupVenues}
+                          preferredVenueId={created.venueId}
+                          onChanged={() => refreshSetup()}
+                        />
+                      ) : (
+                        <p className="text-ink-soft">Đang tải địa điểm…</p>
+                      )}
                     </div>
                   )}
-                </div>
 
-                {/* Description */}
-                <div>
-                  <label className="block font-meta text-beige-kem font-semibold mb-1">
-                    Mô tả chi tiết
-                  </label>
-                  <textarea
-                    rows={4}
-                    value={createDescription}
-                    onChange={(e) => setCreateDescription(e.target.value)}
-                    placeholder="Nhập mô tả sự kiện (hoặc dùng AI gợi ý ở trên)..."
-                    required
-                    className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none"
-                  />
-                </div>
+                  {/* ── Trang 5 · Sơ đồ ghế (chỉ seated) ── */}
+                  {chartStageIndex !== null && createStep === chartStageIndex && (
+                    <div className="space-y-4">
+                      <p className="font-meta text-[11px] leading-relaxed text-ink-soft">
+                        Vẽ sơ đồ cho từng địa điểm rồi gán hạng vé vào từng hạng ghế — ghế lên sàn
+                        bán ngay khi áp dụng. Công cụ mở toàn màn hình; đóng để quay lại đây.
+                      </p>
+                      <ul className="space-y-2">
+                        {upcomingOf(wizardRows ?? []).map((st) => (
+                          <li
+                            key={st.id}
+                            className="flex flex-wrap items-center justify-between gap-2 border border-beige-kem/20 bg-xanh-pho px-3 py-2"
+                          >
+                            <span className="font-semibold text-beige-kem">{st.venueName}</span>
+                            <span
+                              className={`px-2 py-0.5 font-mono text-[10px] ${
+                                st.hasSeatMap && st.bookableSeats > 0
+                                  ? "bg-la-co/25 text-beige-kem"
+                                  : "border border-beige-kem/30 text-ink-soft"
+                              }`}
+                            >
+                              {st.hasSeatMap && st.bookableSeats > 0
+                                ? `Đã áp dụng · ${st.bookableSeats} ghế`
+                                : "Chưa áp dụng sơ đồ"}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                      <button
+                        type="button"
+                        onClick={() => setSeatMapEventId(created.eventId)}
+                        disabled={publishing}
+                        className="w-full bg-burgundy px-4 py-2.5 text-xs font-bold text-white transition hover:brightness-110 disabled:opacity-50 sm:w-auto"
+                      >
+                        Mở trình thiết kế sơ đồ
+                      </button>
+                    </div>
+                  )}
 
-                {/*
-                  Pinned to the bottom of the viewport while the form scrolls.
-                  The commit action sat at the end of a two-screen form, so it was off screen for
-                  most of the time somebody spends filling it in. `-mx` and its own surface let it
-                  span the card's full width and stay opaque — a translucent bar here would put the
-                  buttons on top of the field underneath, which is the problem this page already had
-                  with the site header.
-                */}
-                <div className="sticky bottom-0 -mx-6 flex items-center justify-end gap-3 border-t border-beige-kem/20 bg-surface-2 px-6 pb-1 pt-4 sm:-mx-8 sm:px-8">
-                  <button
-                    type="button"
-                    onClick={() => handleSectionSwitch("events")}
-                    disabled={isCreating}
-                    className="px-5 py-2.5 bg-surface-2 hover:bg-beige-kem/10 text-beige-kem font-semibold transition-colors border border-beige-kem/30 disabled:opacity-50"
-                  >
-                    Hủy
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isCreating}
-                    className="px-6 py-2.5 bg-burgundy hover:brightness-110 text-white font-bold transition-all disabled:opacity-50 flex items-center gap-2"
-                  >
-                    {isCreating ? (
-                      <>
-                        <span
-                          aria-hidden="true"
-                          className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent align-middle"
+                  {/* ── Trang cuối · Hoàn tất ── */}
+                  {createStep === finishStageIndex && (
+                    <div className="space-y-4">
+                      <p className="font-meta text-[11px] leading-relaxed text-ink-soft">
+                        Danh sách dưới đây đọc TRỰC TIẾP từ các điều kiện của máy chủ — cùng một
+                        bảng ràng buộc mà nút xuất bản kiểm tra. Gửi duyệt chỉ mở khi mọi bước đều
+                        đã xanh.
+                      </p>
+                      {wizardEvent ? (
+                        <EventFlowRail
+                          steps={setupSteps}
+                          onAction={(action) => {
+                            if (action === "submit") return;
+                            setCreateStep(
+                              action === "showtimes" || !chartStageIndex ? 3 : chartStageIndex,
+                            );
+                          }}
                         />
-                        <span>Đang tải lên & tạo bản nháp…</span>
-                      </>
-                    ) : (
-                      "Tạo bản nháp & tiếp tục"
-                    )}
-                  </button>
+                      ) : (
+                        <p className="text-ink-soft">Đang tải tiến độ…</p>
+                      )}
+                      {!canSubmitForReview && wizardEvent && (
+                        <p className="border border-cam-dat/60 bg-cam-dat/10 px-4 py-3 text-beige-kem">
+                          Chưa gửi được: hãy hoàn tất các bước còn thiếu trong danh sách trên. Quay
+                          lại bất cứ lúc nào cũng được — bản nháp đã được lưu.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {transport}
                 </div>
-              </form>
+              )}
             </div>
           }
         </div>
@@ -905,6 +1317,8 @@ export const OrganizerEventsPage: React.FC<{
           onClose={() => {
             setSeatMapEventId(null);
             setReloadKey((k) => k + 1);
+            // The wizard's chart stage reads this too — refresh its applied/unapplied statuses.
+            void refreshSetup();
           }}
         />
       )}

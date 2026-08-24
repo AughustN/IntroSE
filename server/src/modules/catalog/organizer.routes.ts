@@ -31,8 +31,11 @@ import {
   seatVenueOwnerUserId,
   showtimeHasSeatMap,
   showtimeInfo,
+  strayQuantityTiers,
   unpublishEvent,
   updateEvent,
+  bindEventVenue,
+  updateVenue,
   venueOwnerUserId,
 } from "./catalog.write.js";
 import {
@@ -197,10 +200,9 @@ organizerRouter.get(
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
     await assertEventOwner(req, id);
-    const { rows } = await pool.query<{ slug: string }>(
-      `SELECT slug FROM events WHERE id = $1`,
-      [id],
-    );
+    const { rows } = await pool.query<{ slug: string }>(`SELECT slug FROM events WHERE id = $1`, [
+      id,
+    ]);
     const slug = rows[0]?.slug;
     if (!slug) throw err.notFound("not_found", "Không tìm thấy sự kiện.");
     const detail = await getEventDetail(slug, pool, { asOwner: true });
@@ -221,12 +223,12 @@ organizerRouter.post(
 );
 
 organizerRouter.post(
-  '/events/:id/complete',
+  "/events/:id/complete",
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
     await assertEventOwner(req, id);
     await finishEvent(id);
-    res.json({ ok: true, message: 'Sự kiện đã được đánh dấu hoàn tất.' });
+    res.json({ ok: true, message: "Sự kiện đã được đánh dấu hoàn tất." });
   }),
 );
 
@@ -285,7 +287,8 @@ organizerRouter.get(
   asyncH(async (req, res) => {
     const eventId = Number(req.params.id);
     await assertEventOwner(req, eventId);
-    const showtimeId = req.query.showtimeId === undefined ? undefined : Number(req.query.showtimeId);
+    const showtimeId =
+      req.query.showtimeId === undefined ? undefined : Number(req.query.showtimeId);
     if (showtimeId !== undefined && !Number.isInteger(showtimeId))
       throw err.badRequest("validation_failed", "Mã suất diễn không hợp lệ.");
     // Unpaged here: this route has always answered with the whole list and its only consumer is the
@@ -321,6 +324,45 @@ organizerRouter.post(
   asyncH(async (req, res) => {
     const id = await createVenue(req.auth!.userId, req.body as z.infer<typeof venueSchema>);
     res.status(201).json({ id });
+  }),
+);
+
+// A venue's display details stay editable while it only serves DRAFT events — the same "unfinished
+// means changeable" rule the event editor follows. `updateVenue` owns the ownership and in-use
+// checks; this handler just draws the shape of a partial edit.
+const venuePatchSchema = z
+  .object({
+    name: z.string().trim().min(1).optional(),
+    city: z.string().trim().min(1).optional(),
+    rawAddress: z.string().trim().min(1).optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: "empty" });
+
+organizerRouter.patch(
+  "/venues/:id",
+  validate(venuePatchSchema),
+  asyncH(async (req, res) => {
+    await updateVenue(
+      req.auth!.userId,
+      Number(req.params.id),
+      req.body as z.infer<typeof venuePatchSchema>,
+    );
+    res.json({ ok: true });
+  }),
+);
+
+// Binding (not editing) — for a draft whose venue was never pinned. Ownership of the EVENT is
+// asserted here; ownership of the VENUE and the draft-only gate live in `bindEventVenue`.
+const eventVenueSchema = z.object({ venueId: z.number().int().positive() }).strict();
+
+organizerRouter.put(
+  "/events/:id/venue",
+  validate(eventVenueSchema),
+  asyncH(async (req, res) => {
+    await assertEventOwner(req, Number(req.params.id));
+    const body = req.body as z.infer<typeof eventVenueSchema>;
+    await bindEventVenue(Number(req.params.id), body.venueId);
+    res.json({ ok: true });
   }),
 );
 
@@ -434,6 +476,16 @@ organizerRouter.post(
     const unpriced = (await categoriesWithInventory(chart)).filter((c) => !priced.has(c));
     if (unpriced.length > 0)
       throw err.badRequest("category_without_tier", "Mỗi hạng vé có ghế phải được gán một giá vé.");
+
+    // ...and the SC-026 half: a count-BACKED tier naming no class would sell by head count on a
+    // showtime whose inventory is otherwise seats. A class-less, quantity-less tier is inert and
+    // passes — seats carry their own tier, so nothing can point at it.
+    const stray = await strayQuantityTiers(showtimeId);
+    if (stray.length > 0)
+      throw err.badRequest(
+        "seated_tier_without_category",
+        `Hạng vé "${stray.map((t) => t.label).join('", "')}" đặt số lượng nhưng chưa gán hạng ghế của sơ đồ.`,
+      );
 
     res.status(201).json({ seats: await generateSeatMap(showtimeId, chart) });
   }),

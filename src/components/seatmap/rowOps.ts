@@ -4,8 +4,9 @@
  */
 
 import type { ChartDocument, DocumentBlock, DocumentSeat } from "@/shared/catalog/seatmap-document";
-import { isSeatBearing } from "@/shared/catalog/seatmap-document";
-import { mintId } from "./layoutOps";
+import { isSeatBearing, resolvedSeatSectionId } from "@/shared/catalog/seatmap-document";
+import { rowLabelFor } from "@/shared/catalog/seatmap-project";
+import { MAX_ROWS, mintId } from "./layoutOps";
 
 /**
  * Operations on a ROW (§9).
@@ -31,6 +32,8 @@ import { mintId } from "./layoutOps";
 export interface RowRef {
   blockKey: string;
   label: string;
+  rowId?: number | null;
+  sectionId?: number | null;
 }
 
 const editable = (b: DocumentBlock): boolean =>
@@ -75,6 +78,96 @@ export function renameRow(doc: ChartDocument, rowId: number, label: string): Cha
   };
 }
 
+/** Move one complete row to another section, preserving every seat id and number. */
+export function assignRowToSection(
+  doc: ChartDocument,
+  ref: RowRef,
+  sectionId: number | null,
+): ChartDocument {
+  const block = doc.blocks.find((candidate) => candidate.key === ref.blockKey);
+  if (!block || !editable(block)) return doc;
+  const refSection =
+    ref.sectionId !== undefined
+      ? ref.sectionId
+      : (() => {
+          const first = (block.seats ?? []).find((seat) => seat.rowLabel === ref.label);
+          return first ? resolvedSeatSectionId(first, block) : undefined;
+        })();
+  const seed = (block.seats ?? []).filter((seat) =>
+    ref.rowId != null
+      ? seat.rowId === ref.rowId
+      : seat.rowLabel === ref.label && resolvedSeatSectionId(seat, block) === refSection,
+  );
+  if (seed.length === 0) return doc;
+  const rowIds = new Set(seed.map((seat) => seat.rowId).filter((id): id is number => id != null));
+  const belongsToRow = (candidate: DocumentBlock, seat: DocumentSeat) =>
+    rowIds.size > 0
+      ? seat.rowId != null && rowIds.has(seat.rowId)
+      : candidate.key === ref.blockKey &&
+        seat.rowLabel === ref.label &&
+        resolvedSeatSectionId(seat, candidate) === refSection;
+  const sourceEntries = doc.blocks.flatMap((candidate) =>
+    (candidate.seats ?? [])
+      .filter((seat) => belongsToRow(candidate, seat))
+      .map((seat) => ({ seat, sectionId: resolvedSeatSectionId(seat, candidate) })),
+  );
+  const source = sourceEntries.map(({ seat }) => seat);
+  if (
+    doc.blocks.some(
+      (candidate) =>
+        (candidate.seats ?? []).some((seat) => belongsToRow(candidate, seat)) &&
+        !editable(candidate),
+    )
+  )
+    return doc;
+  if (sourceEntries.every((entry) => entry.sectionId === sectionId)) return doc;
+
+  const sourceIds = new Set(source.map((seat) => seat.seatId));
+  const used = new Set<string>();
+  for (const candidate of doc.blocks) {
+    for (const seat of candidate.seats ?? []) {
+      if (sourceIds.has(seat.seatId)) continue;
+      if (resolvedSeatSectionId(seat, candidate) === sectionId) used.add(seat.rowLabel);
+    }
+  }
+
+  let label = ref.label;
+  if (sectionId !== null && used.has(label)) {
+    const params = block.params ?? {};
+    for (let start = 0; start <= MAX_ROWS; start += 1) {
+      const candidate = rowLabelFor(
+        0,
+        1,
+        params.rowLabelScheme,
+        params.rowLabelPrefix,
+        start,
+        params.rowLabelSuffix,
+      );
+      if (!used.has(candidate)) {
+        label = candidate;
+        break;
+      }
+    }
+  }
+
+  return {
+    ...doc,
+    rows: doc.rows?.map((row) => (rowIds.has(row.id) ? { ...row, sectionId, label } : row)),
+    blocks: doc.blocks.map((candidate) =>
+      (candidate.seats ?? []).some((seat) => belongsToRow(candidate, seat))
+        ? {
+            ...candidate,
+            // A generated block cannot express one row living in a different section.
+            params: undefined,
+            seats: candidate.seats?.map((seat) =>
+              belongsToRow(candidate, seat) ? { ...seat, sectionId, rowLabel: label } : seat,
+            ),
+          }
+        : candidate,
+    ),
+  };
+}
+
 /**
  * Reverse the numbering of one row: seat 1 becomes seat N.
  *
@@ -94,7 +187,9 @@ export function reverseRow(doc: ChartDocument, ref: RowRef): ChartDocument {
       // The sequence no longer describes these numbers, so the block stops claiming it does.
       params: undefined,
       seats: b.seats?.map((s) =>
-        s.rowLabel === ref.label ? { ...s, seatNumber: byOldNumber.get(s.seatNumber) ?? s.seatNumber } : s,
+        s.rowLabel === ref.label
+          ? { ...s, seatNumber: byOldNumber.get(s.seatNumber) ?? s.seatNumber }
+          : s,
       ),
     };
   });
@@ -110,7 +205,10 @@ export function reverseRow(doc: ChartDocument, ref: RowRef): ChartDocument {
 export function deleteRow(doc: ChartDocument, ref: RowRef): ChartDocument {
   const block = doc.blocks.find((b) => b.key === ref.blockKey);
   const goingIds = new Set(
-    (block?.seats ?? []).filter((s) => s.rowLabel === ref.label).map((s) => s.rowId).filter((id): id is number => id != null),
+    (block?.seats ?? [])
+      .filter((s) => s.rowLabel === ref.label)
+      .map((s) => s.rowId)
+      .filter((id): id is number => id != null),
   );
 
   const withoutSeats = rewrite(doc, ref.blockKey, (b) => {
@@ -119,14 +217,18 @@ export function deleteRow(doc: ChartDocument, ref: RowRef): ChartDocument {
     return {
       ...b,
       // Removing the LAST row is still a sequence, one shorter. Removing one from the middle is not.
-      params: wasLast && b.params ? { ...b.params, rowsCount: Math.max(1, (b.params.rowsCount ?? 1) - 1) } : undefined,
+      params:
+        wasLast && b.params
+          ? { ...b.params, rowsCount: Math.max(1, (b.params.rowsCount ?? 1) - 1) }
+          : undefined,
       seats: kept,
     };
   });
 
   // Drop the row itself only if nothing else still occupies it — two blocks may share one row.
   const stillUsed = new Set<number>();
-  for (const b of withoutSeats.blocks) for (const s of b.seats ?? []) if (s.rowId != null) stillUsed.add(s.rowId);
+  for (const b of withoutSeats.blocks)
+    for (const s of b.seats ?? []) if (s.rowId != null) stillUsed.add(s.rowId);
   return {
     ...withoutSeats,
     rows: withoutSeats.rows?.filter((r) => !goingIds.has(r.id) || stillUsed.has(r.id)),

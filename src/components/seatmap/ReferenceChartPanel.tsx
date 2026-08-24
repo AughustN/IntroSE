@@ -22,7 +22,10 @@ import { layoutApi } from "../../services/catalogClient";
 
 import { MediaDropzone } from "../common/MediaDropzone";
 import ConfirmDialog from "../ConfirmDialog";
+import ImageAlignmentControls from "./ImageAlignmentControls";
+import { usePersistedMedia } from "./usePersistedMedia";
 
+import { RAIL_PANEL } from "./panelSurface";
 const btn =
   " border-2 border-beige-kem px-2.5 py-1.5 text-eyebrow font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
 
@@ -36,21 +39,7 @@ export default function ReferenceChartPanel({
   onChange: (reference: LayoutReferenceChart) => void;
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const run = async (fn: () => Promise<LayoutReferenceChart | void>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const next = await fn();
-      if (next) onChange(next);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { busy, error, run } = usePersistedMedia(reference, onChange);
 
   const align = (patch: Partial<Omit<LayoutReferenceChart, "url">>) =>
     run(() =>
@@ -63,11 +52,11 @@ export default function ReferenceChartPanel({
     );
 
   return (
-    <div className="border-2 border-beige-kem bg-surface-2 p-4 space-y-3">
+    <div className={`${RAIL_PANEL} space-y-3`}>
       <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-beige-kem/70">
         Bản vẽ tham chiếu
       </h3>
-      <p className="mt-1 text-eyebrow leading-4 text-beige-kem/50">
+      <p className="mt-1 text-eyebrow leading-4 text-beige-kem/70">
         Ảnh chỉ hiện khi thiết kế, để bạn vẽ ghế đè lên cho khớp. Người mua không bao giờ thấy ảnh
         này.
       </p>
@@ -91,58 +80,12 @@ export default function ReferenceChartPanel({
 
       {reference.url && (
         <>
-          <label className="mt-3 block font-meta text-eyebrow text-beige-kem/60">
-            Tỉ lệ {reference.scale}‰
-            <input
-              type="range"
-              min={100}
-              max={3000}
-              step={50}
-              value={reference.scale}
-              disabled={busy}
-              onChange={(e) => align({ scale: Number(e.target.value) })}
-              className="w-full"
-            />
-          </label>
-          <label className="block font-meta text-eyebrow text-beige-kem/60">
-            Lệch ngang {reference.offsetX}
-            <input
-              type="range"
-              min={-5000}
-              max={5000}
-              step={50}
-              value={reference.offsetX}
-              disabled={busy}
-              onChange={(e) => align({ offsetX: Number(e.target.value) })}
-              className="w-full"
-            />
-          </label>
-          <label className="block font-meta text-eyebrow text-beige-kem/60">
-            Lệch dọc {reference.offsetY}
-            <input
-              type="range"
-              min={-5000}
-              max={5000}
-              step={50}
-              value={reference.offsetY}
-              disabled={busy}
-              onChange={(e) => align({ offsetY: Number(e.target.value) })}
-              className="w-full"
-            />
-          </label>
-          <label className="block font-meta text-eyebrow text-beige-kem/60">
-            Độ mờ {reference.opacity}%
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={5}
-              value={reference.opacity}
-              disabled={busy}
-              onChange={(e) => align({ opacity: Number(e.target.value) })}
-              className="w-full"
-            />
-          </label>
+          <ImageAlignmentControls
+            value={reference}
+            disabled={busy}
+            onPreview={(patch) => onChange({ ...reference, ...patch })}
+            onCommit={(patch) => void align(patch)}
+          />
 
           <button className={`${btn} mt-3`} disabled={busy} onClick={() => setConfirmRemove(true)}>
             Xoá bản vẽ tham chiếu

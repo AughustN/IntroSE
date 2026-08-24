@@ -23,6 +23,33 @@ import { CATEGORY_COLORS } from "@/shared/catalog/tier-palette";
 
 export const GRID = 50;
 
+/**
+ * Grid steps the editor offers, in layout units (a nominal seat is 100).
+ *
+ * Chosen against what an organizer is actually placing rather than as round numbers: 50 is half a
+ * seat, the finest step worth having; 150 is `SEAT_PITCH`, so a block nudged one step lands exactly
+ * one seat further along a row; 300 and 600 are two and four seats, the scale at which aisles and
+ * blocks get positioned. A step is never below 50 — at the zoom needed to see a whole chart, a
+ * finer one snaps to lines closer together than a screen pixel, which is indistinguishable from
+ * not snapping at all while still hiding the free coordinate the organizer asked for.
+ */
+export const GRID_STEPS = [50, 150, 300, 600] as const;
+
+/**
+ * How a coordinate should be rounded.
+ *
+ * `false` (or 0) is free placement, `true` is the default step, and a number is that step. The
+ * boolean forms exist because every caller below threads this value through unchanged, and widening
+ * a boolean is a far smaller change than renaming a parameter in seven signatures — but they are
+ * also the honest spelling for the callers that genuinely have only an on/off (keyboard nudging,
+ * the row and arc generators).
+ */
+export type Snap = boolean | number;
+
+/** The step a `Snap` actually means, or 0 for "do not snap". */
+export const snapStep = (grid: Snap): number =>
+  grid === true ? GRID : grid === false ? 0 : Math.max(0, grid);
+
 /** Default centre-to-centre spacing when a tool lays seats out: 1.5 nominal diameters, the gap a
  *  real theatre row uses and comfortably clear of the overlap threshold (one diameter). */
 export const SEAT_PITCH = 150;
@@ -112,8 +139,10 @@ export function readableInk(hex: string | undefined): string | undefined {
   return luminance > 0.179 ? "#17100f" : "#ffffff";
 }
 
-export const snap = (v: number, enabled: boolean): number =>
-  enabled ? Math.round(v / GRID) * GRID : Math.round(v);
+export const snap = (v: number, grid: Snap): number => {
+  const step = snapStep(grid);
+  return step > 0 ? Math.round(v / step) * step : Math.round(v);
+};
 
 const isSelected = (s: LayoutSeat, ids: Set<number>) => s.id !== undefined && ids.has(s.id);
 
@@ -123,7 +152,7 @@ export function moveSeats(
   ids: Set<number>,
   dx: number,
   dy: number,
-  grid: boolean,
+  grid: Snap,
 ): LayoutSeat[] {
   return seats.map((s) =>
     isSelected(s, ids)
@@ -144,13 +173,40 @@ export function moveElement(
   index: number,
   dx: number,
   dy: number,
-  grid: boolean,
+  grid: Snap,
 ): LayoutElement[] {
   return elements.map((el, i) =>
     i === index
       ? { ...el, x: clampCoord(snap(el.x + dx, grid)), y: clampCoord(snap(el.y + dy, grid)) }
       : el,
   );
+}
+
+/**
+ * Offset a drawn element by a delta — `points` INCLUDED.
+ *
+ * The mirror of `translated` in `documentOps`, and it is a named function for the same reason that
+ * one is: an element's `points` are ABSOLUTE coordinates, and the canvas draws a polygon from them
+ * alone — `x`/`y` only ever serve as its rotation origin. The live drag preview used to offset the
+ * origin and leave the points where they were, so a dragged outline sat perfectly still under the
+ * pointer for the whole gesture and then appeared at the drop, once the commit — which DOES
+ * translate points — finally ran. Nothing about the landing spot was wrong; it was simply invisible
+ * until the organizer had already let go.
+ *
+ * NOTE: `moveElement` above still has that shape. It is dead code today (nothing calls it), so it is
+ * left as it is rather than silently changed, but anything wiring it up should call this instead.
+ */
+export function translateElement<T extends Pick<LayoutElement, "x" | "y" | "points">>(
+  el: T,
+  dx: number,
+  dy: number,
+): T {
+  return {
+    ...el,
+    x: el.x + dx,
+    y: el.y + dy,
+    points: el.points?.map((p) => ({ x: p.x + dx, y: p.y + dy })) ?? el.points,
+  };
 }
 
 export function deleteElement(elements: LayoutElement[], index: number): LayoutElement[] {
@@ -307,7 +363,7 @@ export function makeRow(
   from: { x: number; y: number },
   to: { x: number; y: number },
   f: SeatFactory,
-  grid: boolean,
+  grid: Snap,
   nextId: () => number = mintId,
 ): LayoutSeat[] {
   const length = Math.hypot(to.x - from.x, to.y - from.y);
@@ -334,7 +390,7 @@ export function makeRow(
 export function makeGrid(
   rect: Rect,
   f: SeatFactory,
-  grid: boolean,
+  grid: Snap,
   nextId: () => number = mintId,
 ): LayoutSeat[] {
   const x0 = Math.min(rect.x1, rect.x2);
@@ -368,7 +424,7 @@ export function makeArc(
   to: { x: number; y: number },
   bow: number,
   f: SeatFactory,
-  grid: boolean,
+  grid: Snap,
   nextId: () => number = mintId,
 ): LayoutSeat[] {
   // Built as a straight row, then bent by the same code the Curve button uses, so a drawn arc and a
@@ -674,6 +730,7 @@ interface RowMarkerSeat {
 export function rowMarkers(seats: RowMarkerSeat[], gap: number): RowMarker[] {
   const rows = new Map<string, RowMarkerSeat[]>();
   for (const s of seats) {
+    if (s.section === null) continue; // outside a section, its storage label has no map meaning
     if (!s.row) continue; // an unlabelled seat has no row to letter
     const key = `${s.section ?? ""}|${s.row}`;
     const group = rows.get(key);

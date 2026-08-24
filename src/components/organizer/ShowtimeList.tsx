@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ManageShowtime, MyVenue, organizerApi, studioApi } from "../../services/catalogClient";
 import TierPanel from "./TierPanel";
 import { Empty, ErrorRetry, Loading, Refusal } from "./states";
@@ -31,10 +31,20 @@ const toLocalInput = (iso: string) => {
 export default function ShowtimeList({
   eventId,
   venues,
+  preferredVenueId,
   onChanged,
 }: {
   eventId: number;
   venues: MyVenue[];
+  /**
+   * The event's ONE venue, when the caller knows it — the create wizard always does, because the
+   * venue was collected on page two of the form and created WITH the draft.
+   *
+   * Omitted, it is derived from the event's existing showtimes. Either way this is now a
+   * system-wide rule: showtimes are never ASKED which venue they belong to, because the event
+   * already answered (FR-040's "one word per concept" applied to places).
+   */
+  preferredVenueId?: number;
   onChanged: (returnedToReview: boolean) => void;
 }) {
   const [showtimes, setShowtimes] = useState<ManageShowtime[] | null>(null);
@@ -46,12 +56,20 @@ export default function ShowtimeList({
   // Creating a showtime (feature 002's endpoint). A showtime is born with 1–4 tiers, because
   // publishing requires at least one upcoming showtime with at least one tier.
   const [adding, setAdding] = useState(false);
-  const [addVenue, setAddVenue] = useState<number | "">("");
-  const [addDate, setAddDate] = useState("");
+  // Uncontrolled, like the per-showtime edit input below (`defaultValue` + read-on-demand): a
+  // `value`/`onChange` pair here re-renders — and reassigns `.value` on — the datetime-local input
+  // on every keystroke, which resets its focused segment mid-type. Typing "24" for the day right
+  // after the month landed the "2" and "4" in the year segment instead, e.g. "12/02/0004".
+  const addDateRef = useRef<HTMLInputElement>(null);
   const [addTiers, setAddTiers] = useState<{ label: string; price: string }[]>([
     { label: "Thường", price: "100000" },
   ]);
   const [addError, setAddError] = useState<string | null>(null);
+
+  /** The event's venue, in priority order: told → established by an existing showtime → sole option. */
+  const lockedVenueId = preferredVenueId ?? showtimes?.[0]?.venueId ?? venues[0]?.id ?? null;
+  const lockedVenueName =
+    venues.find((v) => v.id === lockedVenueId)?.name ?? showtimes?.[0]?.venueName ?? null;
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -84,8 +102,15 @@ export default function ShowtimeList({
 
   const createShowtime = async () => {
     setAddError(null);
-    if (!addVenue || !addDate) {
-      setAddError("Chọn địa điểm và ngày giờ.");
+    // The venue is not a question this form asks — the event answered it at creation (see
+    // `lockedVenueId`). Only a date and 1–4 priced tiers remain to check.
+    const addDate = addDateRef.current?.value ?? "";
+    if (!addDate) {
+      setAddError("Chọn ngày giờ.");
+      return;
+    }
+    if (!lockedVenueId) {
+      setAddError("Sự kiện chưa có địa điểm.");
       return;
     }
     const tiers = addTiers.map((t) => ({ label: t.label.trim(), price: Number(t.price) }));
@@ -96,12 +121,13 @@ export default function ShowtimeList({
     setBusy(true);
     try {
       await organizerApi.addShowtime(eventId, {
-        venueId: Number(addVenue),
+        venueId: Number(lockedVenueId),
         startsAt: new Date(addDate).toISOString(),
         tiers,
       });
+      // Unmounting the form (rather than resetting the ref) is what clears the uncontrolled
+      // date input — it remounts blank the next time "+ Thêm suất chiếu" reopens it.
       setAdding(false);
-      setAddDate("");
       setAddTiers([{ label: "Thường", price: "100000" }]);
       onChanged(true); // a new showtime is a material edit — the event goes back for review
       await load();
@@ -122,26 +148,11 @@ export default function ShowtimeList({
         <div className="space-y-2">
           <p className="font-mono text-[11px] text-beige-kem/60">Suất chiếu mới (1–4 hạng vé)</p>
           <div className="grid gap-2 sm:grid-cols-2">
-            <select
-              value={addVenue}
-              onChange={(e) => setAddVenue(Number(e.target.value) || "")}
-              className={input}
-            >
-              <option value="" className="bg-xanh-pho">
-                Chọn địa điểm
-              </option>
-              {venues.map((v) => (
-                <option key={v.id} value={v.id} className="bg-xanh-pho">
-                  {v.name}
-                </option>
-              ))}
-            </select>
-            <input
-              type="datetime-local"
-              value={addDate}
-              onChange={(e) => setAddDate(e.target.value)}
-              className={input}
-            />
+            {/* The venue, stated rather than asked: the event already has exactly one (FR-040). */}
+            <p className="flex items-center gap-1.5 border border-beige-kem/25 bg-xanh-pho px-3 py-2.5 text-xs text-beige-kem">
+              {lockedVenueName ?? "—"}
+            </p>
+            <input type="datetime-local" ref={addDateRef} className={input} />
           </div>
 
           {addTiers.map((t, i) => (
@@ -217,12 +228,19 @@ export default function ShowtimeList({
 
   return (
     <div className="space-y-3">
+      {/*
+        One boundary around the whole list, hairlines between rows — not a border-2 box per
+        showtime. Several of those stacked read as a wall of rectangles before an organizer gets
+        to the dates inside them; a single frame with `divide-y` still separates the rows without
+        multiplying the outline.
+      */}
+      {showtimes.length > 0 && <div className="divide-y divide-beige-kem/20 border border-beige-kem/25">
       {showtimes.map((st) => {
         const committed = st.tiers.reduce((n, t) => n + t.sold + t.held, 0);
         const locked = committed > 0;
         return (
-          <div key={st.id} className="border-2 border-beige-kem p-3">
-            <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+          <div key={st.id} className="p-3">
+            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
               <input
                 type="datetime-local"
                 defaultValue={toLocalInput(st.startsAt)}
@@ -239,22 +257,6 @@ export default function ShowtimeList({
                 }}
                 className={input}
               />
-              <select
-                defaultValue={st.venueId}
-                disabled={locked || st.hasSeatMap}
-                onChange={(e) =>
-                  void run(st.id, () =>
-                    studioApi.updateShowtime(st.id, { venueId: Number(e.target.value) }),
-                  )
-                }
-                className={input}
-              >
-                {venues.map((v) => (
-                  <option key={v.id} value={v.id} className="bg-xanh-pho">
-                    {v.name}
-                  </option>
-                ))}
-              </select>
               <div className="flex gap-2">
                 <button
                   onClick={() => setOpenTiers(openTiers === st.id ? null : st.id)}
@@ -274,10 +276,8 @@ export default function ShowtimeList({
 
             <p className="mt-2 font-mono text-[11px] text-beige-kem/55">
               {st.venueName}
-              {locked && " · Đã có vé bán hoặc đang giữ — không thể đổi địa điểm hay xoá suất"}
-              {!locked &&
-                st.hasSeatMap &&
-                " · Đã có sơ đồ ghế — đổi địa điểm phải qua trình thiết kế sơ đồ"}
+              {locked && " · Đã có vé bán hoặc đang giữ — không thể xoá suất"}
+              {!locked && st.hasSeatMap && " · Đã có sơ đồ ghế — sửa qua trình thiết kế sơ đồ"}
             </p>
 
             <Refusal message={refusal[st.id] ?? null} />
@@ -290,6 +290,7 @@ export default function ShowtimeList({
           </div>
         );
       })}
+      </div>}
       {addForm}
     </div>
   );

@@ -166,6 +166,109 @@ describe("standing areas (FR-080)", () => {
   });
 });
 
+/*
+ * The area a standing path draws must never ALSO be sold by head count.
+ *
+ * `layout_elements.capacity` means exactly one thing — "sold by head count against this class's tier"
+ * (0027). The standing path used to write the generated position count there as a note to itself, and
+ * the two readings collided: generation turned the note into the tier's quantity while every position
+ * stayed its own seat row, so a 200-place area came out of `POST /seat-map` as `{"seats": 400}`. It
+ * also left an area with a capacity and no class, which `zone_without_category` refuses — a standing
+ * area could not be published at all.
+ */
+describe("a standing area is inventory ONCE", () => {
+  it("writes no capacity, so the drawn area is not a zone sold by head count", async () => {
+    const o = await organizer();
+    const { layoutId, section } = await layoutWithSection(o);
+    await request(app)
+      .post(`/api/organizer/layouts/${layoutId}/standing-area`)
+      .set(o.h)
+      .send({ sectionId: section, rowLabel: "ĐỨNG", count: 200, points: BIG_SQUARE })
+      .expect(201);
+
+    const { rows } = await pool.query<{ capacity: number | null }>(
+      `SELECT capacity FROM layout_elements WHERE layout_id = $1 AND kind = 'area'`,
+      [layoutId],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].capacity).toBeNull();
+  });
+
+  it("publishes — the capacity it used to write made every standing area unpublishable", async () => {
+    const o = await organizer();
+    const { layoutId, section } = await layoutWithSection(o);
+    await request(app)
+      .post(`/api/organizer/layouts/${layoutId}/standing-area`)
+      .set(o.h)
+      .send({ sectionId: section, rowLabel: "ĐỨNG", count: 200, points: BIG_SQUARE })
+      .expect(201);
+
+    const v = await request(app)
+      .post(`/api/organizer/layouts/${layoutId}/validate`)
+      .set(o.h)
+      .expect(200);
+    expect(v.body.valid).toBe(true);
+    await request(app).post(`/api/organizer/layouts/${layoutId}/publish`).set(o.h).expect(200);
+  });
+
+  it("generates one ticket per position, not two", async () => {
+    const o = await organizer();
+    const { venue, layoutId, section } = await layoutWithSection(o);
+    await request(app)
+      .post(`/api/organizer/layouts/${layoutId}/standing-area`)
+      .set(o.h)
+      .send({ sectionId: section, rowLabel: "ĐỨNG", count: 200, points: BIG_SQUARE })
+      .expect(201);
+    await request(app).post(`/api/organizer/layouts/${layoutId}/publish`).set(o.h).expect(200);
+
+    const ev = (
+      await request(app)
+        .post("/api/organizer/events")
+        .set(o.h)
+        .send({ title: "S", categoryCode: "theatre", description: "d", eventType: "seated" })
+        .expect(201)
+    ).body.id;
+    const showtime = (
+      await request(app)
+        .post(`/api/organizer/events/${ev}/showtimes`)
+        .set(o.h)
+        .send({
+          venueId: venue,
+          startsAt: new Date(Date.now() + 86_400_000).toISOString(),
+          tiers: [{ label: "Đứng", price: 100_000 }],
+        })
+        .expect(201)
+    ).body.id;
+    const { rows: cat } = await pool.query<{ c: number }>(
+      `SELECT DISTINCT category_id AS c FROM seats WHERE layout_id = $1`,
+      [layoutId],
+    );
+    await pool.query(`UPDATE ticket_tiers SET category_id = $2 WHERE showtime_id = $1`, [
+      showtime,
+      cat[0].c,
+    ]);
+
+    const gen = await request(app)
+      .post(`/api/organizer/showtimes/${showtime}/seat-map`)
+      .set(o.h)
+      .send({ layoutId })
+      .expect(201);
+
+    // 200 places on the floor, 200 tickets. This read 400 before the fix.
+    expect(gen.body.seats).toBe(200);
+    const inv = await pool.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM showtime_seats WHERE showtime_id = $1`,
+      [showtime],
+    );
+    expect(inv.rows[0].n).toBe(200);
+    const tq = await pool.query<{ total_quantity: number | null }>(
+      `SELECT total_quantity FROM ticket_tiers WHERE showtime_id = $1`,
+      [showtime],
+    );
+    expect(tq.rows[0].total_quantity).toBeNull();
+  });
+});
+
 describe("no showtime is both seated and general admission (SC-026)", () => {
   it("holds across every showtime in the database", async () => {
     const { rows } = await pool.query<{ id: string }>(

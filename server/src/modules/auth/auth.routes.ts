@@ -1,14 +1,14 @@
-import { type NextFunction, type Request, type Response, Router } from 'express';
-import multer from 'multer';
-import { z } from 'zod';
-import type { AuthSuccess } from '@shared/auth/types.js';
-import { REFRESH_COOKIE, REFRESH_TTL_MS, RESET_TTL_MS, config } from '../../config.js';
-import { pool, withTransaction } from '../../db/pool.js';
-import { err } from '../../http.js';
-import { validate } from '../../middleware/validate.js';
-import { requireAuth } from '../../middleware/requireAuth.js';
-import { requireOrganizer } from '../../middleware/authz.js';
-import { recentIdentifierFailures, recordAuthEvent } from './auth.events.js';
+import { type NextFunction, type Request, type Response, Router } from "express";
+import multer from "multer";
+import { z } from "zod";
+import type { AuthSuccess } from "@shared/auth/types.js";
+import { REFRESH_COOKIE, REFRESH_TTL_MS, RESET_TTL_MS, config } from "../../config.js";
+import { pool, withTransaction } from "../../db/pool.js";
+import { err } from "../../http.js";
+import { validate } from "../../middleware/validate.js";
+import { requireAuth } from "../../middleware/requireAuth.js";
+import { requireOrganizer } from "../../middleware/authz.js";
+import { recentIdentifierFailures, recordAuthEvent } from "./auth.events.js";
 import {
   createGoogleUser,
   createPasswordUser,
@@ -21,14 +21,14 @@ import {
   updateAvatarUrl,
   updatePasswordHash,
   updateProfile,
-} from './auth.repo.js';
-import { deleteAvatar, processAvatar, saveAvatar } from './avatar.js';
-import { createApplication, getLiveApplication, listApplications } from './organizer.js';
-import { googleVerifier } from './oauth.google.js';
-import { hashIdentifier, hashToken, randomToken } from './crypto.js';
-import { classifyIdentifier, normalizeEmail, normalizePhone } from './identifier.js';
-import { mailer } from './mailer.js';
-import { dummyVerify, hashPassword, passwordStrengthError, verifyPassword } from './password.js';
+} from "./auth.repo.js";
+import { deleteAvatar, processAvatar, saveAvatar } from "./avatar.js";
+import { createApplication, getLiveApplication, listApplications } from "./organizer.js";
+import { googleVerifier } from "./oauth.google.js";
+import { hashIdentifier, hashToken, randomToken } from "./crypto.js";
+import { classifyIdentifier, normalizeEmail, normalizePhone } from "./identifier.js";
+import { mailer } from "./mailer.js";
+import { dummyVerify, hashPassword, passwordStrengthError, verifyPassword } from "./password.js";
 import {
   SessionError,
   issueSession,
@@ -36,8 +36,8 @@ import {
   revokeAllForUser,
   revokeFamily,
   rotateSession,
-} from './sessions.js';
-import { allow, applyIdentifierDelay, ipKey } from './throttle.js';
+} from "./sessions.js";
+import { allow, applyIdentifierDelay, ipKey } from "./throttle.js";
 
 // Mounted at /api → auth endpoints live under /api/auth/*, profile at /api/me.
 export const authRouter = Router();
@@ -45,33 +45,35 @@ export const authRouter = Router();
 // ---- helpers ----
 
 const asyncH =
-  (fn: (req: Request, res: Response) => Promise<void>) => (req: Request, res: Response, next: NextFunction) =>
+  (fn: (req: Request, res: Response) => Promise<void>) =>
+  (req: Request, res: Response, next: NextFunction) =>
     fn(req, res).catch(next);
 
 function setRefreshCookie(res: Response, token: string): void {
   res.cookie(REFRESH_COOKIE, token, {
     httpOnly: true,
     secure: config.isProd,
-    sameSite: 'lax',
-    path: '/',
+    sameSite: "lax",
+    path: "/",
     maxAge: REFRESH_TTL_MS,
   });
 }
 
 function clearRefreshCookie(res: Response): void {
-  res.clearCookie(REFRESH_COOKIE, { path: '/' });
+  res.clearCookie(REFRESH_COOKIE, { path: "/" });
 }
 
 const ctxOf = (req: Request) => ({
-  userAgent: req.headers['user-agent'] ?? null,
+  userAgent: req.headers["user-agent"] ?? null,
   sourceIp: req.ip ?? null,
 });
 
 function mapUniqueViolation(e: unknown): unknown {
   const pgErr = e as { code?: string; constraint?: string };
-  if (pgErr?.code === '23505') {
-    if (pgErr.constraint === 'uq_users_phone') return err.conflict('phone_taken', 'Số điện thoại đã được sử dụng.');
-    return err.conflict('email_taken', 'Email đã được sử dụng.');
+  if (pgErr?.code === "23505") {
+    if (pgErr.constraint === "uq_users_phone")
+      return err.conflict("phone_taken", "Số điện thoại đã được sử dụng.");
+    return err.conflict("email_taken", "Email đã được sử dụng.");
   }
   return e;
 }
@@ -117,48 +119,65 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 *
 // ---- POST /api/auth/register (US1) ----
 
 authRouter.post(
-  '/auth/register',
+  "/auth/register",
   validate(registerSchema),
   asyncH(async (req, res) => {
     if (!allow(`reg:${ipKey(req.ip)}`, 30, 60_000))
-      throw err.tooMany('rate_limited', 'Bạn thao tác quá nhanh, thử lại sau.');
+      throw err.tooMany("rate_limited", "Bạn thao tác quá nhanh, thử lại sau.");
     const body = req.body as z.infer<typeof registerSchema>;
 
-    if (body.password !== body.passwordConfirm) throw err.badRequest('password_mismatch', 'Mật khẩu nhập lại không khớp.');
+    if (body.password !== body.passwordConfirm)
+      throw err.badRequest("password_mismatch", "Mật khẩu nhập lại không khớp.");
     const weak = passwordStrengthError(body.password);
-    if (weak) throw err.badRequest('weak_password', weak);
+    if (weak) throw err.badRequest("weak_password", weak);
 
     const email = normalizeEmail(body.email);
     let phone: string | null = null;
     if (body.phone) {
       phone = normalizePhone(body.phone);
-      if (!phone) throw err.badRequest('validation_failed', 'Số điện thoại không hợp lệ.');
+      if (!phone) throw err.badRequest("validation_failed", "Số điện thoại không hợp lệ.");
     }
 
     // Friendly pre-check messages; the DB unique constraints are the real guarantee (SC-007).
     const existingEmail = await findByEmail(email);
     if (existingEmail) {
-      throw existingEmail.provider === 'google'
-        ? err.conflict('email_registered_with_google', 'Email này đã đăng ký bằng Google. Hãy dùng nút đăng nhập Google.')
-        : err.conflict('email_taken', 'Email đã được sử dụng. Bạn có thể đăng nhập.');
+      throw existingEmail.provider === "google"
+        ? err.conflict(
+            "email_registered_with_google",
+            "Email này đã đăng ký bằng Google. Hãy dùng nút đăng nhập Google.",
+          )
+        : err.conflict("email_taken", "Email đã được sử dụng. Bạn có thể đăng nhập.");
     }
     if (phone && (await findByPhone(phone))) {
-      throw err.conflict('phone_taken', 'Số điện thoại đã được sử dụng. Bạn có thể đăng nhập.');
+      throw err.conflict("phone_taken", "Số điện thoại đã được sử dụng. Bạn có thể đăng nhập.");
     }
 
     const passwordHash = await hashPassword(body.password);
     try {
       const result = await withTransaction(async (client) => {
-        const user = await createPasswordUser(client, { email, phone, nickname: body.nickname, passwordHash });
+        const user = await createPasswordUser(client, {
+          email,
+          phone,
+          nickname: body.nickname,
+          passwordHash,
+        });
         const session = await issueSession(client, user.id, ctxOf(req));
         await recordAuthEvent(
-          { event: 'login_success', userId: user.id, identifierHash: hashIdentifier(email), sourceIp: req.ip },
+          {
+            event: "login_success",
+            userId: user.id,
+            identifierHash: hashIdentifier(email),
+            sourceIp: req.ip,
+          },
           client,
         );
         return { user, session };
       });
       setRefreshCookie(res, result.session.refreshToken);
-      const payload: AuthSuccess = { accessToken: result.session.accessToken, user: toMe(result.user, false) };
+      const payload: AuthSuccess = {
+        accessToken: result.session.accessToken,
+        user: toMe(result.user, false),
+      };
       res.status(201).json(payload);
     } catch (e) {
       throw mapUniqueViolation(e);
@@ -169,25 +188,28 @@ authRouter.post(
 // ---- POST /api/auth/login (US1) ----
 
 authRouter.post(
-  '/auth/login',
+  "/auth/login",
   validate(loginSchema),
   asyncH(async (req, res) => {
     const body = req.body as z.infer<typeof loginSchema>;
     if (!allow(`login:${ipKey(req.ip)}`, 100, 60_000))
-      throw err.tooMany('rate_limited', 'Bạn thử quá nhiều lần, hãy chờ một lát.');
+      throw err.tooMany("rate_limited", "Bạn thử quá nhiều lần, hãy chờ một lát.");
 
     const classified = classifyIdentifier(body.identifier);
-    const idHash = classified.kind === 'unknown' ? hashIdentifier(body.identifier) : hashIdentifier(classified.value);
+    const idHash =
+      classified.kind === "unknown"
+        ? hashIdentifier(body.identifier)
+        : hashIdentifier(classified.value);
     const user =
-      classified.kind === 'email'
+      classified.kind === "email"
         ? await findByEmail(classified.value)
-        : classified.kind === 'phone'
+        : classified.kind === "phone"
           ? await findByPhone(classified.value)
           : null;
 
     // Google account (no password): only disclosed after the identifier is known to exist (FR-014).
     if (user && !user.password_hash) {
-      throw err.conflict('account_uses_google', 'Tài khoản này đăng nhập bằng Google.');
+      throw err.conflict("account_uses_google", "Tài khoản này đăng nhập bằng Google.");
     }
 
     const ok = user?.password_hash
@@ -196,22 +218,36 @@ authRouter.post(
     if (!ok || !user) {
       // Progressive per-identifier delay (equal for unknown identifiers, FR-048/049); never a lockout.
       await applyIdentifierDelay(await recentIdentifierFailures(idHash, 15 * 60_000));
-      await recordAuthEvent({ event: 'login_failure', userId: user?.id ?? null, identifierHash: idHash, sourceIp: req.ip });
-      throw err.unauthorized('invalid_credentials', 'Thông tin đăng nhập không đúng.');
+      await recordAuthEvent({
+        event: "login_failure",
+        userId: user?.id ?? null,
+        identifierHash: idHash,
+        sourceIp: req.ip,
+      });
+      throw err.unauthorized("invalid_credentials", "Thông tin đăng nhập không đúng.");
     }
 
     // Suspension is checked only AFTER the password is verified (FR-013).
-    if (user.status === 'suspended') {
-      throw err.forbidden('account_suspended', 'Tài khoản đã bị tạm khoá. Liên hệ hỗ trợ để khiếu nại.');
+    if (user.status === "suspended") {
+      throw err.forbidden(
+        "account_suspended",
+        "Tài khoản đã bị tạm khoá. Liên hệ hỗ trợ để khiếu nại.",
+      );
     }
 
     const session = await withTransaction(async (client) => {
       const s = await issueSession(client, user.id, ctxOf(req));
-      await recordAuthEvent({ event: 'login_success', userId: user.id, identifierHash: idHash, sourceIp: req.ip }, client);
+      await recordAuthEvent(
+        { event: "login_success", userId: user.id, identifierHash: idHash, sourceIp: req.ip },
+        client,
+      );
       return s;
     });
     setRefreshCookie(res, session.refreshToken);
-    const payload: AuthSuccess = { accessToken: session.accessToken, user: toMe(user, await isApprovedOrganizer(user.id)) };
+    const payload: AuthSuccess = {
+      accessToken: session.accessToken,
+      user: toMe(user, await isApprovedOrganizer(user.id)),
+    };
     res.status(200).json(payload);
   }),
 );
@@ -219,7 +255,7 @@ authRouter.post(
 // ---- POST /api/auth/oauth/google (US3) ----
 
 authRouter.post(
-  '/auth/oauth/google',
+  "/auth/oauth/google",
   validate(googleSchema),
   asyncH(async (req, res) => {
     const { credential } = req.body as z.infer<typeof googleSchema>;
@@ -228,20 +264,28 @@ authRouter.post(
     try {
       identity = await googleVerifier.verify(credential);
     } catch {
-      throw err.unauthorized('invalid_google_credential', 'Xác thực Google thất bại.');
+      throw err.unauthorized("invalid_google_credential", "Xác thực Google thất bại.");
     }
 
     // Look up by the stable provider subject, never by email (FR-025).
-    const existing = await findByProviderSubject('google', identity.sub);
+    const existing = await findByProviderSubject("google", identity.sub);
     if (existing) {
       // Suspension is checked only after the provider confirms identity (FR-013).
-      if (existing.status === 'suspended') {
-        throw err.forbidden('account_suspended', 'Tài khoản đã bị tạm khoá. Liên hệ hỗ trợ để khiếu nại.');
+      if (existing.status === "suspended") {
+        throw err.forbidden(
+          "account_suspended",
+          "Tài khoản đã bị tạm khoá. Liên hệ hỗ trợ để khiếu nại.",
+        );
       }
       const session = await withTransaction(async (client) => {
         const s = await issueSession(client, existing.id, ctxOf(req));
         await recordAuthEvent(
-          { event: 'login_success', userId: existing.id, identifierHash: hashIdentifier(identity.email), sourceIp: req.ip },
+          {
+            event: "login_success",
+            userId: existing.id,
+            identifierHash: hashIdentifier(identity.email),
+            sourceIp: req.ip,
+          },
           client,
         );
         return s;
@@ -260,12 +304,12 @@ authRouter.post(
     const byEmail = await findByEmail(identity.email);
     if (byEmail) {
       throw err.conflict(
-        'email_registered_with_password',
-        'Email này đã đăng ký bằng mật khẩu. Hãy đăng nhập bằng mật khẩu.',
+        "email_registered_with_password",
+        "Email này đã đăng ký bằng mật khẩu. Hãy đăng nhập bằng mật khẩu.",
       );
     }
 
-    const avatarUrl = identity.picture?.startsWith('https://') ? identity.picture : null;
+    const avatarUrl = identity.picture?.startsWith("https://") ? identity.picture : null;
     const result = await withTransaction(async (client) => {
       const user = await createGoogleUser(client, {
         email: identity.email,
@@ -275,13 +319,21 @@ authRouter.post(
       });
       const session = await issueSession(client, user.id, ctxOf(req));
       await recordAuthEvent(
-        { event: 'login_success', userId: user.id, identifierHash: hashIdentifier(identity.email), sourceIp: req.ip },
+        {
+          event: "login_success",
+          userId: user.id,
+          identifierHash: hashIdentifier(identity.email),
+          sourceIp: req.ip,
+        },
         client,
       );
       return { user, session };
     });
     setRefreshCookie(res, result.session.refreshToken);
-    const payload: AuthSuccess = { accessToken: result.session.accessToken, user: toMe(result.user, false) };
+    const payload: AuthSuccess = {
+      accessToken: result.session.accessToken,
+      user: toMe(result.user, false),
+    };
     res.status(201).json(payload);
   }),
 );
@@ -289,13 +341,13 @@ authRouter.post(
 // ---- POST /api/auth/refresh (US1/US2) ----
 
 authRouter.post(
-  '/auth/refresh',
+  "/auth/refresh",
   asyncH(async (req, res) => {
     const raw = req.cookies?.[REFRESH_COOKIE] as string | undefined;
-    if (!raw) throw err.unauthorized('invalid_session');
+    if (!raw) throw err.unauthorized("invalid_session");
     try {
       const result = await rotateSession(raw, {
-        idempotencyKey: (req.headers['x-idempotency-key'] as string) ?? null,
+        idempotencyKey: (req.headers["x-idempotency-key"] as string) ?? null,
         ...ctxOf(req),
       });
       setRefreshCookie(res, result.refreshToken);
@@ -314,22 +366,22 @@ authRouter.post(
 // ---- POST /api/auth/logout, /api/auth/logout-all (US2) ----
 
 authRouter.post(
-  '/auth/logout',
+  "/auth/logout",
   requireAuth,
   asyncH(async (req, res) => {
-    await revokeFamily(req.auth!.familyId, 'logout');
-    await recordAuthEvent({ event: 'logout', userId: req.auth!.userId, sourceIp: req.ip });
+    await revokeFamily(req.auth!.familyId, "logout");
+    await recordAuthEvent({ event: "logout", userId: req.auth!.userId, sourceIp: req.ip });
     clearRefreshCookie(res);
     res.status(204).end();
   }),
 );
 
 authRouter.post(
-  '/auth/logout-all',
+  "/auth/logout-all",
   requireAuth,
   asyncH(async (req, res) => {
-    await revokeAllForUser(req.auth!.userId, 'logout_all');
-    await recordAuthEvent({ event: 'logout_all', userId: req.auth!.userId, sourceIp: req.ip });
+    await revokeAllForUser(req.auth!.userId, "logout_all");
+    await recordAuthEvent({ event: "logout_all", userId: req.auth!.userId, sourceIp: req.ip });
     clearRefreshCookie(res);
     res.status(204).end();
   }),
@@ -337,14 +389,14 @@ authRouter.post(
 
 // ---- GET /api/me (US1) ----
 
-authRouter.get('/me', requireAuth, (req: Request, res: Response) => {
+authRouter.get("/me", requireAuth, (req: Request, res: Response) => {
   res.json(req.auth!.user);
 });
 
 // ---- PATCH /api/me (US5) — nickname / phone only ----
 
 authRouter.patch(
-  '/me',
+  "/me",
   requireAuth,
   validate(updateMeSchema),
   asyncH(async (req, res) => {
@@ -355,9 +407,10 @@ authRouter.patch(
       if (!body.phone) fields.phone = null;
       else {
         const p = normalizePhone(body.phone);
-        if (!p) throw err.badRequest('validation_failed', 'Số điện thoại không hợp lệ.');
+        if (!p) throw err.badRequest("validation_failed", "Số điện thoại không hợp lệ.");
         const owner = await findByPhone(p);
-        if (owner && owner.id !== req.auth!.userId) throw err.conflict('phone_taken', 'Số điện thoại đã được sử dụng.');
+        if (owner && owner.id !== req.auth!.userId)
+          throw err.conflict("phone_taken", "Số điện thoại đã được sử dụng.");
         fields.phone = p;
       }
     }
@@ -373,43 +426,48 @@ authRouter.patch(
 // ---- POST /api/me/password (US5) — change password, revoke OTHER sessions (FR-057) ----
 
 authRouter.post(
-  '/me/password',
+  "/me/password",
   requireAuth,
   validate(changePasswordSchema),
   asyncH(async (req, res) => {
     const body = req.body as z.infer<typeof changePasswordSchema>;
     if (body.newPassword !== body.newPasswordConfirm)
-      throw err.badRequest('password_mismatch', 'Mật khẩu nhập lại không khớp.');
+      throw err.badRequest("password_mismatch", "Mật khẩu nhập lại không khớp.");
     const weak = passwordStrengthError(body.newPassword);
-    if (weak) throw err.badRequest('weak_password', weak);
+    if (weak) throw err.badRequest("weak_password", weak);
 
     const user = await findById(req.auth!.userId);
-    if (!user?.password_hash) throw err.badRequest('validation_failed', 'Tài khoản này không dùng mật khẩu.');
+    if (!user?.password_hash)
+      throw err.badRequest("validation_failed", "Tài khoản này không dùng mật khẩu.");
     if (!(await verifyPassword(body.currentPassword, user.password_hash))) {
-      throw err.forbidden('wrong_current_password', 'Mật khẩu hiện tại không đúng.');
+      throw err.forbidden("wrong_current_password", "Mật khẩu hiện tại không đúng.");
     }
 
     const newHash = await hashPassword(body.newPassword);
     await updatePasswordHash(req.auth!.userId, newHash);
-    await revokeAllExceptFamily(req.auth!.userId, req.auth!.familyId, 'password_changed'); // FR-057
-    await recordAuthEvent({ event: 'password_changed', userId: req.auth!.userId, sourceIp: req.ip });
-    res.status(200).json({ ok: true, message: 'Đổi mật khẩu thành công.' });
+    await revokeAllExceptFamily(req.auth!.userId, req.auth!.familyId, "password_changed"); // FR-057
+    await recordAuthEvent({
+      event: "password_changed",
+      userId: req.auth!.userId,
+      sourceIp: req.ip,
+    });
+    res.status(200).json({ ok: true, message: "Đổi mật khẩu thành công." });
   }),
 );
 
 // ---- POST /api/me/avatar (US5) — upload, re-encode, store on disk (ADR 0004) ----
 
 authRouter.post(
-  '/me/avatar',
+  "/me/avatar",
   requireAuth,
-  upload.single('file'),
+  upload.single("file"),
   asyncH(async (req, res) => {
-    if (!req.file) throw err.badRequest('invalid_image', 'Chưa chọn ảnh.');
+    if (!req.file) throw err.badRequest("invalid_image", "Chưa chọn ảnh.");
     let webp: Buffer;
     try {
       webp = await processAvatar(req.file.buffer);
     } catch {
-      throw err.badRequest('invalid_image', 'Ảnh không hợp lệ (chỉ chấp nhận JPEG/PNG/WebP).');
+      throw err.badRequest("invalid_image", "Ảnh không hợp lệ (chỉ chấp nhận JPEG/PNG/WebP).");
     }
     const previous = req.auth!.user.avatarUrl;
     const url = await saveAvatar(req.auth!.userId, webp);
@@ -422,19 +480,20 @@ authRouter.post(
 // ---- POST /api/auth/password/forgot, /api/auth/password/reset (US4) ----
 
 authRouter.post(
-  '/auth/password/forgot',
+  "/auth/password/forgot",
   validate(forgotSchema),
   asyncH(async (req, res) => {
     const email = normalizeEmail((req.body as z.infer<typeof forgotSchema>).email);
     // Keyed on hash(identifier)+IP, never on account existence (R-13) — fires identically for real/fake.
     const perId = allow(`forgot:id:${hashIdentifier(email)}`, 3, 60 * 60_000);
     const perIp = allow(`forgot:ip:${ipKey(req.ip)}`, 10, 60 * 60_000);
-    if (!perId || !perIp) throw err.tooMany('rate_limited', 'Bạn đã yêu cầu quá nhiều lần, hãy thử lại sau.');
+    if (!perId || !perIp)
+      throw err.tooMany("rate_limited", "Bạn đã yêu cầu quá nhiều lần, hãy thử lại sau.");
 
     const user = await findByEmail(email);
     // Google accounts get no link (FR-053, D5); suspended ones get none either — a reset must not
     // be a way back in (UC-05 A6). Both cases fall through to the same response as an unknown address.
-    if (user && user.provider === 'email' && user.status === 'active') {
+    if (user && user.provider === "email" && user.status === "active") {
       const token = randomToken();
       await pool.query(
         `INSERT INTO password_resets (user_id, token_hash, expires_at)
@@ -442,40 +501,44 @@ authRouter.post(
         [user.id, hashToken(token), RESET_TTL_MS],
       );
       await recordAuthEvent({
-        event: 'password_reset_requested',
+        event: "password_reset_requested",
         userId: user.id,
         identifierHash: hashIdentifier(email),
         sourceIp: req.ip,
       });
       try {
         await mailer.sendPasswordReset(email, `${config.appUrl}/reset-password?token=${token}`);
-        console.info('[mailer] password reset accepted for delivery:', { userId: user.id });
+        console.info("[mailer] password reset accepted for delivery:", { userId: user.id });
       } catch (e) {
         // A mail-provider failure must never change the reply: a 500 here would only ever fire for
         // a registered address, turning the uniform response (FR-028) into an enumeration oracle.
-        console.error('[mailer] password reset send failed:', e);
+        console.error("[mailer] password reset send failed:", e);
       }
     } else {
       // Never log the address or reset token. This is enough to distinguish a skipped request
       // from a provider failure while keeping credentials out of process logs.
-      console.info('[mailer] password reset skipped:', {
+      console.info("[mailer] password reset skipped:", {
         identifierHash: hashIdentifier(email),
-        reason: user ? `${user.provider}_${user.status}` : 'unknown_email',
+        reason: user ? `${user.provider}_${user.status}` : "unknown_email",
       });
     }
     // Uniform response whether or not the address is registered (FR-028).
-    res.status(200).json({ ok: true, message: 'Nếu email tồn tại, chúng tôi đã gửi liên kết đặt lại mật khẩu.' });
+    res.status(200).json({
+      ok: true,
+      message: "Nếu email tồn tại, chúng tôi đã gửi liên kết đặt lại mật khẩu.",
+    });
   }),
 );
 
 authRouter.post(
-  '/auth/password/reset',
+  "/auth/password/reset",
   validate(resetSchema),
   asyncH(async (req, res) => {
     const body = req.body as z.infer<typeof resetSchema>;
-    if (body.password !== body.passwordConfirm) throw err.badRequest('password_mismatch', 'Mật khẩu nhập lại không khớp.');
+    if (body.password !== body.passwordConfirm)
+      throw err.badRequest("password_mismatch", "Mật khẩu nhập lại không khớp.");
     const weak = passwordStrengthError(body.password);
-    if (weak) throw err.badRequest('weak_password', weak);
+    if (weak) throw err.badRequest("weak_password", weak);
 
     const tokenHash = hashToken(body.token);
     const newHash = await hashPassword(body.password);
@@ -487,14 +550,23 @@ authRouter.post(
         [tokenHash],
       );
       const reset = rows[0];
-      if (!reset) throw err.badRequest('invalid_or_expired_token', 'Liên kết đặt lại không hợp lệ hoặc đã hết hạn.');
-      await client.query(`UPDATE password_resets SET consumed_at = now() WHERE id = $1`, [reset.id]);
+      if (!reset)
+        throw err.badRequest(
+          "invalid_or_expired_token",
+          "Liên kết đặt lại không hợp lệ hoặc đã hết hạn.",
+        );
+      await client.query(`UPDATE password_resets SET consumed_at = now() WHERE id = $1`, [
+        reset.id,
+      ]);
       await updatePasswordHash(reset.user_id, newHash, client);
-      await revokeAllForUser(reset.user_id, 'password_reset', client); // FR-030
-      await recordAuthEvent({ event: 'password_reset_completed', userId: reset.user_id, sourceIp: req.ip }, client);
+      await revokeAllForUser(reset.user_id, "password_reset", client); // FR-030
+      await recordAuthEvent(
+        { event: "password_reset_completed", userId: reset.user_id, sourceIp: req.ip },
+        client,
+      );
     });
 
-    res.status(200).json({ ok: true, message: 'Đặt lại mật khẩu thành công.' });
+    res.status(200).json({ ok: true, message: "Đặt lại mật khẩu thành công." });
   }),
 );
 
@@ -507,65 +579,92 @@ const applySchema = z.object({
 });
 
 authRouter.post(
-  '/organizers/apply',
+  "/organizers/apply",
   requireAuth,
-  upload.single('logo'),
+  upload.single("logo"),
   asyncH(async (req, res) => {
     const rawBody = req.body || {};
-    const displayName = String(rawBody.displayName || '').trim();
-    const description = String(rawBody.description || '').trim();
+    const displayName = String(rawBody.displayName || "").trim();
+    const description = String(rawBody.description || "").trim();
     const logoUrl = rawBody.logoUrl ? String(rawBody.logoUrl).trim() : null;
 
     if (!displayName || displayName.length < 1 || displayName.length > 100) {
-      throw err.badRequest('validation_failed', 'Tên hiển thị nhà tổ chức không hợp lệ.');
+      throw err.badRequest("validation_failed", "Tên hiển thị nhà tổ chức không hợp lệ.");
     }
     if (!description || description.length < 1) {
-      throw err.badRequest('validation_failed', 'Mô tả nhà tổ chức không hợp lệ.');
+      throw err.badRequest("validation_failed", "Mô tả nhà tổ chức không hợp lệ.");
     }
 
     const live = await getLiveApplication(req.auth!.userId);
     if (live) {
-      if (live.status === 'pending') throw err.conflict('already_pending', 'Đơn của bạn đang chờ duyệt.');
-      if (live.status === 'approved') throw err.conflict('already_approved', 'Bạn đã là nhà tổ chức.');
+      if (live.status === "pending")
+        throw err.conflict("already_pending", "Đơn của bạn đang chờ duyệt.");
+      if (live.status === "approved")
+        throw err.conflict("already_approved", "Bạn đã là nhà tổ chức.");
       // suspended: re-applying must never shed a suspension (FR-059)
-      throw err.conflict('suspended_cannot_reapply', 'Tài khoản nhà tổ chức đang bị đình chỉ, không thể nộp lại.');
+      throw err.conflict(
+        "suspended_cannot_reapply",
+        "Tài khoản nhà tổ chức đang bị đình chỉ, không thể nộp lại.",
+      );
     }
 
     let finalLogoUrl = logoUrl;
+    let appRow: { id: number } | undefined;
     try {
-      const appRow = await createApplication(req.auth!.userId, {
+      appRow = await createApplication(req.auth!.userId, {
         displayName,
         description,
         logoUrl: finalLogoUrl,
       });
 
       if (req.file?.buffer) {
-        const { sanitizeSquareImage } = await import('../media/sanitizer.js');
-        const { uploadToCloudinary } = await import('../../services/cloudinary.js');
+        const { sanitizeSquareImage } = await import("../media/sanitizer.js");
+        const { uploadToCloudinary } = await import("../../services/cloudinary.js");
         const sanitized = await sanitizeSquareImage(req.file.buffer, 2 * 1024 * 1024);
         const cloudResult = await uploadToCloudinary(sanitized, {
           folder: `tixhub/organizers/${appRow.id}/logo`,
           publicId: String(appRow.id),
-          resourceType: 'image',
+          resourceType: "image",
           overwrite: true,
           invalidate: true,
         });
         finalLogoUrl = cloudResult.secure_url;
-        await pool.query(`UPDATE organizers SET logo_url = $1 WHERE id = $2`, [finalLogoUrl, appRow.id]);
+        await pool.query(`UPDATE organizers SET logo_url = $1 WHERE id = $2`, [
+          finalLogoUrl,
+          appRow.id,
+        ]);
       }
     } catch (e) {
       // concurrent apply → unique live-application index → treat as already pending
-      if ((e as { code?: string }).code === '23505') throw err.conflict('already_pending', 'Đơn của bạn đang chờ duyệt.');
+      if ((e as { code?: string }).code === "23505")
+        throw err.conflict("already_pending", "Đơn của bạn đang chờ duyệt.");
+      // The application row is committed but the logo failed: leaving it would strand a pending
+      // application no retry can reach (the next attempt hits `already_pending`). Roll the row
+      // back — guarded on status so it can never clobber an admin decision made in between — and
+      // surface the real error, so nothing is committed unless everything succeeded.
+      if (appRow) {
+        await pool.query(`DELETE FROM organizers WHERE id = $1 AND status = 'pending'`, [
+          appRow.id,
+        ]);
+      }
       throw e;
     }
-    await recordAuthEvent({ event: 'organizer_applied', userId: req.auth!.userId, sourceIp: req.ip });
-    res.status(201).json({ ok: true, message: 'Đã gửi đơn đăng ký nhà tổ chức, đang chờ duyệt.', logoUrl: finalLogoUrl });
+    await recordAuthEvent({
+      event: "organizer_applied",
+      userId: req.auth!.userId,
+      sourceIp: req.ip,
+    });
+    res.status(201).json({
+      ok: true,
+      message: "Đã gửi đơn đăng ký nhà tổ chức, đang chờ duyệt.",
+      logoUrl: finalLogoUrl,
+    });
   }),
 );
 
 // Applicant's own status + history (for the FE).
 authRouter.get(
-  '/organizers/me',
+  "/organizers/me",
   requireAuth,
   asyncH(async (req, res) => {
     res.json({
@@ -577,6 +676,11 @@ authRouter.get(
 
 // An organizer-only action: allowed only while an approved application exists (FR-038).
 // A suspension bites here on the very next request (FR-021 / SC-008).
-authRouter.get('/organizers/dashboard', requireAuth, requireOrganizer, (req: Request, res: Response) => {
-  res.json({ ok: true, userId: req.auth!.userId });
-});
+authRouter.get(
+  "/organizers/dashboard",
+  requireAuth,
+  requireOrganizer,
+  (req: Request, res: Response) => {
+    res.json({ ok: true, userId: req.auth!.userId });
+  },
+);

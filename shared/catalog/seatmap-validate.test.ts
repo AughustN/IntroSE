@@ -182,3 +182,112 @@ describe("companion seats", () => {
     expect(codes(issues)).not.toContain("accessible_without_companion");
   });
 });
+
+/*
+ * zone_over_seats — a capacity zone drawn on top of seats.
+ *
+ * `category_mixed_inventory` compares price CLASSES, and two classes can describe one physical space.
+ * A zone of 300 laid over a block of seats names a different class, so it passed, published, and
+ * generated capacity + seats sellable tickets for a floor that holds only the seats. Measured before
+ * the fix on a 200-place standing area: `{"seats": 400}`.
+ */
+describe("zone_over_seats", () => {
+  const zone = (extra: Record<string, unknown>) => ({
+    kind: "area",
+    capacity: 300,
+    categoryId: 2,
+    ...extra,
+  });
+
+  it("refuses a zone whose BOX encloses seats — a rectangle carries no points", () => {
+    const issues = validateLayout({
+      seats: cleanSeats,
+      sections,
+      elements: [stage, zone({ x: 5_050, y: 3_000, width: 400, height: 400 })],
+    });
+    const found = issues.filter((i) => i.code === "zone_over_seats");
+    expect(found).toHaveLength(1);
+    expect(found[0].severity).toBeUndefined(); // blocking
+    expect(found[0].seatIds).toEqual([1, 2]);
+  });
+
+  it("refuses a zone whose POLYGON encloses seats", () => {
+    const issues = validateLayout({
+      seats: cleanSeats,
+      sections,
+      elements: [
+        stage,
+        zone({
+          points: [
+            { x: 4_900, y: 2_900 },
+            { x: 5_200, y: 2_900 },
+            { x: 5_200, y: 3_100 },
+            { x: 4_900, y: 3_100 },
+          ],
+        }),
+      ],
+    });
+    expect(codes(issues)).toContain("zone_over_seats");
+  });
+
+  it("is silent on a zone standing clear of every seat — the normal arena floor", () => {
+    const issues = validateLayout({
+      seats: cleanSeats,
+      sections,
+      elements: [stage, zone({ x: 20_000, y: 20_000, width: 400, height: 400 })],
+    });
+    expect(codes(issues)).not.toContain("zone_over_seats");
+  });
+
+  it("is silent on a drawn area carrying NO capacity — that is a standing area, whose seats ARE its inventory", () => {
+    const issues = validateLayout({
+      seats: cleanSeats,
+      sections,
+      elements: [stage, { kind: "area", x: 5_050, y: 3_000, width: 400, height: 400 }],
+    });
+    expect(codes(issues)).not.toContain("zone_over_seats");
+    expect(codes(issues)).not.toContain("zone_without_category");
+  });
+});
+
+/*
+ * Two seats on DIFFERENT LEVELS do not occupy the same space (0044).
+ *
+ * `findOverlaps` buckets purely by x/y, which was right when a chart was one plane. With floors it
+ * means a stacked balcony — the upper tier directly above the stalls, which is where a balcony
+ * physically IS — reports `overlapping_seats` for every seat and can never be published.
+ */
+describe("overlapping_seats across floors", () => {
+  const twoLevels = [
+    { id: 1, name: "Tầng trệt", floorId: 10 },
+    { id: 2, name: "Ban công", floorId: 20 },
+  ];
+  const stacked = [
+    { id: 1, sectionId: 1, categoryId: 1, rowLabel: "A", seatNumber: 1, x: 5_000, y: 3_000 },
+    // Same point, one storey up.
+    { id: 2, sectionId: 2, categoryId: 1, rowLabel: "A", seatNumber: 1, x: 5_000, y: 3_000 },
+  ];
+
+  it("does not report a seat stacked directly above another on a different floor", () => {
+    const issues = validateLayout({ seats: stacked, sections: twoLevels, elements: [stage] });
+    expect(codes(issues)).not.toContain("overlapping_seats");
+  });
+
+  it("still reports two seats on the SAME floor", () => {
+    const sameFloor = [
+      { id: 1, name: "Khu A", floorId: 10 },
+      { id: 2, name: "Khu B", floorId: 10 },
+    ];
+    const issues = validateLayout({ seats: stacked, sections: sameFloor, elements: [stage] });
+    expect(codes(issues)).toContain("overlapping_seats");
+  });
+
+  it("still reports two seats on a chart with NO floors at all", () => {
+    const flat = [
+      { id: 1, name: "Khu A" },
+      { id: 2, name: "Khu B" },
+    ];
+    const issues = validateLayout({ seats: stacked, sections: flat, elements: [stage] });
+    expect(codes(issues)).toContain("overlapping_seats");
+  });
+});

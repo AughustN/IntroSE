@@ -7,6 +7,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApplyPreview, ShowtimeMap, ShowtimeMapSeat } from "@/shared/catalog/seatmap";
 import { NEUTRAL_TIER_COLOR, colorForTier } from "@/shared/catalog/tier-palette";
 import { layoutApi } from "../../services/catalogClient";
+import type { ApplyRefusalView, RefusedEditError } from "../../services/apiError";
+import { watchShowtime } from "../../services/seatSocket";
 import { formatVnd } from "../../services/currency";
 import SeatCanvas, { type CanvasBlock, type SeatCanvasHandle } from "./SeatCanvas";
 import { seatsInRect } from "./layoutOps";
@@ -60,6 +62,8 @@ export default function ShowtimeMapPanel({
   const [tierId, setTierId] = useState<number | "">("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Per-seat reasons from a refused whole-edit — the same vocabulary the preview reports. */
+  const [refusals, setRefusals] = useState<ApplyRefusalView[] | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const canvas = useRef<SeatCanvasHandle>(null);
   /** Wrapped so the ref is read when a chip is pressed, not while the key is being built. */
@@ -78,15 +82,60 @@ export default function ShowtimeMapPanel({
     void load();
   }, [load]);
 
+  /**
+   * Live statuses, straight off the channel block/tier and hold actions already broadcast on
+   * (`seat:update`). The organizer's own writes arrive as echoes; a buyer's hold repaints without
+   * waiting for the next manual reload. Status only — geometry never rides this channel.
+   */
+  useEffect(() => {
+    const stop = watchShowtime(showtimeId, (update) => {
+      // Captured outside setMap: the updater may run after this closure, so narrowing on
+      // `update.seats` directly does not survive into it.
+      const frames = update.seats;
+      if (!frames || frames.length === 0) return;
+      setMap((cur) => {
+        if (!cur) return cur;
+        const byId = new Map(frames.map((u) => [u.showtimeSeatId, u]));
+        return {
+          ...cur,
+          seats: cur.seats.map((s) => {
+            const hit = byId.get(s.id);
+            if (!hit) return s;
+            // A retier frame names the new class; resolve its id from the legend so the seat
+            // keeps painting in its price colour. Status-only frames change nothing else.
+            const retieredTo = hit.tier
+              ? cur.tierLegend.find((t) => t.label === hit.tier && t.price === hit.price)
+              : undefined;
+            return {
+              ...s,
+              status: hit.status,
+              ticketTierId: retieredTo?.tierId ?? s.ticketTierId,
+              tier: hit.tier ?? s.tier,
+              price: hit.price ?? s.price,
+            };
+          }),
+        };
+      });
+    });
+    return stop;
+  }, [showtimeId]);
+
   /** Refusals arrive as a structured list on the 409 body, so we can name the seats (FR-029). */
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
     setError(null);
+    setRefusals(null);
     setNotice(null);
     try {
       await fn();
     } catch (e) {
-      setError((e as Error).message);
+      if ((e as Error).name === "RefusedEditError") {
+        const refused = e as RefusedEditError;
+        setError(refused.message);
+        setRefusals(refused.refusals);
+      } else {
+        setError((e as Error).message);
+      }
     } finally {
       setBusy(false);
     }
@@ -268,6 +317,18 @@ export default function ShowtimeMapPanel({
       {error && (
         <div className="border-2 border-beige-kem bg-bubblegum p-3 text-xs text-on-tint">
           {error}
+          {/* A refused whole-edit names its seats — the same list the preview would have shown
+              (FR-029), so confirming without a preview no longer hides which seat refused. */}
+          {refusals && refusals.length > 0 && (
+            <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+              {refusals.map((r, i) => (
+                <li key={i}>
+                  — {r.seatLabel ? `${r.seatLabel}: ` : ""}
+                  {r.message ?? r.reason}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
       {notice && (

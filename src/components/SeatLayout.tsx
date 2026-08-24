@@ -11,6 +11,7 @@ import { watchShowtime } from "../services/seatSocket";
 import { NEUTRAL_TIER_COLOR } from "@/shared/catalog/tier-palette";
 import SeatCanvas, { type CanvasBlock, type SeatCanvasHandle } from "./seatmap/SeatCanvas";
 import { bestSeats } from "./seatmap/bestAvailable";
+import { floorShifts } from "./seatmap/floorLayout";
 import TierLegend from "./seatmap/TierLegend";
 import {
   type BookingStep,
@@ -65,7 +66,17 @@ export default function SeatLayout({
 }: SeatLayoutProps) {
   const [seats, setSeats] = useState<SeatMapSeat[]>([]);
   const [mapMeta, setMapMeta] = useState<
-    Pick<SeatMap, "space" | "elements" | "floorPlan" | "tables" | "tierLegend" | "orphanRule">
+    Pick<
+      SeatMap,
+      | "space"
+      | "elements"
+      | "floorPlan"
+      | "tables"
+      | "tierLegend"
+      | "orphanRule"
+      | "focalPoint"
+      | "floors"
+    >
   >({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -75,14 +86,150 @@ export default function SeatLayout({
    * and no seat ever disappears from view (which a filter would do, and which a map must not).
    */
   const canvas = useRef<SeatCanvasHandle>(null);
+
+  /**
+   * Which level the buyer is looking at (0044).
+   *
+   * Null until the map loads, then the FIRST floor the chart lists — the organizer's own order, so a
+   * theatre opens on the stalls rather than wherever the seat list happened to start. A chart with
+   * fewer than two floors never sets it and never draws the strip: a single-level venue must not
+   * grow a control that does nothing.
+   */
+  const [activeFloor, setActiveFloor] = useState<string | null>(null);
+  const floors = useMemo(
+    () => [...(mapMeta.floors ?? [])].sort((a, b) => a.displayOrder - b.displayOrder),
+    [mapMeta.floors],
+  );
+  const multiFloor = floors.length > 1;
+  /*
+   * DERIVED, not defaulted into state by an effect.
+   *
+   * `activeFloor` holds only what the buyer has actually chosen; the floor on screen falls back to
+   * the first the chart lists — the organizer's own order, so a theatre opens on the stalls. Storing
+   * that default instead would cascade a second render on every load, and would go stale if the map
+   * reloaded with different floors while a now-absent one stayed selected.
+   */
+  /*
+   * `SPLIT` shows every level at once, pulled APART so they do not cover each other.
+   *
+   * It is the default when a chart has levels, because a buyer arriving at a two-tier stadium needs
+   * to see the venue before they can choose a part of it — isolating tier 1 on arrival hides half the
+   * building behind a control they have not noticed yet. Picking a floor then narrows to it, which is
+   * the mode that is actually good for choosing a seat.
+   */
+  const SPLIT = "__split__";
+  const currentFloor = multiFloor
+    ? (floors.find((f) => f.name === activeFloor)?.name ?? SPLIT)
+    : null;
+  const splitting = currentFloor === SPLIT;
+
+  /*
+   * What the canvas draws, and what the picker picks from.
+   *
+   * ONE derived list feeds both, deliberately: "chọn giúp tôi" offering a balcony seat to a buyer
+   * looking at the stalls would be the picker disagreeing with the map in front of them. Scoping it
+   * here means `bestSeats` needs no floor argument at all — it ranks whatever it is handed.
+   *
+   * Decoration with NO floor is drawn on every level: a hall outline is not something the second
+   * storey stops having. A stage carries its section's floor, so it stops being drawn when the buyer
+   * moves upstairs.
+   */
+  const visibleSeats = useMemo(
+    () =>
+      currentFloor === null || splitting
+        ? seats
+        : seats.filter((s) => (s.floor ?? null) === currentFloor),
+    [seats, currentFloor, splitting],
+  );
+  const visibleElements = useMemo(
+    () =>
+      currentFloor === null || splitting
+        ? mapMeta.elements
+        : (mapMeta.elements ?? []).filter((e) => !e.floor || e.floor === currentFloor),
+    [mapMeta.elements, currentFloor, splitting],
+  );
+
+  /*
+   * ---- Exploded view (0044) -------------------------------------------------------------------
+   *
+   * A second deck physically sits ON the first, so an honest chart STORES it there — stacked, sharing
+   * the plan's footprint. That is unreadable as a picture: every upper seat hides a lower one.
+   *
+   * Pulling the levels apart is therefore a RENDER transform and never stored data. The coordinates
+   * in the database stay truthful, the organizer never has to draw a lie to get a legible map, and
+   * turning the view off restores the real geometry exactly.
+   *
+   * Laid out left to right in the organizer's own floor order, each level shifted so its own bounding
+   * box clears the previous one. Per-floor boxes rather than one shared box, so this reads correctly
+   * whether the levels are stacked (identical footprints) or drawn as concentric rings (different
+   * ones) — the stadium starter is the second kind and must not gain a pointless gap.
+   */
+  const floorShift = useMemo(
+    () =>
+      splitting
+        ? floorShifts([...seats, ...(mapMeta.elements ?? [])], floors)
+        : new Map<string, number>(),
+    [splitting, floors, seats, mapMeta.elements],
+  );
+
+  /** What the canvas DRAWS. Same seats, same ids — only moved, and only while exploded. */
+  const renderSeats = useMemo(
+    () =>
+      floorShift.size === 0
+        ? visibleSeats
+        : visibleSeats.map((s) => {
+            const dx = floorShift.get(s.floor ?? "") ?? 0;
+            return dx === 0 ? s : { ...s, x: s.x + dx };
+          }),
+    [visibleSeats, floorShift],
+  );
+  /**
+   * The same for decoration, plus a NAME over each level.
+   *
+   * Synthesised at render time as an ordinary `label` element rather than stored: the floor already
+   * has a name, and writing a second copy of it into the chart would be two things to keep in step.
+   * Without it the exploded view is two anonymous shapes and the buyer has to guess which deck is
+   * which — the one thing this view exists to make obvious.
+   */
+  const renderElements = useMemo(() => {
+    const base = visibleElements ?? [];
+    if (floorShift.size === 0) return base;
+    const moved = base.map((e) => {
+      const dx = e.floor ? (floorShift.get(e.floor) ?? 0) : 0;
+      return dx === 0 ? e : { ...e, x: e.x + dx };
+    });
+    const captions = floors.flatMap((f) => {
+      const own = renderSeats.filter((s) => (s.floor ?? null) === f.name);
+      if (own.length === 0) return [];
+      const xs = own.map((s) => s.x);
+      const ys = own.map((s) => s.y);
+      const top = Math.min(...ys);
+      return [
+        {
+          kind: "label" as const,
+          x: Math.round((Math.min(...xs) + Math.max(...xs)) / 2),
+          // Clear of the topmost seat by a comfortable margin, in layout units.
+          y: Math.round(top - 900),
+          width: 1,
+          height: 1,
+          rotation: 0,
+          label: f.name,
+          points: null,
+        },
+      ];
+    });
+    return [...moved, ...captions];
+  }, [visibleElements, floorShift, floors, renderSeats]);
   /**
    * One chip per section, in the section→row→number order the seats arrive in (FR-039a), stable per
    * render. Section colours never reach the buyer (FR-064: colour means price only), so the chips are
    * neutrally tinted and named.
    */
   const sections = useMemo(
-    () => [...new Set(seats.map((s) => s.section).filter((s): s is string => !!s))],
-    [seats],
+    // Scoped to the floor on screen: a chip that jumps to a section on another level would zoom the
+    // canvas to coordinates it is not currently drawing.
+    () => [...new Set(visibleSeats.map((s) => s.section).filter((s): s is string => !!s))],
+    [visibleSeats],
   );
   const blocks = useMemo<CanvasBlock[]>(
     // Neutral hull colour: on the buyer's map colour is PRICE and nothing else (FR-064), so a
@@ -115,6 +262,11 @@ export default function SeatLayout({
         tables: map.tables,
         tierLegend: map.tierLegend,
         orphanRule: map.orphanRule,
+        // Was declared in the Pick above and passed to `bestSeats`, but never actually SET — so the
+        // chart's explicit focal point (0043) reached the picker as `undefined` and every buyer map
+        // silently fell back to inferring it. Carried now, which is what the column was added for.
+        focalPoint: map.focalPoint,
+        floors: map.floors,
       });
       setLoadError(null);
     } catch {
@@ -201,7 +353,18 @@ export default function SeatLayout({
     const heldIds = new Set(
       heldSeats.map((s) => s.showtimeSeatId).filter((id): id is number => id !== undefined),
     );
-    const result = bestSeats(seats, mapMeta.elements, bestCount, heldIds, mapMeta.orphanRule);
+    // TRUE coordinates, never the exploded ones: `bestSeats` ranks by distance to the focal point,
+    // and pulling the levels apart for legibility would otherwise rewrite what "closest to the pitch"
+    // means. Drawing and ranking are deliberately different geometries here — the seats are the same
+    // objects either way, so what comes back still selects correctly on the map.
+    const result = bestSeats(
+      visibleSeats,
+      visibleElements,
+      bestCount,
+      heldIds,
+      mapMeta.orphanRule,
+      mapMeta.focalPoint,
+    );
     if (result.seats.length === 0) {
       setBestNotice(
         result.reason === "none_available"
@@ -468,10 +631,66 @@ export default function SeatLayout({
                   )}
                 </div>
 
+                {/*
+                  The floor picker (0044).
+
+                  A LABELLED top-level control beside the map, not a chip tucked among the section
+                  anchors — the survey's point about the accessibility toggle applies exactly here:
+                  switching level changes what the map IS, so it cannot look like a scroll shortcut.
+                  It is the one control on this screen that HIDES seats, which is why it is named and
+                  why the section chips below it are scoped to whatever it has selected.
+
+                  Rendered only when there is a choice to make. A single-level venue sees nothing.
+                */}
+                {multiFloor && (
+                  <div
+                    className="mb-3 flex flex-wrap items-center gap-2"
+                    role="group"
+                    aria-label="Chọn tầng"
+                  >
+                    <span className="font-meta text-meta font-bold text-beige-kem/70">Tầng</span>
+                    {/*
+                      "Tách lớp" comes FIRST because it is the arriving view: see the whole building,
+                      then narrow. It is a peer of the floors, not a checkbox beside them — the buyer
+                      is choosing one way of looking at the venue out of three, not toggling a
+                      modifier on top of a floor.
+                    */}
+                    <button
+                      onClick={() => setActiveFloor(SPLIT)}
+                      aria-pressed={splitting}
+                      title="Xem mọi tầng cùng lúc, tách rời để không che nhau"
+                      className={`min-h-9 rounded border-2 px-3 py-1 font-meta text-meta font-bold transition ${
+                        splitting
+                          ? "border-burgundy bg-burgundy text-white"
+                          : "border-beige-kem/50 text-beige-kem/80 hover:border-beige-kem"
+                      }`}
+                    >
+                      Tách lớp
+                    </button>
+                    {floors.map((f) => {
+                      const on = f.name === currentFloor;
+                      return (
+                        <button
+                          key={f.name}
+                          onClick={() => setActiveFloor(f.name)}
+                          aria-pressed={on}
+                          className={`min-h-9 rounded border-2 px-3 py-1 font-meta text-meta font-bold transition ${
+                            on
+                              ? "border-burgundy bg-burgundy text-white"
+                              : "border-beige-kem/50 text-beige-kem/80 hover:border-beige-kem"
+                          }`}
+                        >
+                          {f.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
                 <SeatCanvas
                   ref={canvas}
-                  seats={seats}
-                  elements={mapMeta.elements}
+                  seats={renderSeats}
+                  elements={renderElements}
                   floorPlan={mapMeta.floorPlan}
                   space={mapMeta.space}
                   tables={mapMeta.tables}

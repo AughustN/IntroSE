@@ -7,6 +7,7 @@ import { useState } from "react";
 import type { LayoutCategory, LayoutSeat } from "@/shared/catalog/seatmap";
 import { CATEGORY_COLORS } from "./layoutOps";
 
+import { RAIL_PANEL } from "./panelSurface";
 /**
  * Categories — the chart's PRICE CLASSES, and the one panel here that is not about geometry.
  *
@@ -32,6 +33,20 @@ import { CATEGORY_COLORS } from "./layoutOps";
  *
  * Unlike a section's, a category's colour is not merely an editor aid: it is what the buyer's map is
  * coloured by, so the swatch here is the real thing rather than a preview.
+ *
+ * `tierLabels` is why this panel knows anything about the priced side at all.
+ *
+ * The two lists are independent by design — that independence is what lets one chart sell at
+ * different prices on different nights — but independent was being read as UNRELATED. An organizer
+ * types the tiers first (`flowSteps` step 3), opens the designer (step 4), invents "SVIP" here
+ * because nothing suggested otherwise, publishes the chart (step 5), and only at step 6 meets
+ * `category_without_tier`: a class with no price, discovered after the drawing was finished.
+ *
+ * So the tier labels come in as SUGGESTIONS and as a warning, not as a constraint. Naming a class
+ * after a tier is one press instead of a typing exercise, and a class that matches nothing says so
+ * while there is still a chart open to fix it. What it deliberately does NOT do is restrict the
+ * input to the list: a chart outlives the event that first used it, and the next event at this
+ * venue may price it with an entirely different set of names.
  */
 
 const btn =
@@ -41,7 +56,9 @@ export default function CategoryPanel({
   categories,
   seats,
   selectedCount,
+  selectedLabel,
   activeCategoryId,
+  tierLabels = [],
   onActivate,
   onAdd,
   onRename,
@@ -52,7 +69,11 @@ export default function CategoryPanel({
   categories: LayoutCategory[];
   seats: LayoutSeat[];
   selectedCount: number;
+  selectedLabel?: string;
   activeCategoryId: number | null;
+  /** Labels of the ticket tiers already priced on this venue's showtimes. Advisory — see the note
+   *  above. Empty when the editor was opened outside any event (the chart library). */
+  tierLabels?: string[];
   onActivate: (id: number | null) => void;
   onAdd: (name: string) => void;
   onRename: (id: number, name: string) => void;
@@ -67,6 +88,19 @@ export default function CategoryPanel({
   const countIn = (id: number | null) => seats.filter((s) => (s.categoryId ?? null) === id).length;
   const unclassified = countIn(null);
 
+  /*
+   * Matched case- and space-insensitively, because that is how the organizer means them: "VIP" here
+   * and "Vip " on the tier are the same class to everyone except a string comparison, and warning
+   * about that pair would train them to ignore the warning. The APPLY step still joins by
+   * `ticket_tiers.category_id`, an explicit choice — so a loose match here can only under-warn, never
+   * mis-bind anything.
+   */
+  const norm = (s: string) => s.trim().toLowerCase();
+  const tierSet = new Set(tierLabels.map(norm));
+  const knowsTiers = tierLabels.length > 0;
+  /** Tiers with no class of that name yet — the one-press half of the suggestion. */
+  const unused = tierLabels.filter((t) => !categories.some((c) => norm(c.name) === norm(t)));
+
   const add = () => {
     const trimmed = name.trim();
     if (!trimmed) return;
@@ -75,14 +109,32 @@ export default function CategoryPanel({
   };
 
   return (
-    <div className="border-2 border-beige-kem bg-surface-2 p-4">
+    <div className={RAIL_PANEL}>
       <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">
         Hạng ghế
       </h3>
-      <p className="mt-1 text-[11px] leading-4 text-beige-kem/50">
-        Hạng ghế chỉ có tên và màu — đây không phải hạng vé. Giá nằm ở hạng vé, đặt riêng cho từng
-        suất diễn, nên một sơ đồ dùng lại được cho nhiều suất với các mức giá khác nhau.
-      </p>
+
+      {/* One press per tier the chart has not named yet. Placed ABOVE the free-text box on purpose:
+          the suggested path should be the one the eye lands on first. */}
+      {unused.length > 0 && (
+        <div className="mt-3">
+          <p className="font-mono text-[11px] text-beige-kem/70">
+            Hạng vé của sự kiện — bấm để tạo:
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {unused.map((label) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => onAdd(label)}
+                className="border-2 border-beige-kem/40 px-2 py-1 text-xs font-bold text-beige-kem/80 transition hover:border-beige-kem hover:text-beige-kem"
+              >
+                + {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="mt-3 flex gap-2">
         <input
@@ -105,7 +157,8 @@ export default function CategoryPanel({
           return (
             <li
               key={id}
-              className={`border-2 p-2 transition ${ active ? "border-burgundy bg-burgundy/10" : "border-beige-kem/30"
+              className={`border-2 p-2 transition ${
+                active ? "border-burgundy bg-burgundy/10" : "border-beige-kem/30"
               }`}
             >
               <div className="flex items-center gap-2">
@@ -140,7 +193,7 @@ export default function CategoryPanel({
                     {category.name}
                   </button>
                 )}
-                <span className="shrink-0 font-mono text-[11px] text-beige-kem/45">
+                <span className="shrink-0 font-mono text-[11px] text-beige-kem/70">
                   {countIn(id)} ghế
                 </span>
               </div>
@@ -154,7 +207,8 @@ export default function CategoryPanel({
                     aria-label={`Đổi màu hạng ghế ${category.name}`}
                     aria-pressed={category.color.toLowerCase() === c.toLowerCase()}
                     onClick={() => onRecolor(id, c)}
-                    className={`h-5 w-5 border-2 transition ${ category.color.toLowerCase() === c.toLowerCase()
+                    className={`h-5 w-5 border-2 transition ${
+                      category.color.toLowerCase() === c.toLowerCase()
                         ? "border-beige-kem"
                         : "border-transparent"
                     }`}
@@ -174,19 +228,30 @@ export default function CategoryPanel({
                   Đổi tên
                 </button>
                 <button className={btn} disabled={selectedCount === 0} onClick={() => onAssign(id)}>
-                  Gán {selectedCount > 0 ? `${selectedCount} ghế` : "ghế"}
+                  Gán {selectedCount > 0 ? (selectedLabel ?? `${selectedCount} ghế`) : "phần chọn"}
                 </button>
                 <button className={btn} onClick={() => onRemove(id)}>
                   Xoá hạng ghế
                 </button>
               </div>
+
+              {/* The refusal the organizer would otherwise meet at "Gán giá & áp dụng", said here
+                  instead — while the chart is still open and renaming costs nothing. Only for
+                  classes that actually hold seats: an empty class blocks nothing. */}
+              {knowsTiers && !tierSet.has(norm(category.name)) && countIn(id) > 0 && (
+                <p className="mt-1.5 font-mono text-[11px] leading-4 text-cam-dat-ink">
+                  ⚠ Không có hạng vé nào tên “{category.name}”. Đổi tên cho khớp một hạng vé, hoặc
+                  thêm hạng vé mới ở phần Hạng vé của suất — nếu không, bước áp dụng sơ đồ sẽ bị từ
+                  chối.
+                </p>
+              )}
             </li>
           );
         })}
       </ul>
 
       {categories.length === 0 && (
-        <p className="mt-3 text-[11px] text-beige-kem/50">
+        <p className="mt-3 text-[11px] text-beige-kem/70">
           Chưa có hạng ghế nào. Ghế chưa thuộc hạng ghế nào sẽ chặn phát hành, vì không có gì để
           hạng vé gắn giá vào.
         </p>
@@ -202,7 +267,7 @@ export default function CategoryPanel({
             disabled={selectedCount === 0}
             onClick={() => onAssign(null)}
           >
-            Bỏ hạng ghế khỏi {selectedCount} ghế đang chọn
+            Bỏ hạng ghế khỏi {selectedLabel ?? `${selectedCount} ghế`} đang chọn
           </button>
         </div>
       )}

@@ -57,11 +57,32 @@ export interface ShapePoint {
   y: number;
 }
 
+/**
+ * A level of the venue (0044).
+ *
+ * A chart with no floors is a chart on one floor — that is what every chart drawn before this is, and
+ * it stays that way without saying so. Floors only ever appear once an organizer creates one.
+ */
+export interface LayoutFloor {
+  /** Absent for a floor being created in this save. */
+  id?: number;
+  name: string;
+  displayOrder: number;
+}
+
 export interface LayoutSection {
   /** Absent for a section being created in this save. */
   id?: number;
   name: string;
   description?: string | null;
+  /**
+   * Which level this part of the room is on (0044). Null means the implicit single floor.
+   *
+   * The floor hangs here rather than on the seat because a section cannot straddle two levels, and
+   * because the buyer already learns a seat's section by name through the snapshot — so the floor
+   * rides that same key instead of needing a column on `showtime_seats`.
+   */
+  floorId?: number | null;
   /**
    * Visual style (FR-064). `color` is an EDITOR-ONLY aid and is never sent to the buyer map, where
    * colour carries the PRICE CLASS instead — see `LayoutCategory`. `seatShape` and
@@ -251,6 +272,8 @@ export interface Layout {
   /** Send back on save; a stale value is refused (FR-015). */
   version: number;
   sections: LayoutSection[];
+  /** The chart's levels (0044). Empty on a single-floor chart, which is most of them. */
+  floors: LayoutFloor[];
   categories: LayoutCategory[];
   /** The chart's rows (0032). Empty on a layout saved before rows existed and not yet re-saved. */
   rows: LayoutRow[];
@@ -267,6 +290,17 @@ export interface Layout {
    * the snapshot at apply time, so changing it never re-tunes a show already on sale.
    */
   orphanRule: OrphanRule;
+  /**
+   * Where the event happens, when the chart cannot say so with a stage (0043).
+   *
+   * Best-available ranks by distance to a focal point, and without this the ranking is INFERRED —
+   * the stage's centre if there is a stage, otherwise the centroid of every seat. The inference is
+   * right often enough to be worth keeping as a fallback and wrong often enough to need overriding:
+   * an arena's focal point is its pitch, not the middle of its four stands.
+   *
+   * Null means "infer it", which is what every chart drawn before this did and still does.
+   */
+  focalPoint: { x: number; y: number } | null;
   /**
    * The authoring document (./seatmap-document.ts) — how the chart was BUILT, as opposed to the
    * collections above, which are what is for sale.
@@ -318,6 +352,31 @@ export interface LayoutLibraryEntry extends LayoutSummary {
   updatedAt: string;
   /** Showtimes that are neither finished nor cancelled and still point at this chart. */
   usageCount: number;
+  /**
+   * Whether this chart has ever been published — which is what separates the two very different
+   * things `status: "draft"` was covering.
+   *
+   * Saving a published chart demotes it to `draft` (`layouts.repo.ts`, the Seats.io lifecycle: what
+   * is live and what is being worked on are not the same document). So a plain `draft` badge was
+   * telling an organizer the same word about a chart nobody has ever sold from and about one that is
+   * selling right now under an older published version. The first is unfinished; the second is live
+   * with edits waiting. Conflating them hides the only question that matters — is anything of mine on
+   * sale? — behind a word that says no.
+   *
+   * Derived from `layout_revisions`, which is written on publish and nowhere else.
+   */
+  hasPublishedVersion: boolean;
+  /**
+   * A recognition thumbnail: each block's box and kind, nothing else.
+   *
+   * Deliberately NOT the document. A chart's document runs to tens of kilobytes and a library of
+   * thirty would be megabytes on every page load, to draw a picture two centimetres wide. What makes
+   * a floor plan recognisable at that size is its silhouette — a wide stage along the top, two wings,
+   * a block in the middle — and that survives at box resolution.
+   *
+   * Empty for a chart drawn before the document existed, or one with nothing in it yet.
+   */
+  thumbnail: { x: number; y: number; w: number; h: number; kind: string }[];
 }
 
 export interface SaveLayoutRequest {

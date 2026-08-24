@@ -4,6 +4,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowLeft } from "lucide-react";
 import { isMaterialEdit } from "@/shared/catalog/material-edit";
 import {
   type ManageShowtime,
@@ -21,6 +22,7 @@ import FlowProgressStrip from "./FlowProgressStrip";
 import { flowSteps, type FlowStep } from "./flowSteps";
 import ShowtimeList from "./ShowtimeList";
 import { Refusal } from "./states";
+import { VN_PROVINCES } from "../../vnProvinces";
 
 const input =
   "h-10 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
@@ -52,7 +54,7 @@ export default function EventEditor({
   onOpenSeatMap: (eventId: number) => void;
 }) {
   const [title, setTitle] = useState(event.title);
-  const [description, setDescription] = useState("");
+  const [description, setDescription] = useState(event.description);
   const [categoryCode, setCategoryCode] = useState(event.category);
   const categories = useEventCategories();
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -148,7 +150,7 @@ export default function EventEditor({
   const changedFields = () => {
     const fields: string[] = [];
     if (title !== event.title) fields.push("event.title");
-    if (description.trim()) fields.push("event.description");
+    if (description !== event.description) fields.push("event.description");
     if (categoryCode !== event.category) fields.push("event.category");
     return fields;
   };
@@ -172,7 +174,7 @@ export default function EventEditor({
     try {
       const res = await studioApi.updateEvent(event.id, {
         title: title !== event.title ? title : undefined,
-        description: description.trim() ? description.trim() : undefined,
+        description: description !== event.description ? description : undefined,
         categoryCode: categoryCode !== event.category ? categoryCode : undefined,
       });
       setNotice(
@@ -180,7 +182,6 @@ export default function EventEditor({
           ? "Đã lưu. Sự kiện đang chờ duyệt lại và tạm ẩn khỏi trang công khai."
           : "Đã lưu thay đổi.",
       );
-      setDescription("");
       onRefresh();
     } catch (e) {
       // The organizer's typing is deliberately NOT cleared on a refusal (FR-041).
@@ -213,6 +214,83 @@ export default function EventEditor({
 
   useEffect(() => loadRows(), [loadRows]);
 
+  /*
+   * The bound venue's display details, editable while the event is a DRAFT.
+   *
+   * The venue was collected on the create form and locked system-wide from then on — but a draft
+   * has sold nothing and surprised nobody, so a typo in "Nhà hát Hòa Bình" should be fixable where
+   * it was made, not frozen forever. Once the event is submitted this card disappears: published
+   * buyers bought the venue's name as much as its seats (the server refuses independently).
+   *
+   * Showtimes need no migration when this saves — they point at the same VENUE ROW; only its
+   * spelling changed.
+   */
+  const boundVenue = venues.find((v) => v.id === event.venueId) ?? null;
+  const venueEditable = event.status === "draft" && boundVenue !== null;
+  const [venueDraft, setVenueDraft] = useState({
+    name: boundVenue?.name ?? "",
+    city: boundVenue?.city ?? "",
+    rawAddress: boundVenue?.rawAddress ?? "",
+  });
+  // Re-seed the draft when a DIFFERENT venue becomes bound, adjusted during render against the
+  // previous id — the same pattern OrganizerEventsPage uses for URL sync (no effect, no cascade).
+  const [venueSeenId, setVenueSeenId] = useState<number | null>(boundVenue?.id ?? null);
+  if (boundVenue !== null && boundVenue.id !== venueSeenId) {
+    setVenueSeenId(boundVenue.id);
+    setVenueDraft({
+      name: boundVenue.name,
+      city: boundVenue.city,
+      rawAddress: boundVenue.rawAddress,
+    });
+  }
+  const [venueBusy, setVenueBusy] = useState(false);
+  const [venueNotice, setVenueNotice] = useState<string | null>(null);
+  const [venueRefusal, setVenueRefusal] = useState<string | null>(null);
+  /** An UNBOUND draft picks its venue here; the details card takes over once one is bound. */
+  const [bindChoice, setBindChoice] = useState<number | "">("");
+  const bindVenue = async () => {
+    if (!bindChoice || venueBusy) return;
+    setVenueBusy(true);
+    setVenueNotice(null);
+    setVenueRefusal(null);
+    try {
+      await organizerApi.bindEventVenue(event.id, Number(bindChoice));
+      setVenueNotice("Đã gán địa điểm.");
+      onRefresh();
+    } catch (e) {
+      setVenueRefusal((e as Error).message);
+    } finally {
+      setVenueBusy(false);
+    }
+  };
+
+  const venueDirty =
+    boundVenue !== null &&
+    (venueDraft.name !== boundVenue.name ||
+      venueDraft.city !== boundVenue.city ||
+      venueDraft.rawAddress !== boundVenue.rawAddress);
+
+  const saveVenue = async () => {
+    if (!boundVenue || !venueDirty || venueBusy) return;
+    setVenueBusy(true);
+    setVenueNotice(null);
+    setVenueRefusal(null);
+    try {
+      await organizerApi.updateVenue(boundVenue.id, {
+        name: venueDraft.name.trim() || undefined,
+        city: venueDraft.city.trim() || undefined,
+        rawAddress: venueDraft.rawAddress.trim() || undefined,
+      });
+      setVenueNotice("Đã lưu địa điểm.");
+      onRefresh();
+    } catch (e) {
+      // Its OWN refusal surface: a venue error must not appear inside the event-info card above.
+      setVenueRefusal((e as Error).message);
+    } finally {
+      setVenueBusy(false);
+    }
+  };
+
   const steps = flowSteps(event, rows);
 
   /**
@@ -243,8 +321,14 @@ export default function EventEditor({
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <button onClick={onBack} className={ghost}>
-          ← Danh sách sự kiện
+        {/* Borderless, like the booking flow's back link (`BookingHeader`) — an arrow and a label
+            rather than a boxed button, since this is navigation, not an action taken on the page. */}
+        <button
+          onClick={onBack}
+          className="flex items-center gap-2 text-xs font-bold text-beige-kem/70 transition-colors hover:text-beige-kem"
+        >
+          <ArrowLeft aria-hidden className="h-3.5 w-3.5" />
+          Danh sách sự kiện
         </button>
         <div className="flex flex-wrap items-center gap-3">
           {event.eventType === "seated" && (
@@ -276,15 +360,6 @@ export default function EventEditor({
               Hủy sự kiện
             </button>
           )}
-          {cancelled ? (
-            <span className="font-mono text-[10px] text-burgundy">Đã hủy</span>
-          ) : isLive ? (
-            <span className="font-mono text-[10px] text-la-co">Đang hiển thị công khai</span>
-          ) : (
-            onSale && (
-              <span className="font-mono text-[10px] text-cam-dat">Đang chờ admin duyệt</span>
-            )
-          )}
         </div>
       </div>
 
@@ -301,9 +376,16 @@ export default function EventEditor({
           <EventFlowRail steps={steps} onAction={runAction} />
         </div>
 
+        {/*
+          Tinted blocks, not bordered cards: `space-y-5` already puts page showing between them, so
+          the border-2 outline each used to carry was doing the same job twice — once with the
+          outline, once with the gap. Dropping it is the same call the booking flow's own
+          `OrderSummary` made for the same reason (see that file's "Blocks on the page, not
+          compartments inside a box").
+        */}
         <div className="space-y-5 lg:order-2">
-          <div className="border-2 border-beige-kem bg-surface-2 p-5">
-            <h3 className="mb-3 font-display text-lg font-bold">{event.title}</h3>
+          <div className="bg-surface-2 p-5">
+            <h3 className="mb-3 font-display text-2xl font-bold">{event.title}</h3>
 
             <label className="block">
               <span className={label}>Tiêu đề</span>
@@ -311,7 +393,7 @@ export default function EventEditor({
             </label>
 
             <label className="mt-3 block">
-              <span className={label}>Mô tả (để trống nếu không đổi)</span>
+              <span className={label}>Mô tả</span>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
@@ -354,6 +436,103 @@ export default function EventEditor({
             <Refusal message={refusal} />
           </div>
 
+          {/* The venue card, only while the event is still a draft — see `venueEditable` above. */}
+          {venueEditable && (
+            <div className="bg-surface-2 p-5">
+              <h3 className="mb-1 font-display text-lg font-bold">Địa điểm</h3>
+
+              {/* ── Chưa gán: chọn một trong các địa điểm của bạn ── */}
+              {!boundVenue && (
+                <div className="space-y-3">
+                  <p className="font-mono text-[11px] text-beige-kem/55">
+                    Sự kiện này chưa gán địa điểm. Chọn một địa điểm của bạn — mọi suất chiếu hiện
+                    có sẽ chuyển theo.
+                  </p>
+                  <select
+                    value={bindChoice}
+                    onChange={(e) => setBindChoice(Number(e.target.value) || "")}
+                    className={input}
+                  >
+                    <option value="" className="bg-surface-2">
+                      Chọn địa điểm
+                    </option>
+                    {venues.map((v) => (
+                      <option key={v.id} value={v.id} className="bg-surface-2">
+                        {v.name} · {v.city}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => void bindVenue()}
+                    disabled={!bindChoice || venueBusy}
+                    className={btn}
+                  >
+                    Gán địa điểm
+                  </button>
+                </div>
+              )}
+
+              {/* ── Đã gán: sửa chi tiết hiển thị ── */}
+              {boundVenue && (
+                <>
+                  <p className="mb-3 font-mono text-[11px] text-beige-kem/55">
+                    Sự kiện chưa xuất bản nên địa điểm vẫn sửa được. Các suất chiếu hiện có tự theo
+                    địa điểm này — chúng trỏ vào cùng một bản ghi, chỉ tên và vị trí thay đổi.
+                  </p>
+
+                  <label className="block">
+                    <span className={label}>Tên địa điểm</span>
+                    <input
+                      value={venueDraft.name}
+                      onChange={(e) => setVenueDraft((v) => ({ ...v, name: e.target.value }))}
+                      className={input}
+                    />
+                  </label>
+
+                  <div className="mt-3 grid gap-3 sm:grid-cols-[12rem_minmax(0,1fr)]">
+                    <label className="block">
+                      <span className={label}>Thành phố</span>
+                      <select
+                        value={venueDraft.city}
+                        onChange={(e) => setVenueDraft((v) => ({ ...v, city: e.target.value }))}
+                        className={input}
+                      >
+                        {VN_PROVINCES.map((p) => (
+                          <option key={p} value={p} className="bg-surface-2">
+                            {p === "TP.HCM" ? "TP. Hồ Chí Minh" : p}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className={label}>Địa chỉ chi tiết</span>
+                      <input
+                        value={venueDraft.rawAddress}
+                        onChange={(e) =>
+                          setVenueDraft((v) => ({ ...v, rawAddress: e.target.value }))
+                        }
+                        className={input}
+                      />
+                    </label>
+                  </div>
+
+                  <button
+                    onClick={() => void saveVenue()}
+                    disabled={venueBusy || !venueDirty}
+                    className={`${btn} mt-4`}
+                  >
+                    Lưu địa điểm
+                  </button>
+
+                  {venueNotice && (
+                    <p className="mt-3 font-mono text-[11px] text-la-co">{venueNotice}</p>
+                  )}
+                  <Refusal message={venueRefusal} />
+                </>
+              )}
+            </div>
+          )}
+
           {/* Never on a critical path: the whole editor above works with this panel broken (FR-029). */}
           <AiListingPanel
             eventId={isLive ? undefined : event.id}
@@ -362,8 +541,8 @@ export default function EventEditor({
             }
           />
 
-          <div ref={showtimesRef} className="border-2 border-beige-kem bg-surface-2 p-5">
-            <h3 className="mb-3 font-display text-base font-bold">Suất chiếu</h3>
+          <div ref={showtimesRef} className="bg-surface-2 p-5">
+            <h3 className="mb-3 font-display text-lg font-bold">Suất chiếu</h3>
             <ShowtimeList
               eventId={event.id}
               venues={venues}

@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type { VnProvince } from "./vnProvinces";
+
 export interface MovieEvent {
   /** The event slug. Named `id` because routing keys off it; the numeric one is `eventId`. */
   id: string;
@@ -49,7 +51,7 @@ export interface MovieEvent {
   trailerUrl: string; // fallback or streaming video url
   times: string[]; // showtimes
   dates: string[]; // calendar dates
-  city: "TP.HCM" | "Hà Nội" | "Đà Nẵng";
+  city: VnProvince;
   location: string;
   venueName: string;
   venueMapUrl: string;
@@ -167,7 +169,8 @@ export interface CheckoutPayload {
   promoCode?: string;
 }
 
-export type OrganizerEventStatus = "draft" | "pending_review" | "published" | "canceled" | "completed";
+export type OrganizerEventStatus =
+  "draft" | "pending_review" | "published" | "canceled" | "completed";
 
 export interface OrganizerEvent {
   eventId: string;
@@ -180,7 +183,7 @@ export interface OrganizerEvent {
   videoUrl?: string;
   venueName: string;
   venueAddress: string;
-  city: "TP.HCM" | "Hà Nội" | "Đà Nẵng";
+  city: VnProvince;
   startDatetime: string;
   endDatetime: string;
   salesStartDatetime: string;
@@ -221,8 +224,8 @@ export interface EventCancellationAuditRecord {
   totalRefundAmountVnd: number;
 }
 
-export type MediaType = 'avatar' | 'logo' | 'banner' | 'trailer' | 'floorplan' | 'reference';
-export type StagedMediaStatus = 'idle' | 'staged' | 'uploading' | 'error';
+export type MediaType = "avatar" | "logo" | "banner" | "trailer" | "floorplan" | "reference";
+export type StagedMediaStatus = "idle" | "staged" | "uploading" | "error";
 
 export interface StagedMedia {
   file: File | null;
@@ -232,4 +235,3 @@ export interface StagedMedia {
   status: StagedMediaStatus;
   errorMessage?: string;
 }
-

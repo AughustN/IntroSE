@@ -199,12 +199,51 @@ export const TOPUP_RECONCILE_AFTER_MS = ms("TOPUP_RECONCILE_AFTER_MS", 15 * 60 *
 export const TOPUP_SWEEP_INTERVAL_MS = ms("TOPUP_SWEEP_INTERVAL_MS", 5 * 60 * 1000);
 
 // ---- Seat map designer (feature 005). Settings with defaults, not hard-coded constants (UC-36).
-/** Layout coordinate space: 0–LAYOUT_SPACE integer units on each axis (FR-008). */
-export const LAYOUT_SPACE = ms("LAYOUT_SPACE", 10_000);
+/**
+ * The layout FRAME: the working area the editor pins its view to, and the `space` a buyer's map
+ * reports (FR-008). No longer the coordinate limit — see `LAYOUT_MIN`/`LAYOUT_MAX`.
+ *
+ * Keep in step with `LAYOUT_SPACE` in `shared/catalog/seatmap-validate.ts`.
+ */
+export const LAYOUT_SPACE = ms("LAYOUT_SPACE", 30_000);
+/**
+ * The coordinate WALL: the range a stored position may occupy, one frame of slack around the frame.
+ *
+ * Keep BOTH in step with `LAYOUT_MIN`/`LAYOUT_MAX` in `shared/catalog/seatmap-validate.ts` AND with
+ * the `seats_pos_x_range` / `seats_pos_y_range` CHECK constraints (migration 0041). They are not
+ * wired together: widening only these is accepted by the API and then rejected by the database.
+ *
+ * `ms` parses an integer, so the negative default is stated as a negation of a positive setting —
+ * an env var is a string and a leading minus is not something to make every reader check for.
+ */
+export const LAYOUT_MIN = -ms("LAYOUT_MIN_ABS", 30_000);
+export const LAYOUT_MAX = ms("LAYOUT_MAX", 60_000);
 /** Nominal seat size. Two seats overlap when their centres are closer than this (FR-008, FR-030a). */
 export const SEAT_DIAMETER = ms("SEAT_DIAMETER", 100);
 /** Ceilings — chosen to keep the editor and the buyer map inside PLAT-01 and PERF-02 (FR-007, FR-019). */
-export const LAYOUT_MAX_SEATS = ms("LAYOUT_MAX_SEATS", 2_000);
+/**
+ * Seats per layout (FR-007). Raised from 2,000 to 10,000 (0044).
+ *
+ * 2,000 was set when a save wrote one statement PER SEAT — 2,000 serialised round trips was already
+ * a slow save, so the number was a write-path limit wearing a product limit's clothes. Both write
+ * paths now batch through `unnest` (`apply.ts`, `layouts.repo.ts`), and the geometry stopped being
+ * the constraint once `curved-row` could build a real bowl.
+ *
+ * 10,000 is chosen against a MEASUREMENT, not picked round. A saved document is about 78 bytes a
+ * seat, so:
+ *
+ *     2,000 seats → 0.15 MB      10,000 seats → 0.78 MB      20,000 seats → 1.58 MB
+ *
+ * and projection costs 3ms at 10,000. The binding limit is neither: it is the JSON body cap, which
+ * is 1 MB app-wide. The seatmap router raises its own to 4 MB (see `app.ts`) because a chart save is
+ * authenticated and ownership-checked, which the global limit cannot assume — so 10,000 sits at a
+ * fifth of the allowance it actually runs under, with room for long row prefixes and labels.
+ *
+ * What to watch next, in order: the buyer's `getSeatMap` response (a 10,000-seat map is a couple of
+ * megabytes to download, mitigated by the ETag but not eliminated), and `SeatCanvas`'s culling
+ * threshold of 400, which is what keeps a large map interactive.
+ */
+export const LAYOUT_MAX_SEATS = ms("LAYOUT_MAX_SEATS", 10_000);
 export const LAYOUT_MAX_ELEMENTS = ms("LAYOUT_MAX_ELEMENTS", 200);
 /**
  * How many people one capacity zone may hold.
