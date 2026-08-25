@@ -59,8 +59,8 @@ export default function ValidationPanel({
 
   if (blocking.length === 0) {
     return (
-      <div className="border-2 border-la-co bg-surface-2 p-4">
-        <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-la-co">
+      <div className="border-2 border-la-co-ink bg-surface-2 p-4">
+        <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-la-co-ink">
           Hợp lệ
         </h3>
         <p className="mt-1 text-eyebrow text-beige-kem/70">Sơ đồ có thể phát hành.</p>
@@ -72,8 +72,8 @@ export default function ValidationPanel({
   }
 
   return (
-    <div className="border-2 border-bubblegum bg-surface-2 p-4">
-      <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-bubblegum">
+    <div className="border-2 border-burgundy-ink bg-surface-2 p-4">
+      <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-burgundy-ink">
         {blocking.length} vấn đề — chưa thể phát hành
       </h3>
       <ul className="mt-2 space-y-2">
@@ -99,26 +99,28 @@ export default function ValidationPanel({
                   </button>
                 ))}
                 {issue.seatIds.length > 6 && (
-                  <span className="self-center font-meta text-[10px] text-beige-kem/50">
+                  <span className="self-center font-meta text-[10px] text-beige-kem/70">
                     +{issue.seatIds.length - 6} ghế nữa
                   </span>
                 )}
               </span>
             )}
 
-            {issue.code === "duplicate_label" && onRenumberSection && issue.sectionIds?.length === 1 && (
-              <button
-                type="button"
-                onClick={() => onRenumberSection(issue.sectionIds![0])}
-                title="Đánh lại số cho khu này để hết trùng nhãn"
-                className="ml-1 border border-la-co px-1.5 py-0.5 font-meta text-[10px] text-la-co transition hover:bg-la-co/10"
-              >
-                Sửa tự động
-              </button>
-            )}
+            {issue.code === "duplicate_label" &&
+              onRenumberSection &&
+              issue.sectionIds?.length === 1 && (
+                <button
+                  type="button"
+                  onClick={() => onRenumberSection(issue.sectionIds![0])}
+                  title="Đánh lại số cho khu này để hết trùng nhãn"
+                  className="ml-1 border border-la-co-ink px-1.5 py-0.5 font-meta text-[10px] text-la-co-ink transition hover:bg-la-co/10"
+                >
+                  Sửa tự động
+                </button>
+              )}
 
             {issue.sectionIds && issue.sectionIds.length > 0 && (
-              <span className="ml-1 font-meta text-eyebrow text-beige-kem/50">
+              <span className="ml-1 font-meta text-eyebrow text-beige-kem/70">
                 (khu vực #{issue.sectionIds.join(", #")})
               </span>
             )}
@@ -147,13 +149,13 @@ function Warning({ issue, onAddStage }: { issue: ValidationIssue; onAddStage?: (
   return (
     <p className="mt-2 border-l-2 border-cam-dat pl-2 text-eyebrow leading-5 text-beige-kem/70">
       {/* Message is plain text from the shared validator — React escapes it (SEC-07). */}
-      <span className="font-bold text-cam-dat">Lưu ý</span> · {issue.message}
+      <span className="font-bold text-cam-dat-ink">Lưu ý</span> · {issue.message}
       {issue.code === "focal_point_unset" && onAddStage && (
         <button
           type="button"
           onClick={onAddStage}
           title="Đặt một sân khấu vào giữa khung nhìn — kéo tới đúng chỗ sau"
-          className="ml-1 border border-cam-dat px-1.5 py-0.5 font-meta text-[10px] text-cam-dat transition hover:bg-cam-dat/10"
+          className="ml-1 border border-cam-dat-ink px-1.5 py-0.5 font-meta text-[10px] text-cam-dat-ink transition hover:bg-cam-dat/10"
         >
           Thêm sân khấu
         </button>

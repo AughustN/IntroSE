@@ -75,17 +75,24 @@ interface CurrentSeat {
   seat_number: number | null;
   section_name: string | null;
   ticket_tier_id: number;
-  status: 'available' | 'held' | 'sold' | 'blocked';
+  status: "available" | "held" | "sold" | "blocked";
   pos_x: number | null;
   pos_y: number | null;
   rotation: number;
   live_hold: boolean;
 }
 
-const labelOf = (s: { sectionName?: string | null; section_name?: string | null; rowLabel?: string; row_label?: string | null; seatNumber?: number; seat_number?: number | null }): string => {
+const labelOf = (s: {
+  sectionName?: string | null;
+  section_name?: string | null;
+  rowLabel?: string;
+  row_label?: string | null;
+  seatNumber?: number;
+  seat_number?: number | null;
+}): string => {
   const section = s.sectionName ?? s.section_name ?? null;
-  const row = s.rowLabel ?? s.row_label ?? '?';
-  const num = s.seatNumber ?? s.seat_number ?? '?';
+  const row = s.rowLabel ?? s.row_label ?? "?";
+  const num = s.seatNumber ?? s.seat_number ?? "?";
   return section ? `${section} / ${row}${num}` : `${row}${num}`;
 };
 
@@ -123,24 +130,45 @@ function positionChanged(desired: DesiredSeat, current: CurrentSeat): boolean {
   );
 }
 
+/**
+ * Which current seat does this desired line refer to?
+ *
+ * The direct id wins. When the line carries no showtime_seat id — or one this map does not have —
+ * it falls back to the PHYSICAL seat, so an existing row can never be classified as an addition
+ * and then swept away by the removal pass while its INSERT no-ops on the (showtime_id, seat_id)
+ * conflict. The fallback is what makes a client that lost track of ids degrade into an edit of
+ * the right seat instead of a silent delete; both callers (classify and apply's write loop) go
+ * through this one function so preview and write can never resolve differently.
+ */
+function resolveCurrent(
+  d: DesiredSeat,
+  byId: Map<number, CurrentSeat>,
+  bySeatId: Map<number, CurrentSeat>,
+): CurrentSeat | undefined {
+  const direct = d.showtimeSeatId !== null ? byId.get(d.showtimeSeatId) : undefined;
+  return direct ?? bySeatId.get(d.seatId);
+}
+
 /** Classify an edit without writing anything. Pure — used by both the preview and the apply. */
 export function classify(desired: DesiredSeat[], current: CurrentSeat[]): ApplyPreview {
   const changes: ApplyChange[] = [];
   const refusals: ApplyRefusal[] = [];
   const byId = new Map(current.map((c) => [c.id, c]));
+  const bySeatId = new Map(current.map((c) => [c.seat_id, c]));
   const keptIds = new Set<number>();
+  // A line that resolves to a current seat ANOTHER line already claimed is an addition: two lines
+  // cannot both edit one row, and the second's INSERT then no-ops harmlessly on the unique
+  // (showtime_id, seat_id) conflict instead of double-writing it.
+  const matched = new Set<number>();
 
   for (const d of desired) {
-    if (d.showtimeSeatId === null) {
-      changes.push({ kind: 'add', showtimeSeatId: null, seatLabel: labelOf(d) });
+    const c = resolveCurrent(d, byId, bySeatId);
+    if (!c || matched.has(c.id)) {
+      // Refers to nothing on this map (or to a seat another line already edits) — an addition.
+      changes.push({ kind: "add", showtimeSeatId: null, seatLabel: labelOf(d) });
       continue;
     }
-    const c = byId.get(d.showtimeSeatId);
-    if (!c) {
-      // Refers to a seat this showtime does not have — treat as an addition rather than failing.
-      changes.push({ kind: 'add', showtimeSeatId: null, seatLabel: labelOf(d) });
-      continue;
-    }
+    matched.add(c.id);
     keptIds.add(c.id);
 
     const movedOnly = positionChanged(d, c);
@@ -149,16 +177,16 @@ export function classify(desired: DesiredSeat[], current: CurrentSeat[]): ApplyP
 
     if (c.live_hold) {
       refusals.push({
-        reason: 'seat_held',
+        reason: "seat_held",
         showtimeSeatId: c.id,
         seatLabel: labelOf(c),
         message: `Ghế ${labelOf(c)} đang được một khách giữ. Hãy thử lại sau khi lượt giữ hết hạn.`,
       });
       continue;
     }
-    if (c.status === 'sold' && identity) {
+    if (c.status === "sold" && identity) {
       refusals.push({
-        reason: 'seat_sold',
+        reason: "seat_sold",
         showtimeSeatId: c.id,
         seatLabel: labelOf(c),
         message: `Ghế ${labelOf(c)} đã được bán: chỉ có thể đổi vị trí hiển thị, không đổi nhãn, khu vực hay hạng vé.`,
@@ -166,7 +194,7 @@ export function classify(desired: DesiredSeat[], current: CurrentSeat[]): ApplyP
       continue;
     }
     changes.push({
-      kind: identity ? (d.ticketTierId !== c.ticket_tier_id ? 'retier' : 'relabel') : 'move',
+      kind: identity ? (d.ticketTierId !== c.ticket_tier_id ? "retier" : "relabel") : "move",
       showtimeSeatId: c.id,
       seatLabel: labelOf(d),
     });
@@ -176,23 +204,23 @@ export function classify(desired: DesiredSeat[], current: CurrentSeat[]): ApplyP
     if (keptIds.has(c.id)) continue;
     if (c.live_hold) {
       refusals.push({
-        reason: 'seat_held',
+        reason: "seat_held",
         showtimeSeatId: c.id,
         seatLabel: labelOf(c),
         message: `Ghế ${labelOf(c)} đang được một khách giữ, không thể xoá.`,
       });
       continue;
     }
-    if (c.status === 'sold') {
+    if (c.status === "sold") {
       refusals.push({
-        reason: 'seat_sold',
+        reason: "seat_sold",
         showtimeSeatId: c.id,
         seatLabel: labelOf(c),
         message: `Ghế ${labelOf(c)} đã được bán, không thể xoá khỏi sơ đồ.`,
       });
       continue;
     }
-    changes.push({ kind: 'remove', showtimeSeatId: c.id, seatLabel: labelOf(c) });
+    changes.push({ kind: "remove", showtimeSeatId: c.id, seatLabel: labelOf(c) });
   }
 
   return { changes, refusals, wouldSucceed: refusals.length === 0 };
@@ -207,8 +235,17 @@ export async function preview(showtimeId: number, desired: DesiredSeat[]): Promi
  * Apply an edit. Locks every touched row, re-classifies under the lock, and refuses the whole edit
  * if anything came up refused — so a sale or hold landing between preview and confirm is never
  * silently overwritten (research R-6, Principle I).
+ *
+ * `opts.refreshLayoutId` names the source layout whose decoration should be re-snapshotted onto the
+ * showtime (the re-apply path). It runs INSIDE this transaction, on purpose: a snapshot refreshed
+ * after the seat writes commit could crash in between and leave seats describing one layout under
+ * decoration from another. Direct PUT edits pass nothing — they change no decoration.
  */
-export async function apply(showtimeId: number, desired: DesiredSeat[]): Promise<ApplyPreview> {
+export async function apply(
+  showtimeId: number,
+  desired: DesiredSeat[],
+  opts: { refreshLayoutId?: number | null } = {},
+): Promise<ApplyPreview> {
   return withTransaction(async (client) => {
     // Lock first, then read: whatever we classify cannot move underneath us.
     await client.query(`SELECT id FROM showtime_seats WHERE showtime_id = $1 FOR UPDATE`, [showtimeId]);
@@ -218,52 +255,122 @@ export async function apply(showtimeId: number, desired: DesiredSeat[]): Promise
     if (!outcome.wouldSucceed) return outcome; // caller turns this into 409; the txn wrote nothing
 
     const byId = new Map(current.map((c) => [c.id, c]));
+    const bySeatId = new Map(current.map((c) => [c.seat_id, c]));
     const keptIds = new Set<number>();
 
+    /*
+     * Sorted in memory, written in two statements — NOT one statement per seat.
+     *
+     * The loop used to `await` a query per desired seat, inside this transaction and under the
+     * `FOR UPDATE` taken above. That is one network round trip each, serialised, while every seat
+     * of the showtime stays locked: no buyer can hold or buy anything on this showtime until the
+     * last seat lands. At the 2,000-seat ceiling that is 2,000 round trips of lock time, and it is
+     * what made the seat cap a write-path limit rather than a rendering one.
+     *
+     * `unnest` carries each column as ONE array parameter, so the whole edit is two statements
+     * whatever its size — the bind-parameter ceiling is never approached, because eight arrays are
+     * eight parameters, not eight per seat.
+     *
+     * Ordering is not lost by grouping the two kinds: updates address existing rows by primary key
+     * and are independent of each other, and a desired line can never be an insert on a seat another
+     * line updates — `resolveCurrent` falls back to the physical seat, so both lines resolve to the
+     * same existing row and both classify as updates.
+     */
+    const up = {
+      id: [] as number[],
+      x: [] as number[],
+      y: [] as number[],
+      rot: [] as number[],
+      row: [] as (string | null)[],
+      num: [] as (number | null)[],
+      sect: [] as (string | null)[],
+      tier: [] as number[],
+    };
+    const ins = {
+      seatId: [] as number[],
+      tier: [] as number[],
+      x: [] as number[],
+      y: [] as number[],
+      rot: [] as number[],
+      row: [] as (string | null)[],
+      num: [] as (number | null)[],
+      sect: [] as (string | null)[],
+    };
+
     for (const d of desired) {
-      const c = d.showtimeSeatId === null ? undefined : byId.get(d.showtimeSeatId);
+      // Same resolution classify used, so the writes land exactly where the preview said they
+      // would — including a line that names an existing physical seat without its row id.
+      const c = resolveCurrent(d, byId, bySeatId);
       if (c) {
         keptIds.add(c.id);
-        await client.query(
-          `UPDATE showtime_seats
-              SET pos_x = $2, pos_y = $3, rotation = $4, row_label = $5, seat_number = $6,
-                  section_name = $7, ticket_tier_id = $8
-            WHERE id = $1`,
-          [
-            c.id,
-            clampCoord(d.x),
-            clampCoord(d.y),
-            normaliseRotation(d.rotation),
-            d.rowLabel,
-            d.seatNumber,
-            d.sectionName,
-            d.ticketTierId,
-          ],
-        );
+        up.id.push(c.id);
+        up.x.push(clampCoord(d.x));
+        up.y.push(clampCoord(d.y));
+        up.rot.push(normaliseRotation(d.rotation));
+        up.row.push(d.rowLabel);
+        up.num.push(d.seatNumber);
+        up.sect.push(d.sectionName);
+        up.tier.push(d.ticketTierId);
       } else {
-        await client.query(
-          `INSERT INTO showtime_seats (showtime_id, seat_id, ticket_tier_id, status,
-                                       pos_x, pos_y, rotation, row_label, seat_number, section_name)
-           VALUES ($1, $2, $3, 'available', $4, $5, $6, $7, $8, $9)
-           ON CONFLICT (showtime_id, seat_id) DO NOTHING`,
-          [
-            showtimeId,
-            d.seatId,
-            d.ticketTierId,
-            clampCoord(d.x),
-            clampCoord(d.y),
-            normaliseRotation(d.rotation),
-            d.rowLabel,
-            d.seatNumber,
-            d.sectionName,
-          ],
-        );
+        ins.seatId.push(d.seatId);
+        ins.tier.push(d.ticketTierId);
+        ins.x.push(clampCoord(d.x));
+        ins.y.push(clampCoord(d.y));
+        ins.rot.push(normaliseRotation(d.rotation));
+        ins.row.push(d.rowLabel);
+        ins.num.push(d.seatNumber);
+        ins.sect.push(d.sectionName);
       }
+    }
+
+    if (up.id.length > 0) {
+      await client.query(
+        `UPDATE showtime_seats AS s
+            SET pos_x = v.pos_x, pos_y = v.pos_y, rotation = v.rotation,
+                row_label = v.row_label, seat_number = v.seat_number,
+                section_name = v.section_name, ticket_tier_id = v.ticket_tier_id
+           FROM unnest($1::bigint[], $2::int[], $3::int[], $4::smallint[],
+                       $5::text[], $6::int[], $7::text[], $8::bigint[])
+                AS v(id, pos_x, pos_y, rotation, row_label, seat_number, section_name, ticket_tier_id)
+          WHERE s.id = v.id`,
+        [up.id, up.x, up.y, up.rot, up.row, up.num, up.sect, up.tier],
+      );
+    }
+
+    if (ins.seatId.length > 0) {
+      // `DO NOTHING` rather than `DO UPDATE`, exactly as before — and unlike `DO UPDATE` it is also
+      // safe when one batch carries the same seat twice, which Postgres refuses for the update form.
+      await client.query(
+        `INSERT INTO showtime_seats (showtime_id, seat_id, ticket_tier_id, status,
+                                     pos_x, pos_y, rotation, row_label, seat_number, section_name)
+         SELECT $1, v.seat_id, v.ticket_tier_id, 'available',
+                v.pos_x, v.pos_y, v.rotation, v.row_label, v.seat_number, v.section_name
+           FROM unnest($2::bigint[], $3::bigint[], $4::int[], $5::int[], $6::smallint[],
+                       $7::text[], $8::int[], $9::text[])
+                AS v(seat_id, ticket_tier_id, pos_x, pos_y, rotation, row_label, seat_number, section_name)
+         ON CONFLICT (showtime_id, seat_id) DO NOTHING`,
+        [showtimeId, ins.seatId, ins.tier, ins.x, ins.y, ins.rot, ins.row, ins.num, ins.sect],
+      );
     }
 
     const removable = current.filter((c) => !keptIds.has(c.id)).map((c) => c.id);
     if (removable.length > 0) {
       await client.query(`DELETE FROM showtime_seats WHERE id = ANY($1::bigint[])`, [removable]);
+    }
+
+    // The re-apply just added and removed seat rows (0036): re-sync the pair links from the chart,
+    // the same way initial generation copies them. A no-op when nothing is paired.
+    const bound = await client.query<{ layout_id: number | null }>(
+      `SELECT layout_id FROM showtimes WHERE id = $1`,
+      [showtimeId],
+    );
+    const layoutId = bound.rows[0]?.layout_id ?? null;
+    if (layoutId !== null) await syncCompanionLinks(showtimeId, layoutId, client);
+
+    // Same transaction as the seat writes: seats and their decoration can never disagree about
+    // which layout they describe, even if this process dies mid-apply.
+    if (opts.refreshLayoutId != null) {
+      await refreshSnapshot(showtimeId, opts.refreshLayoutId, client);
     }
 
     return outcome;
@@ -275,8 +382,14 @@ export async function apply(showtimeId: number, desired: DesiredSeat[]): Promise
  * matched to the existing map by `seat_id`, so a seat that survived keeps its bookable row (and its
  * sale) rather than being deleted and re-added.
  */
-export async function desiredFromLayout(showtimeId: number, db: Db = pool): Promise<DesiredSeat[] | null> {
-  const head = await db.query<{ layout_id: number | null }>(`SELECT layout_id FROM showtimes WHERE id = $1`, [showtimeId]);
+export async function desiredFromLayout(
+  showtimeId: number,
+  db: Db = pool,
+): Promise<DesiredSeat[] | null> {
+  const head = await db.query<{ layout_id: number | null }>(
+    `SELECT layout_id FROM showtimes WHERE id = $1`,
+    [showtimeId],
+  );
   const layoutId = head.rows[0]?.layout_id ?? null;
   if (layoutId === null) return null;
 
@@ -327,7 +440,11 @@ export async function desiredFromLayout(showtimeId: number, db: Db = pool): Prom
 }
 
 /** Refresh the decoration half of the snapshot from the source layout (FR-005, T046). */
-export async function refreshSnapshot(showtimeId: number, layoutId: number, db: Db = pool): Promise<void> {
+export async function refreshSnapshot(
+  showtimeId: number,
+  layoutId: number,
+  db: Db = pool,
+): Promise<void> {
   await db.query(
     `UPDATE showtimes st
         SET layout_id = $2,
@@ -343,7 +460,14 @@ export async function refreshSnapshot(showtimeId: number, layoutId: number, db: 
                   -- a standing floor looked like decoration.
                   'capacity', e.capacity, 'categoryId', e.category_id,
                   -- A drawn outline's colour reaches the buyer through here or not at all.
-                  'color', e.color, 'geometry', e.geometry))
+                  'color', e.color, 'geometry', e.geometry,
+                  -- The level this decoration stands on (0044), by NAME, reached through its section.
+                  -- Without it a stage drawn on the stalls would also be drawn over the balcony, on
+                  -- every floor the buyer switched to. Null means it belongs to the whole chart --
+                  -- structural outlines usually have no section, and those SHOULD stay visible.
+                  'floor', (SELECT f.name FROM sections sec2
+                              JOIN layout_floors f ON f.id = sec2.floor_id
+                             WHERE sec2.id = e.section_id)))
                   FROM layout_elements e WHERE e.layout_id = l.id), '[]'::jsonb),
               -- Tables ride in the SAME snapshot as the elements (FR-081). The snapshot is what stops
               -- a later layout edit reshaping a show that is already selling, and a table sits in the
@@ -365,8 +489,21 @@ export async function refreshSnapshot(showtimeId: number, layoutId: number, db: 
               'sectionStyles', COALESCE((
                 SELECT jsonb_agg(jsonb_build_object(
                   'name', sec.name, 'seatShape', sec.seat_shape,
-                  'seatSizeMultiplier', sec.seat_size_multiplier))
+                  'seatSizeMultiplier', sec.seat_size_multiplier,
+                  -- The level (0044), by NAME. It rides this key because a section name is the only
+                  -- section identity a showtime_seats row carries -- which is the whole reason a
+                  -- floor hangs off a section rather than off a seat. No new column, no migration of
+                  -- inventory already selling.
+                  'floor', (SELECT f.name FROM layout_floors f WHERE f.id = sec.floor_id)))
                   FROM sections sec WHERE sec.layout_id = l.id), '[]'::jsonb),
+              -- The chart's levels, in order, so the buyer's strip presents them the way the
+              -- organizer arranged them rather than in whatever order seats happen to arrive.
+              -- Snapshotted like everything else here: adding a floor to a venue must not re-shape
+              -- the picker of a show already selling.
+              'floors', COALESCE((
+                SELECT jsonb_agg(jsonb_build_object('name', f.name, 'displayOrder', f.display_order)
+                         ORDER BY f.display_order, f.name)
+                  FROM layout_floors f WHERE f.layout_id = l.id), '[]'::jsonb),
               'planUrl', l.background_url,
               'planScale', round(l.background_scale * 1000),
               'planOffsetX', l.background_offset_x,
@@ -376,7 +513,14 @@ export async function refreshSnapshot(showtimeId: number, layoutId: number, db: 
               -- Snapshotted like everything else here: the rule the buyer's picker obeys is the one
               -- that was in force when the map was applied, so retuning a venue cannot change how a
               -- show already selling answers "chọn giúp tôi" halfway through its on-sale.
-              'orphanRule', l.orphan_rule
+              'orphanRule', l.orphan_rule,
+              -- Snapshotted for the same reason the orphan rule above is: the point a show ranks
+              -- from must be the one that was in force when its map was applied. No backticks in
+              -- here — this whole statement is a JS template literal, and one would end the string.
+              'focalPoint', CASE
+                WHEN l.focal_x IS NULL OR l.focal_y IS NULL THEN NULL
+                ELSE jsonb_build_object('x', l.focal_x, 'y', l.focal_y)
+              END
             )
        FROM venue_layouts l
       WHERE st.id = $1 AND l.id = $2`,
@@ -384,12 +528,78 @@ export async function refreshSnapshot(showtimeId: number, layoutId: number, db: 
   );
 }
 
+/**
+ * Re-sync the showtime's companion links from its source layout (0036).
+ *
+ * The pairing lives on `seats` (the chart) and is COPIED onto `showtime_seats` — a self-reference
+ * between the showtime's own rows, resolved through both seats' physical ids. Whatever path just
+ * (re)wrote the showtime's seat rows — initial generation or a re-apply — calls this afterwards, so
+ * the snapshot and the chart never disagree about who accompanies whom while the chart is the
+ * current source of truth.
+ *
+ * Written as one UPDATE rather than a per-seat loop: pairs are rare on a chart but a map holds
+ * thousands of seats, and a statement that touches nothing on an unpaired chart costs a scan and
+ * returns. NULL-clears pairs whose partner was REMOVED from this showtime (the deleted row breaks
+ * the join, so the seat simply stops naming a companion — the layout's validator is still the one
+ * that calls the chart itself out).
+ */
+export async function syncCompanionLinks(
+  showtimeId: number,
+  layoutId: number,
+  db: Db,
+): Promise<void> {
+  await db.query(
+    `UPDATE showtime_seats ss
+        SET companion_seat_id = partner.id
+       FROM seats se
+       JOIN showtime_seats partner ON partner.showtime_id = $1 AND partner.seat_id = se.companion_seat_id
+      WHERE ss.showtime_id = $1
+        AND ss.seat_id = se.id
+        AND se.layout_id = $2
+        AND se.archived_at IS NULL
+        AND se.companion_seat_id IS NOT NULL`,
+    [showtimeId, layoutId],
+  );
+  // Seats whose partner row is gone (deleted or archived out of this showtime) must stop pointing
+  // at the old link: the UPDATE above cannot reach them (the join fails), so clear explicitly.
+  await db.query(
+    `UPDATE showtime_seats ss
+        SET companion_seat_id = NULL
+       FROM seats se
+      WHERE ss.showtime_id = $1
+        AND ss.seat_id = se.id
+        AND ss.companion_seat_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM showtime_seats partner
+           WHERE partner.id = ss.companion_seat_id
+        )`,
+    [showtimeId],
+  );
+}
+
+/**
+ * Every id the request named must exist on THIS showtime. Counted distinctly, so a duplicated id
+ * in the payload neither passes nor inflates the count.
+ */
+function assertAllRequested(found: number, showtimeSeatIds: number[]): void {
+  const distinct = new Set(showtimeSeatIds).size;
+  if (found !== distinct) {
+    throw err.badRequest(
+      "unknown_seats",
+      `${distinct - found} ghế trong lựa chọn không thuộc suất chiếu này.`,
+    );
+  }
+}
+
 /** Block or unblock seats on a live map. Never takes a seat from someone who has it (FR-033). */
 export async function setBlocked(
   showtimeId: number,
   showtimeSeatIds: number[],
   blocked: boolean,
-): Promise<{ refusals: ApplyRefusal[]; changed: { showtimeSeatId: number; status: 'available' | 'blocked' }[] }> {
+): Promise<{
+  refusals: ApplyRefusal[];
+  changed: { showtimeSeatId: number; status: "available" | "blocked" }[];
+}> {
   return withTransaction(async (client) => {
     const { rows } = await client.query<CurrentSeat>(
       `SELECT id, seat_id, row_label, seat_number, section_name, ticket_tier_id, status, pos_x, pos_y, rotation,
@@ -397,24 +607,39 @@ export async function setBlocked(
          FROM showtime_seats WHERE showtime_id = $1 AND id = ANY($2::bigint[]) FOR UPDATE`,
       [showtimeId, showtimeSeatIds],
     );
+    // Ids that matched nothing are refused, not silently dropped: a selection built from a stale
+    // screen must not report success over seats it never touched.
+    assertAllRequested(rows.length, showtimeSeatIds);
 
     const refusals: ApplyRefusal[] = [];
     for (const s of rows) {
       if (s.live_hold) {
-        refusals.push({ reason: 'seat_held', showtimeSeatId: s.id, seatLabel: labelOf(s), message: `Ghế ${labelOf(s)} đang được giữ.` });
-      } else if (s.status === 'sold') {
-        refusals.push({ reason: 'seat_sold', showtimeSeatId: s.id, seatLabel: labelOf(s), message: `Ghế ${labelOf(s)} đã được bán.` });
+        refusals.push({
+          reason: "seat_held",
+          showtimeSeatId: s.id,
+          seatLabel: labelOf(s),
+          message: `Ghế ${labelOf(s)} đang được giữ.`,
+        });
+      } else if (s.status === "sold") {
+        refusals.push({
+          reason: "seat_sold",
+          showtimeSeatId: s.id,
+          seatLabel: labelOf(s),
+          message: `Ghế ${labelOf(s)} đã được bán.`,
+        });
       }
     }
     if (refusals.length > 0) return { refusals, changed: [] };
 
-    const next = blocked ? 'blocked' : 'available';
-    await client.query(`UPDATE showtime_seats SET status = $3 WHERE showtime_id = $1 AND id = ANY($2::bigint[])`, [
-      showtimeId,
-      showtimeSeatIds,
-      next,
-    ]);
-    return { refusals: [], changed: rows.map((s) => ({ showtimeSeatId: s.id, status: next as 'available' | 'blocked' })) };
+    const next = blocked ? "blocked" : "available";
+    await client.query(
+      `UPDATE showtime_seats SET status = $3 WHERE showtime_id = $1 AND id = ANY($2::bigint[])`,
+      [showtimeId, showtimeSeatIds, next],
+    );
+    return {
+      refusals: [],
+      changed: rows.map((s) => ({ showtimeSeatId: s.id, status: next as "available" | "blocked" })),
+    };
   });
 }
 
@@ -426,11 +651,24 @@ export async function setTier(
   ticketTierId: number,
 ): Promise<{ refusals: ApplyRefusal[]; tier: { label: string; price: number } | null }> {
   return withTransaction(async (client) => {
-    const tier = await client.query<{ id: number; label: string; price: string }>(
-      `SELECT id, label, price_amount::text AS price FROM ticket_tiers WHERE id = $1 AND showtime_id = $2`,
+    const tier = await client.query<{
+      id: number;
+      label: string;
+      price: string;
+      archived_at: Date | null;
+    }>(
+      `SELECT id, label, price_amount::text AS price, archived_at
+         FROM ticket_tiers WHERE id = $1 AND showtime_id = $2`,
       [ticketTierId, showtimeId],
     );
     if (!tier.rows[0]) return { refusals: [], tier: null };
+    // An archived class is a retired price: it has left every buyer-facing read, so binding seats
+    // to it would make them unsellable while looking assigned. Refused with its own code rather
+    // than the generic not-belonging error, so the organizer can tell the two apart — the same
+    // rule `desiredFromLayout` applies when matching new seats to a tier.
+    if (tier.rows[0].archived_at !== null) {
+      throw err.badRequest("tier_archived", "Hạng vé đã được lưu trữ, không thể gán cho ghế.");
+    }
 
     const { rows } = await client.query<CurrentSeat>(
       `SELECT id, seat_id, row_label, seat_number, section_name, ticket_tier_id, status, pos_x, pos_y, rotation,
@@ -438,30 +676,36 @@ export async function setTier(
          FROM showtime_seats WHERE showtime_id = $1 AND id = ANY($2::bigint[]) FOR UPDATE`,
       [showtimeId, showtimeSeatIds],
     );
+    // Same honesty as blocking: a stale selection is refused, never half-applied.
+    assertAllRequested(rows.length, showtimeSeatIds);
     // A retier is a price change. Refusing it only for seats already sold left every unsold seat
     // repriceable while the picker was showing its old price.
     await assertNotOnSale(client, showtimeId);
 
     const refusals: ApplyRefusal[] = [];
     for (const s of rows) {
-      if (s.status === 'sold') {
+      if (s.status === "sold") {
         refusals.push({
-          reason: 'seat_sold',
+          reason: "seat_sold",
           showtimeSeatId: s.id,
           seatLabel: labelOf(s),
           message: `Ghế ${labelOf(s)} đã được bán, không thể đổi hạng vé.`,
         });
       } else if (s.live_hold) {
-        refusals.push({ reason: 'seat_held', showtimeSeatId: s.id, seatLabel: labelOf(s), message: `Ghế ${labelOf(s)} đang được giữ.` });
+        refusals.push({
+          reason: "seat_held",
+          showtimeSeatId: s.id,
+          seatLabel: labelOf(s),
+          message: `Ghế ${labelOf(s)} đang được giữ.`,
+        });
       }
     }
     if (refusals.length > 0) return { refusals, tier: null };
 
-    await client.query(`UPDATE showtime_seats SET ticket_tier_id = $3 WHERE showtime_id = $1 AND id = ANY($2::bigint[])`, [
-      showtimeId,
-      showtimeSeatIds,
-      ticketTierId,
-    ]);
+    await client.query(
+      `UPDATE showtime_seats SET ticket_tier_id = $3 WHERE showtime_id = $1 AND id = ANY($2::bigint[])`,
+      [showtimeId, showtimeSeatIds, ticketTierId],
+    );
     return { refusals: [], tier: { label: tier.rows[0].label, price: Number(tier.rows[0].price) } };
   });
 }

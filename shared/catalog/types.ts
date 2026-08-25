@@ -129,6 +129,14 @@ export interface SeatMapSeat {
   /** Section name — drives the accessible label and the tab order (FR-039a). */
   section: string | null;
   /**
+   * The level this seat is on (0044), by name. Null means the chart's single implicit floor, which
+   * is what every map generated before floors has and what the picker treats as "no picker needed".
+   *
+   * Carried per seat rather than looked up, because the buyer's renderer filters by it on every
+   * frame and the snapshot already resolved it from the section.
+   */
+  floor?: string | null;
+  /**
    * The seat's price class, frozen at generation. Names what the colour MEANS: the legend labels each
    * class, so colour is never the only carrier of price (FR-071). Null on maps generated before
    * categories existed, where the legend falls back to naming the tier.
@@ -198,6 +206,14 @@ export interface SeatMapElement {
   /** A drawn outline's fill colour, six hex digits; absent means the theme's ink. */
   color?: string | null;
   geometry?: string | null;
+  /**
+   * The level this decoration stands on (0044), by name, reached through its section.
+   *
+   * Null means it belongs to the whole chart and is drawn on EVERY floor — which is the right answer
+   * for the structural outlines that carry no section: a hall boundary is not a thing the second
+   * storey stops having. A stage does carry one, so switching to the balcony stops drawing it.
+   */
+  floor?: string | null;
 }
 
 /** Background layer only. Holds no seat and no status (FR-020). */
@@ -243,6 +259,15 @@ export interface SeatMap {
    * it was applied. Absent on older snapshots, where the picker's own default (`balanced`) stands.
    */
   orphanRule?: 'balanced' | 'strict';
+  /** The chart's explicit focal point, snapshotted at apply time (0043). Absent means "infer it". */
+  focalPoint?: { x: number; y: number } | null;
+  /**
+   * The chart's levels, in the order the organizer arranged them (0044).
+   *
+   * Absent or shorter than two means there is nothing to pick between, and the renderer shows no
+   * strip at all — a single-level venue must not grow a control that does nothing.
+   */
+  floors?: { name: string; displayOrder: number }[];
 }
 
 export interface SeatMapTierLegendEntry {

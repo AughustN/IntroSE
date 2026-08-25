@@ -19,8 +19,9 @@ import type {
   DocumentSeat,
   RowLabelScheme,
   SeatLabelScheme,
-} from './seatmap-document.js';
-import { isSeatBearing } from './seatmap-document.js';
+} from "./seatmap-document.js";
+import { isSeatBearing } from "./seatmap-document.js";
+import { tableSeatOffsets } from "./seatmap-tables.js";
 import type {
   ElementKind,
   LayoutCategory,
@@ -28,11 +29,14 @@ import type {
   LayoutElement,
   LayoutSeat,
   LayoutSection,
-} from './seatmap.js';
-import { LAYOUT_MAX_SEATS, clampCoord, normaliseRotation } from './seatmap-validate.js';
+  LayoutFloor,
+} from "./seatmap.js";
+import { LAYOUT_MAX_SEATS, clampCoord, normaliseRotation } from "./seatmap-validate.js";
 
 export interface ProjectedLayout {
   sections: LayoutSection[];
+  /** The chart's levels (0044); empty on a single-floor chart. */
+  floors: LayoutFloor[];
   categories: LayoutCategory[];
   /**
    * The chart's rows (0032), one per distinct `(sectionId, rowLabel)` plus any the document declares
@@ -57,20 +61,20 @@ export interface ProjectedLayout {
 
 /** Block kinds that become decoration rows, and the `layout_elements.kind` each maps to. */
 const BLOCK_TO_ELEMENT: Record<string, ElementKind> = {
-  stage: 'stage',
-  aisle: 'aisle',
-  door: 'door',
-  bar: 'bar',
-  text: 'label',
-  shape: 'boundary',
-  'ga-zone': 'area',
-  exit: 'exit',
-  restroom: 'restroom',
-  food_drink: 'food_drink',
-  smoking: 'smoking',
-  first_aid: 'first_aid',
-  lift_stairs: 'lift_stairs',
-  wheelchair: 'wheelchair',
+  stage: "stage",
+  aisle: "aisle",
+  door: "door",
+  bar: "bar",
+  text: "label",
+  shape: "boundary",
+  "ga-zone": "area",
+  exit: "exit",
+  restroom: "restroom",
+  food_drink: "food_drink",
+  smoking: "smoking",
+  first_aid: "first_aid",
+  lift_stairs: "lift_stairs",
+  wheelchair: "wheelchair",
 };
 
 // ---- Labels ------------------------------------------------------------------------------------
@@ -78,7 +82,7 @@ const BLOCK_TO_ELEMENT: Record<string, ElementKind> = {
 /** A → B → … → Z → AA, matching `layoutOps.rowLabelAt` so both editors letter rows identically. */
 export function letterAt(index: number): string {
   let n = index;
-  let out = '';
+  let out = "";
   do {
     out = String.fromCharCode(65 + (n % 26)) + out;
     n = Math.floor(n / 26) - 1;
@@ -95,13 +99,16 @@ export function letterAt(index: number): string {
 export function rowLabelFor(
   r: number,
   rows: number,
-  scheme: RowLabelScheme = 'alpha-asc',
-  prefix = '',
+  scheme: RowLabelScheme = "alpha-asc",
+  prefix = "",
   startIndex = 0,
-  suffix = '',
+  suffix = "",
 ): string {
-  const i = scheme === 'alpha-desc' || scheme === 'num-desc' ? rows - 1 - r : r;
-  const body = scheme === 'num-asc' || scheme === 'num-desc' ? String(startIndex + i + 1) : letterAt(startIndex + i);
+  const i = scheme === "alpha-desc" || scheme === "num-desc" ? rows - 1 - r : r;
+  const body =
+    scheme === "num-asc" || scheme === "num-desc"
+      ? String(startIndex + i + 1)
+      : letterAt(startIndex + i);
   // `seats.row_label` is capped at 8 characters by the route schema, so a long prefix or suffix is
   // truncated here rather than rejected at save time after the organizer has drawn the block.
   return `${prefix}${body}${suffix}`.slice(0, 8);
@@ -146,7 +153,7 @@ export function inferStartLabels(block: DocumentBlock): Partial<BlockParams> {
   if (asLetters !== null) {
     out.startRowIndex = asLetters;
   } else if (/^[0-9]+$/.test(topmost)) {
-    out.rowLabelScheme = 'num-asc';
+    out.rowLabelScheme = "num-asc";
     out.startRowIndex = Math.max(0, Number(topmost) - 1);
   }
   return out;
@@ -155,21 +162,21 @@ export function inferStartLabels(block: DocumentBlock): Partial<BlockParams> {
 export function seatNumberFor(
   c: number,
   perRow: number,
-  scheme: SeatLabelScheme = 'num-asc',
+  scheme: SeatLabelScheme = "num-asc",
   start = 1,
   /** How far apart consecutive seats number (§13). 1 is what every stored chart has. */
   step = 1,
 ): number {
   const by = Math.max(1, Math.floor(step));
   switch (scheme) {
-    case 'num-desc':
+    case "num-desc":
       return start + (perRow - 1 - c) * by;
     // Odd/even numbering is how a centre-aisle row is labelled: 1,3,5 to the left, 2,4,6 to the right.
     // The step is deliberately NOT applied here: these schemes already ARE a step of two, and
     // multiplying them again would produce 1,5,9 for a request that says "odd".
-    case 'even':
+    case "even":
       return start * 2 + c * 2;
-    case 'odd':
+    case "odd":
       return start * 2 - 1 + c * 2;
     default:
       return start + c * by;
@@ -186,19 +193,47 @@ export function seatNumberFor(
  */
 export function seatDisplay(seatNumber: number, padding = 0): string {
   const digits = Math.max(0, Math.floor(padding));
-  return String(seatNumber).padStart(digits, '0');
+  return String(seatNumber).padStart(digits, "0");
 }
 
 // ---- Regeneration ------------------------------------------------------------------------------
 
 /** Positions for a block's seats, in block-relative units, before rotation. */
-function seatOffsets(block: DocumentBlock, rows: number, perRow: number): { dx: number; dy: number }[] {
+function seatOffsets(
+  block: DocumentBlock,
+  rows: number,
+  perRow: number,
+): { dx: number; dy: number }[] {
   const p = block.params ?? {};
   const seatSpacing = p.seatSpacing ?? 150;
   const rowSpacing = p.rowSpacing ?? 150;
   const out: { dx: number; dy: number }[] = [];
 
-  if (block.kind === 'curved-row') {
+  /*
+   * A table lays its seats out AROUND its edge, not on a grid.
+   *
+   * Without this branch a `table` block fell through to the rectangular loop below and produced a
+   * square of seats sitting on top of the table — which is why the document could not express a
+   * table at all, and why the built-in banquet starter had to author its own ring. The geometry is
+   * the same function the table endpoints use (`shared/catalog/seatmap-tables.ts`), so a table drawn
+   * either way lands in the same place.
+   *
+   * `perRow` is ignored here: a table's seat count is `tableSeatCount`, and reading the grid's column
+   * count instead would silently reseat every table whose inspector had been touched.
+   */
+  if (block.kind === "table") {
+    const count = Math.max(0, Math.floor(block.tableSeatCount ?? 0));
+    if (count === 0) return [];
+    return tableSeatOffsets({
+      shape: block.tableShape ?? "round",
+      width: block.width,
+      height: block.height,
+      seatCount: count,
+      sideCounts: block.sideCounts,
+    }).map((o) => ({ dx: Math.round(o.dx), dy: Math.round(o.dy) }));
+  }
+
+  if (block.kind === "curved-row") {
     // Rows on concentric arcs, centred on the block's midline and bulging away from the origin, so a
     // curved tier faces the stage the way the organizer drew it.
     const radius = p.radius ?? 1200;
@@ -208,7 +243,22 @@ function seatOffsets(block: DocumentBlock, rows: number, perRow: number): { dx: 
       for (let c = 0; c < perRow; c += 1) {
         const t = perRow === 1 ? 0.5 : c / (perRow - 1);
         const a = -sweep / 2 + t * sweep;
-        out.push({ dx: Math.round(rr * Math.sin(a)), dy: Math.round(rr * (1 - Math.cos(a)) + r * rowSpacing) });
+        out.push({
+          dx: Math.round(rr * Math.sin(a)),
+          /*
+           * Two layouts, and the difference is where the rows go (see `BlockParams.concentric`).
+           *
+           * Concentric measures every row from ONE focus at `(0, radius)`: the arc's ends bend toward
+           * it and each further row sits further from it. That is a stadium stand.
+           *
+           * The default keeps each row on its own circle and shifts it by `rowSpacing` as well, so the
+           * rows drift toward the focus — a bowed tier. It is the only behaviour that existed before
+           * 0044 and stays the default because changing it would move seats on charts already drawn.
+           */
+          dy: Math.round(
+            p.concentric ? radius - rr * Math.cos(a) : rr * (1 - Math.cos(a)) + r * rowSpacing,
+          ),
+        });
       }
     }
     return out;
@@ -244,11 +294,22 @@ export function regenerateBlock(
   mint: () => number,
   budget = LAYOUT_MAX_SEATS,
 ): DocumentBlock {
-  if (!block.params || !isSeatBearing(block.kind)) return block;
-  const p = block.params;
+  /*
+   * A table regenerates from `tableSeatCount`, not from `params`.
+   *
+   * Its seat count is a property of the table, and it has no rows or columns to speak of — so
+   * requiring `params` would mean inventing a row count for something that has none. A table created
+   * through the table ENDPOINT carries neither, and so still returns untouched here: its seats are
+   * written directly and pass through the projection, which is the behaviour that must not change.
+   */
+  const parametricTable = block.kind === "table" && (block.tableSeatCount ?? 0) > 0;
+  if ((!block.params && !parametricTable) || !isSeatBearing(block.kind)) return block;
+  const p = block.params ?? {};
 
-  const rows = block.kind === 'single-row' ? 1 : Math.max(1, Math.floor(p.rowsCount ?? 1));
-  const perRow = Math.max(1, Math.floor(p.seatsPerRow ?? 1));
+  const rows = block.kind === "single-row" ? 1 : Math.max(1, Math.floor(p.rowsCount ?? 1));
+  const perRow = parametricTable
+    ? Math.max(1, Math.floor(block.tableSeatCount ?? 1))
+    : Math.max(1, Math.floor(p.seatsPerRow ?? 1));
   const offsets = seatOffsets(block, rows, perRow);
 
   // Clipped to what is left of the layout ceiling. The reference inspector had no cap at all, so
@@ -263,12 +324,21 @@ export function regenerateBlock(
   for (let i = 0; i < limit; i += 1) {
     const r = Math.floor(i / perRow);
     const c = i % perRow;
-    const rowLabel = rowLabelFor(
-      r, rows, p.rowLabelScheme, p.rowLabelPrefix ?? '', p.startRowIndex ?? 0, p.rowLabelSuffix ?? '',
-    );
-    const seatNumber = seatNumberFor(
-      c, perRow, p.seatLabelScheme, p.startSeatNumber ?? 1, p.seatNumberStep ?? 1,
-    );
+    // A table's seats are labelled by the TABLE, matching what the table endpoint writes
+    // (`row_label: t.name`) — so the same table expressed either way reads the same on a ticket.
+    const rowLabel = parametricTable
+      ? block.title
+      : rowLabelFor(
+          r,
+          rows,
+          p.rowLabelScheme,
+          p.rowLabelPrefix ?? "",
+          p.startRowIndex ?? 0,
+          p.rowLabelSuffix ?? "",
+        );
+    const seatNumber = parametricTable
+      ? c + 1
+      : seatNumberFor(c, perRow, p.seatLabelScheme, p.startSeatNumber ?? 1, p.seatNumberStep ?? 1);
     const kept = existing.get(`${rowLabel}|${seatNumber}`);
     seats.push({
       // Identity survives iff the label survives.
@@ -282,6 +352,11 @@ export function regenerateBlock(
       sectionId: kept?.sectionId,
       isAccessible: kept?.isAccessible,
       seatType: kept?.seatType,
+      // Carried through when the seat keeps its label (and therefore its id). If a regeneration
+      // changes the TARGET's label, the pointer is left naming a seat that no longer exists under
+      // that id — and that is the honest answer: the validator's `companion_wrong_target` will say
+      // so at publish time, which is better than silently inventing a new pairing (0036).
+      companionSeatId: kept?.companionSeatId,
     });
   }
   return { ...block, seats };
@@ -310,6 +385,13 @@ export function projectDocument(doc: ChartDocument): ProjectedLayout {
     name: s.name,
     seatShape: s.seatShape,
     seatSizeMultiplier: s.seatSizeMultiplier,
+    floorId: s.floorId ?? null,
+  }));
+  /** Levels (0044). A document without floors projects none, which is a single-floor chart. */
+  const floors: LayoutFloor[] = (doc.floors ?? []).map((f) => ({
+    id: f.id,
+    name: f.name,
+    displayOrder: f.displayOrder,
   }));
   const categories: LayoutCategory[] = doc.categories.map((c) => ({
     id: c.id,
@@ -334,7 +416,7 @@ export function projectDocument(doc: ChartDocument): ProjectedLayout {
     label: r.label,
     displayOrder: r.displayOrder,
   }));
-  const rowKey = (sectionId: number | null, label: string) => `${sectionId ?? 'none'}|${label}`;
+  const rowKey = (sectionId: number | null, label: string) => `${sectionId ?? "none"}|${label}`;
   const rowIdByKey = new Map(rows.map((r) => [rowKey(r.sectionId, r.label), r.id]));
   let nextRowPlaceholder = -1;
 
@@ -365,9 +447,11 @@ export function projectDocument(doc: ChartDocument): ProjectedLayout {
         width: Math.max(1, Math.round(block.width)),
         height: Math.max(1, Math.round(block.height)),
         rotation: normaliseRotation(block.rotation),
-        label: block.label ?? null,
+        // A drawn shape is its outline. Suppress labels from older documents too, so scaling a
+        // polygon cannot leave text behind at a different apparent position or size.
+        label: block.kind === "shape" ? null : (block.label ?? null),
         points: block.points ?? null,
-        capacity: block.kind === 'ga-zone' ? (block.capacity ?? null) : null,
+        capacity: block.kind === "ga-zone" ? (block.capacity ?? null) : null,
         color: block.color ?? null,
         geometry: block.geometry ?? null,
         sectionId: block.sectionId,
@@ -378,9 +462,9 @@ export function projectDocument(doc: ChartDocument): ProjectedLayout {
 
     // A ga-zone draws its outline here; its standing positions come from the standing-area endpoint.
     // Any it already owns fall through to the seat loop below, so a save never drops them.
-    if (block.kind === 'ga-zone') {
+    if (block.kind === "ga-zone") {
       elements.push({
-        kind: 'area',
+        kind: "area",
         x: clampCoord(block.x),
         y: clampCoord(block.y),
         width: Math.max(1, Math.round(block.width)),
@@ -409,22 +493,34 @@ export function projectDocument(doc: ChartDocument): ProjectedLayout {
     for (const [index, s] of (block.seats ?? []).entries()) {
       seats.push({
         id: s.seatId > 0 ? s.seatId : undefined,
-        sectionId: s.sectionId ?? block.sectionId,
+        sectionId: s.sectionId === undefined ? block.sectionId : s.sectionId,
         categoryId: s.categoryId ?? block.categoryId,
         rowLabel: s.rowLabel,
         seatNumber: s.seatNumber,
-        seatType: s.seatType ?? 'single',
+        seatType: s.seatType ?? "single",
         x: clampCoord(block.x + s.dx * cos - s.dy * sin),
         y: clampCoord(block.y + s.dx * sin + s.dy * cos),
         rotation: normaliseRotation(s.rotation + block.rotation),
         isAccessible: s.isAccessible ?? false,
-        rowId: rowIdFor(s.sectionId ?? block.sectionId, s.rowLabel),
+        rowId: rowIdFor(s.sectionId === undefined ? block.sectionId : s.sectionId, s.rowLabel),
+        // Which table this seat belongs to. Dropped entirely before now, so a table expressed in a
+        // document produced seats that pointed at nothing — the outline had no rows attached and
+        // whole-table booking had nothing to gather. `saveLayout` resolves a placeholder id here to
+        // the real `layout_tables` row it creates.
+        tableId: block.kind === "table" ? (block.tableId ?? null) : null,
+        // The accessible seat this one accompanies (0036) passes through unchanged. It is a pointer
+        // into the document's own seat ids, not a per-showtime fact: `saveLayout` resolves it onto
+        // `seats.companion_seat_id` and `generateSeatMap` copies it onto `showtime_seats`, so both
+        // halves of a pair read the same row. A dangling pointer is not refused here — the publish
+        // gate's `companion_wrong_target` says so, because a draft may legitimately pair seats the
+        // editor has not minted yet.
+        companionSeatId: s.companionSeatId,
       });
       seatOrigin.push({ blockKey: block.key, index });
     }
   }
 
-  return { sections, categories, rows, seats, elements, seatOrigin, elementOrigin };
+  return { sections, floors, categories, rows, seats, elements, seatOrigin, elementOrigin };
 }
 
 /**
@@ -441,7 +537,7 @@ export function projectDocument(doc: ChartDocument): ProjectedLayout {
  */
 export function stitchRows(
   doc: ChartDocument,
-  projected: Pick<ProjectedLayout, 'rows' | 'seats' | 'seatOrigin'>,
+  projected: Pick<ProjectedLayout, "rows" | "seats" | "seatOrigin">,
   resolve: (placeholderOrRealId: number) => number,
 ): ChartDocument {
   const rows: DocumentRow[] = projected.rows.map((r) => ({

@@ -28,7 +28,7 @@ import type {
   SeatType,
   ShapePoint,
   TableBookingMode,
-} from './seatmap.js';
+} from "./seatmap.js";
 
 /** Bumped only when a stored document needs `upgradeDocument` to read it. */
 export const CHART_DOCUMENT_SCHEMA = 1;
@@ -42,45 +42,45 @@ export const CHART_DOCUMENT_SCHEMA = 1;
  */
 export type BlockKind =
   // Seat-bearing
-  | 'seating-block'
-  | 'curved-row'
-  | 'single-row'
-  | 'individual-seat'
-  | 'table'
-  | 'ga-zone'
+  | "seating-block"
+  | "curved-row"
+  | "single-row"
+  | "individual-seat"
+  | "table"
+  | "ga-zone"
   // Decoration. These mirror `ElementKind` one-for-one, deliberately: the editor must be able to
   // create everything `layout_elements` can hold, or a kind becomes unreachable the moment the old
   // element palette is retired. `text` is stored as `label` and `shape` as `boundary`; the rest keep
   // their names.
-  | 'stage'
-  | 'aisle'
-  | 'door'
-  | 'bar'
-  | 'text'
-  | 'shape'
-  | 'exit'
-  | 'restroom'
-  | 'food_drink'
-  | 'smoking'
-  | 'first_aid'
-  | 'lift_stairs'
-  | 'wheelchair';
+  | "stage"
+  | "aisle"
+  | "door"
+  | "bar"
+  | "text"
+  | "shape"
+  | "exit"
+  | "restroom"
+  | "food_drink"
+  | "smoking"
+  | "first_aid"
+  | "lift_stairs"
+  | "wheelchair";
 
 /** Kinds that produce `seats` rows. Everything else is decoration and can never become inventory. */
 export const SEAT_BEARING_KINDS = [
-  'seating-block',
-  'curved-row',
-  'single-row',
-  'individual-seat',
-  'table',
-  'ga-zone',
+  "seating-block",
+  "curved-row",
+  "single-row",
+  "individual-seat",
+  "table",
+  "ga-zone",
 ] as const;
 
 export const isSeatBearing = (k: BlockKind): boolean =>
   (SEAT_BEARING_KINDS as readonly string[]).includes(k);
 
-export type RowLabelScheme = 'alpha-asc' | 'alpha-desc' | 'num-asc' | 'num-desc';
-export type SeatLabelScheme = 'num-asc' | 'num-desc' | 'even' | 'odd';
+export type RowLabelScheme = "alpha-asc" | "alpha-desc" | "num-asc" | "num-desc";
+export type SeatLabelScheme = "num-asc" | "num-desc" | "even" | "odd";
 
 /**
  * A price class, mirroring `LayoutCategory`.
@@ -112,6 +112,24 @@ export interface DocumentSection {
   name: string;
   seatShape?: SeatShape;
   seatSizeMultiplier?: number;
+  /**
+   * The level this section sits on (0044). Optional and nullable, both meaning the single implicit
+   * floor — so every document written before floors parses unchanged and draws exactly as it did.
+   */
+  floorId?: number | null;
+}
+
+/**
+ * A level of the venue (0044).
+ *
+ * Modelled like `DocumentRow`: an id the editor may mint negative before the first save, a name, and
+ * an explicit order. Deriving floors from a label on the section was the shape rows had before 0032
+ * and it fails the same way here — a floor could not exist before something stood on it.
+ */
+export interface DocumentFloor {
+  id: number;
+  name: string;
+  displayOrder: number;
 }
 
 /**
@@ -146,7 +164,31 @@ export interface DocumentSeat {
    * and not the second, which is the whole reason it exists.
    */
   rowId?: number | null;
+  /**
+   * The ACCESSIBLE seat this seat accompanies — set only on the ordinary seat, never on the
+   * wheelchair seat itself.
+   *
+   * The direction is deliberate: a companion is swappable, but an accessible seat is the exceptional
+   * thing in the pair, and the rule set reads both ends through this pointer — an ordinary seat may
+   * name it (`companion_wrong_target` if the target is not wheelchair-marked), and a wheelchair seat
+   * with NO seat pointing at it is `accessible_without_companion`. At most one seat may point at a
+   * given accessible seat; `seatmap-validate.ts` enforces that too.
+   *
+   * A seat id, positive or negative like `seatId` — the editor can pair seats before the first save,
+   * so the pointer must survive a round trip through `stripIds` (template export — links are dropped,
+   * re-pairing is an organizer's act), `remapDocument` (clones) and `stitchSeatIds` (the save's
+   * real-id rewrite). Absent means "no companion". A dangling pointer is not an invariant this type
+   * can express; the validator reports `companion_wrong_target` when the seat it names is not in the
+   * chart.
+   */
+  companionSeatId?: number;
 }
+
+/** Resolve a seat's section without collapsing explicit `null` into block inheritance. */
+export const resolvedSeatSectionId = (
+  seat: Pick<DocumentSeat, "sectionId">,
+  block: Pick<DocumentBlock, "sectionId">,
+): number | null => (seat.sectionId === undefined ? block.sectionId : seat.sectionId);
 
 /**
  * A row of seats, as a thing rather than as a string repeated on each of its seats.
@@ -193,6 +235,23 @@ export interface BlockParams {
   rowSpacing?: number;
   /** Curved rows only. */
   radius?: number;
+  /**
+   * Lay a curved block out as CONCENTRIC arcs about one focus, rows receding away from it (0044).
+   *
+   * The default — false, and the only behaviour before this — offsets each row by `rowSpacing` in the
+   * block's own +y as well as growing its radius. The result is a stack of parallel arcs that drift
+   * TOWARD the centre of curvature, which is right for a bowed theatre tier and wrong for a stadium
+   * stand: whichever way such a block is rotated, either its front row ends up furthest from the
+   * pitch or its ends bow away from it. The two cannot both be right, because the row offset and the
+   * arc direction are coupled.
+   *
+   * Concentric decouples them: every row is an arc about the SAME focus, so the ends bend toward the
+   * focus and the rows recede from it at once — which is what a stand around a pitch actually is.
+   *
+   * Off by default on purpose. Turning it on moves every seat of a curved block, and doing that to
+   * charts already drawn would relocate rows under tickets that are already sold.
+   */
+  concentric?: boolean;
   /** Total sweep in degrees. Capped at `MAX_ARC_ANGLE` — see that constant before widening it. */
   arcAngle?: number;
   rowLabelScheme?: RowLabelScheme;
@@ -244,7 +303,7 @@ export interface DocumentBlock {
   capacity?: number;
   /** `table`: mirrors `LayoutTable`. `round`/`rect` matches the `layout_tables.shape` CHECK. */
   tableId?: number | null;
-  tableShape?: 'round' | 'rect';
+  tableShape?: "round" | "rect";
   tableSeatCount?: number;
   sideCounts?: number[] | null;
   bookingMode?: TableBookingMode;
@@ -305,6 +364,11 @@ export interface ChartDocument {
    * exactly what they did before.
    */
   rows?: DocumentRow[];
+  /**
+   * The chart's levels (0044). Optional: absent means the chart is on one floor, which is what every
+   * chart drawn before floors is and what most charts will always be.
+   */
+  floors?: DocumentFloor[];
 }
 
 /** An empty document, for a layout that has just been created. */
@@ -344,15 +408,22 @@ export function nextBlockKey(doc: ChartDocument): string {
  * rather than throwing on a hand-edited row.
  */
 export function upgradeDocument(input: unknown): ChartDocument | null {
-  if (typeof input !== 'object' || input === null || Array.isArray(input)) return null;
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return null;
   const raw = input as Partial<ChartDocument>;
-  if (!Array.isArray(raw.blocks) || !Array.isArray(raw.categories) || !Array.isArray(raw.sections)) {
+  if (
+    !Array.isArray(raw.blocks) ||
+    !Array.isArray(raw.categories) ||
+    !Array.isArray(raw.sections)
+  ) {
     return null;
   }
   // Only one schema exists so far. Future versions add cases here, never in SQL.
   return {
     schemaVersion: CHART_DOCUMENT_SCHEMA,
-    gridSize: typeof raw.gridSize === 'number' && raw.gridSize > 0 ? raw.gridSize : 50,
+    gridSize: typeof raw.gridSize === "number" && raw.gridSize > 0 ? raw.gridSize : 50,
+    // `companionSeatId` added after schema 1 shipped: old blobs simply lack it, and the rebuild below
+    // keeps the field on any seat that carries one — the per-seat fields of `blocks` are NOT rebuilt
+    // here, they pass through as stored, so an absent field stays absent and a present one survives.
     sections: raw.sections,
     categories: raw.categories,
     blocks: raw.blocks,
@@ -364,6 +435,11 @@ export function upgradeDocument(input: unknown): ChartDocument | null {
     // `?? []` rather than left undefined: a document written before rows existed reads back as a
     // chart with no rows declared, which is exactly what it is, and the projection derives them.
     rows: Array.isArray(raw.rows) ? raw.rows : [],
+    // Floors (0044) — and this line is exactly what the note above is about. The field was added to
+    // the type and to every writer, but not here, so every read rebuilt the document WITHOUT it: a
+    // two-tier chart came back to the editor with no levels, no layer picker, and a section pointing
+    // at a floor the document no longer declared.
+    floors: Array.isArray(raw.floors) ? raw.floors : [],
   };
 }
 
@@ -413,9 +489,20 @@ export function stripIds(doc: ChartDocument, mint: () => number): ChartDocument 
       seats: b.seats?.map((s) => ({
         ...s,
         seatId: mint(),
-        sectionId: s.sectionId === null || s.sectionId === undefined ? s.sectionId : remap(sectionMap, s.sectionId),
-        categoryId: s.categoryId === null || s.categoryId === undefined ? s.categoryId : remap(categoryMap, s.categoryId),
+        sectionId:
+          s.sectionId === null || s.sectionId === undefined
+            ? s.sectionId
+            : remap(sectionMap, s.sectionId),
+        categoryId:
+          s.categoryId === null || s.categoryId === undefined
+            ? s.categoryId
+            : remap(categoryMap, s.categoryId),
         rowId: s.rowId === null || s.rowId === undefined ? s.rowId : remap(rowMap, s.rowId),
+        // The companion link is DROPPED on template export. Both ends exist in the exported chart, so
+        // the pair could in principle be remapped — but a link across a fresh import would silently
+        // bind a seat the importing organizer never chose for it. Re-pairing is deliberate; an export
+        // starts from scratch.
+        companionSeatId: undefined,
       })),
     })),
   };
@@ -429,6 +516,8 @@ export interface IdRemap {
   tables: Map<number, number>;
   /** Rows (0032). Optional: on the save path `stitchRows` has already made them real. */
   rows?: Map<number, number>;
+  /** Floors (0044). Optional for the same reason rows are, and absent on a single-floor chart. */
+  floors?: Map<number, number>;
 }
 
 /**
@@ -446,7 +535,32 @@ export function remapDocument(doc: ChartDocument, ids: IdRemap, mint: () => numb
   return {
     ...doc,
     schemaVersion: CHART_DOCUMENT_SCHEMA,
-    sections: doc.sections.map((s) => ({ ...s, id: ids.sections.get(s.id) ?? mint() })),
+    /*
+     * A section's FLOOR is remapped for the same reason its own id is: a clone that kept the source's
+     * floor ids would point its sections at another layout's levels, and the floor picker would then
+     * filter a chart by rows that belong to a different venue entirely.
+     */
+    sections: doc.sections.map((s) => ({
+      ...s,
+      id: ids.sections.get(s.id) ?? mint(),
+      /*
+       * Remapped ONLY when the floors themselves are, and never minted.
+       *
+       * `via` mints a fresh placeholder for anything the map does not answer, which is right for a
+       * section or a category — a clone must not address the source's rows. It is wrong here: a
+       * minted floor id points at a level that exists nowhere, so the section silently left the floor
+       * it was on. Every caller that does not remap floors leaves both `floors` and `floorId` alone,
+       * which keeps the document internally consistent either way.
+       */
+      floorId: ids.floors
+        ? s.floorId === null || s.floorId === undefined
+          ? s.floorId
+          : (ids.floors.get(s.floorId) ?? null)
+        : s.floorId,
+    })),
+    floors: ids.floors
+      ? doc.floors?.map((f) => ({ ...f, id: ids.floors!.get(f.id) ?? f.id }))
+      : doc.floors,
     categories: doc.categories.map((c) => ({ ...c, id: ids.categories.get(c.id) ?? mint() })),
     /*
      * Rows carry a section id too, and it has to be remapped for exactly the reason the blocks' is.
@@ -470,8 +584,23 @@ export function remapDocument(doc: ChartDocument, ids: IdRemap, mint: () => numb
       seats: b.seats?.map((s) => ({
         ...s,
         seatId: ids.seats.get(s.seatId) ?? mint(),
-        sectionId: s.sectionId === null || s.sectionId === undefined ? s.sectionId : via(ids.sections, s.sectionId),
-        categoryId: s.categoryId === null || s.categoryId === undefined ? s.categoryId : via(ids.categories, s.categoryId),
+        sectionId:
+          s.sectionId === null || s.sectionId === undefined
+            ? s.sectionId
+            : via(ids.sections, s.sectionId),
+        categoryId:
+          s.categoryId === null || s.categoryId === undefined
+            ? s.categoryId
+            : via(ids.categories, s.categoryId),
+        // A CLONE keeps its wheels: both ends of a companion pair live in the same chart, and this map
+        // covers every seat of it, so the pointer resolves to the companion's own clone id — even
+        // across blocks, because `ids.seats` is complete before any block is remapped. A target the
+        // map does not cover is handled like every other unknown id: a fresh placeholder, which the
+        // subsequent validation flags as `companion_wrong_target` rather than silently surviving.
+        companionSeatId:
+          s.companionSeatId === undefined
+            ? undefined
+            : (via(ids.seats, s.companionSeatId) ?? undefined),
       })),
     })),
   };
@@ -479,21 +608,21 @@ export function remapDocument(doc: ChartDocument, ids: IdRemap, mint: () => numb
 
 /** Decoration element kinds mapped to the block kind that renders them. */
 const ELEMENT_TO_BLOCK: Record<ElementKind, BlockKind> = {
-  stage: 'stage',
-  aisle: 'aisle',
-  door: 'door',
-  bar: 'bar',
-  label: 'text',
-  area: 'ga-zone',
-  boundary: 'shape',
-  divider: 'shape',
-  exit: 'exit',
-  restroom: 'restroom',
-  food_drink: 'food_drink',
-  smoking: 'smoking',
-  first_aid: 'first_aid',
-  lift_stairs: 'lift_stairs',
-  wheelchair: 'wheelchair',
+  stage: "stage",
+  aisle: "aisle",
+  door: "door",
+  bar: "bar",
+  label: "text",
+  area: "ga-zone",
+  boundary: "shape",
+  divider: "shape",
+  exit: "exit",
+  restroom: "restroom",
+  food_drink: "food_drink",
+  smoking: "smoking",
+  first_aid: "first_aid",
+  lift_stairs: "lift_stairs",
+  wheelchair: "wheelchair",
 };
 
 /**
@@ -530,17 +659,38 @@ export function reviveDocument(
   liveSeatIds: Set<number>,
   mint: () => number,
 ): ChartDocument {
+  // Seats that lose their id, indexed old id → new placeholder. Built BEFORE the seats are rewritten,
+  // so a companion pointer whose target was re-minted keeps following it. Without that map, reviving
+  // a revision that dropped the wheelchair seat would leave its companion pointing at a dead row, and
+  // the validator would report `companion_wrong_target` for a pairing the organizer never broke.
+  const revived = new Map<number, number>();
+  const freshOf = (id: number): number => {
+    const known = revived.get(id);
+    if (known !== undefined) return known;
+    const fresh = mint();
+    revived.set(id, fresh);
+    return fresh;
+  };
+  for (const b of doc.blocks) {
+    for (const seat of b.seats ?? []) {
+      if (seat.seatId > 0 && !liveSeatIds.has(seat.seatId)) freshOf(seat.seatId);
+    }
+  }
+
   return {
     ...doc,
     blocks: doc.blocks.map((b) =>
       b.seats
         ? {
             ...b,
-            seats: b.seats.map((seat) =>
-              seat.seatId > 0 && !liveSeatIds.has(seat.seatId)
-                ? { ...seat, seatId: mint() }
-                : seat,
-            ),
+            seats: b.seats.map((seat) => {
+              const seatId = revived.has(seat.seatId) ? revived.get(seat.seatId)! : seat.seatId;
+              const companionSeatId =
+                seat.companionSeatId === undefined
+                  ? undefined
+                  : (revived.get(seat.companionSeatId) ?? seat.companionSeatId);
+              return { ...seat, seatId, companionSeatId };
+            }),
           }
         : b,
     ),
@@ -555,6 +705,10 @@ export function adoptLayout(layout: Layout, gridSize = 50): ChartDocument {
       name: s.name,
       seatShape: s.seatShape,
       seatSizeMultiplier: s.seatSizeMultiplier,
+      // Carried for the same reason the style fields are: adoption happens whenever the rows change
+      // outside the document, and handing back a section with no floor would drop it onto the ground
+      // level on the next save — silently flattening a balcony an organizer had already built.
+      floorId: s.floorId ?? null,
     }));
   const categories: DocumentCategory[] = layout.categories
     .filter((c) => c.id !== undefined)
@@ -571,7 +725,7 @@ export function adoptLayout(layout: Layout, gridSize = 50): ChartDocument {
     if (t.id === undefined) continue;
     const block: DocumentBlock = {
       key: key(),
-      kind: 'table',
+      kind: "table",
       title: t.name,
       x: t.x,
       y: t.y,
@@ -612,31 +766,33 @@ export function adoptLayout(layout: Layout, gridSize = 50): ChartDocument {
         rotation: seat.rotation,
         isAccessible: seat.isAccessible,
         seatType: seat.seatType,
+        // Normalise the nullable column onto the document's `number | undefined` shape (0036).
+        companionSeatId: seat.companionSeatId ?? undefined,
       });
       continue;
     }
-    const k = `${seat.sectionId ?? 'none'}|${seat.categoryId ?? 'none'}`;
+    const k = `${seat.sectionId ?? "none"}|${seat.categoryId ?? "none"}`;
     const bucket = groups.get(k);
     if (bucket) bucket.push(seat);
     else groups.set(k, [seat]);
   }
 
   for (const [k, seats] of groups) {
-    const [sec, cat] = k.split('|');
-    const sectionId = sec === 'none' ? null : Number(sec);
+    const [sec, cat] = k.split("|");
+    const sectionId = sec === "none" ? null : Number(sec);
     const originX = Math.min(...seats.map((s) => s.x));
     const originY = Math.min(...seats.map((s) => s.y));
     blocks.push({
       key: key(),
-      kind: seats.length === 1 ? 'individual-seat' : 'seating-block',
-      title: sectionId === null ? 'Ghế chưa thuộc khu' : (sectionName.get(sectionId) ?? 'Khu'),
+      kind: seats.length === 1 ? "individual-seat" : "seating-block",
+      title: sectionId === null ? "Ghế chưa thuộc khu" : (sectionName.get(sectionId) ?? "Khu"),
       x: originX,
       y: originY,
       rotation: 0,
       width: Math.max(1, Math.max(...seats.map((s) => s.x)) - originX),
       height: Math.max(1, Math.max(...seats.map((s) => s.y)) - originY),
       sectionId,
-      categoryId: cat === 'none' ? null : Number(cat),
+      categoryId: cat === "none" ? null : Number(cat),
       // No `params`: this group was not built from parameters, and pretending otherwise would let a
       // regeneration relabel seats that may already be sold.
       seats: seats.map((s) => ({
@@ -652,6 +808,8 @@ export function adoptLayout(layout: Layout, gridSize = 50): ChartDocument {
         // whenever geometry changes outside the document, and handing back seats with no row would
         // make the next save mint a second set of rows for labels that already have them.
         rowId: s.rowId,
+        // Normalise the nullable column onto the document's `number | undefined` shape (0036).
+        companionSeatId: s.companionSeatId ?? undefined,
       })),
     });
   }
@@ -693,5 +851,18 @@ export function adoptLayout(layout: Layout, gridSize = 50): ChartDocument {
     displayOrder: r.displayOrder,
   }));
 
-  return { schemaVersion: CHART_DOCUMENT_SCHEMA, gridSize, sections, categories, rows, blocks };
+  /** The chart's levels, verbatim. A single-floor chart simply has none. */
+  const floors: DocumentFloor[] = layout.floors
+    .filter((f) => f.id !== undefined)
+    .map((f) => ({ id: f.id as number, name: f.name, displayOrder: f.displayOrder }));
+
+  return {
+    schemaVersion: CHART_DOCUMENT_SCHEMA,
+    gridSize,
+    sections,
+    categories,
+    rows,
+    floors,
+    blocks,
+  };
 }

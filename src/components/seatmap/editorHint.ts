@@ -65,31 +65,26 @@ export function editorHint(s: HintState): string {
   if (s.seatCount > 0) {
     return (
       `${s.seatCount} ghế: đổi hạng ghế hoặc loại ghế trên thanh công cụ · ` +
-      `Shift+bấm chọn thêm · Esc bỏ chọn · ${VIEW}`
+      `Shift+bấm chọn thêm · Esc bỏ chọn`
     );
   }
 
   if (s.rowLabel) {
     return (
       `Hàng ${s.rowLabel}: đổi nhãn và số ghế ở bảng thuộc tính · ` +
-      `giữ Alt để chọn từng ghế · Esc bỏ chọn · ${VIEW}`
+      `giữ Alt để chọn từng ghế · Esc bỏ chọn`
     );
   }
 
   if (s.blockCount > 0) {
     // Align and distribute are the two the toolbar greys out until enough is selected, so the hint
     // says what "enough" is rather than leaving the organizer to guess from a disabled button.
-    const more =
-      s.blockCount === 1
-        ? " · Shift+bấm chọn thêm để canh hàng"
-        : s.blockCount === 2
-          ? " · chọn thêm một khối nữa để dàn đều"
-          : "";
-    return (
-      `${s.blockCount} khối: kéo để dời · mũi tên nhích, Shift+mũi tên nhích xa · ` +
-      `Ctrl+D nhân đôi · Delete xoá · Ctrl+Z hoàn tác${more} · ${VIEW}`
-    );
+    return s.blockCount === 1
+      ? "1 khối: kéo để dời · mũi tên nhích · Ctrl+D nhân đôi · Delete xoá"
+      : s.blockCount === 2
+        ? "2 khối: chọn thêm một khối nữa để dàn đều"
+        : `${s.blockCount} khối: kéo để dời · mũi tên nhích`;
   }
 
-  return `Bấm một khối để chọn · kéo nền để quét chọn · giữ Alt để chọn từng ghế · ${VIEW}`;
+  return "Bấm một khối để chọn · kéo nền để quét chọn";
 }

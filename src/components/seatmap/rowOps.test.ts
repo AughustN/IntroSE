@@ -2,7 +2,15 @@ import { describe, expect, it } from "vitest";
 import { emptyDocument } from "@/shared/catalog/seatmap-document";
 import { projectDocument } from "@/shared/catalog/seatmap-project";
 import { addBlock, addSection, setLocked } from "./documentOps";
-import { deleteRow, duplicateRow, moveRow, renameRow, reverseRow, rowLabelsOf } from "./rowOps";
+import {
+  assignRowToSection,
+  deleteRow,
+  duplicateRow,
+  moveRow,
+  renameRow,
+  reverseRow,
+  rowLabelsOf,
+} from "./rowOps";
 
 // §9: every section manages its rows independently, and deleting one must not renumber the others.
 const chart = () => {
@@ -22,7 +30,8 @@ const chart = () => {
   };
   return { doc, key: made.key, sec: sec.id };
 };
-const block = (d: ReturnType<typeof emptyDocument>, key: string) => d.blocks.find((b) => b.key === key)!;
+const block = (d: ReturnType<typeof emptyDocument>, key: string) =>
+  d.blocks.find((b) => b.key === key)!;
 const seatsOf = (d: ReturnType<typeof emptyDocument>, key: string) => block(d, key).seats!;
 
 describe("renaming a row", () => {
@@ -30,7 +39,11 @@ describe("renaming a row", () => {
     const c = chart();
     const after = renameRow(c.doc, 202, "K");
     expect(after.rows?.find((r) => r.id === 202)?.label).toBe("K");
-    expect(seatsOf(after, c.key).filter((s) => s.rowId === 202).every((s) => s.rowLabel === "K")).toBe(true);
+    expect(
+      seatsOf(after, c.key)
+        .filter((s) => s.rowId === 202)
+        .every((s) => s.rowLabel === "K"),
+    ).toBe(true);
   });
 
   it("leaves the rows around it exactly as they were", () => {
@@ -51,20 +64,136 @@ describe("renaming a row", () => {
   });
 });
 
+describe("moving a row to another section", () => {
+  it("moves every block fragment that shares the row identity", () => {
+    const c = chart();
+    const target = addSection(c.doc, "Khu B");
+    const second = addBlock(
+      target.doc,
+      "single-row",
+      { x: 6000, y: 2000 },
+      {
+        sectionId: c.sec,
+      },
+    );
+    const split = {
+      ...second.doc,
+      blocks: second.doc.blocks.map((candidate) =>
+        candidate.key === second.key
+          ? {
+              ...candidate,
+              seats: candidate.seats?.map((seat) => ({
+                ...seat,
+                rowId: 200,
+                rowLabel: "A",
+              })),
+            }
+          : candidate,
+      ),
+    };
+
+    const moved = assignRowToSection(split, { blockKey: c.key, label: "A" }, target.id);
+    const fragments = moved.blocks.flatMap((candidate) =>
+      (candidate.seats ?? []).filter((seat) => seat.rowId === 200),
+    );
+
+    expect(fragments).toHaveLength(20);
+    expect(fragments.every((seat) => seat.sectionId === target.id)).toBe(true);
+    expect(moved.rows?.find((row) => row.id === 200)?.sectionId).toBe(target.id);
+  });
+
+  it("moves a row to no section without inheriting its block section", () => {
+    const c = chart();
+    const moved = assignRowToSection(
+      c.doc,
+      { blockKey: c.key, label: "A", rowId: 200, sectionId: c.sec },
+      null,
+    );
+
+    expect(projectDocument(moved).seats.filter((seat) => seat.rowLabel === "A")).toHaveLength(10);
+    expect(
+      projectDocument(moved)
+        .seats.filter((seat) => seat.rowLabel === "A")
+        .every((seat) => seat.sectionId === null),
+    ).toBe(true);
+  });
+
+  it("uses the section-qualified fallback when equal labels share one block", () => {
+    const c = chart();
+    const target = addSection(c.doc, "Khu B");
+    const split = {
+      ...target.doc,
+      blocks: target.doc.blocks.map((candidate) =>
+        candidate.key === c.key
+          ? {
+              ...candidate,
+              seats: candidate.seats?.map((seat, index) =>
+                seat.rowLabel === "A"
+                  ? { ...seat, rowId: null, sectionId: index === 0 ? target.id : undefined }
+                  : seat,
+              ),
+            }
+          : candidate,
+      ),
+    };
+
+    const moved = assignRowToSection(
+      split,
+      { blockKey: c.key, label: "A", rowId: null, sectionId: c.sec },
+      null,
+    );
+    const rowA = seatsOf(moved, c.key).filter((seat) => seat.rowLabel === "A");
+    expect(rowA[0].sectionId).toBe(target.id);
+    expect(rowA.slice(1).every((seat) => seat.sectionId === null)).toBe(true);
+  });
+
+  it("does not partly move a shared row when one fragment is locked", () => {
+    const c = chart();
+    const target = addSection(c.doc, "Khu B");
+    const second = addBlock(target.doc, "single-row", { x: 6000, y: 2000 }, { sectionId: c.sec });
+    const split = {
+      ...second.doc,
+      blocks: second.doc.blocks.map((candidate) =>
+        candidate.key === second.key
+          ? {
+              ...candidate,
+              locked: true,
+              seats: candidate.seats?.map((seat) => ({ ...seat, rowId: 200, rowLabel: "A" })),
+            }
+          : candidate,
+      ),
+    };
+
+    expect(
+      assignRowToSection(
+        split,
+        { blockKey: c.key, label: "A", rowId: 200, sectionId: c.sec },
+        target.id,
+      ),
+    ).toBe(split);
+  });
+});
+
 describe("reversing a row", () => {
   it("flips the numbering without moving a seat", () => {
     const c = chart();
     const after = reverseRow(c.doc, { blockKey: c.key, label: "A" });
     const rowA = seatsOf(after, c.key).filter((s) => s.rowLabel === "A");
     expect(rowA.map((s) => s.seatNumber)).toEqual([10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
-    expect(rowA.map((s) => s.dx)).toEqual(seatsOf(c.doc, c.key).filter((s) => s.rowLabel === "A").map((s) => s.dx));
+    expect(rowA.map((s) => s.dx)).toEqual(
+      seatsOf(c.doc, c.key)
+        .filter((s) => s.rowLabel === "A")
+        .map((s) => s.dx),
+    );
   });
 
   it("keeps each seat's id where the seat physically is", () => {
     // The safety property: the seat nearest the aisle keeps its id and simply gets a new number, so a
     // showtime's snapshot still describes the same physical seat.
     const c = chart();
-    const before = seatsOf(c.doc, c.key).filter((s) => s.rowLabel === "A").map((s) => s.seatId);
+    const before = seatsOf(c.doc, c.key)
+      .filter((s) => s.rowLabel === "A")
+      .map((s) => s.seatId);
     const after = seatsOf(reverseRow(c.doc, { blockKey: c.key, label: "A" }), c.key)
       .filter((s) => s.rowLabel === "A")
       .map((s) => s.seatId);
@@ -96,8 +225,12 @@ describe("deleting a row", () => {
 
   it("keeps every remaining seat's id", () => {
     const c = chart();
-    const before = seatsOf(c.doc, c.key).filter((s) => s.rowLabel !== "B").map((s) => s.seatId);
-    expect(seatsOf(deleteRow(c.doc, { blockKey: c.key, label: "B" }), c.key).map((s) => s.seatId)).toEqual(before);
+    const before = seatsOf(c.doc, c.key)
+      .filter((s) => s.rowLabel !== "B")
+      .map((s) => s.seatId);
+    expect(
+      seatsOf(deleteRow(c.doc, { blockKey: c.key, label: "B" }), c.key).map((s) => s.seatId),
+    ).toEqual(before);
   });
 
   it("stops the block claiming to be a generated sequence it no longer is", () => {
@@ -134,7 +267,9 @@ describe("deleting a row", () => {
   it("leaves a locked block alone", () => {
     const c = chart();
     const locked = setLocked(c.doc, new Set([c.key]), true);
-    expect(rowLabelsOf(block(deleteRow(locked, { blockKey: c.key, label: "B" }), c.key))).toHaveLength(5);
+    expect(
+      rowLabelsOf(block(deleteRow(locked, { blockKey: c.key, label: "B" }), c.key)),
+    ).toHaveLength(5);
   });
 });
 
@@ -167,7 +302,10 @@ describe("duplicating a row", () => {
       ...c.doc,
       blocks: c.doc.blocks.map((b) =>
         b.key === c.key
-          ? { ...b, seats: b.seats?.map((s) => (s.rowLabel === "A" ? { ...s, rowLabel: "GHEA1234" } : s)) }
+          ? {
+              ...b,
+              seats: b.seats?.map((s) => (s.rowLabel === "A" ? { ...s, rowLabel: "GHEA1234" } : s)),
+            }
           : b,
       ),
     };
@@ -186,7 +324,9 @@ describe("duplicating a row", () => {
     const c = chart();
     const after = duplicateRow(c.doc, { blockKey: c.key, label: "A" });
     const originalY = seatsOf(c.doc, c.key).find((s) => s.rowLabel === "A")!.dy;
-    const copy = seatsOf(after, c.key).find((s) => s.rowLabel !== "A" && s.seatNumber === 1 && s.dy !== originalY);
+    const copy = seatsOf(after, c.key).find(
+      (s) => s.rowLabel !== "A" && s.seatNumber === 1 && s.dy !== originalY,
+    );
     expect(copy).toBeDefined();
   });
 
@@ -194,7 +334,11 @@ describe("duplicating a row", () => {
     const c = chart();
     const after = duplicateRow(c.doc, { blockKey: c.key, label: "A" });
     const originals = new Set(seatsOf(c.doc, c.key).map((s) => s.seatId));
-    expect(seatsOf(after, c.key).filter((s) => !originals.has(s.seatId)).every((s) => s.rowId == null)).toBe(true);
+    expect(
+      seatsOf(after, c.key)
+        .filter((s) => !originals.has(s.seatId))
+        .every((s) => s.rowId == null),
+    ).toBe(true);
   });
 });
 
@@ -202,7 +346,9 @@ describe("reordering a row", () => {
   it("moves it in the list", () => {
     const c = chart();
     const after = moveRow(c.doc, 204, 0);
-    const order = [...(after.rows ?? [])].sort((a, b) => a.displayOrder - b.displayOrder).map((r) => r.label);
+    const order = [...(after.rows ?? [])]
+      .sort((a, b) => a.displayOrder - b.displayOrder)
+      .map((r) => r.label);
     expect(order).toEqual(["E", "A", "B", "C", "D"]);
   });
 

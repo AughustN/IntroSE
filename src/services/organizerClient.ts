@@ -203,7 +203,11 @@ export async function getOrganizerEvents(params?: { status?: string; search?: st
   let completedCount = 0;
 
   const summaries: OrganizerPortfolioSummary[] = ownedEvents.map((event) => {
-    const compStatus = computeEventStatus(event);
+    // Feed the DEMOTER the derived status, not the wire spelling. The moderation-aware mapping
+    // already ran while events were fetched (on_sale + approved → "published"); recomputing from
+    // the raw "on_sale" returned it unchanged and made every live event unpromotable, so the ad
+    // panel's PROMOTABLE filter ("published") offered nothing to buy.
+    const compStatus = computeEventStatus({ ...event, status: event.computedStatus });
     event.computedStatus = compStatus;
 
     if (compStatus === "draft") draftCount++;

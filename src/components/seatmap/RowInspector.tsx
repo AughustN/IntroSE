@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 
+import { RAIL_PANEL } from "./panelSurface";
 /**
  * Row Properties (§49).
  *
@@ -19,6 +20,19 @@ import { useState } from "react";
 
 const btn =
   " border-2 border-beige-kem/50 px-2 py-1 text-eyebrow text-beige-kem/80 transition hover:border-beige-kem hover:text-beige-kem disabled:opacity-40";
+const fieldLabel = "block font-mono text-[11px] text-beige-kem/70";
+
+/** Deliberately the same shape as `BlockInspector`'s `Group`, so the two panels read as one family. */
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="mt-3 border-t border-beige-kem/25 pt-3">
+      <p className="font-mono text-[11px] font-bold uppercase tracking-wider text-beige-kem/70">
+        {title}
+      </p>
+      {children}
+    </section>
+  );
+}
 
 export default function RowInspector({
   label,
@@ -52,56 +66,72 @@ export default function RowInspector({
   };
 
   return (
-    <div className="border-2 border-beige-kem bg-surface-2 p-4">
+    <div className={RAIL_PANEL}>
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">
           Hàng {label}
         </h3>
-        <span className="font-mono text-[10px] text-beige-kem/45">{seatCount} ghế</span>
+        <span className="font-mono text-[10px] text-beige-kem/70">{seatCount} ghế</span>
       </div>
-      <p className="mt-1 font-mono text-[10px] text-beige-kem/50">
+      <p className="mt-1 font-mono text-[10px] text-beige-kem/70">
         {sectionName ?? "chưa thuộc khu nào"}
       </p>
 
-      <label className="mt-3 block font-mono text-[10px] uppercase tracking-wider text-beige-kem/45">
-        Tên hàng
-        <input
-          value={draft}
-          disabled={!canEdit}
-          maxLength={8}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commit();
-            // Escape abandons the edit rather than committing half a name.
-            if (e.key === "Escape") setDraft(label);
-          }}
-          className="mt-1 h-9 w-full border-2 border-beige-kem bg-surface-2 px-3 text-xs text-beige-kem outline-none focus:border-burgundy disabled:opacity-40"
-        />
-      </label>
-      <p className="mt-1 text-[10px] leading-4 text-beige-kem/45">
-        Đổi tên chỉ đổi nhãn — ghế và vé đã bán giữ nguyên.
-      </p>
+      {/*
+        Two named groups, matching the block inspector's vocabulary (`BlockInspector`'s `Group`).
 
-      <div className="mt-3 grid grid-cols-2 gap-1">
-        <button onClick={onReverse} disabled={!canEdit} className={btn} title="Đảo thứ tự đánh số của hàng này">
-          Đảo chiều
+        The panel is still the four things §50 says belong to a row and nothing more — but naming its
+        halves is what makes it read as the SAME kind of panel as the block's. An organizer switching
+        between a row and a block was previously handed two panels laid out on different principles,
+        which is the cost of a small component styling itself.
+      */}
+      <Section title="Nhãn">
+        <label className={fieldLabel}>
+          Tên hàng
+          <input
+            value={draft}
+            disabled={!canEdit}
+            maxLength={8}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commit();
+              // Escape abandons the edit rather than committing half a name.
+              if (e.key === "Escape") setDraft(label);
+            }}
+            className="mt-1 h-9 w-full border-2 border-beige-kem bg-surface-2 px-3 text-xs text-beige-kem outline-none focus:border-burgundy disabled:opacity-40"
+          />
+        </label>
+      </Section>
+
+      <Section title="Thao tác">
+        <div className="mt-2 grid grid-cols-2 gap-1">
+          <button
+            onClick={onReverse}
+            disabled={!canEdit}
+            className={btn}
+            title="Đảo thứ tự đánh số của hàng này"
+          >
+            Đảo chiều
+          </button>
+          <button
+            onClick={onDuplicate}
+            disabled={!canEdit}
+            className={btn}
+            title="Nhân đôi hàng này"
+          >
+            Nhân đôi
+          </button>
+        </div>
+        <button
+          onClick={onDelete}
+          disabled={!canEdit}
+          className={`${btn} mt-1 w-full border-burgundy-ink text-burgundy-ink hover:border-burgundy-ink`}
+          title="Xoá hàng này — các hàng khác giữ nguyên nhãn"
+        >
+          Xoá hàng
         </button>
-        <button onClick={onDuplicate} disabled={!canEdit} className={btn} title="Nhân đôi hàng này">
-          Nhân đôi
-        </button>
-      </div>
-      <button
-        onClick={onDelete}
-        disabled={!canEdit}
-        className={`${btn} mt-1 w-full border-bubblegum/70 text-bubblegum hover:border-bubblegum`}
-        title="Xoá hàng này — các hàng khác giữ nguyên nhãn"
-      >
-        Xoá hàng
-      </button>
-      <p className="mt-1 text-[10px] leading-4 text-beige-kem/45">
-        Xoá không đánh lại các hàng còn lại. Dùng “Đánh lại số” khi muốn dồn.
-      </p>
+      </Section>
     </div>
   );
 }

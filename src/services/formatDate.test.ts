@@ -21,17 +21,35 @@ describe("formatShowtimeAt", () => {
   const localIso = (y: number, m: number, d: number, hh: number, mm: number) =>
     new Date(y, m - 1, d, hh, mm).toISOString();
 
-  const thisYear = new Date().getFullYear();
+  const WEEKDAYS_VI = ["Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"];
 
-  it("keeps the clock time — two showtimes of one event differ by it, not by the day", () => {
-    expect(formatShowtimeAt(localIso(thisYear, 9, 14, 20, 0))).toBe("14/09 20:00");
-    expect(formatShowtimeAt(localIso(thisYear, 9, 14, 9, 5))).toBe("14/09 09:05");
+  const thisYear = new Date().getFullYear();
+  const expected = (y: number, m: number, d: number, hh: number, mm: number) => {
+    const at = new Date(y, m - 1, d);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(hh)}:${pad(mm)}, ${WEEKDAYS_VI[at.getDay()]} ${pad(d)}/${pad(m)}/${y}`;
+  };
+
+  it("leads with the clock time, names the weekday, and prints the full date", () => {
+    expect(formatShowtimeAt(localIso(thisYear, 9, 14, 20, 0))).toBe(
+      expected(thisYear, 9, 14, 20, 0),
+    );
+    expect(formatShowtimeAt(localIso(thisYear, 9, 14, 9, 5))).toBe(expected(thisYear, 9, 14, 9, 5));
   });
 
-  it("omits the year in the current year and prints it otherwise", () => {
-    expect(formatShowtimeAt(localIso(thisYear, 1, 2, 3, 4))).toBe("02/01 03:04");
+  it("always prints the year, current or not — a month-spanning list needs it", () => {
+    expect(formatShowtimeAt(localIso(thisYear, 1, 2, 3, 4))).toBe(expected(thisYear, 1, 2, 3, 4));
     expect(formatShowtimeAt(localIso(thisYear + 1, 1, 2, 3, 4))).toBe(
-      `02/01/${thisYear + 1} 03:04`,
+      expected(thisYear + 1, 1, 2, 3, 4),
+    );
+  });
+
+  it("always prints the year, current or not — a month-spanning list needs it", () => {
+    expect(formatShowtimeAt(localIso(thisYear, 1, 2, 3, 4))).toBe(
+      "03:04, Thứ Sáu 02/01/" + thisYear,
+    );
+    expect(formatShowtimeAt(localIso(thisYear + 1, 1, 2, 3, 4))).toBe(
+      "03:04, Thứ Bảy 02/01/" + (thisYear + 1),
     );
   });
 

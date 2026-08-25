@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { pool } from "../../src/db/pool.js";
-import { api, auth, makeOtherOrganizer, makeSeatedStudio, makeStudio } from "./helpers.js";
+import { api, auth, makeStudio } from "./helpers.js";
 
 /**
  * Showtime editing guards (US2, UC-23 A2).
@@ -135,34 +135,53 @@ describe("showtime editing guards", () => {
       )
     ).rows[0].id;
 
+    // Relocation is GONE as a capability (0039): the schema strips the unknown key, leaving an
+    // empty patch — refused as such, and the hold's reservation untouched either way.
     const res = await api()
       .patch(`/api/organizer/showtimes/${s.showtimeId}`)
       .set(auth(s.token))
       .send({ venueId: elsewhere })
-      .expect(409);
-    expect(res.body.error).toBe("showtime_has_holds");
+      .expect(400);
+    expect(res.body.error).toBe("validation_failed");
     expect(await reservationSnapshot(s.showtimeId)).toEqual(before);
   });
 
-  it("relocates a clean showtime to another venue the organizer owns (FR-016)", async () => {
+  it("pins the event's venue on its FIRST showtime (0039)", async () => {
     const s = await makeStudio();
-    const elsewhere = (
-      await pool.query(
-        `INSERT INTO venues (created_by, name, city, raw_address) VALUES ($1, 'Nơi khác', 'Hà Nội', 'X') RETURNING id`,
-        [s.userId],
-      )
-    ).rows[0].id;
+    // The seed inserted its showtime directly, so the event starts unpinned — exactly a legacy row.
+    const before = (await pool.query(`SELECT venue_id FROM events WHERE id = $1`, [s.eventId]))
+      .rows[0].venue_id;
+    expect(before).toBeNull();
 
-    const res = await api()
-      .patch(`/api/organizer/showtimes/${s.showtimeId}`)
+    await api()
+      .post(`/api/organizer/events/${s.eventId}/showtimes`)
       .set(auth(s.token))
-      .send({ venueId: elsewhere })
-      .expect(200);
-    expect(res.body.venueId).toBe(elsewhere);
+      .send({
+        venueId: s.venueId,
+        startsAt: iso(2 * 86_400_000),
+        tiers: [{ label: "Thường", price: 100000 }],
+      })
+      .expect(201);
+
+    const pinned = (await pool.query(`SELECT venue_id FROM events WHERE id = $1`, [s.eventId]))
+      .rows[0].venue_id;
+    expect(pinned).toBe(s.venueId);
   });
 
-  it("refuses to relocate a seated showtime that already has a bookable map, pointing at 005 (FR-016)", async () => {
-    const s = await makeSeatedStudio();
+  it("refuses a second showtime at a DIFFERENT venue — an event runs at one place (0039)", async () => {
+    const s = await makeStudio();
+    // Pin first, through the API itself: the seeded row bypassed addShowtimeWithTiers, so this is
+    // the moment the event acquires its binding.
+    await api()
+      .post(`/api/organizer/events/${s.eventId}/showtimes`)
+      .set(auth(s.token))
+      .send({
+        venueId: s.venueId,
+        startsAt: iso(2 * 86_400_000),
+        tiers: [{ label: "Thường", price: 100000 }],
+      })
+      .expect(201);
+
     const elsewhere = (
       await pool.query(
         `INSERT INTO venues (created_by, name, city, raw_address) VALUES ($1, 'Nơi khác', 'Hà Nội', 'X') RETURNING id`,
@@ -171,24 +190,38 @@ describe("showtime editing guards", () => {
     ).rows[0].id;
 
     const res = await api()
-      .patch(`/api/organizer/showtimes/${s.showtimeId}`)
+      .post(`/api/organizer/events/${s.eventId}/showtimes`)
       .set(auth(s.token))
-      .send({ venueId: elsewhere })
+      .send({
+        venueId: elsewhere,
+        startsAt: iso(4 * 86_400_000),
+        tiers: [{ label: "Thường", price: 100000 }],
+      })
       .expect(409);
-    expect(res.body.error).toBe("seat_map_locks_venue");
-    expect(res.body.message).toContain("sơ đồ");
+    expect(res.body.error).toBe("venue_mismatch");
+
+    // And nothing half-applied: no showtime at the stranger venue.
+    expect(
+      (
+        await pool.query(`SELECT 1 FROM showtimes WHERE event_id = $1 AND venue_id = $2`, [
+          s.eventId,
+          elsewhere,
+        ])
+      ).rows,
+    ).toHaveLength(0);
   });
 
-  it("refuses a venue the caller does not own (FR-017)", async () => {
+  it("accepts another showtime at the SAME venue (0039 happy path)", async () => {
     const s = await makeStudio();
-    const other = await makeOtherOrganizer();
-
-    const res = await api()
-      .patch(`/api/organizer/showtimes/${s.showtimeId}`)
+    await api()
+      .post(`/api/organizer/events/${s.eventId}/showtimes`)
       .set(auth(s.token))
-      .send({ venueId: other.venueId })
-      .expect(403);
-    expect(res.body.error).toBe("not_owner");
+      .send({
+        venueId: s.venueId,
+        startsAt: iso(3 * 86_400_000),
+        tiers: [{ label: "Thường", price: 100000 }],
+      })
+      .expect(201);
   });
 
   it("deletes a clean showtime (FR-013 happy path)", async () => {

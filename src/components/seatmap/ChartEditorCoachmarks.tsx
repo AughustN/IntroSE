@@ -19,29 +19,24 @@ import { useEffect, useRef } from "react";
  * second chart would be noise, and the chart is the hard part, not the editor around it.
  */
 
-const STEPS: { icon: string; title: string; body: string }[] = [
+const STEPS: { title: string; body: string }[] = [
   {
-    icon: "✏️",
     title: "Vẽ một khối chỗ ngồi",
-    body: 'Chọn công cụ "Khối ghế" trên bảng bên trái rồi kéo một vùng trên bản vẽ. Mỗi vùng kéo ra là một khối, và ghế được tạo theo lưới.',
+    body: 'Mở chế độ "Thêm" ở bên trái, chọn "Khối ghế", rồi bấm hoặc kéo khối vào bản vẽ. Mỗi khối giữ số hàng, số ghế và khoảng cách để bạn có thể chỉnh lại sau.',
   },
   {
-    icon: "🧱",
-    title: "Khu vực & hạng vé",
-    body: "Gán các khối vào khu vực (Khu A, Khu VIP…) để gom chúng lại, và xếp mỗi khối vào một hạng vé. Hạng vé là nơi giá được gán ở bước sau.",
+    title: "Khu vực & hạng ghế",
+    body: 'Chọn khối, mở "Khu vực" để gom theo vị trí, rồi mở "Hạng ghế" để phân loại bán. Giá vé vẫn được gán ở bước thiết lập suất chiếu.',
   },
   {
-    icon: "💾",
     title: "Lưu, rồi phát hành",
-    body: '"Lưu" giữ bản nháp. Sơ đồ chỉ có thể áp cho suất chiếu sau khi bấm "Phát hành" — hãy sửa hết các vấn đề ở bảng kiểm tra bên phải trước.',
+    body: '"Lưu ngay" giữ bản nháp. Sơ đồ chỉ có thể áp cho suất chiếu sau khi bấm "Phát hành" — mở chế độ "Kiểm tra" bên trái để sửa hết lỗi trước.',
   },
   {
-    icon: "🪑",
     title: "Áp sơ đồ cho suất chiếu",
     body: 'Sơ đồ thuộc về địa điểm, không thuộc sự kiện. Sau khi phát hành, mở "Sơ đồ ghế" từ sự kiện để áp sơ đồ này cho từng suất và gán hạng vé.',
   },
   {
-    icon: "⌨️",
     title: "Có phím tắt",
     body: 'Ctrl+Z hoàn tác, các phím mũi tên di chuyển khối đang chọn. Bấm "Phím tắt" trên thanh công cụ để xem toàn bộ.',
   },
@@ -89,10 +84,7 @@ export default function ChartEditorCoachmarks({ onDone }: { onDone: () => void }
 
         <ol className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto">
           {STEPS.map((step, i) => (
-            <li key={step.title} className="flex gap-3 border border-beige-kem/25 bg-surface-2 p-3">
-              <span aria-hidden="true" className="text-lg leading-none">
-                {step.icon}
-              </span>
+            <li key={step.title} className="border border-beige-kem/25 bg-surface-2 p-3">
               <div>
                 <p className="text-eyebrow font-bold">
                   {i + 1}. {step.title}
@@ -104,13 +96,15 @@ export default function ChartEditorCoachmarks({ onDone }: { onDone: () => void }
         </ol>
 
         <div className="mt-5 flex shrink-0 items-center justify-between gap-3">
-          <p className="font-meta text-meta text-beige-kem/50">Bảng này chỉ hiện một lần.</p>
+          <p className="font-meta text-meta text-beige-kem/70">
+            Có thể mở lại bằng nút Hướng dẫn trên thanh công cụ.
+          </p>
           <button
             ref={firstBtn}
             onClick={onDone}
             className="bg-burgundy px-5 py-2.5 font-meta text-body font-bold text-white transition hover:brightness-95"
           >
-            Bắt đầu vẽ
+            Mở trình thiết kế
           </button>
         </div>
       </div>

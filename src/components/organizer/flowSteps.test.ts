@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ManageShowtime, MyEvent } from "../../services/catalogClient";
-import { flowSteps } from "./flowSteps";
+import { flowSteps, stepProgress } from "./flowSteps";
 
 // The property every case here circles: a step is `done` only when the SERVER gate that governs it
 // would actually pass. Optimism in this table is how an organizer ends up at a 409.
@@ -11,6 +11,7 @@ const event = (over: Partial<MyEvent> = {}): MyEvent => ({
   id: 1,
   slug: "e",
   title: "Đêm nhạc Indie",
+  description: "",
   status: "draft",
   moderation: "pending_review",
   reviewNote: null,
@@ -24,6 +25,8 @@ const event = (over: Partial<MyEvent> = {}): MyEvent => ({
   totalRevenueVnd: 0,
   nextShowtimeAt: null,
   venueName: null,
+  // `flowSteps` reads none of these — here only because the fixture builds a whole MyEvent.
+  venueId: null,
   ...over,
 });
 
@@ -167,7 +170,13 @@ describe("pricing every class that holds inventory", () => {
    * price. Reading `seatCount` here showed the chart ready to apply and the apply refused.
    */
   it("demands a price for a ZONE-only class, which has no seats at all", () => {
-    const zoneOnly = { id: 4, name: "Khu đứng", color: "#56B4E9", seatCount: 0, hasInventory: true };
+    const zoneOnly = {
+      id: 4,
+      name: "Khu đứng",
+      color: "#56B4E9",
+      seatCount: 0,
+      hasInventory: true,
+    };
     const st = showtime({ categories: [zoneOnly], tiers: [tier({ categoryId: null })] });
     const step = byId(flowSteps(event(), [st]), "apply");
     expect(step.state).toBe("blocked");
@@ -211,7 +220,8 @@ describe("the last step", () => {
 });
 
 describe("gaps the rail used to report as done", () => {
-  const stepOf = (steps: ReturnType<typeof flowSteps>, id: string) => steps.find((x) => x.id === id)!;
+  const stepOf = (steps: ReturnType<typeof flowSteps>, id: string) =>
+    steps.find((x) => x.id === id)!;
 
   it("does not call the chart done when a SECOND venue has none", () => {
     // Charts are per venue. Reading only the first upcoming showtime meant a two-venue event went
@@ -249,10 +259,9 @@ describe("gaps the rail used to report as done", () => {
   });
 
   it("still reports Đang bán for an approved, on-sale event", () => {
-    const steps = flowSteps(
-      event({ status: "on_sale", moderation: "approved" }),
-      [showtime({ hasSeatMap: true, bookableSeats: 12 })],
-    );
+    const steps = flowSteps(event({ status: "on_sale", moderation: "approved" }), [
+      showtime({ hasSeatMap: true, bookableSeats: 12 }),
+    ]);
 
     expect(stepOf(steps, "submit").state).toBe("done");
     expect(stepOf(steps, "submit").label).toBe("Đang bán");
@@ -261,7 +270,9 @@ describe("gaps the rail used to report as done", () => {
 
 describe("the four states events.status can hold", () => {
   const submitOf = (e: MyEvent) =>
-    flowSteps(e, [showtime({ hasSeatMap: true, bookableSeats: 12 })]).find((s) => s.id === "submit")!;
+    flowSteps(e, [showtime({ hasSeatMap: true, bookableSeats: 12 })]).find(
+      (s) => s.id === "submit",
+    )!;
 
   it("does not call the step done before the organizer has submitted anything", () => {
     // A brand-new event is inserted status='draft', moderation='pending_review' by column default
@@ -295,21 +306,55 @@ describe("the four states events.status can hold", () => {
 });
 
 describe("an on-sale event whose showtimes have all passed", () => {
+  const past = () =>
+    showtime({
+      startsAt: new Date(Date.now() - 2 * HOUR).toISOString(),
+      hasSeatMap: true,
+      bookableSeats: 12,
+      tiers: [tier()],
+    });
+
   it("does not mark the selling step as not-yet-started", () => {
     // `upcoming()` filters on startsAt > now, so once the last showtime passes every earlier step
     // goes todo and `ready` is false. If readiness is consulted before liveness, the rail renders
     // label "Đang bán" with state "todo" — grey, not-started, on an event that is selling. Reachable
     // in the window between the last showtime passing and status being flipped to 'finished'.
-    const past = showtime({
-      startsAt: new Date(Date.now() - 2 * HOUR).toISOString(),
-      hasSeatMap: true,
-      bookableSeats: 12,
-    });
-    const steps = flowSteps(event({ status: "on_sale", moderation: "approved" }), [past]);
+    const steps = flowSteps(event({ status: "on_sale", moderation: "approved" }), [past()]);
     const submit = steps.find((s) => s.id === "submit")!;
 
     expect(submit.label).toBe("Đang bán");
     expect(submit.state).toBe("done");
+  });
+
+  it("does not demand a NEW showtime from an event that is already selling", () => {
+    // The bug as reported: entering a published event whose dates have played out rendered step 2
+    // blocked — "Chưa có suất chiếu sắp diễn…" with a "Thêm suất chiếu →" button — under a submit
+    // step that correctly read Đang bán. Its history proves every setup step; the calendar does not
+    // re-open gates the publish check already passed.
+    const steps = flowSteps(event({ status: "on_sale", moderation: "approved" }), [past()]);
+
+    expect(byId(steps, "showtime").state).toBe("done");
+    expect(byId(steps, "tiers").state).toBe("done");
+    expect(byId(steps, "chart").state).toBe("done");
+    expect(byId(steps, "chart-ready").state).toBe("done");
+    expect(byId(steps, "apply").state).toBe("done");
+  });
+
+  it("gives an event waiting for admin review the same treatment", () => {
+    // pending_review passed the same server gates at submission time; only the admin's yes differs.
+    const steps = flowSteps(event({ status: "on_sale", moderation: "pending_review" }), [past()]);
+    expect(byId(steps, "showtime").state).toBe("done");
+    expect(byId(steps, "apply").state).toBe("done");
+  });
+
+  it("keeps judging a DRAFT by what is ahead of it — a past showtime fixes nothing", () => {
+    // The regression guard for the fix above: scoping by submission must not leak to events nobody
+    // has submitted, where a date in the past genuinely cannot be repaired and the rail's job is to
+    // say so.
+    const steps = flowSteps(event({ status: "draft" }), [past()]);
+    expect(byId(steps, "showtime").state).toBe("blocked");
+    expect(byId(steps, "showtime").reason).toContain("Chưa có suất chiếu sắp diễn");
+    expect(byId(steps, "showtime").action).toBe("showtimes");
   });
 });
 
@@ -318,8 +363,20 @@ describe("two venues in the same unready state", () => {
     // `worstChart` breaks ties with `<`, so the first wins. Naming only that one sent the organizer
     // to fix one venue while the other, identically unready, went unmentioned — and the step stayed
     // blocked afterwards for a reason it had never given.
-    const a = showtime({ id: 10, venueId: 5, venueName: "Nhà hát lớn", layoutId: null, sections: [] });
-    const b = showtime({ id: 11, venueId: 6, venueName: "Sân vận động", layoutId: null, sections: [] });
+    const a = showtime({
+      id: 10,
+      venueId: 5,
+      venueName: "Nhà hát lớn",
+      layoutId: null,
+      sections: [],
+    });
+    const b = showtime({
+      id: 11,
+      venueId: 6,
+      venueName: "Sân vận động",
+      layoutId: null,
+      sections: [],
+    });
 
     const chart = flowSteps(event({ eventType: "seated" }), [a, b]).find((s) => s.id === "chart")!;
 
@@ -330,11 +387,57 @@ describe("two venues in the same unready state", () => {
 
   it("names only the venue that is actually behind when the other is fine", () => {
     const drawn = showtime({ id: 10, venueId: 5, venueName: "Nhà hát lớn" });
-    const bare = showtime({ id: 11, venueId: 6, venueName: "Sân vận động", layoutId: null, sections: [] });
+    const bare = showtime({
+      id: 11,
+      venueId: 6,
+      venueName: "Sân vận động",
+      layoutId: null,
+      sections: [],
+    });
 
-    const chart = flowSteps(event({ eventType: "seated" }), [drawn, bare]).find((s) => s.id === "chart")!;
+    const chart = flowSteps(event({ eventType: "seated" }), [drawn, bare]).find(
+      (s) => s.id === "chart",
+    )!;
 
     expect(chart.reason).toContain("Sân vận động");
     expect(chart.reason).not.toContain("Nhà hát lớn");
+  });
+});
+
+describe("stepProgress — the strip's headline", () => {
+  const readyGa = () => showtime({ tiers: [tier()] });
+
+  it("counts blocked steps as progress and names the first open one", () => {
+    // A brand-new seated event: draft done, and the FIRST gate it can fail — an empty showtime list —
+    // is already blocked, while every step the server cannot judge yet stays `todo`. Counting only
+    // `done` here would ignore the blocked tally; the strip's arithmetic is judged steps, not green.
+    const steps = flowSteps(event({ eventType: "seated" }), []);
+    const { doneCount, active } = stepProgress(steps);
+
+    expect(doneCount).toBe(2);
+    expect(active?.id).toBe("showtime");
+    expect(active?.state).toBe("blocked");
+    expect(active?.action).toBe("showtimes");
+  });
+
+  it("stays silent on the ready reason while the showtimes have not loaded", () => {
+    const steps = flowSteps(event({ eventType: "seated" }), null);
+    const { active } = stepProgress(steps);
+    // Steps past the draft are `todo`, so the first open one is the one the organizer can act on
+    // NOW (the showtime list), not a guess about steps the fetch has not judged yet.
+    expect(active?.id).toBe("showtime");
+  });
+
+  it("reports every step counted and hands back the final step when all are done", () => {
+    const steps = flowSteps(
+      event({ eventType: "general_admission", status: "on_sale", moderation: "approved" }),
+      [readyGa()],
+    );
+    const { doneCount, active } = stepProgress(steps);
+
+    expect(steps.every((s) => s.state === "done")).toBe(true);
+    expect(doneCount).toBe(steps.length);
+    expect(active?.id).toBe("submit");
+    expect(active?.label).toBe("Đang bán");
   });
 });

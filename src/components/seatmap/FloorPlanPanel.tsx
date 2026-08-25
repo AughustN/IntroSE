@@ -9,7 +9,10 @@ import { layoutApi } from "../../services/catalogClient";
 
 import { MediaDropzone } from "../common/MediaDropzone";
 import ConfirmDialog from "../ConfirmDialog";
+import ImageAlignmentControls from "./ImageAlignmentControls";
+import { usePersistedMedia } from "./usePersistedMedia";
 
+import { RAIL_PANEL } from "./panelSurface";
 /**
  * Floor-plan upload and alignment (FR-020..FR-026a).
  *
@@ -31,21 +34,7 @@ export default function FloorPlanPanel({
   onChange: (plan: LayoutFloorPlan) => void;
 }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const run = async (fn: () => Promise<LayoutFloorPlan | void>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const next = await fn();
-      if (next) onChange(next);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const { busy, error, run } = usePersistedMedia(plan, onChange);
 
   const align = (patch: Partial<Omit<LayoutFloorPlan, "url">>) =>
     run(() =>
@@ -59,7 +48,7 @@ export default function FloorPlanPanel({
     );
 
   return (
-    <div className="border-2 border-beige-kem bg-surface-2 p-4 space-y-3">
+    <div className={`${RAIL_PANEL} space-y-3`}>
       <h3 className="font-meta text-eyebrow font-bold uppercase tracking-widest text-beige-kem/70">
         Bản vẽ mặt bằng
       </h3>
@@ -79,6 +68,7 @@ export default function FloorPlanPanel({
         // one click was an inconsistency waiting to cost somebody their upload.
         onRemove={() => setConfirmRemove(true)}
         helpText="JPG, PNG, WEBP hoặc SVG tối đa 5MB"
+        captionInside
         aspectRatio="banner"
         disabled={busy}
       />
@@ -87,58 +77,12 @@ export default function FloorPlanPanel({
 
       {plan.url && (
         <>
-          <label className="mt-3 block font-meta text-eyebrow text-beige-kem/60">
-            Tỉ lệ {plan.scale}‰
-            <input
-              type="range"
-              min={100}
-              max={3000}
-              step={50}
-              value={plan.scale}
-              disabled={busy}
-              onChange={(e) => align({ scale: Number(e.target.value) })}
-              className="w-full"
-            />
-          </label>
-          <label className="block font-meta text-eyebrow text-beige-kem/60">
-            Lệch ngang {plan.offsetX}
-            <input
-              type="range"
-              min={-5000}
-              max={5000}
-              step={50}
-              value={plan.offsetX}
-              disabled={busy}
-              onChange={(e) => align({ offsetX: Number(e.target.value) })}
-              className="w-full"
-            />
-          </label>
-          <label className="block font-meta text-eyebrow text-beige-kem/60">
-            Lệch dọc {plan.offsetY}
-            <input
-              type="range"
-              min={-5000}
-              max={5000}
-              step={50}
-              value={plan.offsetY}
-              disabled={busy}
-              onChange={(e) => align({ offsetY: Number(e.target.value) })}
-              className="w-full"
-            />
-          </label>
-          <label className="block font-meta text-eyebrow text-beige-kem/60">
-            Độ mờ {plan.opacity}%
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={5}
-              value={plan.opacity}
-              disabled={busy}
-              onChange={(e) => align({ opacity: Number(e.target.value) })}
-              className="w-full"
-            />
-          </label>
+          <ImageAlignmentControls
+            value={plan}
+            disabled={busy}
+            onPreview={(patch) => onChange({ ...plan, ...patch })}
+            onCommit={(patch) => void align(patch)}
+          />
 
           <label className="mt-3 flex items-center gap-2 text-meta text-beige-kem/80">
             <input
@@ -152,16 +96,12 @@ export default function FloorPlanPanel({
 
           {/* Said plainly at upload time rather than discovered later: the toggle governs display,
               not reachability. The file sits at an unguessable URL with no access check (FR-026a). */}
-          <p className="mt-2 text-eyebrow leading-4 text-beige-kem/45">
+          <p className="mt-2 text-eyebrow leading-4 text-beige-kem/70">
             Ảnh được lưu ở một đường dẫn ngẫu nhiên. Bất kỳ ai có đường dẫn đều mở được, kể cả khi
             tuỳ chọn trên đang tắt — tuỳ chọn chỉ quyết định việc hiển thị trên sơ đồ.
           </p>
 
-          <button
-            className={`${btn} mt-3`}
-            disabled={busy}
-            onClick={() => setConfirmRemove(true)}
-          >
+          <button className={`${btn} mt-3`} disabled={busy} onClick={() => setConfirmRemove(true)}>
             Xoá bản vẽ
           </button>
         </>

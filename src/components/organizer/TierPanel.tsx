@@ -113,9 +113,15 @@ export default function TierPanel({
         <Empty title="Chưa có hạng vé nào." hint="Thêm hạng vé đầu tiên bên dưới." />
       )}
 
-      {tiers.map((t) => (
-        <TierRow key={t.id} tier={t} seated={seated} busy={busy} run={run} />
-      ))}
+      {/* One frame around the list, hairlines between tiers — not a border-2 box per row, which
+          stacked into a wall of rectangles before an organizer got as far as the numbers inside. */}
+      {tiers.length > 0 && (
+        <div className="divide-y divide-beige-kem/20 border border-beige-kem/25">
+          {tiers.map((t) => (
+            <TierRow key={t.id} tier={t} seated={seated} busy={busy} run={run} />
+          ))}
+        </div>
+      )}
 
       <div className="border-2 border-dashed border-beige-kem/40 p-3">
         <p className="mb-2 font-mono text-[11px] text-beige-kem/60">Thêm hạng vé</p>
@@ -200,9 +206,7 @@ function TierRow({
     );
 
   return (
-    <div
-      className={`border-2 p-3 ${tier.archived ? "border-beige-kem/25 opacity-70" : "border-beige-kem"}`}
-    >
+    <div className={`p-3 ${tier.archived ? "opacity-70" : ""}`}>
       <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
         <input
           value={label}
@@ -257,6 +261,19 @@ function TierRow({
         {tier.remaining === null ? "Không giới hạn" : `Còn ${tier.remaining}`} · Giá{" "}
         {dong(tier.price)}
       </p>
+
+      {/*
+        A seated tier with nothing sold, nothing held, and nothing available has never had a seat
+        drawn to it in the map editor — not "sold out," just unreachable. Without this line the row
+        looks identical to a healthy, fully-sold tier ("Đã bán 0 · Đang giữ 0 · Còn 0" either way),
+        so an organizer sends the event for review with a price nobody can ever pay.
+      */}
+      {!tier.archived && seated && tier.sold === 0 && tier.held === 0 && tier.remaining === 0 && (
+        <p className="mt-1 font-mono text-[11px] text-cam-dat">
+          ⚠ Chưa có ghế nào trong sơ đồ được gán hạng này — hạng vé sẽ không bán được vé nào cho
+          đến khi bạn gán ghế trong trình thiết kế sơ đồ.
+        </p>
+      )}
     </div>
   );
 }

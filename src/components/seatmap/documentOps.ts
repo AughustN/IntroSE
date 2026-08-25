@@ -13,11 +13,17 @@ import {
   type DocumentSection,
   isSeatBearing,
   nextBlockKey,
+  resolvedSeatSectionId,
 } from "@/shared/catalog/seatmap-document";
 import type { ShapePoint } from "@/shared/catalog/seatmap";
 import { inferStartLabels, regenerateBlock, rowLabelFor } from "@/shared/catalog/seatmap-project";
-import { LAYOUT_MAX_SEATS, LAYOUT_SPACE, clampCoord } from "@/shared/catalog/seatmap-validate";
-import { CATEGORY_COLORS, GRID, MAX_ROWS, mintId, snap } from "./layoutOps";
+import {
+  LAYOUT_MAX,
+  LAYOUT_MAX_SEATS,
+  LAYOUT_MIN,
+  clampCoord,
+} from "@/shared/catalog/seatmap-validate";
+import { CATEGORY_COLORS, GRID, MAX_ROWS, type Snap, mintId, snap, snapStep } from "./layoutOps";
 
 /**
  * Block-level operations on a `ChartDocument`.
@@ -46,7 +52,14 @@ const DEFAULTS: Record<string, { width: number; height: number; params?: BlockPa
   "curved-row": {
     width: 2400,
     height: 900,
-    params: { rowsCount: 3, seatsPerRow: 12, seatSpacing: 150, rowSpacing: 200, radius: 1500, arcAngle: 90 },
+    params: {
+      rowsCount: 3,
+      seatsPerRow: 12,
+      seatSpacing: 150,
+      rowSpacing: 200,
+      radius: 1500,
+      arcAngle: 90,
+    },
   },
   "individual-seat": {
     width: 100,
@@ -111,12 +124,16 @@ export const remainingBudget = (doc: ChartDocument): number =>
  * can be arbitrary strings once a chart has been adopted or hand-relabelled, so counting is not the
  * same question as "is this free".
  */
-function rowLabelsUsedIn(doc: ChartDocument, sectionId: number | null, exceptKey?: string): Set<string> {
+function rowLabelsUsedIn(
+  doc: ChartDocument,
+  sectionId: number | null,
+  exceptKey?: string,
+): Set<string> {
   const used = new Set<string>();
   for (const b of doc.blocks) {
     if (b.key === exceptKey) continue;
     for (const seat of b.seats ?? []) {
-      const section = seat.sectionId ?? b.sectionId;
+      const section = resolvedSeatSectionId(seat, b);
       if (section === sectionId) used.add(seat.rowLabel);
     }
   }
@@ -127,7 +144,12 @@ function rowLabelsUsedIn(doc: ChartDocument, sectionId: number | null, exceptKey
 function rowsCollide(used: Set<string>, rows: number, params: BlockParams, start: number): boolean {
   for (let r = 0; r < rows; r++) {
     const label = rowLabelFor(
-      r, rows, params.rowLabelScheme, params.rowLabelPrefix, start, params.rowLabelSuffix,
+      r,
+      rows,
+      params.rowLabelScheme,
+      params.rowLabelPrefix,
+      start,
+      params.rowLabelSuffix,
     );
     if (used.has(label)) return true;
   }
@@ -208,33 +230,38 @@ export function nextBlockContext(
     stated: number | null | undefined,
     from: number | null | undefined,
     pool: { id: number }[],
+    /** Guess the first when several are available? True for classes, false for sections — see below. */
+    guessAmongSeveral: boolean,
   ) => {
     if (stated === null) return null;
     if (stated !== undefined && known(stated, pool) !== null) return stated;
-    return known(from, pool) ?? pool[0]?.id ?? null;
+    const inherited = known(from, pool);
+    if (inherited !== null) return inherited;
+    /*
+     * Nothing stated, nothing selected — so GUESS only when there is nothing to guess between.
+     *
+     * This used to fall through to `pool[0]`, which silently filed every new block into whichever
+     * section happened to be first. The organizer adds what they think of as a separate row, it joins
+     * Khu A without being asked, and `firstFreeRowIndex` then letters it F — correct lettering of a
+     * section it was never meant to be in, and the symptom reads as a numbering bug rather than an
+     * assignment one.
+     *
+     * With ONE section there is no ambiguity and defaulting to it saves a click every time. With
+     * several, "none" is the honest answer: the publish gate names an unassigned block, and assigning
+     * it letters it properly for the section it actually joins.
+     *
+     * Price CLASSES keep the old first-of-the-list default, and the asymmetry is deliberate. A wrongly
+     * guessed class is visible — it is the colour the seats are drawn in — and costs one click to
+     * change. A wrongly guessed SECTION is invisible and silently decides how the block is lettered,
+     * which is a different order of mistake.
+     */
+    return pool.length === 1 || guessAmongSeveral ? (pool[0]?.id ?? null) : null;
   };
 
   return {
-    sectionId: resolve(lastUsed.sectionId, picked?.sectionId, doc.sections),
-    categoryId: resolve(lastUsed.categoryId, picked?.categoryId, doc.categories),
+    sectionId: resolve(lastUsed.sectionId, picked?.sectionId, doc.sections, false),
+    categoryId: resolve(lastUsed.categoryId, picked?.categoryId, doc.categories, true),
   };
-}
-
-/**
- * A name for a new shape: "Hình 1", "Hình 2", …
- *
- * Numbered rather than all called the same thing, because a shape's name is how it is referred to
- * afterwards — in the validation list, in the inspector, and on the map itself. Counting the shapes
- * already present rather than every block, so adding a stage does not push the next shape to "Hình 4".
- * A shape whose name has been taken over by the organizer no longer matches, and is simply skipped.
- */
-export function nextShapeName(doc: ChartDocument): string {
-  let max = 0;
-  for (const b of doc.blocks) {
-    const n = /^Hình (\d+)$/.exec(b.label ?? "");
-    if (n) max = Math.max(max, Number(n[1]));
-  }
-  return `Hình ${max + 1}`;
 }
 
 /**
@@ -251,7 +278,7 @@ export function addBlock(
   opts: {
     sectionId?: number | null;
     categoryId?: number | null;
-    grid?: boolean;
+    grid?: Snap;
     geometry?: Exclude<BlockGeometry, "free">;
     color?: string | null;
   } = {},
@@ -294,7 +321,14 @@ export function addBlock(
     // Defaulting to a rectangle means placing one always puts something on the map, which the organizer
     // can then re-shape or drag by the vertices.
     const geometry = opts.geometry ?? "rect";
-    block = { ...block, geometry, points: geometryPoints(geometry, block), label: nextShapeName(doc) };
+    block = {
+      ...block,
+      geometry,
+      points: geometryPoints(geometry, block),
+      // The outline is the content. A caption is a separate text block, otherwise resizing the
+      // points and resizing the text become two competing geometries.
+      label: null,
+    };
   }
   if (opts.color !== undefined && colorable(kind)) block = { ...block, color: opts.color };
 
@@ -346,12 +380,15 @@ export function setBlockParams(
    *
    * An explicit `startRowIndex` in the patch always wins: the organizer typed it.
    */
-  const rows = target.kind === 'single-row' ? 1 : Math.max(1, Math.floor(params.rowsCount ?? 1));
+  const rows = target.kind === "single-row" ? 1 : Math.max(1, Math.floor(params.rowsCount ?? 1));
   const persisted = (target.seats ?? []).some((s) => s.seatId > 0);
   if (patch.startRowIndex === undefined && !persisted) {
     const used = rowLabelsUsedIn(doc, target.sectionId, target.key);
     if (rowsCollide(used, rows, params, params.startRowIndex ?? 0)) {
-      params = { ...params, startRowIndex: firstFreeRowIndex(doc, target.sectionId, rows, params, target.key) };
+      params = {
+        ...params,
+        startRowIndex: firstFreeRowIndex(doc, target.sectionId, rows, params, target.key),
+      };
     }
   }
 
@@ -416,10 +453,22 @@ function blockExtent(b: DocumentBlock): { minX: number; maxX: number; minY: numb
   } else if (b.points?.length) {
     // A drawn outline's real extent is its vertices; `width`/`height` is only an advisory box and can
     // be much smaller, which would let a shape be dragged off the edge of the map.
-    for (const p of b.points) see(p.x, p.y);
+    for (const p of b.points) {
+      const dx = p.x - b.x;
+      const dy = p.y - b.y;
+      see(b.x + dx * cos - dy * sin, b.y + dx * sin + dy * cos);
+    }
   } else {
-    see(b.x - b.width / 2, b.y - b.height / 2);
-    see(b.x + b.width / 2, b.y + b.height / 2);
+    const rx = b.width / 2;
+    const ry = b.height / 2;
+    for (const [dx, dy] of [
+      [-rx, -ry],
+      [rx, -ry],
+      [rx, ry],
+      [-rx, ry],
+    ]) {
+      see(b.x + dx * cos - dy * sin, b.y + dx * sin + dy * cos);
+    }
   }
   return { minX, maxX, minY, maxY };
 }
@@ -435,8 +484,13 @@ function blockExtent(b: DocumentBlock): { minX: number; maxX: number; minY: numb
  * against an edge.
  */
 function fitDelta(shift: number, lo: number, hi: number): number {
-  if (LAYOUT_SPACE - hi < -lo) return 0;
-  const room = shift > 0 ? LAYOUT_SPACE - hi : -lo;
+  // Measured against the WALL, not the frame. These used to read `LAYOUT_SPACE` and `0`, which were
+  // the same numbers back when the frame was the wall; now the frame is only what the editor looks
+  // at, and stopping a drag there would put a stop in the middle of the placeable area.
+  const headroom = LAYOUT_MAX - hi;
+  const backroom = lo - LAYOUT_MIN;
+  if (headroom < -backroom) return 0;
+  const room = shift > 0 ? headroom : -backroom;
   if (shift > 0) return Math.max(0, Math.min(shift, room));
   if (shift < 0) return Math.min(0, Math.max(shift, room));
   return 0;
@@ -445,8 +499,8 @@ function fitDelta(shift: number, lo: number, hi: number): number {
 /**
  * How far a selection may actually move before it leaves the map.
  *
- * The projection clamps every seat into 0..LAYOUT_SPACE INDEPENDENTLY, so without this a block dragged
- * past the edge did not stop — each seat beyond the boundary landed on exactly LAYOUT_SPACE and they
+ * The projection clamps every seat into the wall INDEPENDENTLY, so without this a block dragged
+ * past the edge did not stop — each seat beyond the boundary landed on exactly the limit and they
  * stacked. A block flush against the right wall lost a handful of seats to one point on the first drag,
  * which is what "the seats overlap each other after I move the block" was.
  *
@@ -511,7 +565,7 @@ export function movedPosition(
   b: Pick<DocumentBlock, "x" | "y">,
   dx: number,
   dy: number,
-  grid: boolean,
+  grid: Snap,
 ): { x: number; y: number } {
   return { x: clampCoord(snap(b.x + dx, grid)), y: clampCoord(snap(b.y + dy, grid)) };
 }
@@ -617,7 +671,10 @@ export function geometryPoints(
 export const BLOCK_DRAG_TYPE = "application/x-tixhub-block";
 
 /** `"stage"`, or `"shape:circle"` when the item names a shape to draw. */
-export function formatBlockDrag(kind: BlockKind, geometry?: Exclude<BlockGeometry, "free">): string {
+export function formatBlockDrag(
+  kind: BlockKind,
+  geometry?: Exclude<BlockGeometry, "free">,
+): string {
   return geometry ? `${kind}:${geometry}` : kind;
 }
 
@@ -691,13 +748,17 @@ export function moveBlocks(
   keys: Set<string>,
   dx: number,
   dy: number,
-  grid: boolean,
+  grid: Snap,
 ): ChartDocument {
   const limit = allowedDelta(doc, keys, dx, dy);
   // Grid snapping is skipped on the axis that hit the wall: rounding to the nearest grid line there
   // could push the block back out by up to half a step, and the per-seat clamp would stack the
   // overflow again. Flush against the edge is the honest landing spot.
-  const snapping = grid && !limit.clamped;
+  //
+  // Written as a STEP rather than `grid && !limit.clamped`: that expression collapses any step to
+  // the bare boolean `true`, which `snapStep` then reads as the default 50 — so every step other
+  // than the default silently degraded to 50 the moment the grid was on.
+  const snapping: Snap = limit.clamped ? false : snapStep(grid);
   return {
     ...doc,
     blocks: doc.blocks.map((b) => {
@@ -709,7 +770,11 @@ export function moveBlocks(
   };
 }
 
-export function rotateBlocks(doc: ChartDocument, keys: Set<string>, degrees: number): ChartDocument {
+export function rotateBlocks(
+  doc: ChartDocument,
+  keys: Set<string>,
+  degrees: number,
+): ChartDocument {
   return {
     ...doc,
     blocks: doc.blocks.map((b) =>
@@ -864,6 +929,26 @@ export function selectionBounds(
   return { x, y, w: right - x, h: bottom - y };
 }
 
+/**
+ * The visible geometry occupied by a selection, for view navigation.
+ *
+ * Alignment intentionally works from editable boxes (`selectionBounds`), while framing must include
+ * generated seats, polygon vertices, centred decorations and rotation. Keeping the two questions
+ * separate prevents a navigation improvement from changing where an align command places objects.
+ */
+export function occupiedBounds(
+  doc: ChartDocument,
+  keys: ReadonlySet<string>,
+): { x: number; y: number; w: number; h: number } | null {
+  const extents = doc.blocks.filter((block) => keys.has(block.key)).map(blockExtent);
+  if (extents.length === 0) return null;
+  const x = Math.min(...extents.map((extent) => extent.minX));
+  const y = Math.min(...extents.map((extent) => extent.minY));
+  const right = Math.max(...extents.map((extent) => extent.maxX));
+  const bottom = Math.max(...extents.map((extent) => extent.maxY));
+  return { x, y, w: Math.max(1, right - x), h: Math.max(1, bottom - y) };
+}
+
 export type BlockAlignEdge = "left" | "right" | "top" | "bottom" | "centerX" | "centerY";
 
 /** Where one block lands when aligned to an edge of the selection's box. Shared with `ChartEditor`,
@@ -945,7 +1030,12 @@ export function removeSection(doc: ChartDocument, id: number): ChartDocument {
   return {
     ...doc,
     sections: doc.sections.filter((s) => s.id !== id),
-    blocks: doc.blocks.map((b) => (b.sectionId === id ? { ...b, sectionId: null } : b)),
+    rows: doc.rows?.map((row) => (row.sectionId === id ? { ...row, sectionId: null } : row)),
+    blocks: doc.blocks.map((b) => ({
+      ...b,
+      sectionId: b.sectionId === id ? null : b.sectionId,
+      seats: b.seats?.map((seat) => (seat.sectionId === id ? { ...seat, sectionId: null } : seat)),
+    })),
   };
 }
 
@@ -986,7 +1076,165 @@ export const assignSection = (doc: ChartDocument, keys: Set<string>, sectionId: 
   blocks: doc.blocks.map((b) => (keys.has(b.key) ? { ...b, sectionId } : b)),
 });
 
-export const assignCategory = (doc: ChartDocument, keys: Set<string>, categoryId: number | null) => ({
+/** Move complete editable blocks while keeping the destination's row labels collision-free. */
+export function assignBlocksToSection(
+  doc: ChartDocument,
+  keys: Set<string>,
+  sectionId: number | null,
+): ChartDocument {
+  if (keys.size === 0) return doc;
+  const editableKeys = new Set(
+    doc.blocks.filter((block) => selectedAndEditable(block, keys)).map((block) => block.key),
+  );
+  if (editableKeys.size === 0) return doc;
+
+  const used = new Set<string>();
+  const rowIdsOutsideSelection = new Set<number>();
+  for (const block of doc.blocks) {
+    if (editableKeys.has(block.key)) continue;
+    for (const seat of block.seats ?? [])
+      if (seat.rowId != null) rowIdsOutsideSelection.add(seat.rowId);
+  }
+  if (sectionId !== null) {
+    for (const block of doc.blocks) {
+      if (editableKeys.has(block.key)) continue;
+      for (const seat of block.seats ?? []) {
+        if (resolvedSeatSectionId(seat, block) === sectionId) used.add(seat.rowLabel);
+      }
+    }
+  }
+
+  const changed = new Map<string, DocumentBlock>();
+  const ordered = doc.blocks
+    .filter((block) => editableKeys.has(block.key))
+    .sort((a, b) => Number(b.sectionId === sectionId) - Number(a.sectionId === sectionId));
+  for (const block of ordered) {
+    const rename = new Map<string, string>();
+    for (const seat of block.seats ?? []) {
+      if (rename.has(seat.rowLabel)) continue;
+      let label = seat.rowLabel;
+      if (sectionId !== null && used.has(label)) {
+        for (let start = 0; start <= MAX_ROWS; start += 1) {
+          const candidate = rowLabelFor(
+            0,
+            1,
+            block.params?.rowLabelScheme,
+            block.params?.rowLabelPrefix,
+            start,
+            block.params?.rowLabelSuffix,
+          );
+          if (!used.has(candidate)) {
+            label = candidate;
+            break;
+          }
+        }
+      }
+      rename.set(seat.rowLabel, label);
+      if (sectionId !== null) used.add(label);
+    }
+    const relabelled = [...rename].some(([before, after]) => before !== after);
+    changed.set(block.key, {
+      ...block,
+      sectionId,
+      params: relabelled ? undefined : block.params,
+      seats: block.seats?.map((seat) => ({
+        ...seat,
+        sectionId: undefined,
+        rowLabel: rename.get(seat.rowLabel) ?? seat.rowLabel,
+        // Moving only one fragment must not make one persistent row span two sections.
+        rowId: seat.rowId != null && rowIdsOutsideSelection.has(seat.rowId) ? null : seat.rowId,
+      })),
+    });
+  }
+
+  return syncRowLabels({
+    ...doc,
+    blocks: doc.blocks.map((block) => changed.get(block.key) ?? block),
+  });
+}
+
+/**
+ * Move individual seats to a section without letting their inherited labels collide there.
+ *
+ * A per-seat move is deliberately different from moving a row: the seat leaves its old row identity
+ * and becomes a one-seat row in the destination. The database requires an internal row label even
+ * when the seat is visually unlabelled outside every section, so sectionless seats retain that
+ * storage label; the canvas decides whether it is useful to show.
+ */
+export function assignSeatsToSection(
+  doc: ChartDocument,
+  targets: SeatRef[],
+  sectionId: number | null,
+): ChartDocument {
+  if (targets.length === 0) return doc;
+  const selected = new Set(targets.map((target) => `${target.blockKey}|${target.index}`));
+  const used = new Set<string>();
+  for (const block of doc.blocks) {
+    for (const [index, seat] of (block.seats ?? []).entries()) {
+      const currentSection = resolvedSeatSectionId(seat, block);
+      if (!selected.has(`${block.key}|${index}`) || currentSection === sectionId) {
+        if (currentSection === sectionId) used.add(seat.rowLabel);
+      }
+    }
+  }
+
+  const relabelledBlocks = new Set<string>();
+  const next = {
+    ...doc,
+    blocks: doc.blocks.map((block) => {
+      const indices = new Set(
+        targets.filter((target) => target.blockKey === block.key).map((target) => target.index),
+      );
+      if (indices.size === 0 || !block.seats || serverOwned(block) || block.locked) return block;
+
+      return {
+        ...block,
+        seats: block.seats.map((seat, index) => {
+          if (!indices.has(index)) return seat;
+          const currentSection = resolvedSeatSectionId(seat, block);
+          if (currentSection === sectionId) return seat;
+
+          let rowLabel = seat.rowLabel;
+          const looseSeatEnteringASection =
+            sectionId !== null && currentSection === null && block.kind === "individual-seat";
+          if (sectionId !== null && (looseSeatEnteringASection || used.has(rowLabel))) {
+            const params = block.params ?? {};
+            for (let start = 0; start <= MAX_ROWS; start += 1) {
+              const candidate = rowLabelFor(
+                0,
+                1,
+                params.rowLabelScheme,
+                params.rowLabelPrefix,
+                start,
+                params.rowLabelSuffix,
+              );
+              if (!used.has(candidate)) {
+                rowLabel = candidate;
+                break;
+              }
+            }
+          }
+          used.add(rowLabel);
+          if (rowLabel !== seat.rowLabel) relabelledBlocks.add(block.key);
+          return { ...seat, sectionId, rowLabel, rowId: null };
+        }),
+      };
+    }),
+  };
+
+  return {
+    ...next,
+    blocks: next.blocks.map((block) =>
+      relabelledBlocks.has(block.key) ? { ...block, params: undefined } : block,
+    ),
+  };
+}
+
+export const assignCategory = (
+  doc: ChartDocument,
+  keys: Set<string>,
+  categoryId: number | null,
+) => ({
   ...doc,
   blocks: doc.blocks.map((b) => (keys.has(b.key) ? { ...b, categoryId } : b)),
 });
@@ -1017,8 +1265,22 @@ export function relabelRows(block: DocumentBlock, newStart: number): DocumentBlo
   const rename = new Map<string, string>();
   for (let r = 0; r < rows; r += 1) {
     rename.set(
-      rowLabelFor(r, rows, p.rowLabelScheme, p.rowLabelPrefix ?? "", oldStart, p.rowLabelSuffix ?? ""),
-      rowLabelFor(r, rows, p.rowLabelScheme, p.rowLabelPrefix ?? "", newStart, p.rowLabelSuffix ?? ""),
+      rowLabelFor(
+        r,
+        rows,
+        p.rowLabelScheme,
+        p.rowLabelPrefix ?? "",
+        oldStart,
+        p.rowLabelSuffix ?? "",
+      ),
+      rowLabelFor(
+        r,
+        rows,
+        p.rowLabelScheme,
+        p.rowLabelPrefix ?? "",
+        newStart,
+        p.rowLabelSuffix ?? "",
+      ),
     );
   }
 
@@ -1053,7 +1315,7 @@ function syncRowLabels(doc: ChartDocument): ChartDocument {
       if (seat.rowId == null || seen.has(seat.rowId)) continue;
       seen.set(seat.rowId, {
         label: seat.rowLabel,
-        sectionId: seat.sectionId ?? b.sectionId,
+        sectionId: resolvedSeatSectionId(seat, b),
       });
     }
   }
@@ -1098,7 +1360,9 @@ export function repackRowLabels(doc: ChartDocument): ChartDocument {
   const order = doc.blocks
     .map((b, i) => ({ b, i }))
     .filter((x) => movable(x.b))
-    .sort((x, y) => (x.b.params!.startRowIndex ?? 0) - (y.b.params!.startRowIndex ?? 0) || x.i - y.i)
+    .sort(
+      (x, y) => (x.b.params!.startRowIndex ?? 0) - (y.b.params!.startRowIndex ?? 0) || x.i - y.i,
+    )
     .map((x) => x.b.key);
 
   // Emptied first so the blocks being re-placed do not collide with their own OLD labels — otherwise
@@ -1334,14 +1598,146 @@ export function snapToObjects(
     return best;
   };
 
-  const x = nearest(at.x, anchors.map((b) => b.x));
-  const y = nearest(at.y, anchors.map((b) => b.y));
+  const x = nearest(
+    at.x,
+    anchors.map((b) => b.x),
+  );
+  const y = nearest(
+    at.y,
+    anchors.map((b) => b.y),
+  );
 
   const guides: SnapGuide[] = [];
   if (x !== null) guides.push({ axis: "x", at: x });
   if (y !== null) guides.push({ axis: "y", at: y });
 
   return { x: x ?? at.x, y: y ?? at.y, guides };
+}
+
+/** The true extent of a drawn outline: its vertices, not its advisory `width`/`height` box. */
+export function shapeBounds(
+  points: ShapePoint[],
+): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  if (!points.length) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of points) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+/**
+ * Scale a drawn outline about a fixed point, keeping its shape (§6).
+ *
+ * The corner handles this serves exist because a drawn shape had NO size control at all: the resize
+ * box is suppressed for shapes — correctly, since `width`/`height` only approximate a polygon — so
+ * the single way to make a hand-drawn outline bigger was to drag every vertex outward by eye. That
+ * is not a resize, it is a redraw, and it loses the shape on the way.
+ *
+ * UNIFORM on purpose: one factor for both axes, so a circle stays a circle and a hexagon stays
+ * regular. A per-axis stretch is a different operation and would need different handles to be honest
+ * about it — the edge midpoints, which shapes deliberately do not offer.
+ *
+ * The factor comes from projecting the pointer onto the anchor→corner diagonal rather than from
+ * either axis alone. Taking one axis makes the other feel dead; taking the larger of the two makes
+ * the shape jump when the pointer crosses the diagonal. A projection is monotone in the direction
+ * the corner actually travels, which is the one that matches the hand.
+ */
+export function scaleShapePoints(
+  points: ShapePoint[],
+  anchor: { x: number; y: number },
+  corner: { x: number; y: number },
+  pointer: { x: number; y: number },
+): ShapePoint[] {
+  const cx = corner.x - anchor.x;
+  const cy = corner.y - anchor.y;
+  const lenSq = cx * cx + cy * cy;
+  // A zero-extent shape has no diagonal to project onto and no size to scale — a degenerate outline
+  // must not become NaN the moment a handle is touched.
+  if (lenSq === 0) return points;
+
+  const raw = ((pointer.x - anchor.x) * cx + (pointer.y - anchor.y) * cy) / lenSq;
+  // Never past the anchor: a negative factor mirrors the shape through the point being held still,
+  // which reads as the outline flipping inside out rather than as a resize. `flipBlocks` is the
+  // operation for mirroring, and it says so.
+  const scale = Math.max(0.02, raw);
+
+  return points.map((p) => ({
+    x: clampCoord(anchor.x + (p.x - anchor.x) * scale),
+    y: clampCoord(anchor.y + (p.y - anchor.y) * scale),
+  }));
+}
+
+/** A measured gap the canvas draws along a guide while a drag is snapped to it. */
+export interface SpacingMark {
+  /** The axis the guide runs on — so an "x" guide is a vertical line and the gap is measured in y. */
+  axis: "x" | "y";
+  /** Where the guide sits on `axis`; both ends of the measurement share it. */
+  at: number;
+  /** The two positions being measured between, along the OTHER axis. */
+  from: number;
+  to: number;
+  distance: number;
+}
+
+/**
+ * Distances from the dragged position to its nearest neighbours along each active guide (§25).
+ *
+ * The guides say "these are in line". They do not say how far apart, and that is the half an
+ * organizer actually needs: three blocks can be perfectly aligned and unevenly spaced, and the
+ * misalignment a guide catches is the one that was already visible. Spacing is what you cannot judge
+ * by eye at the zoom that fits a whole chart.
+ *
+ * Measured CENTRE to CENTRE, matching the guides — and for the reason `snapToObjects` gives for
+ * snapping centres rather than edges: `width`/`height` is advisory, so an edge-to-edge gap would be
+ * a confident number describing a box the organizer cannot see. A centre-to-centre figure is one
+ * they can check against the grid.
+ *
+ * One neighbour per direction per axis, at most four marks. Every aligned block would be a thicket
+ * of numbers over the thing being moved, and the near ones are the ones being matched.
+ */
+export function spacingMarks(
+  doc: ChartDocument,
+  moving: Set<string>,
+  at: { x: number; y: number },
+  guides: SnapGuide[],
+): SpacingMark[] {
+  const anchors = doc.blocks.filter((b) => !moving.has(b.key) && !b.hidden && !b.locked);
+  const marks: SpacingMark[] = [];
+
+  for (const guide of guides) {
+    // Blocks sitting ON this guide — the ones it claims the drag is now in line with.
+    const online = anchors.filter((b) => (guide.axis === "x" ? b.x : b.y) === guide.at);
+    // The coordinate the gap is measured along is the other one.
+    const self = guide.axis === "x" ? at.y : at.x;
+    const others = online.map((b) => (guide.axis === "x" ? b.y : b.x));
+
+    for (const side of [-1, 1] as const) {
+      // Nearest neighbour on this side, or none if the drag is at the end of the line.
+      let best: number | null = null;
+      for (const o of others) {
+        const delta = (o - self) * side;
+        if (delta <= 0) continue;
+        if (best === null || delta < (best - self) * side) best = o;
+      }
+      if (best === null) continue;
+      marks.push({
+        axis: guide.axis,
+        at: guide.at,
+        from: self,
+        to: best,
+        distance: Math.abs(best - self),
+      });
+    }
+  }
+
+  return marks;
 }
 
 /**
@@ -1358,7 +1754,10 @@ export function groupBlocks(doc: ChartDocument, keys: Set<string>): ChartDocumen
   const members = doc.blocks.filter((b) => selectedAndEditable(b, keys));
   if (members.length < 2) return doc;
 
-  const groupId = `g${members.map((b) => b.key).sort().join("-")}`.slice(0, 24);
+  const groupId = `g${members
+    .map((b) => b.key)
+    .sort()
+    .join("-")}`.slice(0, 24);
   return {
     ...doc,
     blocks: doc.blocks.map((b) => (members.some((m) => m.key === b.key) ? { ...b, groupId } : b)),
@@ -1378,7 +1777,9 @@ export function ungroupBlocks(doc: ChartDocument, keys: Set<string>): ChartDocum
   if (groups.size === 0) return doc;
   return {
     ...doc,
-    blocks: doc.blocks.map((b) => (b.groupId && groups.has(b.groupId) ? { ...b, groupId: undefined } : b)),
+    blocks: doc.blocks.map((b) =>
+      b.groupId && groups.has(b.groupId) ? { ...b, groupId: undefined } : b,
+    ),
   };
 }
 

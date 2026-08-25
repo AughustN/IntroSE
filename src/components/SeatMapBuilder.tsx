@@ -4,6 +4,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import type { LayoutSummary } from "../../shared/catalog/seatmap";
 import { ManageShowtime, layoutApi, organizerApi, studioApi } from "../services/catalogClient";
 import { Empty, ErrorRetry, Loading } from "./organizer/states";
 import ChartEditor from "./seatmap/ChartEditor";
@@ -13,9 +14,9 @@ import Select from "./Select";
 const input =
   "h-10 w-full rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-body text-beige-kem outline-none focus:border-burgundy";
 const btn =
-  "rounded-lg bg-burgundy px-3 py-2 text-eyebrow font-black text-white transition hover:brightness-95 disabled:opacity-50";
+  "bg-burgundy px-3 py-2 text-eyebrow font-black text-white transition hover:brightness-95 disabled:opacity-50";
 const ghost =
-  "rounded-lg border-2 border-beige-kem px-3 py-2 text-eyebrow font-bold text-beige-kem/80 transition disabled:opacity-40";
+  "border-2 border-beige-kem px-3 py-2 text-eyebrow font-bold text-beige-kem/80 transition disabled:opacity-40";
 
 /**
  * Seat maps for one event.
@@ -43,9 +44,24 @@ export default function SeatMapBuilder({
   const [notice, setNotice] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState<number | null>(null);
+  /**
+   * The chart on the canvas, and the VENUE it was opened from.
+   *
+   * The venue rides along because the editor now shows the event's tier labels beside the chart's
+   * price classes, and tiers hang off showtimes — which are grouped by venue. A bare layout id
+   * cannot get back to them: one event may run at several venues with different tiers at each, so
+   * "the tiers of this event" is the wrong question and "the tiers of this venue's showtimes" is
+   * the right one.
+   */
+  const [editing, setEditing] = useState<{ layoutId: number; venueId: number } | null>(null);
   /** Which venue has its quick-tools drawer open. Per venue, so two venues cannot share one form. */
   const [tools, setTools] = useState<number | null>(null);
+  /** A venue with several charts asks which one to open before the editor mounts. */
+  const [choosing, setChoosing] = useState<{
+    venueId: number;
+    name: string;
+    layouts: LayoutSummary[];
+  } | null>(null);
 
   const reload = useCallback(async () => {
     setLoadError(null);
@@ -76,13 +92,33 @@ export default function SeatMapBuilder({
     }
   };
 
-  /** Open the venue's chart on the canvas, creating one if the venue has none yet. */
-  const openEditor = (venueId: number) =>
-    run(async () => {
+  /**
+   * Open the venue's chart on the canvas, creating one if the venue has none yet.
+   *
+   * A venue may own several charts (the library supports it), and this button used to open the
+   * FIRST unconditionally — chart #2 was unreachable from here. One chart opens straight away;
+   * several ask which.
+   */
+  const openEditor = async (venueId: number, venueName: string) => {
+    setErr(null);
+    setNotice(null);
+    setBusy(true);
+    try {
       const { layouts } = await layoutApi.list(venueId);
-      const target = layouts[0] ?? (await layoutApi.create(venueId, "Sơ đồ mặc định"));
-      setEditing(target.id);
-    }, "Đang mở trình thiết kế sơ đồ.");
+      if (layouts.length === 0) {
+        setEditing({ layoutId: (await layoutApi.create(venueId, "Sơ đồ mặc định")).id, venueId });
+      } else if (layouts.length === 1) {
+        setEditing({ layoutId: layouts[0].id, venueId });
+      } else {
+        // Several charts: ask which one, rather than always opening the first.
+        setChoosing({ venueId, name: venueName, layouts });
+      }
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   /**
    * Price every class, then bind the chart.
@@ -112,9 +148,25 @@ export default function SeatMapBuilder({
   };
 
   if (editing !== null) {
+    /*
+     * Every live tier label sold at this venue, deduplicated.
+     *
+     * Across ALL of the venue's showtimes rather than one, because the chart is shared by them: a
+     * class named after a tier that only the Saturday showtime has is still correctly named, and
+     * warning about it would be wrong. Archived tiers are excluded for the reason every other tier
+     * read excludes them — a retired class is not a price anything may be bound to.
+     */
+    const tierLabels = [
+      ...new Set(
+        (rows ?? [])
+          .filter((s) => s.venueId === editing.venueId)
+          .flatMap((s) => s.tiers.filter((t) => !t.archived).map((t) => t.label)),
+      ),
+    ];
     return (
       <ChartEditor
-        layoutId={editing}
+        layoutId={editing.layoutId}
+        tierLabels={tierLabels}
         onClose={() => {
           setEditing(null);
           void reload();
@@ -183,7 +235,7 @@ export default function SeatMapBuilder({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <p className="font-display text-body font-bold">{venue.name}</p>
-                  <p className="font-meta text-meta text-beige-kem/55">
+                  <p className="font-meta text-meta text-ink-soft">
                     Đã vẽ {drawn} ghế · dùng chung cho {venue.showtimes.length} suất tại địa điểm
                     này
                   </p>
@@ -195,14 +247,49 @@ export default function SeatMapBuilder({
                   >
                     Công cụ nhanh
                   </button>
-                  <button className={btn} disabled={busy} onClick={() => openEditor(venueId)}>
+                  <button
+                    className={btn}
+                    disabled={busy}
+                    onClick={() => void openEditor(venueId, venue.name)}
+                  >
                     Thiết kế sơ đồ
                   </button>
                 </div>
               </div>
 
+              {choosing?.venueId === venueId && (
+                <div className="mt-3 rounded-xl border-2 border-beige-kem/50 p-3">
+                  <p className="text-eyebrow text-beige-kem/70">
+                    Địa điểm này có {choosing.layouts.length} sơ đồ — chọn một để mở:
+                  </p>
+                  <div className="mt-2 grid gap-1">
+                    {choosing.layouts.map((l) => (
+                      <button
+                        key={l.id}
+                        className={`${ghost} flex items-center justify-between text-left`}
+                        disabled={busy}
+                        onClick={() => {
+                          setChoosing(null);
+                          setEditing({ layoutId: l.id, venueId: choosing.venueId });
+                        }}
+                      >
+                        <span>
+                          {l.name}
+                          {l.status !== "ready" && (
+                            <span className="ml-2 font-meta text-meta text-cam-dat-ink">
+                              bản nháp
+                            </span>
+                          )}
+                        </span>
+                        <span className="font-meta text-meta text-ink-soft">{l.seatCount} ghế</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {drawn === 0 && (
-                <p className="mt-2 font-meta text-meta text-cam-dat">
+                <p className="mt-2 font-meta text-meta text-cam-dat-ink">
                   Địa điểm này chưa có ghế nào. Hãy thiết kế sơ đồ trước khi áp dụng cho suất.
                 </p>
               )}
@@ -220,8 +307,10 @@ export default function SeatMapBuilder({
                         {new Date(st.startsAt).toLocaleString("vi-VN")}
                       </span>
                       <span
-                        className={`rounded-lg border-2 border-beige-kem px-2 py-0.5 font-meta text-meta ${
-                          st.hasSeatMap ? "bg-la-co text-on-tint" : "text-beige-kem/60"
+                        className={`border px-2 py-1 font-meta text-meta font-bold ${
+                          st.hasSeatMap
+                            ? "border-la-co/60 bg-la-co/20 text-beige-kem"
+                            : "border-beige-kem/25 bg-beige-kem/5 text-ink-soft"
                         }`}
                       >
                         {st.hasSeatMap ? `${st.bookableSeats} ghế đang bán` : "Chưa áp dụng sơ đồ"}
@@ -235,17 +324,17 @@ export default function SeatMapBuilder({
                         onDone={() => void reload()}
                       />
                     ) : st.categories.filter((c) => c.seatCount > 0).length === 0 ? (
-                      <p className="text-eyebrow text-beige-kem/50">
+                      <p className="text-eyebrow text-ink-soft">
                         Chưa có ghế để áp dụng — hoàn tất bước 1 trước.
                       </p>
                     ) : st.layoutStatus !== "ready" ? (
-                      <p className="text-eyebrow text-beige-kem/50">
+                      <p className="text-eyebrow text-ink-soft">
                         Sơ đồ đang là bản nháp. Mở trình thiết kế và bấm “Phát hành” trước khi áp
                         dụng cho suất diễn.
                       </p>
                     ) : (
                       <div className="space-y-2">
-                        <p className="font-meta text-meta text-beige-kem/60">
+                        <p className="font-meta text-meta text-ink-soft">
                           Đặt giá cho từng hạng vé, rồi áp dụng:
                         </p>
                         {st.categories
@@ -323,7 +412,7 @@ function QuickTools({
 
   return (
     <div className="mt-3 space-y-2 rounded-xl border-2 border-dashed border-beige-kem/40 p-3">
-      <p className="font-meta text-meta text-beige-kem/60">
+      <p className="font-meta text-meta text-ink-soft">
         Tạo nhanh một dãy ghế. Vị trí sẽ xếp theo lưới — tinh chỉnh bằng trình thiết kế.
       </p>
       <div className="grid gap-2 sm:grid-cols-2">

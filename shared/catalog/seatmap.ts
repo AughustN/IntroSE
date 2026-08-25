@@ -4,51 +4,52 @@
 // Coordinates are integers in 0–10000 on each axis; every seat has a nominal diameter of 100 units
 // and rotation is cosmetic (FR-008). The buyer-facing read contract is `SeatMap` in ./types.ts.
 
-import type { ChartDocument } from './seatmap-document.js';
-import type { ValidationIssue } from './seatmap-validate.js';
-import type { SeatMapTable, SeatMapTierLegendEntry } from './types.js';
+import type { ChartDocument } from "./seatmap-document.js";
+import type { ValidationIssue } from "./seatmap-validate.js";
+import type { SeatMapTable, SeatMapTierLegendEntry } from "./types.js";
 
-export type LayoutStatus = 'draft' | 'ready' | 'archived';
-export type SeatType = 'single' | 'double' | 'standing';
-export type TableBookingMode = 'per_seat' | 'whole_table';
+export type LayoutStatus = "draft" | "ready" | "archived";
+export type SeatType = "single" | "double" | "standing";
+export type TableBookingMode = "per_seat" | "whole_table";
 /** `area` predates feature 005 and is kept so existing rows still render (migration 0010). */
 export type ElementKind =
-  | 'stage'
-  | 'aisle'
-  | 'door'
-  | 'bar'
-  | 'label'
-  | 'area'
+  | "stage"
+  | "aisle"
+  | "door"
+  | "bar"
+  | "label"
+  | "area"
   // Hall outline and dividers — decorative geometry, never sellable (FR-057).
-  | 'boundary'
-  | 'divider'
+  | "boundary"
+  | "divider"
   // Facility icons (FR-061). Widened additively, so no stored element becomes invalid.
-  | 'exit'
-  | 'restroom'
-  | 'food_drink'
-  | 'smoking'
-  | 'first_aid'
-  | 'lift_stairs'
-  | 'wheelchair';
+  | "exit"
+  | "restroom"
+  | "food_drink"
+  | "smoking"
+  | "first_aid"
+  | "lift_stairs"
+  | "wheelchair";
 
 /** Kinds whose geometry is a point list rather than a rectangle. */
-export const SHAPE_KINDS = ['boundary', 'divider'] as const;
+export const SHAPE_KINDS = ["boundary", "divider"] as const;
 /** Kinds drawn as a facility marker with an optional Vietnamese label. */
 export const FACILITY_KINDS = [
-  'exit',
-  'restroom',
-  'food_drink',
-  'smoking',
-  'first_aid',
-  'lift_stairs',
-  'wheelchair',
+  "exit",
+  "restroom",
+  "food_drink",
+  "smoking",
+  "first_aid",
+  "lift_stairs",
+  "wheelchair",
 ] as const;
 
-export const isShapeKind = (k: ElementKind): boolean => (SHAPE_KINDS as readonly string[]).includes(k);
+export const isShapeKind = (k: ElementKind): boolean =>
+  (SHAPE_KINDS as readonly string[]).includes(k);
 export const isFacilityKind = (k: ElementKind): boolean =>
   (FACILITY_KINDS as readonly string[]).includes(k);
 
-export type SeatShape = 'circle' | 'square';
+export type SeatShape = "circle" | "square";
 
 /** One vertex of a boundary polygon or a divider (FR-058). */
 export interface ShapePoint {
@@ -56,11 +57,32 @@ export interface ShapePoint {
   y: number;
 }
 
+/**
+ * A level of the venue (0044).
+ *
+ * A chart with no floors is a chart on one floor — that is what every chart drawn before this is, and
+ * it stays that way without saying so. Floors only ever appear once an organizer creates one.
+ */
+export interface LayoutFloor {
+  /** Absent for a floor being created in this save. */
+  id?: number;
+  name: string;
+  displayOrder: number;
+}
+
 export interface LayoutSection {
   /** Absent for a section being created in this save. */
   id?: number;
   name: string;
   description?: string | null;
+  /**
+   * Which level this part of the room is on (0044). Null means the implicit single floor.
+   *
+   * The floor hangs here rather than on the seat because a section cannot straddle two levels, and
+   * because the buyer already learns a seat's section by name through the snapshot — so the floor
+   * rides that same key instead of needing a column on `showtime_seats`.
+   */
+  floorId?: number | null;
   /**
    * Visual style (FR-064). `color` is an EDITOR-ONLY aid and is never sent to the buyer map, where
    * colour carries the PRICE CLASS instead — see `LayoutCategory`. `seatShape` and
@@ -99,7 +121,7 @@ export interface LayoutTable {
   id?: number;
   sectionId: number | null;
   name: string;
-  shape: 'round' | 'rect';
+  shape: "round" | "rect";
   x: number;
   y: number;
   /** Round: width === height === diameter. */
@@ -144,6 +166,14 @@ export interface LayoutSeat {
   /** When set, the seat has been retired from the chart but kept for the bookings that point at it
    *  (§18). Archived seats are excluded from the projection, from validation and from generation. */
   archivedAt?: string | null;
+  /**
+   * The ACCESSIBLE seat this seat accompanies (0036). Set on the ordinary seat, never on the
+   * wheelchair seat itself — see `DocumentSeat.companionSeatId` for why the direction matters.
+   * The `seats.companion_seat_id` column mirrors this field; the showtime half is copied onto
+   * `showtime_seats` at generation time, because after a snapshot the showtime owns its map (FR-005).
+   * The pairing is an authoring fact, not a sale rule: holds still take one seat at a time.
+   */
+  companionSeatId?: number | null;
 }
 
 /**
@@ -231,7 +261,7 @@ export interface LayoutReferenceChart {
 }
 
 /** See `Layout.orphanRule`. Mirrors the CHECK on `venue_layouts.orphan_rule` (0037). */
-export type OrphanRule = 'balanced' | 'strict';
+export type OrphanRule = "balanced" | "strict";
 
 export interface Layout {
   id: number;
@@ -242,6 +272,8 @@ export interface Layout {
   /** Send back on save; a stale value is refused (FR-015). */
   version: number;
   sections: LayoutSection[];
+  /** The chart's levels (0044). Empty on a single-floor chart, which is most of them. */
+  floors: LayoutFloor[];
   categories: LayoutCategory[];
   /** The chart's rows (0032). Empty on a layout saved before rows existed and not yet re-saved. */
   rows: LayoutRow[];
@@ -258,6 +290,17 @@ export interface Layout {
    * the snapshot at apply time, so changing it never re-tunes a show already on sale.
    */
   orphanRule: OrphanRule;
+  /**
+   * Where the event happens, when the chart cannot say so with a stage (0043).
+   *
+   * Best-available ranks by distance to a focal point, and without this the ranking is INFERRED —
+   * the stage's centre if there is a stage, otherwise the centroid of every seat. The inference is
+   * right often enough to be worth keeping as a fallback and wrong often enough to need overriding:
+   * an arena's focal point is its pitch, not the middle of its four stands.
+   *
+   * Null means "infer it", which is what every chart drawn before this did and still does.
+   */
+  focalPoint: { x: number; y: number } | null;
   /**
    * The authoring document (./seatmap-document.ts) — how the chart was BUILT, as opposed to the
    * collections above, which are what is for sale.
@@ -309,6 +352,31 @@ export interface LayoutLibraryEntry extends LayoutSummary {
   updatedAt: string;
   /** Showtimes that are neither finished nor cancelled and still point at this chart. */
   usageCount: number;
+  /**
+   * Whether this chart has ever been published — which is what separates the two very different
+   * things `status: "draft"` was covering.
+   *
+   * Saving a published chart demotes it to `draft` (`layouts.repo.ts`, the Seats.io lifecycle: what
+   * is live and what is being worked on are not the same document). So a plain `draft` badge was
+   * telling an organizer the same word about a chart nobody has ever sold from and about one that is
+   * selling right now under an older published version. The first is unfinished; the second is live
+   * with edits waiting. Conflating them hides the only question that matters — is anything of mine on
+   * sale? — behind a word that says no.
+   *
+   * Derived from `layout_revisions`, which is written on publish and nowhere else.
+   */
+  hasPublishedVersion: boolean;
+  /**
+   * A recognition thumbnail: each block's box and kind, nothing else.
+   *
+   * Deliberately NOT the document. A chart's document runs to tens of kilobytes and a library of
+   * thirty would be megabytes on every page load, to draw a picture two centimetres wide. What makes
+   * a floor plan recognisable at that size is its silhouette — a wide stage along the top, two wings,
+   * a block in the middle — and that survives at box resolution.
+   *
+   * Empty for a chart drawn before the document existed, or one with nothing in it yet.
+   */
+  thumbnail: { x: number; y: number; w: number; h: number; kind: string }[];
 }
 
 export interface SaveLayoutRequest {
@@ -362,13 +430,31 @@ export interface ShowtimeMapSeat {
   ticketTierId: number;
   tier: string;
   price: number;
-  status: 'available' | 'held' | 'sold' | 'blocked';
+  status: "available" | "held" | "sold" | "blocked";
   x: number;
   y: number;
   rotation: number;
   /** From the snapshot's per-section style, so the organizer's map is drawn like the buyer's. */
-  shape?: 'circle' | 'square';
+  shape?: "circle" | "square";
   sizeMultiplier?: number;
+  /**
+   * Who this seat was sold under, and when they walked in — the organizer's question the status
+   * colour alone cannot answer: "whose, and are they here yet?"
+   *
+   * The name is `orders.customer_name`, which checkout snapshots from the account's **Nickname**
+   * (falling back to the email, same rule the checkout itself uses) — deliberately the SAME column
+   * the attendees export already prints, so the chart and the CSV never show two names for one
+   * buyer. `users.nickname` is not re-read: re-reading it would let a later profile edit rewrite
+   * what the ticket was sold under, breaking the purchase's own snapshot contract.
+   *
+   * Both stay `null` unless the seat's current ticket is live: held seats belong to an anonymous
+   * reservation on purpose (holds expire — naming one would publish data about a purchase that has
+   * not happened), and a voided ticket — a refund — un-names the seat. The check-in time exists on
+   * the TICKET, not the seat row, so finding it needs the same ticket join the attendees export
+   * proves out.
+   */
+  buyerName?: string | null;
+  checkedInAt?: string | null;
 }
 
 export interface ShowtimeMap {
@@ -383,8 +469,8 @@ export interface ShowtimeMap {
 
 // ---- Applying a layout to a showtime (FR-027..FR-029) ----
 
-export type ApplyChangeKind = 'add' | 'move' | 'relabel' | 'retier' | 'remove';
-export type RefusalReason = 'seat_sold' | 'seat_held';
+export type ApplyChangeKind = "add" | "move" | "relabel" | "retier" | "remove";
+export type RefusalReason = "seat_sold" | "seat_held";
 
 export interface ApplyChange {
   kind: ApplyChangeKind;
@@ -408,7 +494,7 @@ export interface ApplyPreview {
 
 /** Error codes this feature adds. */
 export type SeatMapErrorCode =
-  | 'layout_name_taken'
+  | "layout_name_taken"
   /**
    * Two seats in one section share a row label and number.
    *
@@ -416,21 +502,21 @@ export type SeatMapErrorCode =
    * That told the organizer to fix a name clash on a chart that had none, and gave them nothing to
    * look for — while the actual cause, two blocks both lettered from A, was the commonest one.
    */
-  | 'duplicate_seat_label'
-  | 'duplicate_row_label'
-  | 'section_name_taken'
-  | 'category_name_taken'
-  | 'layout_limit_reached'
-  | 'seat_limit_reached'
-  | 'element_limit_reached'
-  | 'stale_version'
-  | 'layout_in_use'
+  | "duplicate_seat_label"
+  | "duplicate_row_label"
+  | "section_name_taken"
+  | "category_name_taken"
+  | "layout_limit_reached"
+  | "seat_limit_reached"
+  | "element_limit_reached"
+  | "stale_version"
+  | "layout_in_use"
   /** A save tried to drop a seat that a showtime has already generated inventory from. */
-  | 'seat_in_use'
-  | 'layout_not_published'
-  | 'layout_invalid'
-  | 'map_edit_refused'
-  | 'invalid_image'
-  | 'image_too_large'
-  | 'file_too_large'
-  | 'upload_rate_limited';
+  | "seat_in_use"
+  | "layout_not_published"
+  | "layout_invalid"
+  | "map_edit_refused"
+  | "invalid_image"
+  | "image_too_large"
+  | "file_too_large"
+  | "upload_rate_limited";

@@ -13,6 +13,7 @@ const TABLE_SHAPES = [
   { value: "rect", label: "Bàn chữ nhật" },
 ] as const;
 
+import { RAIL_PANEL } from "./panelSurface";
 /**
  * Tables, hall shapes and the standing area (FR-076).
  *
@@ -92,7 +93,12 @@ export default function TablePalette({
   tables: LayoutTable[];
   onAddTable: (t: TableDraft) => void;
   onAddElement: (el: LayoutElement) => void;
-  onAddStandingArea: (a: { sectionId: number; rowLabel: string; count: number; points: ShapePoint[] }) => void;
+  onAddStandingArea: (a: {
+    sectionId: number;
+    rowLabel: string;
+    count: number;
+    points: ShapePoint[];
+  }) => void;
   busy: boolean;
 }) {
   const [sectionId, setSectionId] = useState<number | "">("");
@@ -104,6 +110,8 @@ export default function TablePalette({
 
   // "Bàn 1", "Bàn 2", … — the next free number, so the organizer rarely types a name at all.
   const suggested = `Bàn ${tables.length + 1}`;
+  /** The standing area refuses to fire until the box holds a usable count (server min is 1). */
+  const standingCount = wholeCount(standing);
 
   const addTable = () => {
     // `Number("")` is 0 and `Number.isFinite(0)` is true, so an empty box used to create a table with
@@ -164,11 +172,10 @@ export default function TablePalette({
     });
 
   return (
-    <div className="border-2 border-beige-kem bg-surface-2 p-4">
-      <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">Bàn tiệc</h3>
-      <p className="mt-1 text-[11px] leading-4 text-beige-kem/50">
-        Đặt một bàn và ghế được xếp sẵn quanh bàn. Kéo bàn thì ghế đi theo.
-      </p>
+    <div className={RAIL_PANEL}>
+      <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">
+        Bàn tiệc
+      </h3>
 
       <div className="mt-3 grid gap-2">
         <Select
@@ -195,7 +202,7 @@ export default function TablePalette({
           />
         </div>
 
-        <label className="flex items-center gap-2 font-mono text-[11px] text-beige-kem/60">
+        <label className="flex items-center gap-2 font-mono text-[11px] text-beige-kem/70">
           <input
             type="checkbox"
             checked={wholeTable}
@@ -205,17 +212,22 @@ export default function TablePalette({
           Bán trọn bàn — khách chọn một ghế là lấy cả bàn
         </label>
 
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder={suggested} maxLength={40} className={input} />
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={suggested}
+          maxLength={40}
+          className={input}
+        />
 
         <button onClick={addTable} disabled={busy} className={btn}>
           + Thêm bàn
         </button>
       </div>
 
-      <h4 className="mt-4 font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">Hình dạng sảnh</h4>
-      <p className="mt-1 text-[11px] leading-4 text-beige-kem/50">
-        Chỉ để nhìn: không bao giờ thành vé, không bấm được trên sơ đồ của khách.
-      </p>
+      <h4 className="mt-4 font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">
+        Hình dạng sảnh
+      </h4>
       <div className="mt-2 flex flex-wrap gap-2">
         <button className={btn} onClick={addBoundary}>
           + Đường bao sảnh
@@ -225,10 +237,9 @@ export default function TablePalette({
         </button>
       </div>
 
-      <h4 className="mt-4 font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">Khu vực đứng</h4>
-      <p className="mt-1 text-[11px] leading-4 text-beige-kem/50">
-        Sinh sẵn chỗ đứng trong một vùng vẽ. Mỗi chỗ vẫn là một ghế, khách chọn từng chỗ như bình thường.
-      </p>
+      <h4 className="mt-4 font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">
+        Khu vực đứng
+      </h4>
       <div className="mt-2 grid grid-cols-2 gap-2">
         <input
           value={standing}
@@ -239,14 +250,14 @@ export default function TablePalette({
         />
         <button
           className={btn}
-          disabled={busy || sectionId === ""}
+          disabled={busy || sectionId === "" || standingCount === null}
           onClick={() =>
             onAddStandingArea({
               sectionId: Number(sectionId),
               rowLabel: "ĐỨNG",
-              // Same rule as a table's: a standing area holds a whole number of people. `|| 0` used
-              // to turn both "" and "abc" into a zero-capacity zone that publishes and sells nothing.
-              count: wholeCount(standing) ?? 0,
+              // Gated above, so this is always a real whole number — never the `|| 0` that used to
+              // send both "" and "abc" as a zero-capacity zone the server was guaranteed to refuse.
+              count: standingCount ?? 0,
               // A square dropped at the centre; the organizer reshapes it like any other polygon.
               points: [
                 { x: 3000, y: 3000 },
@@ -260,9 +271,15 @@ export default function TablePalette({
           + Vùng đứng
         </button>
       </div>
-      {sectionId === "" && (
-        <p className="mt-1 font-mono text-[10px] text-cam-dat">Chọn khu vực trước khi tạo vùng đứng.</p>
-      )}
+      {sectionId === "" ? (
+        <p className="mt-1 font-mono text-[10px] text-cam-dat-ink">
+          Chọn khu vực trước khi tạo vùng đứng.
+        </p>
+      ) : standingCount === null ? (
+        <p className="mt-1 font-mono text-[10px] text-cam-dat-ink">
+          Số chỗ phải là số nguyên dương (tối thiểu 1).
+        </p>
+      ) : null}
     </div>
   );
 }

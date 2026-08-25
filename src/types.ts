@@ -183,7 +183,8 @@ export interface CheckoutPayload {
   promoCode?: string;
 }
 
-export type OrganizerEventStatus = "draft" | "pending_review" | "published" | "canceled" | "completed";
+export type OrganizerEventStatus =
+  "draft" | "pending_review" | "published" | "canceled" | "completed";
 
 export interface OrganizerEvent {
   eventId: string;
@@ -238,8 +239,8 @@ export interface EventCancellationAuditRecord {
   totalRefundAmountVnd: number;
 }
 
-export type MediaType = 'avatar' | 'logo' | 'banner' | 'trailer' | 'floorplan' | 'reference';
-export type StagedMediaStatus = 'idle' | 'staged' | 'uploading' | 'error';
+export type MediaType = "avatar" | "logo" | "banner" | "trailer" | "floorplan" | "reference";
+export type StagedMediaStatus = "idle" | "staged" | "uploading" | "error";
 
 export interface StagedMedia {
   file: File | null;
@@ -249,4 +250,3 @@ export interface StagedMedia {
   status: StagedMediaStatus;
   errorMessage?: string;
 }
-

@@ -286,7 +286,15 @@ interface SeatMapSnapshot {
   /** Tables the showtime snapshotted with its geometry (FR-081). Absent on pre-amendment snapshots. */
   tables?: SeatMapTable[];
   /** Per-section seat shape and size, keyed by section name (FR-064). Absent before the amendment. */
-  sectionStyles?: { name: string; seatShape: 'circle' | 'square'; seatSizeMultiplier: number }[];
+  sectionStyles?: {
+    name: string;
+    seatShape: 'circle' | 'square';
+    seatSizeMultiplier: number;
+    /** The level this section is on (0044), by name. Absent on snapshots written before floors. */
+    floor?: string | null;
+  }[];
+  /** The chart's levels in order (0044). Absent or under two means the picker never appears. */
+  floors?: { name: string; displayOrder: number }[];
   planUrl: string | null;
   planScale: number;
   planOffsetX: number;
@@ -295,6 +303,7 @@ interface SeatMapSnapshot {
   planVisibleToBuyers: boolean;
   /** Absent on snapshots written before 0037; the buyer's picker falls back to `balanced`. */
   orphanRule?: 'balanced' | 'strict';
+  focalPoint?: { x: number; y: number } | null;
 }
 
 /**
@@ -416,9 +425,15 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
         tableBookingMode: r.table_booking_mode,
         shape: r.section ? styleOf.get(r.section)?.seatShape : undefined,
         sizeMultiplier: r.section ? styleOf.get(r.section)?.seatSizeMultiplier : undefined,
+        // Resolved from the section through the same snapshot lookup the style uses (0044).
+        floor: r.section ? (styleOf.get(r.section)?.floor ?? null) : null,
       })),
       elements: readSnapshotElements(s?.elements),
       orphanRule: s?.orphanRule ?? 'balanced',
+      // Null when the chart never named one — `focalPoint()` then infers it exactly as before.
+      focalPoint: s?.focalPoint ?? null,
+      // Empty on every map generated before floors, which is what makes the strip absent there.
+      floors: s?.floors ?? [],
       // Omitted entirely unless the organizer made the plan buyer-visible (FR-026). The toggle governs
       // display; the file itself is unguessable rather than access-controlled (FR-026a).
       floorPlan:

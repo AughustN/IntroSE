@@ -3,8 +3,8 @@
 // catalog does not have yet (rating, cast, tags…) default to empty — they belong to later features
 // (reviews, richer metadata). The MovieEvent `id` carries the event slug so detail can be fetched.
 
-import type { EventCard, EventDetail, Showtime } from '@/shared/catalog/types';
-import type { MovieEvent } from '../types';
+import type { EventCard, EventDetail, Showtime } from "@/shared/catalog/types";
+import type { MovieEvent } from "../types";
 
 /**
  * The province as stored, or empty.
@@ -15,7 +15,12 @@ import type { MovieEvent } from '../types';
  */
 const toCity = (c: string | null): string => c ?? '';
 
-const AGE: Record<string, MovieEvent['ageRating']> = { all: 'P', '13+': 'T13', '16+': 'T16', '18+': 'T18' };
+const AGE: Record<string, MovieEvent["ageRating"]> = {
+  all: "P",
+  "13+": "T13",
+  "16+": "T16",
+  "18+": "T18",
+};
 
 export function cardToMovie(c: EventCard): MovieEvent {
   return {
@@ -23,26 +28,26 @@ export function cardToMovie(c: EventCard): MovieEvent {
     eventId: c.id,
     // A card carries no event type; detail supplies the real one. GA is the safe default: it is the
     // only branch that renders without seat data.
-    eventType: 'general_admission',
+    eventType: "general_admission",
     category: c.category,
     categoryLabel: c.categoryLabel,
     title: c.title,
     tags: [],
-    ageRating: 'P',
-    ageDescription: '',
+    ageRating: "P",
+    ageDescription: "",
     duration: 0,
     genre: [],
-    director: '',
+    director: "",
     cast: [],
-    releaseDate: c.earliestShowtime ?? '',
+    releaseDate: c.earliestShowtime ?? "",
     rating: 0,
     reviewCount: 0,
-    description: '',
+    description: "",
     price: c.startingPrice ?? 0,
     doublePrice: 0,
     ticketTiers: [],
-    imageUrl: c.imageUrl ?? '',
-    trailerUrl: c.trailerUrl ?? '',
+    imageUrl: c.imageUrl ?? "",
+    trailerUrl: c.trailerUrl ?? "",
     times: [],
     dates: c.earliestShowtime ? [c.earliestShowtime.slice(0, 10)] : [],
     city: toCity(c.city),
@@ -68,22 +73,22 @@ export function detailToMovie(d: EventDetail, showtimes: Showtime[]): MovieEvent
   return {
     ...base,
     eventType: d.eventType,
-    ageRating: AGE[d.ageRestriction] ?? 'P',
+    ageRating: AGE[d.ageRestriction] ?? "P",
     genre: d.genre,
     cast: d.lineup,
     description: d.description,
-    trailerUrl: d.trailerUrl ?? '',
-    refundPolicy: d.refundPolicy ?? '',
-    venueGuide: d.venueGuide ?? '',
-    venueName: venue?.name ?? '',
-    location: venue?.city ?? '',
+    trailerUrl: d.trailerUrl ?? "",
+    refundPolicy: d.refundPolicy ?? "",
+    venueGuide: d.venueGuide ?? "",
+    venueName: venue?.name ?? "",
+    location: venue?.city ?? "",
     dates: dates.length ? dates : base.dates,
-    times: times.length ? times : ['19:00'],
+    times: times.length ? times : ["19:00"],
     ticketTiers: d.tiers.map((t) => ({
       id: String(t.id),
       label: t.label,
       price: t.price,
-      description: '',
+      description: "",
       remaining: t.remaining,
     })),
     isHighDemand: Boolean(d.isHighDemand),

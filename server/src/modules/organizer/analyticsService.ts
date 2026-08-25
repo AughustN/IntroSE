@@ -181,8 +181,16 @@ export async function getOrganizerAnalyticsService(
 
   // 4. Capacity Fill Rate Calculation (Uses Lifetime Tickets Sold for Active Events)
   const capacityRes = await pool.query(
-    `SELECT 
-        COALESCE(SUM(tt.total_quantity), 0)::int AS total_capacity,
+    `SELECT
+        COALESCE(SUM(
+          CASE
+            WHEN tt.total_quantity IS NOT NULL THEN tt.total_quantity
+            ELSE (
+              SELECT COUNT(*) FROM showtime_seats ss
+               WHERE ss.ticket_tier_id = tt.id AND ss.status <> 'blocked'
+            )
+          END
+        ), 0)::int AS total_capacity,
         COALESCE(COUNT(t.id), 0)::int AS lifetime_tickets_sold
        FROM events e
        JOIN showtimes s ON s.event_id = e.id
@@ -234,7 +242,15 @@ export async function getOrganizerAnalyticsService(
         e.status,
         COALESCE(ec.label_vi, 'Khác') AS category,
         COALESCE((
-          SELECT SUM(tt.total_quantity)
+          SELECT SUM(
+            CASE
+              WHEN tt.total_quantity IS NOT NULL THEN tt.total_quantity
+              ELSE (
+                SELECT COUNT(*) FROM showtime_seats ss
+                 WHERE ss.ticket_tier_id = tt.id AND ss.status <> 'blocked'
+              )
+            END
+          )
             FROM showtimes s2
             JOIN ticket_tiers tt ON tt.showtime_id = s2.id
            WHERE s2.event_id = e.id
@@ -351,7 +367,15 @@ export async function getOrganizerAnalyticsService(
         e.title,
         COALESCE(ec.label_vi, 'Khác') AS category,
         s.starts_at,
-        COALESCE(SUM(tt.total_quantity), 0)::int AS capacity,
+        COALESCE(SUM(
+          CASE
+            WHEN tt.total_quantity IS NOT NULL THEN tt.total_quantity
+            ELSE (
+              SELECT COUNT(*) FROM showtime_seats ss
+               WHERE ss.ticket_tier_id = tt.id AND ss.status <> 'blocked'
+            )
+          END
+        ), 0)::int AS capacity,
         COALESCE(COUNT(t.id), 0)::int AS sold
        FROM events e
        JOIN showtimes s ON s.event_id = e.id

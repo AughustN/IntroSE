@@ -123,30 +123,14 @@ export function OrganizerBusinessAnalytics() {
           <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             {/* Left: Greeting & Description */}
             <div className="flex items-start gap-4">
-              {/* Illustration Hero Icon Box */}
-              <div className="relative flex h-14 w-14 shrink-0 items-center justify-center border-2 border-beige-kem/30 bg-burgundy/20 text-burgundy">
-                <Sparkles className="h-7 w-7 animate-pulse text-la-co" />
-                <svg
-                  className="absolute inset-0 h-full w-full opacity-30 pointer-events-none"
-                  viewBox="0 0 100 100"
-                  fill="none"
-                >
-                  <circle cx="20" cy="20" r="3" fill="#bfc0f2" />
-                  <circle cx="80" cy="30" r="2" fill="#f7a97c" />
-                  <circle cx="70" cy="80" r="4" fill="#d93025" />
-                  <path
-                    d="M10 50 Q 50 10 90 50"
-                    stroke="#fdf6ea"
-                    strokeWidth="1"
-                    strokeDasharray="3 3"
-                  />
-                </svg>
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center text-la-co">
+                <Sparkles className="h-8 w-8" strokeWidth={2} />
               </div>
 
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-xl font-black text-beige-kem sm:text-2xl">
-                    Xin chào, Nhà tổ chức! 👋
+                    Xin chào, Nhà tổ chức!
                   </h2>
                 </div>
                 <p className="mt-1 text-xs text-beige-kem/70 sm:text-sm max-w-xl">
@@ -245,13 +229,7 @@ export function OrganizerBusinessAnalytics() {
               {/* Left Column (Wide): Main Sales Analytics Chart, Upcoming Events Gauge, Recent Activity Feed */}
               <div className="space-y-6 lg:col-span-7 xl:col-span-8">
                 {/* Sales Analytics Chart Card */}
-                <TimeSeriesChart
-                  data={dashboardData.time_series}
-                  period={period}
-                  onPeriodChange={setPeriod}
-                  onRefresh={loadData}
-                  loading={loading}
-                />
+                <TimeSeriesChart data={dashboardData.time_series} />
 
                 {/* Soonest Event Capacity Gauge Card */}
                 <CapacityGauge capacityData={dashboardData.soonest_event_capacity} />

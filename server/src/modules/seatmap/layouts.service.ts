@@ -1,14 +1,22 @@
-import type { Request } from 'express';
-import type { LayoutLibraryEntry, LayoutRevision, SaveLayoutRequest } from '@shared/catalog/seatmap.js';
-import { projectDocument } from '@shared/catalog/seatmap-project.js';
-import { type ChartDocument, reviveDocument } from '@shared/catalog/seatmap-document.js';
-import { blockingIssues, validateLayout, type ValidationIssue } from '@shared/catalog/seatmap-validate.js';
-import { LAYOUT_MAX_ELEMENTS, LAYOUT_MAX_SEATS, VENUE_MAX_LAYOUTS } from '../../config.js';
-import { pool } from '../../db/pool.js';
-import { err } from '../../http.js';
-import * as repo from './layouts.repo.js';
-import { type ChartAction, assertChartAccess } from './permissions.js';
-import { insertAudit } from '../admin/audit.js';
+import type { Request } from "express";
+import type {
+  LayoutLibraryEntry,
+  LayoutRevision,
+  SaveLayoutRequest,
+} from "@shared/catalog/seatmap.js";
+import { projectDocument } from "@shared/catalog/seatmap-project.js";
+import { type ChartDocument, reviveDocument } from "@shared/catalog/seatmap-document.js";
+import {
+  blockingIssues,
+  validateLayout,
+  type ValidationIssue,
+} from "@shared/catalog/seatmap-validate.js";
+import { LAYOUT_MAX_ELEMENTS, LAYOUT_MAX_SEATS, VENUE_MAX_LAYOUTS } from "../../config.js";
+import { pool } from "../../db/pool.js";
+import { err } from "../../http.js";
+import * as repo from "./layouts.repo.js";
+import { type ChartAction, assertChartAccess } from "./permissions.js";
+import { insertAudit } from "../admin/audit.js";
 
 // Ownership, ceilings, validation and cloning.
 //
@@ -18,20 +26,23 @@ import { insertAudit } from '../admin/audit.js';
 async function assertOwn(
   req: Request,
   ownerUserId: number | null,
-  action: ChartAction = 'manage',
+  action: ChartAction = "manage",
 ): Promise<void> {
   await assertChartAccess(req, ownerUserId, action);
 }
 
 export async function venueOwnerUserId(venueId: number): Promise<number | null> {
-  const { rows } = await pool.query<{ created_by: number }>(`SELECT created_by FROM venues WHERE id = $1`, [venueId]);
+  const { rows } = await pool.query<{ created_by: number }>(
+    `SELECT created_by FROM venues WHERE id = $1`,
+    [venueId],
+  );
   return rows[0]?.created_by ?? null;
 }
 
 export async function assertVenueOwner(
   req: Request,
   venueId: number,
-  action: ChartAction = 'manage',
+  action: ChartAction = "manage",
 ): Promise<void> {
   await assertOwn(req, await venueOwnerUserId(venueId), action);
 }
@@ -47,7 +58,7 @@ export async function assertVenueOwner(
 export async function assertLayoutOwner(
   req: Request,
   layoutId: number,
-  action: ChartAction = 'manage',
+  action: ChartAction = "manage",
 ): Promise<void> {
   await assertOwn(req, await repo.layoutOwnerUserId(layoutId), action);
 }
@@ -68,20 +79,26 @@ export async function assertShowtimeOwner(req: Request, showtimeId: number): Pro
 }
 
 export async function showtimeLayoutId(showtimeId: number): Promise<number | null> {
-  const { rows } = await pool.query<{ layout_id: number | null }>(`SELECT layout_id FROM showtimes WHERE id = $1`, [showtimeId]);
+  const { rows } = await pool.query<{ layout_id: number | null }>(
+    `SELECT layout_id FROM showtimes WHERE id = $1`,
+    [showtimeId],
+  );
   return rows[0]?.layout_id ?? null;
 }
 
 export async function createLayout(req: Request, venueId: number, name: string): Promise<number> {
-  await assertVenueOwner(req, venueId, 'design');
+  await assertVenueOwner(req, venueId, "design");
   if ((await repo.countLayouts(venueId)) >= VENUE_MAX_LAYOUTS) {
-    throw err.conflict('layout_limit_reached', `Mỗi địa điểm chỉ có tối đa ${VENUE_MAX_LAYOUTS} sơ đồ.`);
+    throw err.conflict(
+      "layout_limit_reached",
+      `Mỗi địa điểm chỉ có tối đa ${VENUE_MAX_LAYOUTS} sơ đồ.`,
+    );
   }
   try {
     return await repo.createLayout(venueId, name);
   } catch (e) {
-    if ((e as { code?: string }).code === '23505') {
-      throw err.conflict('layout_name_taken', 'Địa điểm này đã có một sơ đồ trùng tên.');
+    if ((e as { code?: string }).code === "23505") {
+      throw err.conflict("layout_name_taken", "Địa điểm này đã có một sơ đồ trùng tên.");
     }
     throw e;
   }
@@ -89,7 +106,7 @@ export async function createLayout(req: Request, venueId: number, name: string):
 
 /** Full-document save. Ceilings first, then the versioned write; a stale version is refused (FR-015). */
 export async function saveLayout(req: Request, layoutId: number, body: SaveLayoutRequest) {
-  await assertLayoutOwner(req, layoutId, 'design');
+  await assertLayoutOwner(req, layoutId, "design");
 
   // A document wins outright when one is sent: the collections are DERIVED from it, so counting the
   // client's own arrays would police a shape the server is about to discard. The ceilings are still
@@ -99,10 +116,13 @@ export async function saveLayout(req: Request, layoutId: number, body: SaveLayou
   const elements = projected ? projected.elements : (body.elements ?? []);
 
   if (seats.length > LAYOUT_MAX_SEATS) {
-    throw err.conflict('seat_limit_reached', `Một sơ đồ chỉ chứa tối đa ${LAYOUT_MAX_SEATS} ghế.`);
+    throw err.conflict("seat_limit_reached", `Một sơ đồ chỉ chứa tối đa ${LAYOUT_MAX_SEATS} ghế.`);
   }
   if (elements.length > LAYOUT_MAX_ELEMENTS) {
-    throw err.conflict('element_limit_reached', `Một sơ đồ chỉ chứa tối đa ${LAYOUT_MAX_ELEMENTS} chi tiết.`);
+    throw err.conflict(
+      "element_limit_reached",
+      `Một sơ đồ chỉ chứa tối đa ${LAYOUT_MAX_ELEMENTS} chi tiết.`,
+    );
   }
   /*
    * A seat a showtime has generated from is no longer refused here — it is ARCHIVED by the save
@@ -121,35 +141,35 @@ export async function saveLayout(req: Request, layoutId: number, body: SaveLayou
   const saved = await repo.saveLayout(layoutId, body).catch((e) => {
     const code = (e as { code?: string }).code;
     const constraint = (e as { constraint?: string }).constraint;
-    if (code === '23505') {
+    if (code === "23505") {
       /*
        * Scoped by constraint. This used to answer every 23505 with "a name is duplicated", which is
        * the wrong sentence for the commonest cause by far: two seats sharing a row label and number.
        * The organizer was told to fix a name clash that did not exist, on a chart with no name
        * conflict in it, and had no way to find the real problem.
        */
-      if (constraint === 'seats_section_row_number_key' || constraint === 'uq_seat_label') {
+      if (constraint === "seats_section_row_number_key" || constraint === "uq_seat_label") {
         throw err.conflict(
-          'duplicate_seat_label',
-          'Hai ghế trong cùng một khu có cùng hàng và số. Hãy đổi nhãn hàng hoặc số ghế bắt đầu của khối mới.',
+          "duplicate_seat_label",
+          "Hai ghế trong cùng một khu có cùng hàng và số. Hãy đổi nhãn hàng hoặc số ghế bắt đầu của khối mới.",
         );
       }
-      if (constraint === 'sections_layout_name_key' || constraint === 'uq_section_name') {
-        throw err.conflict('section_name_taken', 'Sơ đồ này đã có một khu vực trùng tên.');
+      if (constraint === "sections_layout_name_key" || constraint === "uq_section_name") {
+        throw err.conflict("section_name_taken", "Sơ đồ này đã có một khu vực trùng tên.");
       }
-      if (constraint === 'layout_categories_layout_name_key') {
-        throw err.conflict('category_name_taken', 'Sơ đồ này đã có một hạng ghế trùng tên.');
+      if (constraint === "layout_categories_layout_name_key") {
+        throw err.conflict("category_name_taken", "Sơ đồ này đã có một hạng ghế trùng tên.");
       }
       // Two rows in one section sharing a label (0032). Reported as its own thing rather than as a
       // name clash on the CHART, which is what the fallback below would have said — the same class of
       // wrong sentence that `duplicate_seat_label` exists to replace.
-      if (constraint === 'layout_rows_label_idx') {
+      if (constraint === "layout_rows_label_idx") {
         throw err.conflict(
-          'duplicate_row_label',
-          'Hai hàng trong cùng một khu có cùng tên. Hãy đổi tên hàng hoặc đánh lại số cho khu này.',
+          "duplicate_row_label",
+          "Hai hàng trong cùng một khu có cùng tên. Hãy đổi tên hàng hoặc đánh lại số cho khu này.",
         );
       }
-      throw err.conflict('layout_name_taken', 'Tên bị trùng trong sơ đồ này.');
+      throw err.conflict("layout_name_taken", "Tên bị trùng trong sơ đồ này.");
     }
     // Belt-and-braces behind the pre-check above: that check and the DELETE are two statements, and
     // only the transaction makes them one.
@@ -159,16 +179,19 @@ export async function saveLayout(req: Request, layoutId: number, body: SaveLayou
     // bound seat — so it must surface as a 500 and be fixed rather than be reported to the organizer
     // as "this seat is sold". An earlier version of this catch mapped every 23503 and turned exactly
     // such a bug into a plausible-looking refusal.
-    if (code === '23503' && (e as { constraint?: string }).constraint === 'showtime_seats_seat_id_fkey') {
+    if (
+      code === "23503" &&
+      (e as { constraint?: string }).constraint === "showtime_seats_seat_id_fkey"
+    ) {
       throw err.conflict(
-        'seat_in_use',
-        'Không thể xoá ghế đã có suất diễn tạo vé từ đó. Hãy huỷ hoặc sửa suất diễn đó trước.',
+        "seat_in_use",
+        "Không thể xoá ghế đã có suất diễn tạo vé từ đó. Hãy huỷ hoặc sửa suất diễn đó trước.",
       );
     }
     throw e;
   });
   if (!saved) {
-    throw err.conflict('stale_version', 'Sơ đồ đã được sửa ở nơi khác. Hãy tải lại rồi lưu lại.');
+    throw err.conflict("stale_version", "Sơ đồ đã được sửa ở nơi khác. Hãy tải lại rồi lưu lại.");
   }
   return saved;
 }
@@ -178,11 +201,17 @@ export async function generateSeatRow(
   layoutId: number,
   input: { sectionId: number; rowLabel: string; count: number; replaceExisting?: boolean },
 ): Promise<number> {
-  await assertLayoutOwner(req, layoutId, 'design');
+  await assertLayoutOwner(req, layoutId, "design");
   if ((await repo.countSeats(layoutId)) + input.count > LAYOUT_MAX_SEATS) {
-    throw err.conflict('seat_limit_reached', `Một sơ đồ chỉ chứa tối đa ${LAYOUT_MAX_SEATS} ghế.`);
+    throw err.conflict("seat_limit_reached", `Một sơ đồ chỉ chứa tối đa ${LAYOUT_MAX_SEATS} ghế.`);
   }
-  return repo.generateSeatRow(layoutId, input.sectionId, input.rowLabel, input.count, input.replaceExisting ?? false);
+  return repo.generateSeatRow(
+    layoutId,
+    input.sectionId,
+    input.rowLabel,
+    input.count,
+    input.replaceExisting ?? false,
+  );
 }
 
 /**
@@ -212,13 +241,13 @@ export async function library(req: Request): Promise<LayoutLibraryEntry[]> {
  * that cannot happen.
  */
 export async function rename(req: Request, layoutId: number, name: string) {
-  await assertLayoutOwner(req, layoutId, 'design');
+  await assertLayoutOwner(req, layoutId, "design");
   try {
     await repo.renameLayout(layoutId, name);
   } catch (e) {
     // UNIQUE (venue_id, name) — the same refusal `createLayout` gives, in the same words.
-    if ((e as { code?: string }).code === '23505') {
-      throw err.conflict('layout_name_taken', 'Địa điểm này đã có sơ đồ trùng tên.');
+    if ((e as { code?: string }).code === "23505") {
+      throw err.conflict("layout_name_taken", "Địa điểm này đã có sơ đồ trùng tên.");
     }
     throw e;
   }
@@ -228,15 +257,15 @@ export async function rename(req: Request, layoutId: number, name: string) {
 export async function archive(req: Request, layoutId: number, archived: boolean) {
   await assertLayoutOwner(req, layoutId);
   if (archived && (await repo.layoutInUse(layoutId))) {
-    throw err.conflict('layout_in_use', 'Một suất chiếu đang dùng sơ đồ này, không thể lưu trữ.');
+    throw err.conflict("layout_in_use", "Một suất chiếu đang dùng sơ đồ này, không thể lưu trữ.");
   }
-  await repo.setLayoutStatus(layoutId, archived ? 'archived' : 'draft');
+  await repo.setLayoutStatus(layoutId, archived ? "archived" : "draft");
   await insertAudit(pool, {
     actorUserId: req.auth!.userId,
-    action: archived ? 'layout_archive' : 'layout_unarchive',
-    targetType: 'venue_layout',
+    action: archived ? "layout_archive" : "layout_unarchive",
+    targetType: "venue_layout",
     targetId: layoutId,
-    outcome: 'applied',
+    outcome: "applied",
   });
   return repo.getLayout(layoutId);
 }
@@ -245,24 +274,27 @@ export async function deleteLayout(req: Request, layoutId: number): Promise<void
   await assertLayoutOwner(req, layoutId);
   // A live map's source stays inspectable and re-appliable (FR-006).
   if (await repo.layoutInUse(layoutId)) {
-    throw err.conflict('layout_in_use', 'Một suất chiếu đang dùng sơ đồ này, không thể xoá.');
+    throw err.conflict("layout_in_use", "Một suất chiếu đang dùng sơ đồ này, không thể xoá.");
   }
   // Recorded BEFORE the delete: afterwards there is no row to name, and this is the single action
   // whose evidence cannot be recovered from the data itself.
   await insertAudit(pool, {
     actorUserId: req.auth!.userId,
-    action: 'layout_delete',
-    targetType: 'venue_layout',
+    action: "layout_delete",
+    targetType: "venue_layout",
     targetId: layoutId,
-    outcome: 'applied',
+    outcome: "applied",
   });
   await repo.deleteLayout(layoutId);
 }
 
 /** The pre-publish checks, in one pass (FR-030). `categoriesWithTier` is only known at bind time. */
-export async function validate(layoutId: number, categoriesWithTier?: number[]): Promise<ValidationIssue[]> {
+export async function validate(
+  layoutId: number,
+  categoriesWithTier?: number[],
+): Promise<ValidationIssue[]> {
   const layout = await repo.getLayout(layoutId);
-  if (!layout) throw err.notFound('not_found', 'Không tìm thấy sơ đồ.');
+  if (!layout) throw err.notFound("not_found", "Không tìm thấy sơ đồ.");
   return validateLayout({
     seats: layout.seats.map((s) => ({
       id: s.id ?? 0,
@@ -272,6 +304,8 @@ export async function validate(layoutId: number, categoriesWithTier?: number[]):
       seatNumber: s.seatNumber,
       x: s.x,
       y: s.y,
+      isAccessible: s.isAccessible,
+      companionSeatId: s.companionSeatId,
     })),
     // The size multiplier feeds the overlap test (FR-065), so the style fields have to come through.
     // Colour is no longer among them: it moved to the category, where the column is NOT NULL.
@@ -280,6 +314,8 @@ export async function validate(layoutId: number, categoriesWithTier?: number[]):
       name: s.name,
       color: s.color,
       seatSizeMultiplier: s.seatSizeMultiplier,
+      // Without this the overlap rule cannot tell a stacked balcony from two seats in one spot.
+      floorId: s.floorId ?? null,
     })),
     categories: layout.categories.map((c) => ({ id: c.id ?? 0, name: c.name })),
     // `capacity` and `categoryId` come too, or a capacity zone is invisible to the validator and a
@@ -291,6 +327,10 @@ export async function validate(layoutId: number, categoriesWithTier?: number[]):
       points: e.points,
       capacity: e.capacity,
       categoryId: e.categoryId,
+      // A zone drawn as a plain rectangle has no `points`, so `zone_over_seats` has nothing to ask
+      // "what stands inside this?" with unless its box comes too.
+      width: e.width,
+      height: e.height,
     })),
     categoriesWithTier,
   });
@@ -300,7 +340,10 @@ export async function validate(layoutId: number, categoriesWithTier?: number[]):
  * Validation at BIND time (T050). The category-without-tier check cannot run against a layout alone —
  * a layout has no tiers — so it needs the showtime whose tiers are being assigned (FR-030).
  */
-export async function validateForShowtime(layoutId: number, showtimeId: number): Promise<ValidationIssue[]> {
+export async function validateForShowtime(
+  layoutId: number,
+  showtimeId: number,
+): Promise<ValidationIssue[]> {
   const { rows } = await pool.query<{ category_id: number }>(
     `SELECT DISTINCT se.category_id
        FROM seats se
@@ -308,7 +351,10 @@ export async function validateForShowtime(layoutId: number, showtimeId: number):
       WHERE se.layout_id = $1 AND se.category_id IS NOT NULL`,
     [layoutId, showtimeId],
   );
-  return validate(layoutId, rows.map((r) => r.category_id));
+  return validate(
+    layoutId,
+    rows.map((r) => r.category_id),
+  );
 }
 
 export async function publish(req: Request, layoutId: number) {
@@ -323,17 +369,17 @@ export async function publish(req: Request, layoutId: number) {
     // without this the only record of it is the organizer's memory.
     await insertAudit(pool, {
       actorUserId: req.auth!.userId,
-      action: 'layout_publish',
-      targetType: 'venue_layout',
+      action: "layout_publish",
+      targetType: "venue_layout",
       targetId: layoutId,
-      outcome: 'rejected',
+      outcome: "rejected",
       detail: { issues: blocking.map((i) => i.code) },
     });
-    throw err.refused(422, 'layout_invalid', 'Sơ đồ chưa hợp lệ, không thể phát hành.', {
+    throw err.refused(422, "layout_invalid", "Sơ đồ chưa hợp lệ, không thể phát hành.", {
       issues: blocking,
     });
   }
-  await repo.setLayoutStatus(layoutId, 'ready');
+  await repo.setLayoutStatus(layoutId, "ready");
   const layout = await repo.getLayout(layoutId);
   // Publishing is the moment the organizer declares the chart finished, so it is the checkpoint worth
   // being able to come back to. Recorded AFTER the gate, so history holds only publishable charts, and
@@ -348,16 +394,16 @@ export async function publish(req: Request, layoutId: number) {
   }
   await insertAudit(pool, {
     actorUserId: req.auth!.userId,
-    action: 'layout_publish',
-    targetType: 'venue_layout',
+    action: "layout_publish",
+    targetType: "venue_layout",
     targetId: layoutId,
-    outcome: 'applied',
+    outcome: "applied",
   });
   return layout;
 }
 
 export async function revisions(req: Request, layoutId: number): Promise<LayoutRevision[]> {
-  await assertLayoutOwner(req, layoutId, 'read');
+  await assertLayoutOwner(req, layoutId, "read");
   return repo.listRevisions(layoutId);
 }
 
@@ -367,9 +413,9 @@ export async function revisionDocument(
   layoutId: number,
   revisionId: number,
 ): Promise<ChartDocument> {
-  await assertLayoutOwner(req, layoutId, 'read');
+  await assertLayoutOwner(req, layoutId, "read");
   const doc = await repo.revisionDocument(layoutId, revisionId);
-  if (!doc) throw err.notFound('revision_not_found', 'Không tìm thấy phiên bản này.');
+  if (!doc) throw err.notFound("revision_not_found", "Không tìm thấy phiên bản này.");
   return doc;
 }
 
@@ -385,12 +431,12 @@ export async function revisionDocument(
  * content, not a rewind of the concurrency counter.
  */
 export async function restoreRevision(req: Request, layoutId: number, revisionId: number) {
-  await assertLayoutOwner(req, layoutId, 'design');
+  await assertLayoutOwner(req, layoutId, "design");
   const document = await repo.getRevisionDocument(layoutId, revisionId);
-  if (!document) throw err.notFound('not_found', 'Không tìm thấy phiên bản này.');
+  if (!document) throw err.notFound("not_found", "Không tìm thấy phiên bản này.");
 
   const current = await repo.getLayout(layoutId);
-  if (!current) throw err.notFound('not_found', 'Không tìm thấy sơ đồ.');
+  if (!current) throw err.notFound("not_found", "Không tìm thấy sơ đồ.");
 
   // A revision names the rows that existed when it was taken, and some are gone — usually the very
   // reason for going back. `reviveDocument` keeps the ids that are still live (preserving identity,
@@ -410,35 +456,43 @@ export async function restoreRevision(req: Request, layoutId: number, revisionId
   });
   await insertAudit(pool, {
     actorUserId: req.auth!.userId,
-    action: 'layout_restore',
-    targetType: 'venue_layout',
+    action: "layout_restore",
+    targetType: "venue_layout",
     targetId: layoutId,
-    outcome: 'applied',
+    outcome: "applied",
     detail: { revisionId },
   });
   return saved;
 }
 
-export async function clone(req: Request, sourceId: number, targetVenueId: number, name: string): Promise<number> {
-  await assertLayoutOwner(req, sourceId, 'read'); // refuses another organizer's layout (FR-037)
-  await assertVenueOwner(req, targetVenueId, 'design');
+export async function clone(
+  req: Request,
+  sourceId: number,
+  targetVenueId: number,
+  name: string,
+): Promise<number> {
+  await assertLayoutOwner(req, sourceId, "read"); // refuses another organizer's layout (FR-037)
+  await assertVenueOwner(req, targetVenueId, "design");
   if ((await repo.countLayouts(targetVenueId)) >= VENUE_MAX_LAYOUTS) {
-    throw err.conflict('layout_limit_reached', `Mỗi địa điểm chỉ có tối đa ${VENUE_MAX_LAYOUTS} sơ đồ.`);
+    throw err.conflict(
+      "layout_limit_reached",
+      `Mỗi địa điểm chỉ có tối đa ${VENUE_MAX_LAYOUTS} sơ đồ.`,
+    );
   }
   try {
     const id = await repo.cloneLayout(sourceId, targetVenueId, name);
     await insertAudit(pool, {
       actorUserId: req.auth!.userId,
-      action: 'layout_clone',
-      targetType: 'venue_layout',
+      action: "layout_clone",
+      targetType: "venue_layout",
       targetId: id,
-      outcome: 'applied',
+      outcome: "applied",
       detail: { sourceId, targetVenueId },
     });
     return id;
   } catch (e) {
-    if ((e as { code?: string }).code === '23505') {
-      throw err.conflict('layout_name_taken', 'Địa điểm đích đã có một sơ đồ trùng tên.');
+    if ((e as { code?: string }).code === "23505") {
+      throw err.conflict("layout_name_taken", "Địa điểm đích đã có một sơ đồ trùng tên.");
     }
     throw e;
   }
@@ -456,15 +510,15 @@ export async function clone(req: Request, sourceId: number, targetVenueId: numbe
  */
 export async function saveAsTemplate(req: Request, sourceId: number, name: string) {
   const source = await repo.getLayout(sourceId);
-  if (!source) throw err.notFound('not_found', 'Không tìm thấy sơ đồ.');
+  if (!source) throw err.notFound("not_found", "Không tìm thấy sơ đồ.");
   const id = await clone(req, sourceId, source.venueId, name);
   await repo.setTemplate(id, true);
   await insertAudit(pool, {
     actorUserId: req.auth!.userId,
-    action: 'layout_save_as_template',
-    targetType: 'venue_layout',
+    action: "layout_save_as_template",
+    targetType: "venue_layout",
     targetId: id,
-    outcome: 'applied',
+    outcome: "applied",
     detail: { sourceId },
   });
   return repo.getLayout(id);

@@ -1,6 +1,5 @@
 import React from "react";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
-import { PieChart as PieChartIcon } from "lucide-react";
 import type { AnalyticsBreakdowns } from "../../../../shared/types/analytics";
 
 interface Props {
@@ -24,15 +23,9 @@ export function RevenueDonutCharts({ breakdowns }: Props) {
   return (
     <div className="flex flex-col gap-5 border-2 border-beige-kem/30 bg-surface-2 p-5 text-beige-kem">
       {/* Side Panel Header */}
-      <div className="flex items-center gap-2.5 border-b border-beige-kem/10 pb-3">
-        <div className="bg-cam-dat/20 p-2 text-cam-dat">
-          <PieChartIcon className="h-5 w-5" />
-        </div>
-        <div>
-          <h4 className="text-base font-black text-beige-kem">Cơ cấu doanh thu</h4>
-          <p className="text-xs text-beige-kem/60">Tỷ trọng doanh thu hạng vé & danh mục</p>
-        </div>
-      </div>
+      <h4 className="border-b border-beige-kem/20 pb-3 font-display text-base font-black text-beige-kem">
+        Cơ cấu doanh thu
+      </h4>
 
       {/* 1. Revenue by Ticket Tier */}
       <div className="border border-beige-kem/20 bg-xanh-pho p-4">
@@ -81,23 +74,19 @@ export function RevenueDonutCharts({ breakdowns }: Props) {
           )}
         </div>
 
-        {/* Legend pills */}
         {by_tier.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-2 text-xs">
+          <ul className="mt-2 space-y-2 font-meta text-meta text-beige-kem/80">
             {by_tier.map((t, idx) => (
-              <div
-                key={t.tier_name}
-                className="flex items-center gap-1.5 bg-beige-kem/10 px-2 py-1 text-[11px]"
-              >
+              <li key={t.tier_name} className="flex items-center gap-2">
                 <span
-                  className="h-2.5 w-2.5"
+                  className="h-2.5 w-2.5 shrink-0"
                   style={{ backgroundColor: TIER_COLORS[idx % TIER_COLORS.length] }}
                 />
                 <span className="font-bold text-beige-kem">{t.tier_name}</span>
                 <span className="text-beige-kem/60">({t.percentage_share}%)</span>
-              </div>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
       </div>
 
@@ -148,23 +137,19 @@ export function RevenueDonutCharts({ breakdowns }: Props) {
           )}
         </div>
 
-        {/* Legend pills */}
         {by_category.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-2 text-xs">
+          <ul className="mt-2 space-y-2 font-meta text-meta text-beige-kem/80">
             {by_category.map((c, idx) => (
-              <div
-                key={c.category}
-                className="flex items-center gap-1.5 bg-beige-kem/10 px-2 py-1 text-[11px]"
-              >
+              <li key={c.category} className="flex items-center gap-2">
                 <span
-                  className="h-2.5 w-2.5"
+                  className="h-2.5 w-2.5 shrink-0"
                   style={{ backgroundColor: CATEGORY_COLORS[idx % CATEGORY_COLORS.length] }}
                 />
                 <span className="font-bold text-beige-kem">{c.category}</span>
                 <span className="text-beige-kem/60">({c.percentage_share}%)</span>
-              </div>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
       </div>
     </div>

@@ -1,32 +1,34 @@
-import { type NextFunction, type Request, type Response, Router } from 'express';
-import multer from 'multer';
-import { z } from 'zod';
+import { type NextFunction, type Request, type Response, Router } from "express";
+import multer from "multer";
+import { z } from "zod";
 import {
   FLOORPLAN_MAX_BYTES,
   FLOORPLAN_MAX_PX,
   LAYOUT_MAX_SEATS,
+  LAYOUT_MAX,
+  LAYOUT_MIN,
   LAYOUT_SPACE,
   POLYGON_MAX_POINTS,
   SEAT_DIAMETER,
   SEAT_SIZE_MAX_PCT,
   SEAT_SIZE_MIN_PCT,
-} from '../../config.js';
-import { blockingIssues } from '@shared/catalog/seatmap-validate.js';
-import { ImageRejected, deleteFloorPlan, processFloorPlan, saveFloorPlan } from './floorplan.js';
-import { uploadRateLimit, withUploadSlot } from './upload.throttle.js';
-import { createTable, deleteTable, tableLayoutId, updateTable } from './tables.js';
-import { createStandingArea, reshapeStandingArea } from './standing.js';
-import { documentSchema } from './document.schema.js';
-import { err } from '../../http.js';
-import { requireOrganizer } from '../../middleware/authz.js';
-import { requireAuth } from '../../middleware/requireAuth.js';
-import { validate as validateBody } from '../../middleware/validate.js';
-import { pool } from '../../db/pool.js';
-import { broadcastSeatUpdate } from '../../realtime/io.js';
-import type { SeatStatus } from '@shared/catalog/types.js';
-import * as apply from './apply.js';
-import * as repo from './layouts.repo.js';
-import * as service from './layouts.service.js';
+} from "../../config.js";
+import { blockingIssues } from "@shared/catalog/seatmap-validate.js";
+import { ImageRejected, deleteFloorPlan, processFloorPlan, saveFloorPlan } from "./floorplan.js";
+import { uploadRateLimit, withUploadSlot } from "./upload.throttle.js";
+import { createTable, deleteTable, tableLayoutId, updateTable } from "./tables.js";
+import { createStandingArea, reshapeStandingArea } from "./standing.js";
+import { documentSchema } from "./document.schema.js";
+import { err } from "../../http.js";
+import { requireOrganizer } from "../../middleware/authz.js";
+import { requireAuth } from "../../middleware/requireAuth.js";
+import { validate as validateBody } from "../../middleware/validate.js";
+import { pool } from "../../db/pool.js";
+import { broadcastSeatUpdate } from "../../realtime/io.js";
+import type { SeatStatus } from "@shared/catalog/types.js";
+import * as apply from "./apply.js";
+import * as repo from "./layouts.repo.js";
+import * as service from "./layouts.service.js";
 
 /** Current statuses of the given seats, so a retier broadcast carries a truthful status alongside
  *  the new tier rather than assuming `available`. */
@@ -47,12 +49,14 @@ export const seatmapRouter = Router();
 seatmapRouter.use(requireAuth, requireOrganizer);
 
 const asyncH =
-  (fn: (req: Request, res: Response) => Promise<void>) => (req: Request, res: Response, next: NextFunction) =>
+  (fn: (req: Request, res: Response) => Promise<void>) =>
+  (req: Request, res: Response, next: NextFunction) =>
     fn(req, res).catch(next);
 
 // ---- Schemas (SEC-07: strict, validated before use) ----
 
-const coord = z.number().int().min(0).max(LAYOUT_SPACE);
+// The WALL, not the frame — a coordinate the database now accepts must not be refused here first.
+const coord = z.number().int().min(LAYOUT_MIN).max(LAYOUT_MAX);
 const rotation = z.number().int();
 
 const sectionSchema = z.object({
@@ -61,8 +65,12 @@ const sectionSchema = z.object({
   description: z.string().max(500).nullable().optional(),
   // Visual style (FR-064). `color` is editor-only and never reaches the buyer map.
   color: z.string().trim().max(32).nullable().optional(),
-  seatShape: z.enum(['circle', 'square']).optional(),
-  seatSizeMultiplier: z.number().min(SEAT_SIZE_MIN_PCT / 100).max(SEAT_SIZE_MAX_PCT / 100).optional(),
+  seatShape: z.enum(["circle", "square"]).optional(),
+  seatSizeMultiplier: z
+    .number()
+    .min(SEAT_SIZE_MIN_PCT / 100)
+    .max(SEAT_SIZE_MAX_PCT / 100)
+    .optional(),
 });
 
 const categorySchema = z.object({
@@ -79,7 +87,7 @@ const seatSchema = z.object({
   categoryId: z.number().int().nullable().optional(),
   rowLabel: z.string().trim().min(1).max(8),
   seatNumber: z.number().int().min(1),
-  seatType: z.enum(['single', 'double', 'standing']),
+  seatType: z.enum(["single", "double", "standing"]),
   x: coord,
   y: coord,
   rotation,
@@ -89,10 +97,22 @@ const seatSchema = z.object({
 const elementSchema = z.object({
   id: z.number().int().optional(),
   kind: z.enum([
-    'stage', 'aisle', 'door', 'bar', 'label', 'area',
+    "stage",
+    "aisle",
+    "door",
+    "bar",
+    "label",
+    "area",
     // Hall outline and dividers (FR-057), then the facility icons (FR-061).
-    'boundary', 'divider',
-    'exit', 'restroom', 'food_drink', 'smoking', 'first_aid', 'lift_stairs', 'wheelchair',
+    "boundary",
+    "divider",
+    "exit",
+    "restroom",
+    "food_drink",
+    "smoking",
+    "first_aid",
+    "lift_stairs",
+    "wheelchair",
   ]),
   x: coord,
   y: coord,
@@ -101,7 +121,11 @@ const elementSchema = z.object({
   rotation,
   label: z.string().max(60).nullable(),
   /** Ordered vertices for a boundary or divider; the count rule is a DOMAIN check (FR-059). */
-  points: z.array(z.object({ x: coord, y: coord })).max(POLYGON_MAX_POINTS).nullable().optional(),
+  points: z
+    .array(z.object({ x: coord, y: coord }))
+    .max(POLYGON_MAX_POINTS)
+    .nullable()
+    .optional(),
   /** `area` only: how many standing positions were generated inside it. */
   capacity: z.number().int().min(0).max(LAYOUT_MAX_SEATS).nullable().optional(),
 });
@@ -110,7 +134,7 @@ const tableSchema = z.object({
   sectionId: z.number().int().nullable(),
   categoryId: z.number().int().nullable().optional(),
   name: z.string().trim().min(1).max(40),
-  shape: z.enum(['round', 'rect']),
+  shape: z.enum(["round", "rect"]),
   x: coord,
   y: coord,
   width: z.number().int().min(1).max(LAYOUT_SPACE),
@@ -120,39 +144,42 @@ const tableSchema = z.object({
   // non-integer or absurd value is still a schema error.
   seatCount: z.number().int().min(0).max(999),
   sideCounts: z.array(z.number().int().min(0)).length(4).nullable().optional(),
-  bookingMode: z.enum(['per_seat', 'whole_table']).optional(),
+  bookingMode: z.enum(["per_seat", "whole_table"]).optional(),
 });
-const updateTableSchema = tableSchema.partial().refine((v) => Object.keys(v).length > 0, { message: 'empty' });
+const updateTableSchema = tableSchema
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, { message: "empty" });
 
 const createLayoutSchema = z.object({ name: z.string().trim().min(1).max(80) });
 
-const saveLayoutSchema = z.object({
-  version: z.number().int().min(1),
-  name: z.string().trim().min(1).max(80).optional(),
-  isTemplate: z.boolean().optional(),
-  /**
-   * The authoring document. When present the server projects the collections from it and ignores the
-   * arrays below, so a client never has to keep the two in step.
-   */
-  document: documentSchema.optional(),
-  /**
-   * @deprecated The pre-document shape, accepted until the last caller sends a document.
-   *
-   * Sending these ALONGSIDE a `document` is refused outright (see the refine below). The server
-   * resolves the conflict by ignoring them, which is defensible but silent — a caller that sent both
-   * would believe both had been applied, and would find out only when the seats it asked for were not
-   * there. An ambiguous request is a mistake, so it is an error rather than a coin toss.
-   */
-  sections: z.array(sectionSchema).max(200).optional(),
-  categories: z.array(categorySchema).max(50).optional(),
-  // Deliberately uncapped here: the ceiling is a DOMAIN rule, and the service reports it as
-  // `409 seat_limit_reached` / `element_limit_reached` (FR-007, FR-019). A schema `.max()` would
-  // shadow it with a generic 400. Payload size is already bounded by the 1 MB JSON limit.
-  seats: z.array(seatSchema).optional(),
-  elements: z.array(elementSchema).optional(),
-})
+const saveLayoutSchema = z
+  .object({
+    version: z.number().int().min(1),
+    name: z.string().trim().min(1).max(80).optional(),
+    isTemplate: z.boolean().optional(),
+    /**
+     * The authoring document. When present the server projects the collections from it and ignores the
+     * arrays below, so a client never has to keep the two in step.
+     */
+    document: documentSchema.optional(),
+    /**
+     * @deprecated The pre-document shape, accepted until the last caller sends a document.
+     *
+     * Sending these ALONGSIDE a `document` is refused outright (see the refine below). The server
+     * resolves the conflict by ignoring them, which is defensible but silent — a caller that sent both
+     * would believe both had been applied, and would find out only when the seats it asked for were not
+     * there. An ambiguous request is a mistake, so it is an error rather than a coin toss.
+     */
+    sections: z.array(sectionSchema).max(200).optional(),
+    categories: z.array(categorySchema).max(50).optional(),
+    // Deliberately uncapped here: the ceiling is a DOMAIN rule, and the service reports it as
+    // `409 seat_limit_reached` / `element_limit_reached` (FR-007, FR-019). A schema `.max()` would
+    // shadow it with a generic 400. Payload size is already bounded by the 1 MB JSON limit.
+    seats: z.array(seatSchema).optional(),
+    elements: z.array(elementSchema).optional(),
+  })
   .refine((b) => !(b.document && (b.sections || b.categories || b.seats || b.elements)), {
-    message: 'document_and_legacy_arrays',
+    message: "document_and_legacy_arrays",
   });
 
 const generateSeatsSchema = z.object({
@@ -183,14 +210,14 @@ const cloneSchema = z.object({
 // The library: every chart this organizer owns, across venues. Registered BEFORE `/layouts/:id` so
 // the literal path is not swallowed by the parameterised one.
 seatmapRouter.get(
-  '/layouts',
+  "/layouts",
   asyncH(async (req, res) => {
     res.json({ layouts: await service.library(req) });
   }),
 );
 
 seatmapRouter.patch(
-  '/layouts/:id',
+  "/layouts/:id",
   validateBody(z.object({ name: z.string().trim().min(1).max(80) })),
   asyncH(async (req, res) => {
     const { name } = req.body as { name: string };
@@ -199,30 +226,36 @@ seatmapRouter.patch(
 );
 
 seatmapRouter.get(
-  '/layouts/:id/revisions',
+  "/layouts/:id/revisions",
   asyncH(async (req, res) => {
     res.json({ revisions: await service.revisions(req, Number(req.params.id)) });
   }),
 );
 
 seatmapRouter.get(
-  '/layouts/:id/revisions/:revisionId',
+  "/layouts/:id/revisions/:revisionId",
   asyncH(async (req, res) => {
     res.json({
-      document: await service.revisionDocument(req, Number(req.params.id), Number(req.params.revisionId)),
+      document: await service.revisionDocument(
+        req,
+        Number(req.params.id),
+        Number(req.params.revisionId),
+      ),
     });
   }),
 );
 
 seatmapRouter.post(
-  '/layouts/:id/revisions/:revisionId/restore',
+  "/layouts/:id/revisions/:revisionId/restore",
   asyncH(async (req, res) => {
-    res.json(await service.restoreRevision(req, Number(req.params.id), Number(req.params.revisionId)));
+    res.json(
+      await service.restoreRevision(req, Number(req.params.id), Number(req.params.revisionId)),
+    );
   }),
 );
 
 seatmapRouter.post(
-  '/layouts/:id/save-as-template',
+  "/layouts/:id/save-as-template",
   validateBody(z.object({ name: z.string().trim().min(1).max(80) })),
   asyncH(async (req, res) => {
     const { name } = req.body as { name: string };
@@ -231,30 +264,30 @@ seatmapRouter.post(
 );
 
 seatmapRouter.post(
-  '/layouts/:id/archive',
+  "/layouts/:id/archive",
   asyncH(async (req, res) => {
     res.json(await service.archive(req, Number(req.params.id), true));
   }),
 );
 
 seatmapRouter.post(
-  '/layouts/:id/restore',
+  "/layouts/:id/restore",
   asyncH(async (req, res) => {
     res.json(await service.archive(req, Number(req.params.id), false));
   }),
 );
 
 seatmapRouter.get(
-  '/venues/:venueId/layouts',
+  "/venues/:venueId/layouts",
   asyncH(async (req, res) => {
     const venueId = Number(req.params.venueId);
-    await service.assertVenueOwner(req, venueId, 'read');
+    await service.assertVenueOwner(req, venueId, "read");
     res.json({ layouts: await repo.listLayouts(venueId) });
   }),
 );
 
 seatmapRouter.post(
-  '/venues/:venueId/layouts',
+  "/venues/:venueId/layouts",
   validateBody(createLayoutSchema),
   asyncH(async (req, res) => {
     const venueId = Number(req.params.venueId);
@@ -265,18 +298,21 @@ seatmapRouter.post(
 );
 
 seatmapRouter.get(
-  '/layouts/:id',
+  "/layouts/:id",
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
-    await service.assertLayoutOwner(req, id, 'read');
+    await service.assertLayoutOwner(req, id, "read");
     const layout = await repo.getLayout(id);
-    if (!layout) throw err.notFound('not_found', 'Không tìm thấy sơ đồ.');
-    res.json({ ...layout, space: { width: LAYOUT_SPACE, height: LAYOUT_SPACE, seatDiameter: SEAT_DIAMETER } });
+    if (!layout) throw err.notFound("not_found", "Không tìm thấy sơ đồ.");
+    res.json({
+      ...layout,
+      space: { width: LAYOUT_SPACE, height: LAYOUT_SPACE, seatDiameter: SEAT_DIAMETER },
+    });
   }),
 );
 
 seatmapRouter.put(
-  '/layouts/:id',
+  "/layouts/:id",
   validateBody(saveLayoutSchema),
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
@@ -286,7 +322,7 @@ seatmapRouter.put(
 );
 
 seatmapRouter.delete(
-  '/layouts/:id',
+  "/layouts/:id",
   asyncH(async (req, res) => {
     await service.deleteLayout(req, Number(req.params.id));
     res.status(204).end();
@@ -294,7 +330,7 @@ seatmapRouter.delete(
 );
 
 seatmapRouter.post(
-  '/layouts/:id/generate-seats',
+  "/layouts/:id/generate-seats",
   validateBody(generateSeatsSchema),
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
@@ -307,10 +343,10 @@ seatmapRouter.post(
 // ---- Validation & publishing (FR-030..FR-032) ----
 
 seatmapRouter.post(
-  '/layouts/:id/validate',
+  "/layouts/:id/validate",
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
-    await service.assertLayoutOwner(req, id, 'read');
+    await service.assertLayoutOwner(req, id, "read");
     const issues = await service.validate(id);
     // `valid` answers "would publish succeed?", so it turns on the BLOCKING issues only. The warnings
     // still travel in `issues` — the editor shows them, the gate ignores them.
@@ -319,7 +355,7 @@ seatmapRouter.post(
 );
 
 seatmapRouter.post(
-  '/layouts/:id/publish',
+  "/layouts/:id/publish",
   asyncH(async (req, res) => {
     res.json(await service.publish(req, Number(req.params.id)));
   }),
@@ -327,7 +363,10 @@ seatmapRouter.post(
 
 // ---- Floor plan (FR-020..FR-026a) ----
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: FLOORPLAN_MAX_BYTES } });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: FLOORPLAN_MAX_BYTES },
+});
 
 const planAlignSchema = z.object({
   scale: z.number().int().min(1).max(10000),
@@ -338,26 +377,29 @@ const planAlignSchema = z.object({
 });
 
 seatmapRouter.post(
-  '/layouts/:id/floorplan',
+  "/layouts/:id/floorplan",
   uploadRateLimit,
-  upload.single('file'),
+  upload.single("file"),
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
-    await service.assertLayoutOwner(req, id, 'design');
+    await service.assertLayoutOwner(req, id, "design");
     const file = (req as Request & { file?: { buffer: Buffer } }).file;
-    if (!file) throw err.badRequest('invalid_image', 'Chưa chọn tệp ảnh.');
+    if (!file) throw err.badRequest("invalid_image", "Chưa chọn tệp ảnh.");
 
     const webp = await withUploadSlot(() => processFloorPlan(file.buffer)).catch((e) => {
       if (e instanceof ImageRejected) {
-        throw e.reason === 'image_too_large'
-          ? err.badRequest('image_too_large', `Ảnh quá lớn (tối đa ${FLOORPLAN_MAX_PX}px mỗi cạnh).`)
-          : err.badRequest('invalid_image', 'Chỉ chấp nhận ảnh JPEG, PNG hoặc WebP.');
+        throw e.reason === "image_too_large"
+          ? err.badRequest(
+              "image_too_large",
+              `Ảnh quá lớn (tối đa ${FLOORPLAN_MAX_PX}px mỗi cạnh).`,
+            )
+          : err.badRequest("invalid_image", "Chỉ chấp nhận ảnh JPEG, PNG hoặc WebP.");
       }
       throw e;
     });
 
     const previous = await repo.currentPlanUrl(id);
-    const url = await saveFloorPlan(id, webp, 'floorplan');
+    const url = await saveFloorPlan(id, webp, "floorplan");
     try {
       await repo.setPlanUrl(id, url);
     } catch (e) {
@@ -372,11 +414,11 @@ seatmapRouter.post(
 );
 
 seatmapRouter.patch(
-  '/layouts/:id/floorplan',
+  "/layouts/:id/floorplan",
   validateBody(planAlignSchema),
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
-    await service.assertLayoutOwner(req, id, 'design');
+    await service.assertLayoutOwner(req, id, "design");
     // Alignment only — no seat moves when the background does (FR-024).
     await repo.updatePlanAlignment(id, req.body as z.infer<typeof planAlignSchema>);
     res.json((await repo.getLayout(id))?.floorPlan);
@@ -389,17 +431,40 @@ seatmapRouter.patch(
  * `design` permission, like the alignment above: it changes how the chart SELLS, not what it holds,
  * and no seat moves.
  */
-const orphanRuleSchema = z.object({ orphanRule: z.enum(['balanced', 'strict']) });
+const orphanRuleSchema = z.object({ orphanRule: z.enum(["balanced", "strict"]) });
 
 seatmapRouter.patch(
-  '/layouts/:id/orphan-rule',
+  "/layouts/:id/orphan-rule",
   validateBody(orphanRuleSchema),
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
-    await service.assertLayoutOwner(req, id, 'design');
+    await service.assertLayoutOwner(req, id, "design");
     const { orphanRule } = req.body as z.infer<typeof orphanRuleSchema>;
     await repo.updateOrphanRule(id, orphanRule);
     res.json({ orphanRule });
+  }),
+);
+
+/**
+ * The chart's focal point (0043) — what best-available ranks outward from.
+ *
+ * `null` means "infer it", the behaviour of every chart drawn before this. Bounded by the WALL rather
+ * than the frame, like every other coordinate: a focal point outside the seating is legitimate (an
+ * arena's pitch, a thrust stage) and the frame is only what the editor happens to look at.
+ */
+const focalPointSchema = z.object({
+  focalPoint: z.object({ x: coord, y: coord }).nullable(),
+});
+
+seatmapRouter.patch(
+  "/layouts/:id/focal-point",
+  validateBody(focalPointSchema),
+  asyncH(async (req, res) => {
+    const id = Number(req.params.id);
+    await service.assertLayoutOwner(req, id, "design");
+    const { focalPoint } = req.body as z.infer<typeof focalPointSchema>;
+    await repo.updateFocalPoint(id, focalPoint);
+    res.json({ focalPoint });
   }),
 );
 
@@ -418,11 +483,11 @@ const areaSchema = z.object({
 });
 
 seatmapRouter.patch(
-  '/layouts/:id/areas/:elementId',
+  "/layouts/:id/areas/:elementId",
   validateBody(areaSchema),
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
-    await service.assertLayoutOwner(req, id, 'design');
+    await service.assertLayoutOwner(req, id, "design");
     const body = req.body as z.infer<typeof areaSchema>;
     const created = await reshapeStandingArea(id, Number(req.params.elementId), body);
     res.json({ created, layout: await repo.getLayout(id) });
@@ -430,29 +495,32 @@ seatmapRouter.patch(
 );
 
 seatmapRouter.post(
-  '/layouts/:id/reference',
+  "/layouts/:id/reference",
   uploadRateLimit,
-  upload.single('file'),
+  upload.single("file"),
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
-    await service.assertLayoutOwner(req, id, 'design');
+    await service.assertLayoutOwner(req, id, "design");
     const file = (req as Request & { file?: { buffer: Buffer } }).file;
-    if (!file) throw err.badRequest('invalid_image', 'Chưa chọn tệp ảnh.');
+    if (!file) throw err.badRequest("invalid_image", "Chưa chọn tệp ảnh.");
 
     // The SAME pipeline the buyer-facing plan uses: magic-bytes sniffing, SVG refused outright, and a
     // re-encode to WebP under an unguessable name. A picture only the organizer sees is still a file
     // this server will serve, so it gets no weaker treatment (ADR-0004).
     const webp = await withUploadSlot(() => processFloorPlan(file.buffer)).catch((e) => {
       if (e instanceof ImageRejected) {
-        throw e.reason === 'image_too_large'
-          ? err.badRequest('image_too_large', `Ảnh quá lớn (tối đa ${FLOORPLAN_MAX_PX}px mỗi cạnh).`)
-          : err.badRequest('invalid_image', 'Chỉ chấp nhận ảnh JPEG, PNG hoặc WebP.');
+        throw e.reason === "image_too_large"
+          ? err.badRequest(
+              "image_too_large",
+              `Ảnh quá lớn (tối đa ${FLOORPLAN_MAX_PX}px mỗi cạnh).`,
+            )
+          : err.badRequest("invalid_image", "Chỉ chấp nhận ảnh JPEG, PNG hoặc WebP.");
       }
       throw e;
     });
 
     const previous = await repo.currentReferenceUrl(id);
-    const url = await saveFloorPlan(id, webp, 'reference');
+    const url = await saveFloorPlan(id, webp, "reference");
     try {
       await repo.setReferenceUrl(id, url);
     } catch (e) {
@@ -465,21 +533,21 @@ seatmapRouter.post(
 );
 
 seatmapRouter.patch(
-  '/layouts/:id/reference',
+  "/layouts/:id/reference",
   validateBody(referenceAlignSchema),
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
-    await service.assertLayoutOwner(req, id, 'design');
+    await service.assertLayoutOwner(req, id, "design");
     await repo.updateReferenceAlignment(id, req.body as z.infer<typeof referenceAlignSchema>);
     res.json((await repo.getLayout(id))?.referenceChart);
   }),
 );
 
 seatmapRouter.delete(
-  '/layouts/:id/reference',
+  "/layouts/:id/reference",
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
-    await service.assertLayoutOwner(req, id, 'design');
+    await service.assertLayoutOwner(req, id, "design");
     const previous = await repo.currentReferenceUrl(id);
     await repo.setReferenceUrl(id, null);
     await deleteFloorPlan(previous);
@@ -488,10 +556,10 @@ seatmapRouter.delete(
 );
 
 seatmapRouter.delete(
-  '/layouts/:id/floorplan',
+  "/layouts/:id/floorplan",
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
-    await service.assertLayoutOwner(req, id, 'design');
+    await service.assertLayoutOwner(req, id, "design");
     const previous = await repo.currentPlanUrl(id);
     await repo.setPlanUrl(id, null);
     await deleteFloorPlan(previous);
@@ -517,14 +585,25 @@ const showtimeSeatEditSchema = z.object({
 
 const editMapSchema = z.object({ seats: z.array(showtimeSeatEditSchema).max(LAYOUT_MAX_SEATS) });
 const reapplySchema = z.object({ dryRun: z.boolean() });
-const blockSchema = z.object({ showtimeSeatIds: z.array(z.number().int()).min(1).max(LAYOUT_MAX_SEATS), blocked: z.boolean() });
-const tierSchema = z.object({ showtimeSeatIds: z.array(z.number().int()).min(1).max(LAYOUT_MAX_SEATS), ticketTierId: z.number().int() });
+const blockSchema = z.object({
+  showtimeSeatIds: z.array(z.number().int()).min(1).max(LAYOUT_MAX_SEATS),
+  blocked: z.boolean(),
+});
+const tierSchema = z.object({
+  showtimeSeatIds: z.array(z.number().int()).min(1).max(LAYOUT_MAX_SEATS),
+  ticketTierId: z.number().int(),
+});
 
 /** A refused edit rejects the WHOLE thing and leaves the map exactly as it was (FR-029). */
 function refuse(outcome: { refusals: unknown[] }): never {
-  throw err.refused(409, 'map_edit_refused', 'Một số ghế không thể thay đổi. Sơ đồ được giữ nguyên.', {
-    refusals: outcome.refusals,
-  });
+  throw err.refused(
+    409,
+    "map_edit_refused",
+    "Một số ghế không thể thay đổi. Sơ đồ được giữ nguyên.",
+    {
+      refusals: outcome.refusals,
+    },
+  );
 }
 
 /**
@@ -535,7 +614,7 @@ function refuse(outcome: { refusals: unknown[] }): never {
  * be arranging seats in. Same data, ownership gate instead of a visibility gate.
  */
 seatmapRouter.get(
-  '/showtimes/:id/seat-map',
+  "/showtimes/:id/seat-map",
   asyncH(async (req, res) => {
     const showtimeId = Number(req.params.id);
     await service.assertShowtimeOwner(req, showtimeId);
@@ -544,7 +623,7 @@ seatmapRouter.get(
 );
 
 seatmapRouter.put(
-  '/showtimes/:id/seat-map',
+  "/showtimes/:id/seat-map",
   validateBody(editMapSchema),
   asyncH(async (req, res) => {
     const showtimeId = Number(req.params.id);
@@ -557,13 +636,14 @@ seatmapRouter.put(
 );
 
 seatmapRouter.post(
-  '/showtimes/:id/seat-map/reapply',
+  "/showtimes/:id/seat-map/reapply",
   validateBody(reapplySchema),
   asyncH(async (req, res) => {
     const showtimeId = Number(req.params.id);
     await service.assertShowtimeOwner(req, showtimeId);
     const desired = await apply.desiredFromLayout(showtimeId);
-    if (!desired) throw err.badRequest('validation_failed', 'Suất chiếu này chưa gắn với sơ đồ nào.');
+    if (!desired)
+      throw err.badRequest("validation_failed", "Suất chiếu này chưa gắn với sơ đồ nào.");
 
     // The source layout must still be valid before it can reshape a live map. Checked against THIS
     // showtime, because the section-without-tier rule needs its tiers (T050, FR-030).
@@ -571,9 +651,14 @@ seatmapRouter.post(
     if (layoutId) {
       const blocking = blockingIssues(await service.validateForShowtime(layoutId, showtimeId));
       if (blocking.length > 0) {
-        throw err.refused(422, 'layout_invalid', 'Sơ đồ nguồn chưa hợp lệ, không thể áp dụng lại.', {
-          issues: blocking,
-        });
+        throw err.refused(
+          422,
+          "layout_invalid",
+          "Sơ đồ nguồn chưa hợp lệ, không thể áp dụng lại.",
+          {
+            issues: blocking,
+          },
+        );
       }
     }
 
@@ -584,16 +669,16 @@ seatmapRouter.post(
       res.json(await apply.preview(showtimeId, desired));
       return;
     }
-    const outcome = await apply.apply(showtimeId, desired);
+    const outcome = await apply.apply(showtimeId, desired, { refreshLayoutId: layoutId });
     if (!outcome.wouldSucceed) refuse(outcome);
-    // Decoration and background come across too — the snapshot is the whole layout (FR-005, T046).
-    if (layoutId) await apply.refreshSnapshot(showtimeId, layoutId);
+    // Decoration and background came across inside apply's transaction — the snapshot is the whole
+    // layout (FR-005, T046), refreshed atomically with the seat writes it describes.
     res.json(outcome);
   }),
 );
 
 seatmapRouter.post(
-  '/showtimes/:id/seats/block',
+  "/showtimes/:id/seats/block",
   validateBody(blockSchema),
   asyncH(async (req, res) => {
     const showtimeId = Number(req.params.id);
@@ -608,7 +693,7 @@ seatmapRouter.post(
 );
 
 seatmapRouter.post(
-  '/showtimes/:id/seats/tier',
+  "/showtimes/:id/seats/tier",
   validateBody(tierSchema),
   asyncH(async (req, res) => {
     const showtimeId = Number(req.params.id);
@@ -616,7 +701,8 @@ seatmapRouter.post(
     const { showtimeSeatIds, ticketTierId } = req.body as z.infer<typeof tierSchema>;
     const outcome = await apply.setTier(showtimeId, showtimeSeatIds, ticketTierId);
     if (outcome.refusals.length > 0) refuse(outcome);
-    if (!outcome.tier) throw err.badRequest('validation_failed', 'Hạng vé không thuộc suất chiếu này.');
+    if (!outcome.tier)
+      throw err.badRequest("validation_failed", "Hạng vé không thuộc suất chiếu này.");
 
     // The one additive field on the 003 payload: a retier changes the price a buyer sees, which
     // `status` alone cannot express (FR-035). Geometry is still never broadcast (FR-041).
@@ -630,7 +716,7 @@ seatmapRouter.post(
 );
 
 seatmapRouter.post(
-  '/layouts/:id/clone',
+  "/layouts/:id/clone",
   validateBody(cloneSchema),
   asyncH(async (req, res) => {
     const sourceId = Number(req.params.id);
@@ -645,12 +731,15 @@ seatmapRouter.post(
 // by the unchanged 003/004 path. No mixed seated + GA showtime is created here, and none can be.
 
 seatmapRouter.post(
-  '/layouts/:id/standing-area',
+  "/layouts/:id/standing-area",
   validateBody(standingAreaSchema),
   asyncH(async (req, res) => {
     const layoutId = Number(req.params.id);
-    await service.assertLayoutOwner(req, layoutId, 'design');
-    const created = await createStandingArea(layoutId, req.body as z.infer<typeof standingAreaSchema>);
+    await service.assertLayoutOwner(req, layoutId, "design");
+    const created = await createStandingArea(
+      layoutId,
+      req.body as z.infer<typeof standingAreaSchema>,
+    );
     res.status(201).json({ created, layout: await repo.getLayout(layoutId) });
   }),
 );
@@ -659,34 +748,34 @@ seatmapRouter.post(
 // Ownership resolves through the layout, exactly as every other route here does (SEC-04, FR-079).
 
 seatmapRouter.post(
-  '/layouts/:id/tables',
+  "/layouts/:id/tables",
   validateBody(tableSchema),
   asyncH(async (req, res) => {
     const layoutId = Number(req.params.id);
-    await service.assertLayoutOwner(req, layoutId, 'design');
+    await service.assertLayoutOwner(req, layoutId, "design");
     res.status(201).json(await createTable(layoutId, req.body as z.infer<typeof tableSchema>));
   }),
 );
 
 seatmapRouter.patch(
-  '/tables/:id',
+  "/tables/:id",
   validateBody(updateTableSchema),
   asyncH(async (req, res) => {
     const tableId = Number(req.params.id);
     const layoutId = await tableLayoutId(tableId);
-    if (layoutId === null) throw err.notFound('not_found', 'Không tìm thấy bàn.');
-    await service.assertLayoutOwner(req, layoutId, 'design');
+    if (layoutId === null) throw err.notFound("not_found", "Không tìm thấy bàn.");
+    await service.assertLayoutOwner(req, layoutId, "design");
     res.json(await updateTable(tableId, req.body as z.infer<typeof updateTableSchema>));
   }),
 );
 
 seatmapRouter.delete(
-  '/tables/:id',
+  "/tables/:id",
   asyncH(async (req, res) => {
     const tableId = Number(req.params.id);
     const layoutId = await tableLayoutId(tableId);
-    if (layoutId === null) throw err.notFound('not_found', 'Không tìm thấy bàn.');
-    await service.assertLayoutOwner(req, layoutId, 'design');
+    if (layoutId === null) throw err.notFound("not_found", "Không tìm thấy bàn.");
+    await service.assertLayoutOwner(req, layoutId, "design");
     await deleteTable(tableId);
     res.json({ ok: true });
   }),

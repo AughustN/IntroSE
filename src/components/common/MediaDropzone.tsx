@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Upload, X, Film, Image as ImageIcon, AlertCircle } from 'lucide-react';
-import { MediaType } from '../../types';
+import React, { useState, useEffect, useRef } from "react";
+import { X, PlayCircle, Image as ImageIcon, AlertCircle } from "lucide-react";
+import { MediaType } from "../../types";
 
 interface MediaDropzoneProps {
   label: string;
@@ -13,7 +13,16 @@ interface MediaDropzoneProps {
   disabled?: boolean;
   required?: boolean;
   helpText?: string;
-  aspectRatio?: 'square' | 'video' | 'banner' | 'auto';
+  /**
+   * Move the caption INSIDE the drop target instead of across the label row.
+   *
+   * The create-event form wants the top-right help text ("Tỷ lệ 16:9"); the chart editor's
+   * floor-plan and reference panels want the reading to live where the uploading happens — the
+   * design shows the caption as the drop target's only content, and the panel's own heading above
+   * already names the field, so the label row is omitted there (the drop target keeps an aria-label).
+   */
+  captionInside?: boolean;
+  aspectRatio?: "square" | "video" | "banner" | "auto";
   /**
    * Cap the drop target's height.
    *
@@ -35,8 +44,9 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
   disabled = false,
   required = false,
   helpText,
-  aspectRatio = 'auto',
+  aspectRatio = "auto",
   compact = false,
+  captionInside = false,
 }) => {
   const [stagedFile, setStagedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -44,16 +54,18 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const isVideo = mediaType === 'trailer';
-  const defaultMaxSize = isVideo ? 50 : mediaType === 'avatar' || mediaType === 'logo' ? 2 : 5;
+  const isVideo = mediaType === "trailer";
+  const defaultMaxSize = isVideo ? 50 : mediaType === "avatar" || mediaType === "logo" ? 2 : 5;
   const effectiveMaxSize = maxSizeMb ?? defaultMaxSize;
-  const defaultAccept = isVideo ? 'video/mp4,video/webm' : 'image/jpeg,image/png,image/webp,image/svg+xml';
+  const defaultAccept = isVideo
+    ? "video/mp4,video/webm"
+    : "image/jpeg,image/png,image/webp,image/svg+xml";
   const effectiveAccept = accept ?? defaultAccept;
 
   // Clean up Object URL on unmount or file change
   useEffect(() => {
     return () => {
-      if (previewUrl && previewUrl.startsWith('blob:')) {
+      if (previewUrl && previewUrl.startsWith("blob:")) {
         URL.revokeObjectURL(previewUrl);
       }
     };
@@ -63,7 +75,7 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
     setErrorMessage(null);
 
     if (!file) {
-      if (previewUrl && previewUrl.startsWith('blob:')) {
+      if (previewUrl && previewUrl.startsWith("blob:")) {
         URL.revokeObjectURL(previewUrl);
       }
       setStagedFile(null);
@@ -75,21 +87,23 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
     // Size limit check
     const sizeMb = file.size / (1024 * 1024);
     if (sizeMb > effectiveMaxSize) {
-      setErrorMessage(`Kích thước tệp quá lớn (${sizeMb.toFixed(1)}MB). Tối đa ${effectiveMaxSize}MB.`);
+      setErrorMessage(
+        `Kích thước tệp quá lớn (${sizeMb.toFixed(1)}MB). Tối đa ${effectiveMaxSize}MB.`,
+      );
       return;
     }
 
     // MIME type check
-    if (isVideo && !file.type.startsWith('video/')) {
-      setErrorMessage('Định dạng không hợp lệ. Vui lòng chọn tệp video (MP4, WebM).');
+    if (isVideo && !file.type.startsWith("video/")) {
+      setErrorMessage("Định dạng không hợp lệ. Vui lòng chọn tệp video (MP4, WebM).");
       return;
     }
-    if (!isVideo && !file.type.startsWith('image/')) {
-      setErrorMessage('Định dạng không hợp lệ. Vui lòng chọn tệp hình ảnh (JPEG, PNG, WebP, SVG).');
+    if (!isVideo && !file.type.startsWith("image/")) {
+      setErrorMessage("Định dạng không hợp lệ. Vui lòng chọn tệp hình ảnh (JPEG, PNG, WebP, SVG).");
       return;
     }
 
-    if (previewUrl && previewUrl.startsWith('blob:')) {
+    if (previewUrl && previewUrl.startsWith("blob:")) {
       URL.revokeObjectURL(previewUrl);
     }
 
@@ -113,7 +127,7 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
   const handleClear = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+      fileInputRef.current.value = "";
     }
     handleFile(null);
     if (onRemove) {
@@ -126,29 +140,32 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
   const getAspectClass = () => {
     // `max-h` with the aspect ratio still set: wide containers stop growing taller, narrow ones
     // (a phone) keep the ratio and never end up a letterbox slot too short to drop a file into.
-    const cap = compact ? ' max-h-[180px]' : '';
+    const cap = compact ? " max-h-[180px]" : "";
     switch (aspectRatio) {
-      case 'square':
-        return 'aspect-square max-w-[200px]';
-      case 'video':
-        return 'aspect-video w-full' + cap;
-      case 'banner':
-        return 'aspect-[16/9] w-full' + cap;
+      case "square":
+        return "aspect-square max-w-[200px]";
+      case "video":
+        return "aspect-video w-full" + cap;
+      case "banner":
+        return "aspect-[16/9] w-full" + cap;
       default:
-        return (isVideo ? 'aspect-video w-full' : 'min-h-[160px] w-full') + cap;
+        return (isVideo ? "aspect-video w-full" : "min-h-[160px] w-full") + cap;
     }
   };
 
   return (
     <div className="space-y-1.5">
-      <div className="flex items-center justify-between">
-        <label className="font-meta text-xs font-semibold uppercase tracking-wider text-beige-kem">
-          {label} {required && <span className="text-burgundy">*</span>}
-        </label>
-        {helpText && <span className="font-meta text-[11px] text-ink-soft">{helpText}</span>}
-      </div>
+      {!captionInside && (
+        <div className="flex items-center justify-between">
+          <label className="font-meta text-xs font-semibold uppercase tracking-wider text-beige-kem">
+            {label} {required && <span className="text-burgundy">*</span>}
+          </label>
+          {helpText && <span className="font-meta text-[11px] text-ink-soft">{helpText}</span>}
+        </div>
+      )}
 
       <div
+        aria-label={captionInside ? label : undefined}
         onDragOver={(e) => {
           e.preventDefault();
           if (!disabled) setIsDragOver(true);
@@ -156,13 +173,13 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
         onDragLeave={() => setIsDragOver(false)}
         onDrop={handleDrop}
         onClick={() => !disabled && fileInputRef.current?.click()}
-        className={`relative overflow-hidden rounded-xl border transition-all cursor-pointer flex flex-col items-center justify-center p-4 text-center ${getAspectClass()} ${
+        className={`relative overflow-hidden border transition-all cursor-pointer flex flex-col items-center justify-center p-4 text-center ${getAspectClass()} ${
           isDragOver
-            ? 'border-burgundy bg-burgundy/10 scale-[1.01]'
+            ? "border-burgundy bg-burgundy/10 scale-[1.01]"
             : activeDisplayUrl
-            ? 'border-beige-kem/30 bg-surface-1 hover:border-beige-kem/60'
-            : 'border-dashed border-beige-kem/35 bg-surface-1 hover:border-burgundy/60 hover:bg-surface-1/70'
-        } ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+              ? "border-beige-kem/30 bg-surface-2 hover:border-beige-kem/60"
+              : "border-dashed border-beige-kem/35 bg-surface-2 hover:border-burgundy/60"
+        } ${disabled ? "opacity-60 cursor-not-allowed" : ""}`}
       >
         <input
           ref={fileInputRef}
@@ -224,17 +241,29 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
             )}
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center space-y-2 text-ink-soft">
-            <div className="rounded-full border border-beige-kem/30 bg-surface-2 p-3 text-beige-kem">
-              {isVideo ? <Film className="h-6 w-6 text-burgundy" /> : <Upload className="h-6 w-6 text-burgundy" />}
-            </div>
+          <div className="flex flex-col items-center justify-center gap-2 text-ink-soft">
+            {!captionInside &&
+              (isVideo ? (
+                <PlayCircle className="h-[26px] w-[26px] text-ink-soft" />
+              ) : (
+                <ImageIcon className="h-[26px] w-[26px] text-ink-soft" />
+              ))}
             <div className="space-y-0.5">
-              <p className="font-meta text-xs font-medium text-beige-kem">
-                <span className="font-semibold text-burgundy">Nhấn để tải lên</span> hoặc kéo thả vào đây
+              <p className="font-meta text-xs font-bold text-beige-kem">
+                {captionInside
+                  ? label
+                  : isVideo
+                    ? "Kéo thả video vào đây hoặc bấm để chọn"
+                    : "Kéo thả ảnh vào đây hoặc bấm để chọn"}
               </p>
-              <p className="font-meta text-[11px] text-ink-soft">
-                {isVideo ? 'MP4, WebM' : 'PNG, JPG, WebP, SVG'} (Tối đa {effectiveMaxSize}MB)
-              </p>
+              {!captionInside && (
+                <p className="font-meta text-[11px] text-ink-soft">
+                  {isVideo ? "MP4, WebM" : "JPG, PNG, WEBP, SVG"} · Tối đa {effectiveMaxSize}MB
+                </p>
+              )}
+              {captionInside && helpText && (
+                <p className="font-meta text-[11px] text-ink-soft">{helpText}</p>
+              )}
             </div>
           </div>
         )}

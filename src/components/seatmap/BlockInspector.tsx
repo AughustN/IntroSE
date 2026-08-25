@@ -4,11 +4,10 @@
  */
 
 import { useState } from "react";
+import { Lock, Unlock } from "lucide-react";
 import type {
   BlockParams,
   DocumentBlock,
-  DocumentCategory,
-  DocumentSection,
   RowLabelScheme,
   SeatLabelScheme,
 } from "@/shared/catalog/seatmap-document";
@@ -16,7 +15,9 @@ import { isSeatBearing } from "@/shared/catalog/seatmap-document";
 import { type BlockGeometry, BLOCK_LABEL } from "./documentOps";
 import { MAX_ARC_ANGLE } from "@/shared/catalog/seatmap-document";
 import Select from "../Select";
+import { SEAT_PITCH } from "./layoutOps";
 
+import { RAIL_PANEL } from "./panelSurface";
 /**
  * The block inspector — the reason the editor moved to a document at all.
  *
@@ -33,15 +34,77 @@ import Select from "../Select";
  *   * **canvas width and height.** The layout space is fixed at 0–10000; a per-chart canvas size would
  *     mean every reader had to scale, and two charts could not be compared or cloned.
  *
- * One thing it lacked and needed: a **section** selector. Sections carry the seat shape and size that
- * reach buyers, and a block with no section projects to seats that cannot be published.
+ * Section and seat-class assignment are also deliberately absent. They act on blocks or individually
+ * selected seats and therefore live in their dedicated workspace modes; repeating them here would
+ * create two controls with different visible subjects for the same persisted fields.
  */
 
 const input =
   "h-8 w-full border-2 border-beige-kem bg-surface-2 px-2 text-xs text-beige-kem outline-none focus:border-burgundy";
-const label = "block font-mono text-[11px] text-beige-kem/60";
+const label = "block font-mono text-[11px] text-beige-kem/70";
 const btn =
   " border-2 border-beige-kem px-2 py-1 text-xs font-bold text-beige-kem/80 transition hover:text-beige-kem disabled:opacity-40";
+/** The ‹ › ends of a `CommittedNumber`. Narrow on purpose: the number is the control, these are its grips. */
+const stepBtn =
+  "w-6 shrink-0 select-none text-sm leading-none text-beige-kem/70 transition hover:bg-beige-kem/10 hover:text-beige-kem disabled:opacity-25 disabled:hover:bg-transparent";
+
+/**
+ * One named concern in the inspector.
+ *
+ * The panel used to head only SOME of its groups — "Bố cục" and "Cách đánh nhãn" had titles while
+ * section, class, size and the actions were bare fields separated by nothing but a margin. So the
+ * reader could not tell where a group ended, and the two headings that did exist read as sub-parts of
+ * whatever came before them. Every concern gets the same treatment or the treatment means nothing.
+ */
+/**
+ * What a raw layout number MEANS, in the vocabulary the editor already speaks.
+ *
+ * Spacing and radius are stored in layout units, and the field showed the bare number: "150" told an
+ * organizer nothing about whether that was wide, narrow, pixels or seats. seats.io puts the unit
+ * inside the field for exactly this reason — its spacing reads `4 pt`, its rotation `116 °`.
+ *
+ * The unit here is the SEAT PITCH, because that is the one the editor's own grid control already
+ * names ("Lưới · 0,3 khoảng ghế"). Two vocabularies for one distance would be worse than none.
+ */
+function pitchHint(units: number): string {
+  const pitches = units / SEAT_PITCH;
+  return `≈ ${Number(pitches.toFixed(1)).toLocaleString("vi-VN")} khoảng ghế`;
+}
+
+/** A number field with its unit beside it — the value and what the value means, together. */
+function Measured({ hint, children }: { hint: string; children: React.ReactNode }) {
+  return (
+    <>
+      {children}
+      <span className="mt-0.5 block font-mono text-[10px] text-beige-kem/55">{hint}</span>
+    </>
+  );
+}
+
+function Group({
+  title,
+  action,
+  children,
+  className = "",
+}: {
+  title: string;
+  /** A control that belongs to the whole group — a lock, a "manage" link. Sits on the heading row. */
+  action?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={`mt-3 border-t border-beige-kem/25 pt-3 ${className}`}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-mono text-[11px] font-bold uppercase tracking-wider text-beige-kem/70">
+          {title}
+        </p>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
 
 const ROW_SCHEMES: { value: RowLabelScheme; label: string }[] = [
   { value: "alpha-asc", label: "A, B, C… (từ đầu)" },
@@ -67,15 +130,26 @@ const SEAT_SCHEMES: { value: SeatLabelScheme; label: string }[] = [
  *
  * Commits on blur and on Enter; Escape abandons the edit. Arrow keys step by one and commit
  * immediately, because nudging a value is meant to feel live.
+ *
+ * The ‹ › buttons are an AFFORDANCE, not a new capability. Every behaviour a stepper exists to give
+ * was already here — arrow keys stepped, blank input fell back, a fraction was rounded — but it was
+ * all invisible, so the field read as free text and an organizer nudging "seats per row" by one
+ * selected the number and retyped it. The designer teardown recorded exactly this: sound, and
+ * undiscoverable. The buttons carry `tabIndex={-1}` so they never come between the field and the next
+ * one on a Tab pass; the keyboard path is still the arrow keys.
  */
 function CommittedNumber({
   value,
   onCommit,
+  onDraft,
   className,
   title,
 }: {
   value: number;
   onCommit: (next: number) => void;
+  /** Every keystroke's parsed value (or null while blank) — lets a parent preview what the commit
+   *  WILL become, without committing on every keystroke. */
+  onDraft?: (draft: number | null) => void;
   className: string;
   title?: string;
 }) {
@@ -86,41 +160,80 @@ function CommittedNumber({
   // shows up here instead of leaving a stale number on screen.
   const shown = editing ? draft : String(value);
 
+  const setEditingValue = (raw: string) => {
+    setDraft(raw);
+    const parsed = Number(raw);
+    onDraft?.(Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : null);
+  };
+
   const commit = (raw: string) => {
     setEditing(false);
+    onDraft?.(null);
     const next = num(raw, value);
     if (next !== value) onCommit(next);
   };
 
+  /** Same floor the arrow keys have always used: one, never zero — a block of nothing is not a block. */
+  const step = (delta: number) => {
+    const next = Math.max(1, value + delta);
+    setDraft(String(next));
+    onDraft?.(null);
+    if (next !== value) onCommit(next);
+  };
+
   return (
-    <input
-      value={shown}
-      inputMode="numeric"
-      title={title}
-      className={className}
-      onFocus={() => {
-        setDraft(String(value));
-        setEditing(true);
-      }}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={(e) => commit(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          commit((e.target as HTMLInputElement).value);
-          (e.target as HTMLInputElement).blur();
-        } else if (e.key === "Escape") {
-          e.preventDefault();
-          setEditing(false);
-          (e.target as HTMLInputElement).blur();
-        } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-          e.preventDefault();
-          const next = Math.max(1, value + (e.key === "ArrowUp" ? 1 : -1));
-          setDraft(String(next));
-          onCommit(next);
-        }
-      }}
-    />
+    // The caller's class dresses the WRAPPER, so the border and height it asks for land around the
+    // whole control rather than around the input alone — `focus-within` then lights the same edge
+    // `focus` used to.
+    <span className={`${className} flex items-stretch p-0 focus-within:border-burgundy`}>
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-hidden="true"
+        onClick={() => step(-1)}
+        disabled={value <= 1}
+        className={stepBtn}
+      >
+        ‹
+      </button>
+      <input
+        value={shown}
+        inputMode="numeric"
+        title={title}
+        className="min-w-0 flex-1 border-0 bg-transparent px-1 text-center text-xs text-beige-kem outline-none"
+        onFocus={() => {
+          setDraft(String(value));
+          setEditing(true);
+          onDraft?.(value);
+        }}
+        onChange={(e) => setEditingValue(e.target.value)}
+        onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit((e.target as HTMLInputElement).value);
+            (e.target as HTMLInputElement).blur();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            setEditing(false);
+            onDraft?.(null);
+            (e.target as HTMLInputElement).blur();
+          } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+            step(e.key === "ArrowUp" ? 1 : -1);
+          }
+        }}
+      />
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-hidden="true"
+        onClick={() => step(1)}
+        className={stepBtn}
+      >
+        ›
+      </button>
+    </span>
   );
 }
 
@@ -133,19 +246,16 @@ const num = (raw: string, fallback: number): number => {
 
 export default function BlockInspector({
   block,
-  sections,
-  categories,
+  mode = "all",
   seatBudget,
   onChange,
   onParams,
   onRotate,
   onGeometry,
-  onDuplicate,
-  onDelete,
 }: {
   block: DocumentBlock | null;
-  sections: DocumentSection[];
-  categories: DocumentCategory[];
+  /** Label mode reuses the same mutation path while hiding unrelated geometry controls. */
+  mode?: "all" | "labels";
   /** Seats still available before the layout ceiling — shown so a clip is never a surprise. */
   seatBudget: number;
   onChange: (patch: Partial<DocumentBlock>) => void;
@@ -154,168 +264,242 @@ export default function BlockInspector({
   /** Regenerate the outline as a named shape. `free` is not offered — a hand-drawn polygon is what a
    *  shape BECOMES when its points are dragged, not something to pick. */
   onGeometry?: (geometry: Exclude<BlockGeometry, "free">) => void;
-  onDuplicate: () => void;
-  onDelete: () => void;
 }) {
+  /*
+   * Which block the labelling unlock applies to, as a KEY rather than a boolean.
+   *
+   * Derived, not reset by an effect: unlocking is a decision about the block in front of you, so
+   * selecting another one has to hand the protection straight back. Storing a boolean and clearing it
+   * in an effect would do the same thing a render later — and would trip the cascading-render rule
+   * the editor already learned about elsewhere.
+   *
+   * Hoisted above the null-block early return with the other hooks, for the reason stated below.
+   */
+  const [unlockedFor, setUnlockedFor] = useState<string | null>(null);
+
+  /**
+   * What the block WOULD become, shown while typing, not after — hooks hoisted ABOVE the null-block
+   * early return, because a conditional hook call on `block == null` would break the rules of hooks
+   * the first time the selection flipped from nothing to a block.
+   *
+   * `CommittedNumber` commits on blur precisely because each commit regenerates the whole block —
+   * but the organizer does not know that typing "60" into a 20-per-row field is about to mint more
+   * seats than the layout can hold. Lifting the two count fields' in-progress values up here lets
+   * the inspector print the arithmetic live (`6 hàng × 20 ghế → 120 ghế`) and shout about the clip
+   * BEFORE the commit, when it is still a decision instead of a surprise.
+   */
+  const [pending, setPending] = useState<{
+    key: string | undefined;
+    rows: number | null;
+    perRow: number | null;
+  }>({ key: undefined, rows: null, perRow: null });
+  // Adjusting state during render, React's own pattern for "props changed, discard local": a new block
+  // throws away whatever was half-typed in the old one. Done here rather than in an effect so the
+  // preview can never paint one frame of the previous block's arithmetic.
+  if (pending.key !== block?.key) {
+    setPending({ key: block?.key, rows: null, perRow: null });
+  }
+  const setPendingRows = (rows: number | null) => setPending((p) => ({ ...p, rows }));
+  const setPendingPerRow = (perRow: number | null) => setPending((p) => ({ ...p, perRow }));
+
   if (!block) {
     return (
       <div className="border-2 border-beige-kem/40 bg-surface-2 p-4">
         <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">
           Thuộc tính
         </h3>
-        <p className="mt-1 text-[11px] leading-4 text-beige-kem/50">
-          Bấm một khối trên sơ đồ để sửa số hàng, số ghế mỗi hàng, cách đánh số và khu vực.
-        </p>
       </div>
     );
   }
 
+  const labelsUnlocked = unlockedFor === block.key;
   const p = block.params;
   const seats = block.seats?.length ?? 0;
   const parametric = p !== undefined && isSeatBearing(block.kind);
   const rows = p?.rowsCount ?? 1;
   const perRow = p?.seatsPerRow ?? 1;
-  // What the block would become if the organizer grew it — so the clip is visible before they try.
-  const wouldClip = parametric && rows * perRow > seats + seatBudget;
+
+  const nextRows = pending.rows ?? rows;
+  const nextPerRow = pending.perRow ?? perRow;
+  const prospectiveCount = nextRows * nextPerRow;
+  const wouldClip = parametric && prospectiveCount > seats + seatBudget;
+  const hasEditableCaption = ["stage", "text", "exit", "ga-zone"].includes(block.kind);
 
   return (
-    <div className="border-2 border-beige-kem bg-surface-2 p-4">
+    <div className={RAIL_PANEL}>
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">
           {BLOCK_LABEL[block.kind]}
         </h3>
-        <span className="font-mono text-[10px] text-beige-kem/45">{seats} ghế</span>
+        <span className="font-mono text-[10px] text-beige-kem/70">{seats} ghế</span>
       </div>
 
-      <label className={`${label} mt-3`}>
-        Tên khối
-        <input
-          value={block.title}
-          onChange={(e) => onChange({ title: e.target.value.slice(0, 80) })}
-          className={`mt-1 ${input}`}
-        />
-      </label>
-
-      {/* ---- Section and category: what makes the block publishable and priceable ---- */}
-      <label className={`${label} mt-2`}>
-        Khu vực
-        {/*
-          The shared dropdown. A native `<select>` hands its list to the operating system, which
-          draws a grey platform menu over a designer made entirely of hairlines and mono type —
-          nothing written on the element reaches inside that menu.
-        */}
-        <div className="mt-1">
-          <Select
-            value={block.sectionId === null || block.sectionId === undefined ? "" : String(block.sectionId)}
-            options={sections.map((s) => ({ value: String(s.id), label: s.name }))}
-            placeholder="— chưa thuộc khu nào —"
-            onChange={(v) => onChange({ sectionId: v === "" ? null : Number(v) })}
-            triggerClassName={input}
-          />
-        </div>
-      </label>
-
-      <label className={`${label} mt-2`}>
-        Hạng ghế
-        <div className="mt-1">
-          <Select
-            value={block.categoryId === null || block.categoryId === undefined ? "" : String(block.categoryId)}
-            options={categories.map((c) => ({ value: String(c.id), label: c.name }))}
-            placeholder="— chưa thuộc hạng ghế nào —"
-            onChange={(v) => onChange({ categoryId: v === "" ? null : Number(v) })}
-            triggerClassName={input}
-          />
-        </div>
-      </label>
-      {(block.sectionId === null || block.categoryId === null) && isSeatBearing(block.kind) && (
-        <p className="mt-1 text-[10px] leading-4 text-cam-dat">
-          Ghế chưa thuộc khu vực hoặc hạng ghế nào sẽ chặn phát hành.
+      {mode === "labels" && !parametric && !hasEditableCaption && (
+        <p className="mt-3 border border-beige-kem/30 p-3 text-[11px] leading-4 text-beige-kem/70">
+          Phần tử này không có nhãn bên trong. Thêm một khối văn bản riêng nếu cần chú thích trên sơ
+          đồ.
         </p>
       )}
 
+      {/* Identity stays with object editing; section and category assignment live in dedicated modes. */}
+      {mode === "all" && (
+        <Group title="Nhận dạng">
+          <label className={`${label} mt-2`}>
+            Tên khối
+            <input
+              value={block.title}
+              onChange={(e) => onChange({ title: e.target.value.slice(0, 80) })}
+              className={`mt-1 ${input}`}
+            />
+          </label>
+        </Group>
+      )}
+
       {/* ---- The parametric controls ---- */}
-      {parametric ? (
-        <div className="mt-3 border-t border-beige-kem/25 pt-3">
-          <p className="font-mono text-[11px] font-bold text-beige-kem/70">Bố cục</p>
+      {mode === "all" &&
+        (parametric ? (
+          <Group title="Bố cục">
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {block.kind !== "single-row" && block.kind !== "individual-seat" && (
+                <label className={label}>
+                  Số hàng
+                  <CommittedNumber
+                    value={rows}
+                    onCommit={(rowsCount) => onParams({ rowsCount })}
+                    onDraft={setPendingRows}
+                    className={`mt-1 ${input}`}
+                  />
+                </label>
+              )}
+              {block.kind !== "individual-seat" && (
+                <label className={label}>
+                  Ghế mỗi hàng
+                  <CommittedNumber
+                    value={perRow}
+                    onCommit={(seatsPerRow) => onParams({ seatsPerRow })}
+                    onDraft={setPendingPerRow}
+                    className={`mt-1 ${input}`}
+                  />
+                </label>
+              )}
+            </div>
 
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            {block.kind !== "single-row" && block.kind !== "individual-seat" && (
-              <label className={label}>
-                Số hàng
-                <CommittedNumber
-                  value={rows}
-                  onCommit={(rowsCount) => onParams({ rowsCount })}
-                  className={`mt-1 ${input}`}
-                />
-              </label>
+            {/* The arithmetic, live: the count the commit WILL produce, restated next to the fields
+              that drive it. It duplicates the header's seat total only while nothing is being
+              edited — but pinning it mid-edit meant an organizer had to START typing to learn what
+              the two numbers mean together, which is exactly when confirmation matters. */}
+            {parametric && block.kind !== "individual-seat" && (
+              <p
+                className={`mt-2 font-mono text-[10px] leading-4 ${
+                  wouldClip ? "text-cam-dat-ink" : "text-beige-kem/70"
+                }`}
+              >
+                {nextRows} hàng × {nextPerRow} ghế → {prospectiveCount} ghế
+              </p>
             )}
-            {block.kind !== "individual-seat" && (
-              <label className={label}>
-                Ghế mỗi hàng
-                <CommittedNumber
-                  value={perRow}
-                  onCommit={(seatsPerRow) => onParams({ seatsPerRow })}
-                  className={`mt-1 ${input}`}
-                />
-              </label>
+
+            {wouldClip && (
+              <p className="mt-1 text-[10px] leading-4 text-cam-dat-ink">
+                Chỉ còn {seatBudget} ghế trong hạn mức của sơ đồ — phần vượt sẽ bị cắt bỏ.
+              </p>
             )}
-          </div>
 
-          {wouldClip && (
-            <p className="mt-1 text-[10px] leading-4 text-cam-dat">
-              Chỉ còn {seatBudget} ghế trong hạn mức của sơ đồ — phần vượt sẽ bị cắt bỏ.
-            </p>
-          )}
-
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <label className={label}>
-              Khoảng cách ghế
-              <CommittedNumber
-                value={p.seatSpacing ?? 150}
-                onCommit={(seatSpacing) => onParams({ seatSpacing })}
-                className={`mt-1 ${input}`}
-              />
-            </label>
-            <label className={label}>
-              Khoảng cách hàng
-              <CommittedNumber
-                value={p.rowSpacing ?? 150}
-                onCommit={(rowSpacing) => onParams({ rowSpacing })}
-                className={`mt-1 ${input}`}
-              />
-            </label>
-          </div>
-
-          {block.kind === "curved-row" && (
             <div className="mt-2 grid grid-cols-2 gap-2">
               <label className={label}>
-                Bán kính
-                <CommittedNumber
-                  value={p.radius ?? 1500}
-                  onCommit={(radius) => onParams({ radius })}
-                  className={`mt-1 ${input}`}
-                />
+                Khoảng cách ghế
+                <Measured hint={pitchHint(p.seatSpacing ?? 150)}>
+                  <CommittedNumber
+                    value={p.seatSpacing ?? 150}
+                    onCommit={(seatSpacing) => onParams({ seatSpacing })}
+                    className={`mt-1 ${input}`}
+                  />
+                </Measured>
               </label>
               <label className={label}>
-                Góc cung ({p.arcAngle ?? 90}°)
-                <input
-                  type="range"
-                  min={30}
-                  max={MAX_ARC_ANGLE}
-                  step={5}
-                  value={p.arcAngle ?? 90}
-                  onChange={(e) => onParams({ arcAngle: Number(e.target.value) })}
-                  className="mt-1 w-full accent-burgundy"
-                />
+                Khoảng cách hàng
+                <Measured hint={pitchHint(p.rowSpacing ?? 150)}>
+                  <CommittedNumber
+                    value={p.rowSpacing ?? 150}
+                    onCommit={(rowSpacing) => onParams({ rowSpacing })}
+                    className={`mt-1 ${input}`}
+                  />
+                </Measured>
               </label>
             </div>
-          )}
 
-          <p className="mt-3 font-mono text-[11px] font-bold text-beige-kem/70">Cách đánh nhãn</p>
-          {/* Changing either scheme relabels every seat in the block. Said plainly, because a relabel
-              is refused for seats already sold and the organizer should know before they try. */}
-          <p className="mt-1 text-[10px] leading-4 text-beige-kem/45">
-            Đổi cách đánh nhãn sẽ đổi nhãn mọi ghế trong khối. Ghế đã bán không cho đổi nhãn.
+            {block.kind === "curved-row" && (
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <label className={label}>
+                  Bán kính
+                  <Measured hint={pitchHint(p.radius ?? 1500)}>
+                    <CommittedNumber
+                      value={p.radius ?? 1500}
+                      onCommit={(radius) => onParams({ radius })}
+                      className={`mt-1 ${input}`}
+                    />
+                  </Measured>
+                </label>
+                <label className={label}>
+                  Góc cung ({p.arcAngle ?? 90}°)
+                  <input
+                    type="range"
+                    min={30}
+                    max={MAX_ARC_ANGLE}
+                    step={5}
+                    value={p.arcAngle ?? 90}
+                    onChange={(e) => onParams({ arcAngle: Number(e.target.value) })}
+                    className="mt-1 w-full accent-burgundy"
+                  />
+                </label>
+              </div>
+            )}
+          </Group>
+        ) : (
+          isSeatBearing(block.kind) && (
+            <p className="mt-3 border-t border-beige-kem/25 pt-3 text-[11px] leading-4 text-beige-kem/70">
+              Khối này được vẽ trước khi sơ đồ có bố cục tham số, nên các ghế đang ở vị trí riêng
+              lẻ. Đặt số hàng và số ghế để chuyển thành khối tham số — lưu ý việc này sẽ đánh nhãn
+              lại toàn bộ ghế trong khối.
+            </p>
+          )
+        ))}
+
+      {/* Labelling is its OWN concern, not a tail of the layout. It was a bare paragraph inside the
+          "Bố cục" section, so three dropdowns that relabel every seat in the block read as more
+          geometry — the two groups answer different questions and now say so. */}
+      {parametric && (
+        <Group
+          title="Cách đánh nhãn"
+          action={
+            <button
+              type="button"
+              onClick={() => setUnlockedFor((cur) => (cur === block.key ? null : block.key))}
+              aria-pressed={labelsUnlocked}
+              className={`flex items-center gap-1 border px-2 py-0.5 font-mono text-[10px] font-bold transition ${
+                labelsUnlocked
+                  ? "border-cam-dat/60 bg-cam-dat/20 text-cam-dat-ink"
+                  : "border-beige-kem/40 text-beige-kem/70 hover:border-beige-kem"
+              }`}
+            >
+              {labelsUnlocked ? <Unlock size={11} /> : <Lock size={11} />}
+              {labelsUnlocked ? "Đang mở" : "Mở khoá"}
+            </button>
+          }
+        >
+          {/*
+            LOCKED by default, which is the one thing the old paragraph could not do.
+            
+            A seat's label is what a buyer's ticket says, and the save path REFUSES to relabel a seat
+            that is already sold. The warning was accurate and still let an organizer change three
+            dropdowns, watch every seat in the block relabel on the canvas, and only meet the refusal
+            at save time — with no obvious way back to the labels that had been there.
+
+            seats.io locks its Row labeling and Seat labeling groups behind an explicit Unlock for
+            exactly this. Making the gesture deliberate turns a late refusal into an early decision.
+          */}
+          {/* A consequence, not a description — the lock is what explains itself, so this is one line. */}
+          <p className="mt-1 text-[10px] leading-4 text-beige-kem/70">
+            {labelsUnlocked ? "Sẽ đổi nhãn cả khối. Ghế đã bán bị từ chối." : "Nhãn in trên vé."}
           </p>
 
           <label className={`${label} mt-2`}>
@@ -324,8 +508,9 @@ export default function BlockInspector({
               <Select
                 value={p.rowLabelScheme ?? "alpha-asc"}
                 options={ROW_SCHEMES}
+                disabled={!labelsUnlocked}
                 onChange={(v) => onParams({ rowLabelScheme: v as RowLabelScheme })}
-                triggerClassName={input}
+                triggerClassName={`${input} ${labelsUnlocked ? "" : "opacity-45"}`}
               />
             </div>
           </label>
@@ -336,8 +521,9 @@ export default function BlockInspector({
               <Select
                 value={p.seatLabelScheme ?? "num-asc"}
                 options={SEAT_SCHEMES}
+                disabled={!labelsUnlocked}
                 onChange={(v) => onParams({ seatLabelScheme: v as SeatLabelScheme })}
-                triggerClassName={input}
+                triggerClassName={`${input} ${labelsUnlocked ? "" : "opacity-45"}`}
               />
             </div>
           </label>
@@ -347,24 +533,17 @@ export default function BlockInspector({
             <input
               value={p.rowLabelPrefix ?? ""}
               maxLength={8}
+              disabled={!labelsUnlocked}
               onChange={(e) => onParams({ rowLabelPrefix: e.target.value })}
-              className={`mt-1 ${input}`}
+              className={`mt-1 ${input} ${labelsUnlocked ? "" : "opacity-45"}`}
             />
           </label>
-        </div>
-      ) : (
-        isSeatBearing(block.kind) && (
-          <p className="mt-3 border-t border-beige-kem/25 pt-3 text-[11px] leading-4 text-beige-kem/50">
-            Khối này được vẽ trước khi sơ đồ có bố cục tham số, nên các ghế đang ở vị trí riêng lẻ.
-            Đặt số hàng và số ghế để chuyển thành khối tham số — lưu ý việc này sẽ đánh nhãn lại toàn
-            bộ ghế trong khối.
-          </p>
-        )
+        </Group>
       )}
 
       {/* ---- Capacity zone (0027) ---- */}
-      {block.kind === "ga-zone" && (
-        <div className="mt-3 border-t border-beige-kem/25 pt-3">
+      {mode === "all" && block.kind === "ga-zone" && (
+        <Group title="Sức chứa">
           <label className={label}>
             Sức chứa (người)
             <CommittedNumber
@@ -372,26 +551,25 @@ export default function BlockInspector({
               onCommit={(capacity) => onChange({ capacity })}
               className={`mt-1 ${input}`}
             />
-            <span className="mt-1 block text-[10px] leading-4 text-beige-kem/45">
+            <span className="mt-1 block text-[10px] leading-4 text-beige-kem/70">
               Bán theo số lượng, không theo từng chỗ — khu này không tạo ghế nào.
             </span>
           </label>
           {block.categoryId === null && (
             // The zone is drawn but unsellable until it names a seat class, and the publish gate will
             // say so. Saying it here means the organizer finds out while looking at the zone.
-            <p className="mt-2 border border-bubblegum px-2 py-1 text-[10px] leading-4 text-bubblegum">
+            <p className="mt-2 border border-burgundy-ink px-2 py-1 text-[10px] leading-4 text-burgundy-ink">
               Chưa có hạng ghế — chọn một hạng ở bảng “Hạng ghế” để bán được khu này.
             </p>
           )}
-        </div>
+        </Group>
       )}
 
       {/* ---- Drawn shape: which shape it is. Colour lives in the palette, with the blocks it
              applies to — every block kind can take one, not just this one. ---- */}
-      {block.kind === "shape" && (
-        <div className="mt-3 border-t border-beige-kem/25 pt-3">
-          <p className={label}>Hình dạng</p>
-          <div className="mt-1 grid grid-cols-3 gap-1">
+      {mode === "all" && block.kind === "shape" && (
+        <Group title="Hình dạng">
+          <div className="mt-2 grid grid-cols-3 gap-1">
             {(
               [
                 ["rect", "▭", "Chữ nhật"],
@@ -407,7 +585,8 @@ export default function BlockInspector({
                 title={name}
                 aria-pressed={block.geometry === geometry}
                 onClick={() => onGeometry?.(geometry)}
-                className={`border-2 px-2 py-1.5 text-sm transition ${ block.geometry === geometry
+                className={`border-2 px-2 py-1.5 text-sm transition ${
+                  block.geometry === geometry
                     ? "border-beige-kem bg-beige-kem/10 text-beige-kem"
                     : "border-beige-kem/40 text-beige-kem/70 hover:border-beige-kem"
                 }`}
@@ -416,75 +595,66 @@ export default function BlockInspector({
               </button>
             ))}
           </div>
-          <p className="mt-1 text-[10px] leading-4 text-beige-kem/45">
+          <p className="mt-1 text-[10px] leading-4 text-beige-kem/70">
             {block.geometry
               ? "Kéo các điểm trên sơ đồ để chỉnh lại — hình sẽ thành tự do."
               : "Hình tự do: kéo từng điểm trên sơ đồ để sửa."}
           </p>
-        </div>
+        </Group>
       )}
 
       {/* ---- Decoration text ---- */}
-      {/* `shape` included: a drawn outline is a PLACE — a stand, a wing, a pitch — and until it could
-          be named it was an anonymous polygon in the validation list and on the buyer's map alike. */}
+      {/* A shape deliberately has no embedded text. Add a separate text block when the floor plan
+          needs a caption, so resizing the polygon never leaves its caption behind. */}
       {(block.kind === "stage" ||
         block.kind === "text" ||
         block.kind === "exit" ||
-        block.kind === "shape" ||
         block.kind === "ga-zone") && (
-        <label className={`${label} mt-3`}>
-          Chữ hiển thị
+        <Group title="Chữ hiển thị">
           <input
             value={block.label ?? ""}
             maxLength={120}
             onChange={(e) => onChange({ label: e.target.value || null })}
-            className={`mt-1 ${input}`}
+            className={`mt-2 ${input}`}
           />
-        </label>
+        </Group>
       )}
 
-      {/* ---- Geometry, common to every kind ---- */}
-      <div className="mt-3 border-t border-beige-kem/25 pt-3">
-        <div className="grid grid-cols-2 gap-2">
-          <label className={label}>
-            Rộng
-            <CommittedNumber
-              value={block.width}
-              onCommit={(width) => onChange({ width })}
-              className={`mt-1 ${input}`}
-            />
-          </label>
-          <label className={label}>
-            Cao
-            <CommittedNumber
-              value={block.height}
-              onCommit={(height) => onChange({ height })}
-              className={`mt-1 ${input}`}
-            />
-          </label>
-        </div>
+      {/* Size and angle — the block as a rectangle on the map, whatever it contains. */}
+      {mode === "all" && (
+        <Group title="Kích thước & góc">
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <label className={label}>
+              Rộng
+              <CommittedNumber
+                value={block.width}
+                onCommit={(width) => onChange({ width })}
+                className={`mt-1 ${input}`}
+              />
+            </label>
+            <label className={label}>
+              Cao
+              <CommittedNumber
+                value={block.height}
+                onCommit={(height) => onChange({ height })}
+                className={`mt-1 ${input}`}
+              />
+            </label>
+          </div>
 
-        <p className={`${label} mt-2`}>Xoay ({block.rotation}°)</p>
-        <div className="mt-1 flex flex-wrap gap-1">
-          {[-90, -15, 15, 90].map((d) => (
-            <button key={d} className={btn} onClick={() => onRotate(d)}>
-              {d > 0 ? `+${d}°` : `${d}°`}
+          <p className={`${label} mt-2`}>Xoay ({block.rotation}°)</p>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {[-90, -15, 15, 90].map((d) => (
+              <button key={d} className={btn} onClick={() => onRotate(d)}>
+                {d > 0 ? `+${d}°` : `${d}°`}
+              </button>
+            ))}
+            <button className={btn} onClick={() => onRotate(-block.rotation)}>
+              Về 0°
             </button>
-          ))}
-          <button className={btn} onClick={() => onRotate(-block.rotation)}>
-            Về 0°
-          </button>
-        </div>
-
-        <div className="mt-3 flex flex-wrap gap-1">
-          <button className={btn} onClick={onDuplicate}>
-            Nhân đôi
-          </button>
-          <button className={btn} onClick={onDelete}>
-            Xoá khối
-          </button>
-        </div>
-      </div>
+          </div>
+        </Group>
+      )}
     </div>
   );
 }

@@ -19,6 +19,7 @@ import type {
   SeatMapSpace,
   SeatMapTable,
 } from "@/shared/catalog/types";
+import { LAYOUT_SPACE, SEAT_DIAMETER } from "@/shared/catalog/seatmap-validate";
 import { readableInk, rowMarkers } from "./layoutOps";
 
 /**
@@ -37,7 +38,13 @@ import { readableInk, rowMarkers } from "./layoutOps";
  *     test suite would notice.
  */
 
-const DEFAULT_SPACE: SeatMapSpace = { width: 10000, height: 10000, seatDiameter: 100 };
+/** Only for a caller that passes no `space`; the real one always comes from the server payload.
+ *  Read from the shared constants so it cannot drift from the space the server validates against. */
+const DEFAULT_SPACE: SeatMapSpace = {
+  width: LAYOUT_SPACE,
+  height: LAYOUT_SPACE,
+  seatDiameter: SEAT_DIAMETER,
+};
 
 /**
  * Seat count above which the canvas draws only what the viewport shows.
@@ -72,6 +79,14 @@ export interface CanvasSeat {
   seatType?: "single" | "double" | "standing";
   /** Drawn with a wheelchair mark, on every screen — a buyer needs this more than an organizer. */
   isAccessible?: boolean;
+  /**
+   * The level this seat is on (0044), by name. Null or absent is the single implicit floor.
+   *
+   * The canvas itself never reads it — floors are a VIEW concern its callers resolve before handing
+   * seats over. It rides here so the preview and the buyer's map can group by level without a second
+   * parallel array keyed by seat id.
+   */
+  floor?: string | null;
 }
 
 /** A named group of seats, drawn as a titled hull behind them. */
@@ -91,7 +106,12 @@ export interface Rect {
 /** Imperative view control. The editor's section list and the buyer's section chips both drive it. */
 export interface SeatCanvasHandle {
   zoomToVenue(): void;
+  zoomIn(): void;
+  zoomOut(): void;
+  zoomTo(scale: number): void;
   zoomToBlock(blockId: number | string): void;
+  /** Frame an arbitrary editor selection without teaching this shared renderer document block ids. */
+  zoomToBounds(box: { x: number; y: number; w: number; h: number }): void;
   zoomToSeat(seatId: number): void;
   /** Layout coordinates for a client point — for editors that place things where the pointer is. */
   toLayout(clientX: number, clientY: number): { x: number; y: number } | null;
@@ -148,6 +168,22 @@ export interface SeatCanvasProps<T extends CanvasSeat> {
    */
   fitContent?: boolean;
   /**
+   * Draw a measuring grid at this step, in layout units. `null`/absent draws none.
+   *
+   * The editor has had a grid TOGGLE since the beginning, and it has never drawn anything — it only
+   * rounded coordinates. So the status bar said "Lưới bật" over a blank field, and the organizer
+   * lining a block up against the one above it had nothing to line it up against; the aid was real
+   * but entirely invisible, which is close to the worst case, because an invisible aid still moves
+   * your block and you cannot see why.
+   *
+   * Rendered as an SVG `<pattern>`, not as lines. At the 30,000-unit space and a 50-unit step, the
+   * explicit form is 1,200 `<line>` nodes; the pattern is one node whatever the extent, and the
+   * browser tiles it on the GPU. Two frequencies — a light rule every step and a firmer one every
+   * tenth — because a single frequency at drawing density reads as flat texture: the tenth line is
+   * what lets the eye COUNT a distance rather than merely see that a distance exists.
+   */
+  gridStep?: number | null;
+  /**
    * Draw each row's letter at the end of the row. On by default, on every screen.
    *
    * A buyer needs it at least as much as an organizer: a ticket says "K12", and until now the chart
@@ -170,6 +206,8 @@ export interface SeatCanvasProps<T extends CanvasSeat> {
    * ends up driving the render loop of the canvas it is reporting on.
    */
   onViewReport?: (report: { zoom: number; x: number | null; y: number | null }) => void;
+  /** Keep buyer zoom controls visible unless a surrounding surface provides the same controls. */
+  showViewControls?: boolean;
   /** The row currently selected, as `section|label`, so it can be drawn as selected. */
   selectedRowKey?: string | null;
 
@@ -201,6 +239,16 @@ export interface SeatCanvasProps<T extends CanvasSeat> {
    * whichever block happens to sit at that position instead.
    */
   hiddenElementIndices?: ReadonlySet<number>;
+  /**
+   * Drawn but INERT — dimmed, unclickable, out of the tab order (0044).
+   *
+   * Different from hidden, and the difference is the whole point: an organizer editing the balcony
+   * still needs to see the stalls underneath to line the two up, but must not be able to grab a seat
+   * down there by accident. This is the layer behaviour every drawing tool has, and hiding was the
+   * wrong half of it — you cannot align against something that is not on screen.
+   */
+  ghostSeatIds?: ReadonlySet<number>;
+  ghostElementIndices?: ReadonlySet<number>;
   onElementPointerDown?: (index: number, additive: boolean) => void;
   /**
    * Drag one vertex of the selected polygon (the Nodes tool).
@@ -209,14 +257,48 @@ export interface SeatCanvasProps<T extends CanvasSeat> {
    * there. That is the rule for anything editor-only in this file: it draws the buyer's map too, and
    * a control a buyer can reach is a control a buyer can break.
    */
-  onVertexDrag?: (elementIndex: number, vertex: number, x: number, y: number) => void;
+  /**
+   * Drag one vertex of a drawn outline.
+   *
+   * Carries a `phase` for the same reason `onResize` does: without it the editor had no way to tell a
+   * frame of a drag from the end of one, so it committed on every pointer move — a hundred undo steps
+   * per drag, which at `UNDO_DEPTH` of 50 threw the whole history away and left Ctrl+Z rewinding a
+   * sub-pixel. Preview on `move`, commit once on `end`.
+   */
+  onVertexDrag?: (
+    elementIndex: number,
+    vertex: number,
+    x: number,
+    y: number,
+    phase: "move" | "end",
+  ) => void;
+  /**
+   * Scale a whole drawn outline from a corner of its true bounding box.
+   *
+   * Separate from `onResize`, which drives `width`/`height` — those only approximate a polygon, which
+   * is why the resize box stays suppressed for shapes. This reports the pointer in layout coordinates
+   * and lets the editor scale the POINTS, the thing a shape actually is.
+   */
+  onShapeScale?: (
+    elementIndex: number,
+    corner: "nw" | "ne" | "sw" | "se",
+    x: number,
+    y: number,
+    phase: "move" | "end",
+  ) => void;
   /**
    * Drag one of the eight handles on the selected element's bounding box (§6).
    *
    * Reports a CUMULATIVE delta from where the drag began, like `onElementDrag`, so the editor applies
    * one resize rather than a hundred — and one undo step, not a hundred (§28).
    */
-  onResize?: (elementIndex: number, handle: string, dx: number, dy: number, phase: "move" | "end") => void;
+  onResize?: (
+    elementIndex: number,
+    handle: string,
+    dx: number,
+    dy: number,
+    phase: "move" | "end",
+  ) => void;
   onElementDrag?: (dx: number, dy: number, phase: "move" | "end") => void;
   onTablePointerDown?: (index: number) => void;
   /**
@@ -254,30 +336,36 @@ export interface SeatCanvasProps<T extends CanvasSeat> {
 }
 
 const ELEMENT_FILL: Record<SeatMapElement["kind"], string> = {
-  stage: "fill-beige-kem/20 stroke-beige-kem/40",
+  // The showcase element: one ink treatment on both sides of the app — a solid semi-transparent
+  // wash with a readable outline, no decorative colour of its own. The showcase (a stage) carries
+  // the organiser's label, which has to read against it.
+  stage: "fill-beige-kem/12 stroke-beige-kem/55",
   aisle: "fill-transparent stroke-beige-kem/20",
   door: "fill-la-co/20 stroke-la-co/50",
   bar: "fill-cam-dat/15 stroke-cam-dat/40",
   label: "fill-transparent stroke-transparent",
-  area: "fill-beige-kem/5 stroke-beige-kem/30",
+  area: "fill-beige-kem/8 stroke-beige-kem/60",
   // Hall outline and dividers — drawn behind the seats, never interactive (FR-060).
   boundary: "fill-transparent stroke-beige-kem/45",
   divider: "fill-transparent stroke-beige-kem/35",
-  // Facility icons (FR-062).
-  exit: "fill-la-co/20 stroke-la-co/60",
-  restroom: "fill-beige-kem/10 stroke-beige-kem/50",
-  food_drink: "fill-cam-dat/15 stroke-cam-dat/50",
-  smoking: "fill-beige-kem/10 stroke-beige-kem/40",
-  first_aid: "fill-bubblegum/20 stroke-bubblegum/60",
-  lift_stairs: "fill-beige-kem/10 stroke-beige-kem/40",
-  wheelchair: "fill-la-co/15 stroke-la-co/50",
+  // Facility markers (FR-062): one outline treatment. The letter inside is what names the kind,
+  // so a per-kind wash only competed with the text it was supposed to sit under.
+  exit: "fill-transparent stroke-beige-kem/60",
+  restroom: "fill-transparent stroke-beige-kem/60",
+  food_drink: "fill-transparent stroke-beige-kem/60",
+  smoking: "fill-transparent stroke-beige-kem/60",
+  first_aid: "fill-transparent stroke-beige-kem/60",
+  lift_stairs: "fill-transparent stroke-beige-kem/60",
+  wheelchair: "fill-transparent stroke-beige-kem/60",
 };
 
 /** Kinds drawn from a point list rather than a rectangle (FR-058). */
 const SHAPE_KINDS = new Set(["boundary", "divider"]);
 
-const ZOOM_MIN = 1;
+/** Zooming out stops where the viewBox already frames everything — see `zoomMin`, which relaxes
+ *  this in authoring, where 100% deliberately shows only as much of the floor as the canvas fits. */
 const ZOOM_MAX = 16;
+const ZOOM_STEP = 1.4;
 /** Below this the seat is smaller than the text would be, so `auto` keeps the numbers off. */
 const NUMBER_VISIBILITY_THRESHOLD = 0.022;
 /** A pointer that moved less than this (in layout units) was a click, not a drag. */
@@ -312,9 +400,11 @@ function SeatCanvasInner<T extends CanvasSeat>(
     onSeatActivate,
     interactive = false,
     fitContent = true,
+    gridStep = null,
     showRowLabels = true,
     onRowSelect,
     onViewReport,
+    showViewControls = true,
     selectedRowKey,
     editable = false,
     selectedIds,
@@ -322,8 +412,11 @@ function SeatCanvasInner<T extends CanvasSeat>(
     onSeatDrag,
     selectedElementIndex = null,
     hiddenElementIndices,
+    ghostSeatIds,
+    ghostElementIndices,
     onElementPointerDown,
     onVertexDrag,
+    onShapeScale,
     onResize,
     onElementDrag,
     onTableDrag,
@@ -343,6 +436,7 @@ function SeatCanvasInner<T extends CanvasSeat>(
 ) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const onViewReportRef = useRef(onViewReport);
   const [marquee, setMarquee] = useState<Rect | null>(null);
   const [hover, setHover] = useState<{ seat: T; left: number; top: number } | null>(null);
 
@@ -355,6 +449,16 @@ function SeatCanvasInner<T extends CanvasSeat>(
    * by the tap itself and pinned to the bottom edge instead, clear of the hand.
    */
   const [coarsePointer, setCoarsePointer] = useState(false);
+
+  useEffect(() => {
+    onViewReportRef.current = onViewReport;
+  }, [onViewReport]);
+
+  /** Header and keyboard controls live outside the SVG pointer surface, so zoom changes report
+   *  themselves instead of waiting for the pointer to move over the canvas again. */
+  useEffect(() => {
+    onViewReportRef.current?.({ zoom, x: null, y: null });
+  }, [zoom]);
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
     const mq = window.matchMedia("(pointer: coarse)");
@@ -367,17 +471,41 @@ function SeatCanvasInner<T extends CanvasSeat>(
    *  cursor is something the render decides and a ref is not. */
   const [panning, setPanning] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
+  const minimapRef = useRef<SVGSVGElement>(null);
   const gesture = useRef<Gesture | null>(null);
+
+  /** Element identity stays as its original index even when hidden entries are omitted from a view. */
+  const visibleElements = useMemo(
+    () =>
+      elements.flatMap((element, index) =>
+        hiddenElementIndices?.has(index) ? [] : [{ element, index }],
+      ),
+    [elements, hiddenElementIndices],
+  );
 
   // What the drawn content occupies, padded by two seat diameters so edge seats are never clipped.
   // Whether the viewBox follows this is `fitContent`'s decision, not this value's.
   const contentBounds = useMemo(() => {
     const pts = [
       ...seats.map((s) => ({ x: s.x, y: s.y })),
-      ...elements.flatMap((e) => [
-        { x: e.x - e.width / 2, y: e.y - e.height / 2 },
-        { x: e.x + e.width / 2, y: e.y + e.height / 2 },
-      ]),
+      ...visibleElements.flatMap(({ element: e }) => {
+        const rad = ((((e.rotation ?? 0) % 360) + 360) % 360) * (Math.PI / 180);
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        const source = e.points?.length
+          ? e.points
+          : [
+              { x: e.x - e.width / 2, y: e.y - e.height / 2 },
+              { x: e.x + e.width / 2, y: e.y - e.height / 2 },
+              { x: e.x + e.width / 2, y: e.y + e.height / 2 },
+              { x: e.x - e.width / 2, y: e.y + e.height / 2 },
+            ];
+        return source.map((point) => {
+          const dx = point.x - e.x;
+          const dy = point.y - e.y;
+          return { x: e.x + dx * cos - dy * sin, y: e.y + dx * sin + dy * cos };
+        });
+      }),
       // A point whose coordinates are not finite is DROPPED rather than allowed into the extent
       // maths. `Math.min` propagates a single NaN through every bound, which reaches the DOM as
       // `viewBox="NaN NaN NaN NaN"` — and that blanks the entire map, seats included. One
@@ -391,13 +519,69 @@ function SeatCanvasInner<T extends CanvasSeat>(
     const minY = Math.min(...pts.map((p) => p.y)) - pad;
     const maxY = Math.max(...pts.map((p) => p.y)) + pad;
     return { x: minX, y: minY, w: Math.max(maxX - minX, 1), h: Math.max(maxY - minY, 1) };
-  }, [seats, elements, space]);
+  }, [seats, visibleElements, space]);
 
-  const bounds = useMemo(
-    () =>
-      fitContent ? contentBounds : { x: 0, y: 0, w: space.width, h: space.height },
-    [fitContent, contentBounds, space.width, space.height],
-  );
+  /**
+   * The canvas's rendered size, measured — so authoring can shape its viewBox to the element.
+   *
+   * `setState` here is inside the observer's callback rather than the effect body: that is the
+   * subscribe-to-an-external-system shape, which is what an effect is actually for.
+   */
+  const [viewport, setViewport] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[0]?.contentRect;
+      if (!r || r.width <= 0 || r.height <= 0) return;
+      setViewport((prev) =>
+        prev && Math.abs(prev.w - r.width) < 1 && Math.abs(prev.h - r.height) < 1
+          ? prev
+          : { w: r.width, h: r.height },
+      );
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  /**
+   * What the viewBox covers at 100%.
+   *
+   * Buying fits the content. AUTHORING used to pin this to the whole 10,000-unit square, and an SVG
+   * letterboxes whatever it cannot fit — so a square space inside the editor's wide canvas was
+   * scaled down to the SHORTER side and centred, leaving roughly 60% of the canvas width as dead
+   * margin (measured: a 443×443 working square inside 1112×443 of canvas).
+   *
+   * So the rectangle is cut to the canvas's own aspect instead — full width when the canvas is
+   * wider than the space, full height when it is taller — which is `slice` rather than `meet`. The
+   * placement area is unchanged at 0–10000 on both axes; what changes is that 100% now means "as
+   * much of it as this canvas can actually show", and the rest is a pan away. `zoomMin` below keeps
+   * the whole floor reachable by zooming out.
+   */
+  const bounds = useMemo(() => {
+    if (fitContent) return contentBounds;
+    const full = { x: 0, y: 0, w: space.width, h: space.height };
+    if (!viewport) return full;
+    const canvasAspect = viewport.w / viewport.h;
+    const spaceAspect = space.width / space.height;
+    if (!Number.isFinite(canvasAspect) || canvasAspect <= 0) return full;
+    if (canvasAspect > spaceAspect) {
+      const h = space.width / canvasAspect;
+      return { x: 0, y: (space.height - h) / 2, w: space.width, h };
+    }
+    const w = space.height * canvasAspect;
+    return { x: (space.width - w) / 2, y: 0, w, h: space.height };
+  }, [fitContent, contentBounds, space.width, space.height, viewport]);
+
+  /**
+   * How far out zooming may go. One while the viewBox already frames everything worth seeing;
+   * in authoring it is whatever ratio brings the WHOLE space back on screen, since `bounds` now
+   * deliberately shows less than all of it at 100%.
+   */
+  const zoomMin = useMemo(() => {
+    if (fitContent) return 1;
+    return Math.min(1, bounds.w / space.width, bounds.h / space.height);
+  }, [fitContent, bounds.w, bounds.h, space.width, space.height]);
 
   /**
    * The visible rectangle — and the last line of defence for the `viewBox` attribute.
@@ -456,7 +640,10 @@ function SeatCanvasInner<T extends CanvasSeat>(
     const pad = space.seatDiameter * 4;
     return markers.filter(
       (m) =>
-        m.x >= view.x - pad && m.x <= view.x + view.w + pad && m.y >= view.y - pad && m.y <= view.y + view.h + pad,
+        m.x >= view.x - pad &&
+        m.x <= view.x + view.w + pad &&
+        m.y >= view.y - pad &&
+        m.y <= view.y + view.h + pad,
     );
   }, [markers, view, space.seatDiameter]);
 
@@ -479,15 +666,61 @@ function SeatCanvasInner<T extends CanvasSeat>(
     boundsRef.current = bounds;
   }, [bounds]);
 
-  const applyView = useCallback((nextZoom: number, nextPan: { x: number; y: number }) => {
-    zoomRef.current = nextZoom;
-    panRef.current = nextPan;
-    setZoom(nextZoom);
-    setPan(nextPan);
-  }, []);
+  /** Same reasoning as `boundsRef`: derived from props, read by gestures. */
+  const zoomMinRef = useRef(zoomMin);
+  useEffect(() => {
+    zoomMinRef.current = zoomMin;
+  }, [zoomMin]);
+
+  /**
+   * Keep a BUYER's view on the map. Panning there is a way to look closer, never a way to lose it.
+   *
+   * The drag applied whatever delta the pointer travelled, with nothing bounding it, so a buyer who
+   * flicked the map could end up staring at empty floor with the chart somewhere off-screen and only
+   * the reset button to find it again — on a phone, where the flick is the natural gesture and the
+   * button is the smallest thing on screen. Since `bounds` for a buyer IS the content, holding the
+   * view inside it is exactly "stay on the seats".
+   *
+   * At 100% the limit is zero, which is right: the whole chart already fits, so there is nothing to
+   * pan TO, and a drag that visibly does nothing is better than one that slides the map away.
+   *
+   * The editor is deliberately exempt. There `bounds` is the slice of the coordinate space this
+   * canvas happens to frame, not the content, and an organizer has to be able to reach the parts of
+   * the floor outside it — clamping to the current frame would wall them into whatever they could
+   * already see.
+   */
+  const clampPan = useCallback(
+    (z: number, p: { x: number; y: number }) => {
+      if (!fitContent) return p;
+      const b = boundsRef.current;
+      const limitX = Math.max(0, (b.w - b.w / z) / 2);
+      const limitY = Math.max(0, (b.h - b.h / z) / 2);
+      return {
+        x: Math.min(limitX, Math.max(-limitX, p.x)),
+        y: Math.min(limitY, Math.max(-limitY, p.y)),
+      };
+    },
+    [fitContent],
+  );
+
+  const applyView = useCallback(
+    (nextZoom: number, nextPan: { x: number; y: number }) => {
+      // Every gesture — drag, wheel, zoom buttons, zoom-to-seat — lands here, so the bound is
+      // applied once rather than at each call site where one could be forgotten.
+      const pan = clampPan(nextZoom, nextPan);
+      zoomRef.current = nextZoom;
+      panRef.current = pan;
+      setZoom(nextZoom);
+      setPan(pan);
+    },
+    [clampPan],
+  );
 
   /** The view a gesture must reason about: built from the refs, never from a render's snapshot. */
-  const liveView = useCallback(() => viewOf(boundsRef.current, zoomRef.current, panRef.current), []);
+  const liveView = useCallback(
+    () => viewOf(boundsRef.current, zoomRef.current, panRef.current),
+    [],
+  );
 
   /**
    * Client pixels → layout units, via the SVG's own screen matrix.
@@ -515,7 +748,7 @@ function SeatCanvasInner<T extends CanvasSeat>(
       const b = boundsRef.current;
       const pad = 1.15; // a little air, so a framed block is not flush with the edges
       const z = Math.max(
-        ZOOM_MIN,
+        zoomMinRef.current,
         Math.min(ZOOM_MAX, Math.min(b.w / (box.w * pad), b.h / (box.h * pad))),
       );
       const w = b.w / z;
@@ -542,7 +775,7 @@ function SeatCanvasInner<T extends CanvasSeat>(
       const b = boundsRef.current;
       const v = liveView();
       const current = zoomRef.current;
-      const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, current * factor));
+      const next = Math.min(ZOOM_MAX, Math.max(zoomMinRef.current, current * factor));
       if (next === current) return;
 
       const w = b.w / next;
@@ -558,6 +791,9 @@ function SeatCanvasInner<T extends CanvasSeat>(
     },
     [applyView, liveView],
   );
+  const zoomIn = useCallback(() => zoomAt(ZOOM_STEP), [zoomAt]);
+  const zoomOut = useCallback(() => zoomAt(1 / ZOOM_STEP), [zoomAt]);
+  const zoomTo = useCallback((scale: number) => zoomAt(scale / zoomRef.current), [zoomAt]);
 
   const nudgeView = useCallback(
     (dx: number, dy: number) => {
@@ -567,6 +803,49 @@ function SeatCanvasInner<T extends CanvasSeat>(
     },
     [applyView, liveView],
   );
+
+  /** Centre the current zoom on a layout point — used by the orientation inset. */
+  const centerViewAt = useCallback(
+    (point: { x: number; y: number }) => {
+      const b = boundsRef.current;
+      const z = zoomRef.current;
+      const w = b.w / z;
+      const h = b.h / z;
+      applyView(z, {
+        x: point.x - w / 2 - b.x - (b.w - w) / 2,
+        y: point.y - h / 2 - b.y - (b.h - h) / 2,
+      });
+    },
+    [applyView],
+  );
+
+  const navigateFromMinimap = useCallback(
+    (e: React.PointerEvent<SVGSVGElement>) => {
+      const svg = minimapRef.current;
+      const ctm = svg?.getScreenCTM();
+      if (!svg || !ctm) return;
+      const point = svg.createSVGPoint();
+      point.x = e.clientX;
+      point.y = e.clientY;
+      const layoutPoint = point.matrixTransform(ctm.inverse());
+      if (
+        layoutPoint.x < contentBounds.x ||
+        layoutPoint.x > contentBounds.x + contentBounds.w ||
+        layoutPoint.y < contentBounds.y ||
+        layoutPoint.y > contentBounds.y + contentBounds.h
+      ) {
+        return;
+      }
+      centerViewAt(layoutPoint);
+    },
+    [centerViewAt, contentBounds],
+  );
+
+  /** Keep the inset cheap even when the main canvas is virtualising a stadium-sized seat list. */
+  const minimapSeats = useMemo(() => {
+    const step = Math.max(1, Math.ceil(seats.length / 600));
+    return seats.filter((_, index) => index % step === 0);
+  }, [seats]);
 
   // ---- Blocks -------------------------------------------------------------------------------
 
@@ -618,10 +897,14 @@ function SeatCanvasInner<T extends CanvasSeat>(
       // the chart, so "fit to frame" frames the CONTENT instead — which is what the organizer means by
       // it, and the one moment they are asking to be re-scaled.
       zoomToVenue: () => (fitContent ? resetView() : frame(contentBounds)),
+      zoomIn,
+      zoomOut,
+      zoomTo,
       zoomToBlock: (blockId) => {
         const hull = hulls.find((h) => h.block.id === blockId);
         if (hull) frame(hull);
       },
+      zoomToBounds: frame,
       zoomToSeat: (seatId) => {
         const seat = seats.find((s) => s.id === seatId);
         if (!seat) return;
@@ -630,7 +913,19 @@ function SeatCanvasInner<T extends CanvasSeat>(
       },
       toLayout,
     }),
-    [resetView, hulls, frame, seats, space.seatDiameter, toLayout, fitContent, contentBounds],
+    [
+      resetView,
+      zoomIn,
+      zoomOut,
+      zoomTo,
+      hulls,
+      frame,
+      seats,
+      space.seatDiameter,
+      toLayout,
+      fitContent,
+      contentBounds,
+    ],
   );
 
   // ---- Pointer gestures ---------------------------------------------------------------------
@@ -807,25 +1102,77 @@ function SeatCanvasInner<T extends CanvasSeat>(
     (seatNumbers === "auto" && space.seatDiameter / view.w > NUMBER_VISIBILITY_THRESHOLD);
   const strokeScale = Math.max(1.5, 6 / Math.sqrt(zoom)); // hairlines stay visible when zoomed in
 
+  /** Screen pixels per layout unit at the current view — what pins a hairline to a real pixel. */
+  const unitPx = useMemo(() => {
+    if (!viewport || view.w <= 0) return null;
+    const v = viewport.w / view.w;
+    return Number.isFinite(v) && v > 0 ? v : null;
+  }, [viewport, view.w]);
+
+  /**
+   * The grid actually worth drawing at this zoom, or `null` for none.
+   *
+   * Two things have to adapt or the grid is useless at one end of the zoom range and unreadable at
+   * the other, and the first attempt at this drew nothing at all on a 30,000-unit space:
+   *
+   *   * The STEP. At the zoom that fits a whole venue, 50-unit cells are under two pixels apart —
+   *     not a grid, a flat wash. So the step doubles until the cells are far enough apart to read.
+   *     Doubling (not an arbitrary jump) keeps every drawn line a multiple of the organizer's chosen
+   *     step, so a visible line is always a real snap target — the grid shows FEWER positions than
+   *     it snaps to, never different ones.
+   *   * The STROKE. Widths live in layout units, so a fixed one shrinks with the view: two units is
+   *     a fourteenth of a pixel at full-venue zoom. Dividing by `unitPx` pins them to roughly a
+   *     pixel on screen at any zoom, which is what a rule should be.
+   *
+   * Gives up rather than drawing junk: past 64 doublings-worth the lines are so far apart they say
+   * nothing about the work, and a grid nobody can use is worse than an honest blank.
+   */
+  const gridPlan = useMemo(() => {
+    if (!gridStep || gridStep <= 0 || unitPx === null) return null;
+    const MIN_CELL_PX = 7;
+    let step = gridStep;
+    while (step * unitPx < MIN_CELL_PX && step <= gridStep * 64) step *= 2;
+    if (step * unitPx < MIN_CELL_PX) return null;
+    return { step, minor: 1 / unitPx, major: 1.7 / unitPx };
+  }, [gridStep, unitPx]);
+
   /**
    * Whether to draw the orientation inset.
    *
-   * Only once zoomed IN, and only when the venue is big enough to get lost in — seats.io's rule, and
-   * the right one: at full view the minimap would be a smaller copy of what is already on screen.
-   * Zoomed into one corner of a bowl with no overview is the failure it exists to prevent.
+   * Only once the visible rectangle is meaningfully smaller than the content, and only when there is
+   * enough content to get lost in. Comparing rectangles rather than a magic zoom value also works in
+   * authoring, where fitting a large drawing may put the numeric zoom below one.
    */
-  const showMinimap = !editable && zoom > 1.2 && (blocks?.length ?? 0) > 1;
+  const showMinimap =
+    seats.length + visibleElements.length > 1 &&
+    (view.w < contentBounds.w * 0.9 || view.h < contentBounds.h * 0.9);
 
   return (
     <div className={`relative ${className}`}>
       {showMinimap && (
-        <div
-          className="pointer-events-none absolute bottom-2 left-2 z-10 border border-beige-kem/40 bg-surface-2/90 p-1"
-          aria-hidden="true"
-        >
-          <svg width={96} height={72} viewBox={`${bounds.x} ${bounds.y} ${bounds.w} ${bounds.h}`}>
+        <div className="absolute bottom-2 left-2 z-10 border border-beige-kem/40 bg-surface-2/90 p-1 shadow-sm">
+          <svg
+            ref={minimapRef}
+            role="button"
+            aria-label="Bản đồ thu nhỏ — bấm để chuyển khung nhìn"
+            tabIndex={0}
+            width={112}
+            height={84}
+            viewBox={`${contentBounds.x} ${contentBounds.y} ${contentBounds.w} ${contentBounds.h}`}
+            className="cursor-crosshair"
+            onPointerDown={navigateFromMinimap}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                centerViewAt({
+                  x: contentBounds.x + contentBounds.w / 2,
+                  y: contentBounds.y + contentBounds.h / 2,
+                });
+              }
+            }}
+          >
             {/* Every seat as a plain dot: the inset answers "where am I", not "which seat". */}
-            {seats.map((s) => (
+            {minimapSeats.map((s) => (
               <circle
                 key={s.id}
                 cx={s.x}
@@ -834,6 +1181,34 @@ function SeatCanvasInner<T extends CanvasSeat>(
                 className="fill-beige-kem/35"
               />
             ))}
+            {visibleElements.map(({ element, index }) => {
+              const shared = {
+                className: "fill-transparent stroke-beige-kem/35",
+                strokeWidth: Math.max(contentBounds.w, contentBounds.h) / 180,
+                transform: `rotate(${element.rotation} ${element.x} ${element.y})`,
+                // This is the SHAPE layer, drawn under the interactive one; it has its own copy of
+                // the outline and would otherwise stay at full strength while its twin above faded.
+                opacity: ghostElementIndices?.has(index) ? 0.22 : undefined,
+              };
+              if (element.points?.length) {
+                const points = element.points.map((point) => `${point.x},${point.y}`).join(" ");
+                return element.kind === "divider" ? (
+                  <polyline key={`${element.kind}-${index}`} points={points} {...shared} />
+                ) : (
+                  <polygon key={`${element.kind}-${index}`} points={points} {...shared} />
+                );
+              }
+              return (
+                <rect
+                  key={`${element.kind}-${index}`}
+                  x={element.x - element.width / 2}
+                  y={element.y - element.height / 2}
+                  width={element.width}
+                  height={element.height}
+                  {...shared}
+                />
+              );
+            })}
             {/* The slice currently on screen. */}
             <rect
               x={view.x}
@@ -841,39 +1216,47 @@ function SeatCanvasInner<T extends CanvasSeat>(
               width={view.w}
               height={view.h}
               className="fill-burgundy/15 stroke-burgundy"
-              strokeWidth={Math.max(bounds.w, bounds.h) / 120}
+              strokeWidth={Math.max(contentBounds.w, contentBounds.h) / 120}
             />
           </svg>
+          {editable && (
+            <span className="block pt-0.5 text-center font-mono text-[9px] text-beige-kem/70">
+              Bấm để di chuyển
+            </span>
+          )}
         </div>
       )}
 
-      {/* Zoom and pan are reachable from the keyboard, not only by pointer gesture (FR-039a). */}
-      <div className="absolute right-2 top-2 z-10 flex gap-1 font-mono text-xs">
-        <button
-          type="button"
-          onClick={() => zoomAt(1.4)}
-          aria-label="Phóng to sơ đồ"
-          className="grid h-7 w-7 place-items-center border border-beige-kem/40 bg-surface-2 text-beige-kem"
-        >
-          +
-        </button>
-        <button
-          type="button"
-          onClick={() => zoomAt(1 / 1.4)}
-          aria-label="Thu nhỏ sơ đồ"
-          className="grid h-7 w-7 place-items-center border border-beige-kem/40 bg-surface-2 text-beige-kem"
-        >
-          −
-        </button>
-        <button
-          type="button"
-          onClick={resetView}
-          aria-label="Đặt lại khung nhìn"
-          className="grid h-7 w-auto place-items-center border border-beige-kem/40 bg-surface-2 px-2 text-beige-kem"
-        >
-          ⟲
-        </button>
-      </div>
+      {/* Standalone buyer surfaces keep an on-canvas zoom cluster. A surrounding surface may relocate
+          the same commands into its own chrome, as the editor and preview do. */}
+      {!editable && showViewControls && (
+        <div className="absolute right-2 top-2 z-10 flex gap-1 font-mono text-xs">
+          <button
+            type="button"
+            onClick={zoomIn}
+            aria-label="Phóng to sơ đồ"
+            className="grid h-7 w-7 place-items-center border border-beige-kem/40 bg-surface-2 text-beige-kem"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            onClick={zoomOut}
+            aria-label="Thu nhỏ sơ đồ"
+            className="grid h-7 w-7 place-items-center border border-beige-kem/40 bg-surface-2 text-beige-kem"
+          >
+            −
+          </button>
+          <button
+            type="button"
+            onClick={resetView}
+            aria-label="Đặt lại khung nhìn"
+            className="grid h-7 w-auto place-items-center border border-beige-kem/40 bg-surface-2 px-2 text-beige-kem"
+          >
+            ⟲
+          </button>
+        </div>
+      )}
 
       <svg
         ref={svgRef}
@@ -887,9 +1270,9 @@ function SeatCanvasInner<T extends CanvasSeat>(
           // In edit mode the arrows belong to the selection, not to the viewport — the editor binds
           // them. Only the zoom keys stay, because nothing in the editor wants them.
           const map: Record<string, () => void> = {
-            "+": () => zoomAt(1.4),
-            "=": () => zoomAt(1.4),
-            "-": () => zoomAt(1 / 1.4),
+            "+": zoomIn,
+            "=": zoomIn,
+            "-": zoomOut,
             "0": resetView,
             ...(editable
               ? {}
@@ -939,7 +1322,89 @@ function SeatCanvasInner<T extends CanvasSeat>(
             <rect width={40} height={40} className="fill-stone-800/40" />
             <line x1={0} y1={0} x2={0} y2={40} className="stroke-stone-500" strokeWidth={14} />
           </pattern>
+
+          {/*
+            The measuring grid. Two nested patterns: `chart-grid` tiles one cell, and `chart-grid-10`
+            tiles ten of them and paints the firmer rule over the top.
+
+            Widths come from `gridPlan`, which pins them to about a pixel on screen at any zoom — see
+            the note there for why a fixed width in layout units draws nothing at all once the view is
+            wide enough.
+          */}
+          {gridPlan && (
+            <>
+              <pattern
+                id="chart-grid"
+                patternUnits="userSpaceOnUse"
+                width={gridPlan.step}
+                height={gridPlan.step}
+              >
+                <path
+                  d={`M ${gridPlan.step} 0 L 0 0 0 ${gridPlan.step}`}
+                  fill="none"
+                  className="stroke-beige-kem"
+                  strokeOpacity={0.2}
+                  strokeWidth={gridPlan.minor}
+                />
+              </pattern>
+              <pattern
+                id="chart-grid-10"
+                patternUnits="userSpaceOnUse"
+                width={gridPlan.step * 10}
+                height={gridPlan.step * 10}
+              >
+                <rect
+                  width={gridPlan.step * 10}
+                  height={gridPlan.step * 10}
+                  fill="url(#chart-grid)"
+                />
+                <path
+                  d={`M ${gridPlan.step * 10} 0 L 0 0 0 ${gridPlan.step * 10}`}
+                  fill="none"
+                  className="stroke-beige-kem"
+                  strokeOpacity={0.42}
+                  strokeWidth={gridPlan.major}
+                />
+              </pattern>
+            </>
+          )}
         </defs>
+
+        {/*
+          Under the floor plan as well as the seats: the grid measures the SPACE, and a traced venue
+          photo is content laid on that space, not the ground beneath it.
+
+          Covers the VIEW, not the space. Zoomed all the way out the visible rectangle is wider than
+          the space — `bounds` is cropped to the canvas aspect, so `zoomMin` pulls back until the
+          shorter axis fits and the longer one then overshoots — and a grid drawn only across
+          `0..space.width` ended there, leaving bare strips down both sides. The pattern tiles from
+          the coordinate origin whatever rectangle is painted with it, so widening the rectangle
+          moves no line: the same grid simply stops running out.
+
+          Padded by a cell so a pan cannot outrun the fill between frames.
+        */}
+        {gridPlan && (
+          <rect
+            x={view.x - gridPlan.step}
+            y={view.y - gridPlan.step}
+            width={view.w + gridPlan.step * 2}
+            height={view.h + gridPlan.step * 2}
+            fill="url(#chart-grid-10)"
+            aria-hidden="true"
+            pointerEvents="none"
+          />
+        )}
+
+        {/*
+          No boundary is drawn.
+
+          There was one, briefly, marking the wall `allowedDelta` enforces — on the reasoning that an
+          invisible stop reads as the editor refusing to work. That reasoning belonged to the version
+          where the wall sat at the edge of the frame and a drag met it constantly. Since 0041 it is
+          a full frame outside the furthest the editor can zoom out, so an organizer reaches it only
+          by deliberately panning into empty space, and a line permanently on screen to warn about
+          something nobody arrives at is just furniture.
+        */}
 
         {/* Background layer only. Drawn behind everything, never interactive, and it can never
             determine a seat's status — the database decides (Principle I, FR-020). */}
@@ -966,17 +1431,20 @@ function SeatCanvasInner<T extends CanvasSeat>(
               y={hull.y}
               width={hull.w}
               height={hull.h}
-              fill={`${hull.block.color}14`}
-              stroke={`${hull.block.color}66`}
-              strokeWidth={strokeScale}
-              strokeDasharray={`${space.seatDiameter / 2} ${space.seatDiameter / 3}`}
+              fill="transparent"
+              stroke="currentColor"
+              strokeOpacity={0.3}
+              strokeWidth={strokeScale * 1.5}
+              strokeDasharray={`${space.seatDiameter * 0.6} ${space.seatDiameter * 0.4}`}
+              className="text-beige-kem"
             />
             <text
               x={hull.x + space.seatDiameter / 3}
               y={hull.y - space.seatDiameter / 3}
-              fontSize={space.seatDiameter * 1.1}
-              fill={hull.block.color}
-              className="font-mono"
+              fontSize={space.seatDiameter * 1.25}
+              fill="currentColor"
+              fillOpacity={0.5}
+              className="font-sans text-beige-kem"
             >
               {hull.block.name}
             </text>
@@ -1004,26 +1472,17 @@ function SeatCanvasInner<T extends CanvasSeat>(
                 : undefined
             }
           >
-            {selectedTableIndex === i && (
-              // Same dashed ring the selected element gets, so "what will Delete remove" is legible.
-              <rect
-                x={t.x - t.width / 2 - 30}
-                y={t.y - t.height / 2 - 30}
-                width={t.width + 60}
-                height={t.height + 60}
-                fill="none"
-                className="stroke-burgundy"
-                strokeWidth={strokeScale * 1.5}
-                strokeDasharray={`${strokeScale * 5} ${strokeScale * 4}`}
-              />
-            )}
             {t.shape === "round" ? (
               <circle
                 cx={t.x}
                 cy={t.y}
                 r={t.width / 2}
-                className="fill-beige-kem/10 stroke-beige-kem/40"
-                strokeWidth={8}
+                className={
+                  selectedTableIndex === i
+                    ? "fill-burgundy/15 stroke-burgundy"
+                    : "fill-beige-kem/10 stroke-beige-kem/40"
+                }
+                strokeWidth={selectedTableIndex === i ? 12 : 8}
               />
             ) : (
               <rect
@@ -1031,8 +1490,12 @@ function SeatCanvasInner<T extends CanvasSeat>(
                 y={t.y - t.height / 2}
                 width={t.width}
                 height={t.height}
-                className="fill-beige-kem/10 stroke-beige-kem/40"
-                strokeWidth={8}
+                className={
+                  selectedTableIndex === i
+                    ? "fill-burgundy/15 stroke-burgundy"
+                    : "fill-beige-kem/10 stroke-beige-kem/40"
+                }
+                strokeWidth={selectedTableIndex === i ? 12 : 8}
               />
             )}
             <text
@@ -1051,170 +1514,266 @@ function SeatCanvasInner<T extends CanvasSeat>(
         {/* Non-sellable decoration. Excluded from the seat tab order (FR-040), and inert for a
             buyer — a stage that swallows the tap meant for the front row is a real misclick. */}
         {elements.map((el, i) => {
+          // A capacity zone without an explicit colour defaults to the standing-yellow: the faint
+          // ink wash made it nearly invisible at overview zoom, and its label carried no colour.
+          const zoneYellow = el.kind === "area" && !el.color ? "#F0E442" : undefined;
           // Skipped IN PLACE rather than filtered out: `i` is this element's identity for
           // `selectedElementIndex`, `onElementPointerDown`, `onResize` and `onVertexDrag`, so
           // removing entries would silently re-point the editor's selection at its neighbour.
           if (hiddenElementIndices?.has(i)) return null;
           if (!Number.isFinite(el.x) || !Number.isFinite(el.y)) return null;
-          const grabbable = editable && !!onElementPointerDown;
+          const ghosted = ghostElementIndices?.has(i) ?? false;
+          const grabbable = editable && !ghosted && !!onElementPointerDown;
           return (
-          <g
-            key={`el-${i}`}
-            transform={`rotate(${el.rotation} ${el.x} ${el.y})`}
-            aria-hidden="true"
-            pointerEvents={grabbable ? undefined : "none"}
-            style={grabbable ? { cursor: "grab" } : undefined}
-            onPointerDown={
-              grabbable
-                ? (e) => {
-                    e.stopPropagation();
-                    if (!wantsPan(e)) onElementPointerDown(i, e.shiftKey);
-                    beginGesture(e, "element");
+            <g
+              key={`el-${i}`}
+              transform={`rotate(${el.rotation} ${el.x} ${el.y})`}
+              aria-hidden="true"
+              pointerEvents={grabbable ? undefined : "none"}
+              opacity={ghosted ? 0.22 : undefined}
+              style={grabbable ? { cursor: "grab" } : undefined}
+              onPointerDown={
+                grabbable
+                  ? (e) => {
+                      e.stopPropagation();
+                      if (!wantsPan(e)) onElementPointerDown(i, e.shiftKey);
+                      beginGesture(e, "element");
+                    }
+                  : undefined
+              }
+            >
+              {SHAPE_KINDS.has(el.kind) && el.points && el.points.length >= 2 && (
+                <polyline
+                  // A boundary closes back to its first point; a divider stays an open line.
+                  points={(el.kind === "boundary" ? [...el.points, el.points[0]] : el.points)
+                    .map((p) => `${p.x},${p.y}`)
+                    .join(" ")}
+                  className={el.color ? "" : ELEMENT_FILL[el.kind]}
+                  strokeWidth={selectedElementIndex === i ? 16 : 10}
+                  // A closed outline takes its colour as a translucent wash with a solid edge, so shapes
+                  // stay tellable apart without hiding the seats drawn over them. A divider is an open
+                  // line and only ever takes a stroke.
+                  style={
+                    el.color
+                      ? {
+                          stroke: el.color,
+                          fill: el.kind === "boundary" ? `${el.color}33` : "none",
+                        }
+                      : undefined
                   }
-                : undefined
-            }
-          >
-            {/* Selection ring, drawn only for the one being edited. */}
-            {selectedElementIndex === i && (
-              <rect
-                x={el.x - el.width / 2 - 20}
-                y={el.y - el.height / 2 - 20}
-                width={el.width + 40}
-                height={el.height + 40}
-                fill="none"
-                className="stroke-burgundy"
-                strokeWidth={strokeScale * 1.5}
-                strokeDasharray={`${strokeScale * 5} ${strokeScale * 4}`}
-              />
-            )}
-            {SHAPE_KINDS.has(el.kind) && el.points && el.points.length >= 2 && (
-              <polyline
-                // A boundary closes back to its first point; a divider stays an open line.
-                points={(el.kind === "boundary" ? [...el.points, el.points[0]] : el.points)
-                  .map((p) => `${p.x},${p.y}`)
-                  .join(" ")}
-                className={el.color ? "" : ELEMENT_FILL[el.kind]}
-                strokeWidth={10}
-                // A closed outline takes its colour as a translucent wash with a solid edge, so shapes
-                // stay tellable apart without hiding the seats drawn over them. A divider is an open
-                // line and only ever takes a stroke.
-                style={
-                  el.color
-                    ? {
-                        stroke: el.color,
-                        fill: el.kind === "boundary" ? `${el.color}33` : "none",
-                      }
-                    : undefined
-                }
-                fill="none"
-              />
-            )}
-            {/* Vertex handles — only for the selected shape, and only when an editor asked for them. */}
-            {/*
+                  fill="none"
+                />
+              )}
+              {/* Vertex handles — only for the selected shape, and only when an editor asked for them. */}
+              {/*
               Resize handles (§6). Only on a single selected element, and only where `width`/`height`
               ARE the geometry — a drawn shape is defined by its points, and dragging a box around it
               would claim to resize something the box only approximates.
             */}
-            {onResize &&
-              selectedElementIndex === i &&
-              !SHAPE_KINDS.has(el.kind) &&
-              (["nw", "n", "ne", "w", "e", "sw", "s", "se"] as const).map((handle) => {
-                const hx = el.x + (handle.includes("w") ? -el.width / 2 : handle.includes("e") ? el.width / 2 : 0);
-                const hy = el.y + (handle.includes("n") ? -el.height / 2 : handle.includes("s") ? el.height / 2 : 0);
-                return (
-                  <rect
-                    key={handle}
-                    x={hx - Math.max(14, 44 / Math.sqrt(zoom))}
-                    y={hy - Math.max(14, 44 / Math.sqrt(zoom))}
-                    width={Math.max(28, 88 / Math.sqrt(zoom))}
-                    height={Math.max(28, 88 / Math.sqrt(zoom))}
-                    className="fill-burgundy stroke-beige-kem"
-                    strokeWidth={strokeScale}
-                    style={{ cursor: `${handle}-resize` }}
-                    onPointerDown={(e) => beginResize(i, handle, e)}
-                  />
-                );
-              })}
+              {onResize &&
+                selectedElementIndex === i &&
+                !SHAPE_KINDS.has(el.kind) &&
+                (["nw", "n", "ne", "w", "e", "sw", "s", "se"] as const).map((handle) => {
+                  const hx =
+                    el.x +
+                    (handle.includes("w")
+                      ? -el.width / 2
+                      : handle.includes("e")
+                        ? el.width / 2
+                        : 0);
+                  const hy =
+                    el.y +
+                    (handle.includes("n")
+                      ? -el.height / 2
+                      : handle.includes("s")
+                        ? el.height / 2
+                        : 0);
+                  return (
+                    <rect
+                      key={handle}
+                      x={hx - Math.max(14, 44 / Math.sqrt(zoom))}
+                      y={hy - Math.max(14, 44 / Math.sqrt(zoom))}
+                      width={Math.max(28, 88 / Math.sqrt(zoom))}
+                      height={Math.max(28, 88 / Math.sqrt(zoom))}
+                      className="fill-burgundy stroke-beige-kem"
+                      strokeWidth={strokeScale}
+                      style={{ cursor: `${handle}-resize` }}
+                      onPointerDown={(e) => beginResize(i, handle, e)}
+                    />
+                  );
+                })}
 
-            {onVertexDrag &&
-              selectedElementIndex === i &&
-              SHAPE_KINDS.has(el.kind) &&
-              el.points?.map((p, v) => (
-                <circle
-                  key={v}
-                  cx={p.x}
-                  cy={p.y}
-                  r={Math.max(18, 60 / Math.sqrt(zoom))}
-                  className="cursor-move fill-burgundy stroke-beige-kem"
-                  strokeWidth={strokeScale}
-                  onPointerDown={(e) => {
-                    if (wantsPan(e)) return;
-                    e.stopPropagation();
-                    (e.target as Element).setPointerCapture(e.pointerId);
-                    const move = (ev: PointerEvent) => {
-                      const at = toLayout(ev.clientX, ev.clientY);
-                      if (at) onVertexDrag(i, v, at.x, at.y);
-                    };
-                    const up = () => {
-                      window.removeEventListener("pointermove", move);
-                      window.removeEventListener("pointerup", up);
-                    };
-                    window.addEventListener("pointermove", move);
-                    window.addEventListener("pointerup", up);
-                  }}
+              {/*
+                Corner handles for a drawn outline, measured from the POINTS.
+
+                The resize box above is suppressed for shapes because `width`/`height` only
+                approximate a polygon — a true statement that left shapes with no size control at all,
+                so the only way to enlarge a hand-drawn outline was to drag every vertex by eye. These
+                handles sit on the real extent and scale the points themselves, which is the operation
+                the box could not honestly offer.
+
+                Corners only, no edge midpoints: the scale is uniform, and a midpoint handle would
+                promise a per-axis stretch these do not do.
+              */}
+              {onShapeScale &&
+                selectedElementIndex === i &&
+                SHAPE_KINDS.has(el.kind) &&
+                el.points &&
+                el.points.length >= 2 &&
+                (() => {
+                  const xs = el.points.map((p) => p.x);
+                  const ys = el.points.map((p) => p.y);
+                  const box = {
+                    minX: Math.min(...xs),
+                    maxX: Math.max(...xs),
+                    minY: Math.min(...ys),
+                    maxY: Math.max(...ys),
+                  };
+                  const size = Math.max(28, 88 / Math.sqrt(zoom));
+                  return (
+                    <g>
+                      {(["nw", "ne", "sw", "se"] as const).map((corner) => {
+                        const hx = corner.includes("w") ? box.minX : box.maxX;
+                        const hy = corner.includes("n") ? box.minY : box.maxY;
+                        return (
+                          <rect
+                            key={corner}
+                            x={hx - size / 2}
+                            y={hy - size / 2}
+                            width={size}
+                            height={size}
+                            className="fill-beige-kem stroke-burgundy"
+                            strokeWidth={strokeScale}
+                            style={{ cursor: `${corner}-resize` }}
+                            onPointerDown={(e) => {
+                              if (wantsPan(e)) return;
+                              e.stopPropagation();
+                              (e.target as Element).setPointerCapture(e.pointerId);
+                              let last = { x: hx, y: hy };
+                              const move = (ev: PointerEvent) => {
+                                const at = toLayout(ev.clientX, ev.clientY);
+                                if (!at) return;
+                                last = at;
+                                onShapeScale(i, corner, at.x, at.y, "move");
+                              };
+                              const up = () => {
+                                onShapeScale(i, corner, last.x, last.y, "end");
+                                window.removeEventListener("pointermove", move);
+                                window.removeEventListener("pointerup", up);
+                              };
+                              window.addEventListener("pointermove", move);
+                              window.addEventListener("pointerup", up);
+                            }}
+                          />
+                        );
+                      })}
+                    </g>
+                  );
+                })()}
+
+              {onVertexDrag &&
+                selectedElementIndex === i &&
+                SHAPE_KINDS.has(el.kind) &&
+                el.points?.map((p, v) => (
+                  <circle
+                    key={v}
+                    cx={p.x}
+                    cy={p.y}
+                    r={Math.max(18, 60 / Math.sqrt(zoom))}
+                    className="cursor-move fill-burgundy stroke-beige-kem"
+                    strokeWidth={strokeScale}
+                    onPointerDown={(e) => {
+                      if (wantsPan(e)) return;
+                      e.stopPropagation();
+                      (e.target as Element).setPointerCapture(e.pointerId);
+                      // The last position the pointer actually reported, so the commit on release
+                      // lands exactly where the preview was — `pointerup` does not always carry a
+                      // usable coordinate, and re-reading it there could snap the vertex back.
+                      let last = { x: p.x, y: p.y };
+                      const move = (ev: PointerEvent) => {
+                        const at = toLayout(ev.clientX, ev.clientY);
+                        if (!at) return;
+                        last = at;
+                        onVertexDrag(i, v, at.x, at.y, "move");
+                      };
+                      const up = () => {
+                        onVertexDrag(i, v, last.x, last.y, "end");
+                        window.removeEventListener("pointermove", move);
+                        window.removeEventListener("pointerup", up);
+                      };
+                      window.addEventListener("pointermove", move);
+                      window.addEventListener("pointerup", up);
+                    }}
+                  />
+                ))}
+              {el.kind !== "label" && !SHAPE_KINDS.has(el.kind) && (
+                <rect
+                  x={el.x - el.width / 2}
+                  y={el.y - el.height / 2}
+                  width={el.width}
+                  height={el.height}
+                  strokeWidth={
+                    selectedElementIndex === i
+                      ? Math.max(10, strokeScale * 2.4)
+                      : zoneYellow
+                        ? strokeScale * 2.4
+                        : 6
+                  }
+                  strokeDasharray={el.kind === "aisle" ? "40 30" : undefined}
+                  // A chosen colour replaces the theme's own ink for this element, the same way it does
+                  // for a drawn outline above: solid edge, translucent wash, so a stage or a standing
+                  // zone can be told apart from the one beside it at a glance. A capacity zone without
+                  // a chosen colour falls back to the standing-yellow rather than the faint wash — an
+                  // almost-invisible outline was a zone nobody noticed until they zoomed in.
+                  className={el.color || zoneYellow ? "" : ELEMENT_FILL[el.kind]}
+                  style={
+                    el.color
+                      ? { stroke: el.color, fill: `${el.color}33` }
+                      : zoneYellow
+                        ? { stroke: zoneYellow, fill: `${zoneYellow}47` }
+                        : undefined
+                  }
                 />
-              ))}
-            {el.kind !== "label" && !SHAPE_KINDS.has(el.kind) && (
-              <rect
-                x={el.x - el.width / 2}
-                y={el.y - el.height / 2}
-                width={el.width}
-                height={el.height}
-                strokeWidth={6}
-                strokeDasharray={el.kind === "aisle" ? "40 30" : undefined}
-                // A chosen colour replaces the theme's own ink for this element, the same way it does
-                // for a drawn outline above: solid edge, translucent wash, so a stage or a standing
-                // zone can be told apart from the one beside it at a glance.
-                className={el.color ? "" : ELEMENT_FILL[el.kind]}
-                style={el.color ? { stroke: el.color, fill: `${el.color}33` } : undefined}
-              />
-            )}
-            {el.label && (
-              // Text content, never markup — React escapes it (FR-018, SEC-07).
-              <text
-                x={el.x}
-                y={el.y - (el.kind === "area" && el.capacity ? Math.max(40, el.height / 10) : 0)}
-                textAnchor="middle"
-                dominantBaseline="central"
-                // Has to fit the element BOTH ways. Height alone was enough while every labelled
-                // element was a fixed-size stage; a named shape can be any proportion, and a long name
-                // in a tall narrow one ran clean off both sides of it.
-                fontSize={Math.min(
-                  Math.max(60, el.height / 3),
-                  // 0.62em is about the width of a monospace glyph; the 0.9 keeps it off the edges.
-                  Math.max(40, (el.width * 0.9) / Math.max(1, el.label.length * 0.62)),
-                )}
-                className="fill-beige-kem/70 font-mono"
-              >
-                {el.label}
-              </text>
-            )}
-            {/* A capacity zone says how many it holds. Without this it draws as an anonymous shape,
+              )}
+              {el.label && !SHAPE_KINDS.has(el.kind) && (
+                // Text content, never markup — React escapes it (FR-018, SEC-07).
+                <text
+                  x={el.x}
+                  y={el.y - (el.kind === "area" && el.capacity ? Math.max(40, el.height / 10) : 0)}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  // Fit both dimensions: stages, areas and text blocks can be tall and narrow, so a
+                  // long caption must not run past the component's own edges.
+                  fontSize={Math.min(
+                    Math.max(60, el.height / 3),
+                    // 0.62em is about the width of a monospace glyph; the 0.9 keeps it off the edges.
+                    Math.max(40, (el.width * 0.9) / Math.max(1, el.label.length * 0.62)),
+                  )}
+                  className={
+                    el.kind === "stage" || el.kind === "area"
+                      ? "fill-beige-kem font-display font-bold"
+                      : "fill-beige-kem/70 font-mono"
+                  }
+                >
+                  {el.label}
+                </text>
+              )}
+              {/* A capacity zone says how many it holds. Without this it draws as an anonymous shape,
                 and a standing floor is indistinguishable from a decorative outline — for the buyer
                 as much as for the organizer, since both sides render through this component. */}
-            {el.kind === "area" && (el.capacity ?? 0) > 0 && (
-              <text
-                x={el.x}
-                y={el.y + (el.label ? Math.max(60, el.height / 6) : 0)}
-                textAnchor="middle"
-                dominantBaseline="central"
-                fontSize={Math.max(50, el.height / 5)}
-                className="fill-beige-kem/55 font-mono"
-              >
-                {el.capacity} chỗ
-              </text>
-            )}
-          </g>
+              {el.kind === "area" && (el.capacity ?? 0) > 0 && (
+                <text
+                  x={el.x}
+                  y={el.y + (el.label ? Math.max(60, el.height / 6) : 0)}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontSize={Math.max(50, el.height / 5)}
+                  className="fill-beige-kem/65 font-sans"
+                >
+                  {el.capacity} chỗ
+                </text>
+              )}
+            </g>
           );
         })}
 
@@ -1234,7 +1793,9 @@ function SeatCanvasInner<T extends CanvasSeat>(
                   cx={m.x}
                   cy={m.y}
                   r={space.seatDiameter * 0.62}
-                  className={picked ? "fill-burgundy/35 stroke-burgundy" : "fill-transparent stroke-none"}
+                  className={
+                    picked ? "fill-burgundy/35 stroke-burgundy" : "fill-transparent stroke-none"
+                  }
                   strokeWidth={strokeScale}
                   style={{ cursor: "pointer" }}
                   role="button"
@@ -1274,22 +1835,28 @@ function SeatCanvasInner<T extends CanvasSeat>(
           // The number has to be readable on whatever colour the seat's class carries; with no fill it
           // keeps the theme ink, which already contrasts with the map's own background.
           const ink = readableInk(fill);
+          const ghosted = ghostSeatIds?.has(seat.id) ?? false;
           return (
             <g
               key={seat.id}
               transform={`rotate(${seat.rotation} ${seat.x} ${seat.y})`}
-              role={interactive ? "button" : "img"}
+              role={interactive && !ghosted ? "button" : "img"}
               aria-label={label}
-              aria-pressed={interactive && selectedIds ? selected : undefined}
-              tabIndex={interactive ? 0 : -1}
+              aria-pressed={interactive && !ghosted && selectedIds ? selected : undefined}
+              tabIndex={interactive && !ghosted ? 0 : -1}
+              // `pointer-events: none` rather than merely skipping the handlers: a ghosted seat must
+              // also stop swallowing the drag that starts on top of it, or panning across another
+              // floor would stall wherever the pointer happened to land.
+              pointerEvents={ghosted ? "none" : undefined}
+              opacity={ghosted ? 0.22 : undefined}
               onPointerDown={
-                editable
+                editable && !ghosted
                   ? (e) => {
                       e.stopPropagation();
                       if (!wantsPan(e)) onSeatPointerDown?.(seat, e.shiftKey, e.altKey);
                       beginGesture(e, "seat");
                     }
-                  : interactive
+                  : interactive && !ghosted
                     ? () => {
                         // Deliberately does NOT stop propagation: the <svg> still needs the event to
                         // start a pan, so a drag across the map keeps working and only a stationary
@@ -1329,7 +1896,9 @@ function SeatCanvasInner<T extends CanvasSeat>(
                   : undefined
               }
               className={
-                interactive || editable ? "cursor-pointer outline-none focus-visible:opacity-80" : ""
+                interactive || editable
+                  ? "cursor-pointer outline-none focus-visible:opacity-80"
+                  : ""
               }
             >
               <title>{label}</title>
@@ -1379,13 +1948,7 @@ function SeatCanvasInner<T extends CanvasSeat>(
               )}
               {/* Invisible hit area — a thin chair is hard to grab, and a buyer on a phone hits the
                   gap between backrest and cushion constantly without it. */}
-              <rect
-                x={seat.x - rr}
-                y={seat.y - rr}
-                width={d}
-                height={d}
-                fill="transparent"
-              />
+              <rect x={seat.x - rr} y={seat.y - rr} width={d} height={d} fill="transparent" />
               {/*
                 The accessibility mark: a ring around the seat, not a pictogram inside it.
 
@@ -1409,7 +1972,7 @@ function SeatCanvasInner<T extends CanvasSeat>(
                   style={ink ? { stroke: ink } : undefined}
                 />
               )}
-              {showNumbers && (
+              {showNumbers && seat.section !== null && (
                 <text
                   x={seat.x}
                   y={seat.y}

@@ -7,6 +7,7 @@ import type { BlockKind } from "@/shared/catalog/seatmap-document";
 import { BLOCK_DRAG_TYPE, type BlockGeometry, type BlockTarget, formatBlockDrag } from "./documentOps";
 import Select from "../Select";
 
+import { RAIL_PANEL } from "./panelSurface";
 /**
  * What the organizer can add to a chart.
  *
@@ -25,19 +26,44 @@ import Select from "../Select";
  * like the rest, and then a re-count would behave differently from every other block.
  */
 
-const GROUPS: { title: string; items: { kind: BlockKind; glyph: string; label: string; hint: string }[] }[] = [
+const GROUPS: {
+  title: string;
+  items: { kind: BlockKind; glyph: string; label: string; hint: string }[];
+}[] = [
   {
     title: "Ghế",
     items: [
-      { kind: "seating-block", glyph: "▦", label: "Khối ghế", hint: "Nhiều hàng × nhiều ghế, sửa lại được sau" },
+      {
+        kind: "seating-block",
+        glyph: "▦",
+        label: "Khối ghế",
+        hint: "Nhiều hàng × nhiều ghế, sửa lại được sau",
+      },
       { kind: "single-row", glyph: "▭", label: "Một hàng", hint: "Một hàng ghế thẳng" },
-      { kind: "curved-row", glyph: "◠", label: "Hàng cong", hint: "Các hàng uốn theo bán kính và góc cung" },
-      { kind: "individual-seat", glyph: "•", label: "Ghế lẻ", hint: "Một ghế đơn, đặt ở đâu cũng được" },
+      {
+        kind: "curved-row",
+        glyph: "◠",
+        label: "Hàng cong",
+        hint: "Các hàng uốn theo bán kính và góc cung",
+      },
+      {
+        kind: "individual-seat",
+        glyph: "•",
+        label: "Ghế lẻ",
+        hint: "Đặt tự do, chưa thuộc khu và chưa hiện nhãn cho tới khi được gán khu",
+      },
     ],
   },
   {
     title: "Khu đứng",
-    items: [{ kind: "ga-zone", glyph: "▩", label: "Khu đứng", hint: "Bán theo sức chứa, không theo từng ghế" }],
+    items: [
+      {
+        kind: "ga-zone",
+        glyph: "▩",
+        label: "Khu đứng",
+        hint: "Bán theo sức chứa, không theo từng ghế",
+      },
+    ],
   },
   {
     title: "Trang trí",
@@ -122,26 +148,24 @@ export default function BlockPalette({
     pool.find((x) => x.id === id)?.name ?? none;
 
   /** `undefined` -> "auto", `null` -> "none", an id -> its digits. Three states, three values. */
-  const valueOf = (v: number | null | undefined) => (v === undefined ? "auto" : v === null ? "none" : String(v));
+  const valueOf = (v: number | null | undefined) =>
+    v === undefined ? "auto" : v === null ? "none" : String(v);
   const parse = (v: string) => (v === "auto" ? undefined : v === "none" ? null : Number(v));
 
   return (
-    <div className="border-2 border-beige-kem bg-surface-2 p-4">
+    <div className={RAIL_PANEL}>
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="font-mono text-xs font-bold uppercase tracking-widest text-beige-kem/70">
           Thêm vào sơ đồ
         </h3>
-        <span className="font-mono text-[10px] text-beige-kem/45">còn {remaining} ghế</span>
+        <span className="font-mono text-[10px] text-beige-kem/70">còn {remaining} ghế</span>
       </div>
-      <p className="mt-1 text-[11px] leading-4 text-beige-kem/50">
-        Khối mới được đặt ở giữa khung nhìn — kéo để dời, rồi sửa bố cục ở bảng thuộc tính.
-      </p>
 
       {/* Where the next block lands. A CONTROL rather than a readout: a block does not have to belong
           to a section — the schema has allowed a section-less seat since 0024 and publish reports it —
           but with this resolved automatically there was no way to ask for one. */}
       <div className="mt-2 grid gap-1 border border-beige-kem/30 p-2">
-        <label className="grid gap-0.5 font-mono text-[10px] text-beige-kem/60">
+        <label className="grid gap-0.5 font-mono text-[10px] text-beige-kem/70">
           Khối mới vào khu
           {/*
             The shared dropdown, not a native `<select>`: the option list of a native one is drawn
@@ -160,7 +184,7 @@ export default function BlockPalette({
             triggerClassName="border border-beige-kem/40 bg-surface-2 px-1.5 py-1 text-[11px]"
           />
         </label>
-        <label className="grid gap-0.5 font-mono text-[10px] text-beige-kem/60">
+        <label className="grid gap-0.5 font-mono text-[10px] text-beige-kem/70">
           Hạng ghế
           <Select
             value={valueOf(pinned.categoryId)}
@@ -175,7 +199,7 @@ export default function BlockPalette({
           />
         </label>
         {(pinned.sectionId === null || pinned.categoryId === null) && (
-          <p className="text-[10px] leading-4 text-beige-kem/50">
+          <p className="text-[10px] leading-4 text-beige-kem/70">
             Ghế chưa có khu vực hoặc hạng ghế vẫn lưu được, nhưng phải xếp xong mới xuất bản được.
           </p>
         )}
@@ -183,7 +207,7 @@ export default function BlockPalette({
 
       {GROUPS.map((group) => (
         <div key={group.title} className="mt-3">
-          <p className="font-mono text-[10px] uppercase tracking-wider text-beige-kem/45">
+          <p className="font-mono text-[10px] uppercase tracking-wider text-beige-kem/70">
             {group.title}
           </p>
           <div className="mt-1 grid grid-cols-2 gap-1">
@@ -212,7 +236,9 @@ export default function BlockPalette({
 
       {/* ---- Shapes ---------------------------------------------------------------------------- */}
       <div className="mt-3">
-        <p className="font-mono text-[10px] uppercase tracking-wider text-beige-kem/45">Hình khối</p>
+        <p className="font-mono text-[10px] uppercase tracking-wider text-beige-kem/70">
+          Hình khối
+        </p>
         <div className="mt-1 grid grid-cols-3 gap-1">
           {SHAPES.map((s) => (
             <button
@@ -247,7 +273,7 @@ export default function BlockPalette({
 
       {/* ---- Colour ---------------------------------------------------------------------------- */}
       <div className="mt-3">
-        <p className="font-mono text-[10px] uppercase tracking-wider text-beige-kem/45">
+        <p className="font-mono text-[10px] uppercase tracking-wider text-beige-kem/70">
           {/* Named for what the click will actually do, so a swatch never silently paints the wrong
               thing: with a selection it repaints it, without one it sets what the next block takes. */}
           {colorTarget > 0 ? `Màu · ${colorTarget} khối đang chọn` : "Màu cho khối mới"}
@@ -261,7 +287,8 @@ export default function BlockPalette({
               aria-pressed={(color ?? "").toLowerCase() === c.toLowerCase()}
               onClick={() => onColor(c)}
               style={{ backgroundColor: c }}
-              className={`h-7 w-7 border-2 transition disabled:opacity-40 ${ (color ?? "").toLowerCase() === c.toLowerCase()
+              className={`h-7 w-7 border-2 transition disabled:opacity-40 ${
+                (color ?? "").toLowerCase() === c.toLowerCase()
                   ? "border-beige-kem"
                   : "border-transparent hover:border-beige-kem/50"
               }`}
@@ -272,15 +299,13 @@ export default function BlockPalette({
             onClick={() => onColor(null)}
             aria-pressed={!color}
             title="Dùng màu mặc định của giao diện"
-            className={`h-7 border-2 px-2 font-mono text-[10px] transition disabled:opacity-40 ${ color ? "border-transparent text-beige-kem/50" : "border-beige-kem text-beige-kem"
+            className={`h-7 border-2 px-2 font-mono text-[10px] transition disabled:opacity-40 ${
+              color ? "border-transparent text-beige-kem/70" : "border-beige-kem text-beige-kem"
             }`}
           >
             Mặc định
           </button>
         </div>
-        <p className="mt-1 text-[10px] leading-4 text-beige-kem/45">
-          Màu áp cho sân khấu, hình khối, khu đứng và tiện ích. Ghế lấy màu theo hạng ghế.
-        </p>
       </div>
     </div>
   );

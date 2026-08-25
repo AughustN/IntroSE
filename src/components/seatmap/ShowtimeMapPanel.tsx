@@ -7,6 +7,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApplyPreview, ShowtimeMap, ShowtimeMapSeat } from "@/shared/catalog/seatmap";
 import { NEUTRAL_TIER_COLOR, colorForTier } from "@/shared/catalog/tier-palette";
 import { layoutApi } from "../../services/catalogClient";
+import type { ApplyRefusalView, RefusedEditError } from "../../services/apiError";
+import { watchShowtime } from "../../services/seatSocket";
 import { formatVnd } from "../../services/currency";
 import SeatCanvas, { type CanvasBlock, type SeatCanvasHandle } from "./SeatCanvas";
 import { seatsInRect } from "./layoutOps";
@@ -61,6 +63,8 @@ export default function ShowtimeMapPanel({
   const [tierId, setTierId] = useState<number | "">("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Per-seat reasons from a refused whole-edit — the same vocabulary the preview reports. */
+  const [refusals, setRefusals] = useState<ApplyRefusalView[] | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const canvas = useRef<SeatCanvasHandle>(null);
   /** Wrapped so the ref is read when a chip is pressed, not while the key is being built. */
@@ -79,15 +83,60 @@ export default function ShowtimeMapPanel({
     void load();
   }, [load]);
 
+  /**
+   * Live statuses, straight off the channel block/tier and hold actions already broadcast on
+   * (`seat:update`). The organizer's own writes arrive as echoes; a buyer's hold repaints without
+   * waiting for the next manual reload. Status only — geometry never rides this channel.
+   */
+  useEffect(() => {
+    const stop = watchShowtime(showtimeId, (update) => {
+      // Captured outside setMap: the updater may run after this closure, so narrowing on
+      // `update.seats` directly does not survive into it.
+      const frames = update.seats;
+      if (!frames || frames.length === 0) return;
+      setMap((cur) => {
+        if (!cur) return cur;
+        const byId = new Map(frames.map((u) => [u.showtimeSeatId, u]));
+        return {
+          ...cur,
+          seats: cur.seats.map((s) => {
+            const hit = byId.get(s.id);
+            if (!hit) return s;
+            // A retier frame names the new class; resolve its id from the legend so the seat
+            // keeps painting in its price colour. Status-only frames change nothing else.
+            const retieredTo = hit.tier
+              ? cur.tierLegend.find((t) => t.label === hit.tier && t.price === hit.price)
+              : undefined;
+            return {
+              ...s,
+              status: hit.status,
+              ticketTierId: retieredTo?.tierId ?? s.ticketTierId,
+              tier: hit.tier ?? s.tier,
+              price: hit.price ?? s.price,
+            };
+          }),
+        };
+      });
+    });
+    return stop;
+  }, [showtimeId]);
+
   /** Refusals arrive as a structured list on the 409 body, so we can name the seats (FR-029). */
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
     setError(null);
+    setRefusals(null);
     setNotice(null);
     try {
       await fn();
     } catch (e) {
-      setError((e as Error).message);
+      if ((e as Error).name === "RefusedEditError") {
+        const refused = e as RefusedEditError;
+        setError(refused.message);
+        setRefusals(refused.refusals);
+      } else {
+        setError((e as Error).message);
+      }
     } finally {
       setBusy(false);
     }
@@ -119,14 +168,32 @@ export default function ShowtimeMapPanel({
     [selected, map],
   );
 
+  /**
+   * Status carried by FORM, not hue — the same vocabulary the buyer's map already speaks
+   * (`SeatLayout`), so the two charts reading one database also read one way:
+   *
+   *   sold             — solid, filled in, finished
+   *   sold + checked in— solid dark fill inside a LIGHT HALO: the buyer is already through the door.
+   *                      A halo is this app's mark for "this one matters, look here" (the buyer's
+   *                      own seats get the same treatment), and it survives greyscale.
+   *   held             — hatched, temporarily somebody else's
+   *   blocked          — hollow with a dashed edge, never offered for sale at all
+   *   selected         — solid burgundy, the organiser's own working pick
+   *
+   * The old pair — sold solid-dark, blocked solid-dark with a pink outline — separated two states
+   * only by colour, which is exactly the discrimination this map must not demand: at seat size the
+   * outline reads as noise, and for a colourblind user it reads as nothing.
+   */
   const seatClass = useCallback(
     (seat: ShowtimeMapSeat) => {
       if (selected.has(seat.id)) return "fill-burgundy stroke-burgundy";
-      // A blocked seat is dark like a sold one but outlined, because the two mean different things:
-      // sold is somebody's ticket, blocked is a decision the organizer can take back.
-      if (seat.status === "blocked") return "fill-stone-800 stroke-bubblegum";
-      if (seat.status === "sold") return "fill-stone-800 stroke-stone-800";
-      if (seat.status === "held") return "fill-stone-700/60 stroke-stone-700";
+      if (seat.status === "sold")
+        return seat.checkedInAt
+          ? "fill-stone-800 stroke-beige-kem"
+          : "fill-stone-800 stroke-stone-900";
+      if (seat.status === "held") return "[fill:url(#seat-hatch)] stroke-stone-500";
+      if (seat.status === "blocked")
+        return "fill-transparent stroke-stone-500 [stroke-dasharray:18]";
       return "";
     },
     [selected],
@@ -142,6 +209,13 @@ export default function ShowtimeMapPanel({
     for (const s of seats) out[s.status] += 1;
     return out;
   }, [seats]);
+
+  /** Sold AND through the door — a subset of `sold`, so it renders as a legend note with its own
+   *  haloed swatch rather than as a fifth status bucket the server does not have. */
+  const checkedInCount = useMemo(
+    () => seats.filter((s) => s.status === "sold" && s.checkedInAt).length,
+    [seats],
+  );
 
   const toggleSeat = useCallback(
     (seat: ShowtimeMapSeat, additive: boolean) =>
@@ -159,11 +233,65 @@ export default function ShowtimeMapPanel({
   const selectByStatus = (status: ShowtimeMapSeat["status"]) =>
     setSelected(new Set(seats.filter((s) => s.status === status).map((s) => s.id)));
 
+  /**
+   * Swatches drawn the WAY THE MAP DRAWS each state — a key whose squares differ only in grey tells
+   * nothing, because the states no longer differ only in grey. Each entry repeats the seat's own
+   * form: solid, hatched, hollow-dashed. (Same rule as the buyer's legend, FR-071.)
+   */
   const statusKey = [
-    { key: "available", label: "Còn trống", cls: "border-beige-kem/60", n: counts.available },
-    { key: "held", label: "Khách đang giữ", cls: "bg-stone-700/60 border-stone-700", n: counts.held },
-    { key: "sold", label: "Đã bán", cls: "bg-stone-800 border-stone-800", n: counts.sold },
-    { key: "blocked", label: "Đang khoá", cls: "bg-stone-800 border-bubblegum", n: counts.blocked },
+    {
+      key: "available",
+      label: "Còn trống",
+      swatch: <span aria-hidden="true" className="h-4 w-4 shrink-0 border-2 border-beige-kem/60" />,
+      n: counts.available,
+    },
+    {
+      key: "held",
+      label: "Khách đang giữ",
+      swatch: (
+        <span
+          aria-hidden="true"
+          className="h-4 w-4 shrink-0 border border-stone-500"
+          style={{
+            backgroundImage:
+              "repeating-linear-gradient(45deg, rgb(120 113 108) 0 3px, transparent 3px 6px)",
+          }}
+        />
+      ),
+      n: counts.held,
+    },
+    {
+      key: "sold",
+      label: "Đã bán",
+      swatch: <span aria-hidden="true" className="h-4 w-4 shrink-0 bg-stone-800" />,
+      n: counts.sold,
+    },
+    {
+      key: "blocked",
+      label: "Đang khoá",
+      swatch: (
+        <span
+          aria-hidden="true"
+          className="h-4 w-4 shrink-0 border-2 border-dashed border-stone-500"
+        />
+      ),
+      n: counts.blocked,
+    },
+    ...(checkedInCount > 0
+      ? [
+          {
+            key: "checkedin" as const,
+            label: "Đã vào cửa",
+            swatch: (
+              <span
+                aria-hidden="true"
+                className="h-4 w-4 shrink-0 border-2 border-beige-kem bg-stone-800"
+              />
+            ),
+            n: checkedInCount,
+          },
+        ]
+      : []),
   ];
 
   /** Every action here acts on the CURRENT selection, then re-reads the map — the statuses it just
@@ -190,12 +318,22 @@ export default function ShowtimeMapPanel({
       {error && (
         <div className="border-2 border-beige-kem bg-bubblegum p-3 text-xs text-on-tint">
           {error}
+          {/* A refused whole-edit names its seats — the same list the preview would have shown
+              (FR-029), so confirming without a preview no longer hides which seat refused. */}
+          {refusals && refusals.length > 0 && (
+            <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+              {refusals.map((r, i) => (
+                <li key={i}>
+                  — {r.seatLabel ? `${r.seatLabel}: ` : ""}
+                  {r.message ?? r.reason}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
       {notice && (
-        <div className="border-2 border-beige-kem bg-la-co p-3 text-xs text-on-tint">
-          {notice}
-        </div>
+        <div className="border-2 border-beige-kem bg-la-co p-3 text-xs text-on-tint">{notice}</div>
       )}
 
       {map && seats.length > 0 && (
@@ -214,7 +352,14 @@ export default function ShowtimeMapPanel({
               seatLabel={(s) =>
                 `${s.section ? `${s.section}, ` : ""}hàng ${s.row}, ghế ${s.number} — ${
                   STATUS_LABEL[s.status]
-                } (${s.tier}, ${formatVnd(s.price)})`
+                }${
+                  s.checkedInAt
+                    ? ` · đã vào cửa lúc ${new Date(s.checkedInAt).toLocaleTimeString("vi-VN", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}`
+                    : ""
+                }${s.buyerName ? ` · khách: ${s.buyerName}` : ""} (${s.tier}, ${formatVnd(s.price)})`
               }
               seatTooltip={(s) => (
                 <>
@@ -223,6 +368,24 @@ export default function ShowtimeMapPanel({
                     {s.number}
                   </span>{" "}
                   · {s.tier} · {formatVnd(s.price)} · {STATUS_LABEL[s.status]}
+                  {/* The two facts a colour cannot carry: whose seat it is, and whether its owner
+                      has already walked in. Named only for seats the server actually names — a
+                      held seat stays anonymous until it is paid for. */}
+                  {s.buyerName && (
+                    <>
+                      {" · "}
+                      {s.buyerName}
+                    </>
+                  )}
+                  {s.checkedInAt && (
+                    <>
+                      {" · đã vào cửa "}
+                      {new Date(s.checkedInAt).toLocaleTimeString("vi-VN", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </>
+                  )}
                 </>
               )}
               // `editable` here buys the marquee and press-to-select, not authoring: no drag handler
@@ -247,7 +410,7 @@ export default function ShowtimeMapPanel({
           <div className="flex flex-wrap gap-x-5 gap-y-2 font-mono text-[11px] text-beige-kem/80">
             {statusKey.map((e) => (
               <span key={e.key} className="flex items-center gap-2">
-                <span aria-hidden="true" className={`h-4 w-4 shrink-0 border-2 ${e.cls}`} />
+                {e.swatch}
                 {e.label} <span className="text-beige-kem/45">({e.n})</span>
               </span>
             ))}

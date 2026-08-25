@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { LayoutSeat } from "@/shared/catalog/seatmap";
 import {
   GRID,
+  translateElement,
+  GRID_STEPS,
+  snapStep,
   MAX_PER_ROW,
   MAX_ROWS,
   type SeatFactory,
@@ -25,7 +28,12 @@ import {
   rowMarkers,
   snap,
 } from "./layoutOps";
-import { LAYOUT_MAX_SEATS, validateLayout } from "@/shared/catalog/seatmap-validate";
+import {
+  LAYOUT_MAX,
+  LAYOUT_MAX_SEATS,
+  LAYOUT_MIN,
+  validateLayout,
+} from "@/shared/catalog/seatmap-validate";
 
 // The editor's geometry, tested where it lives. Every assertion below is either a database CHECK
 // (`pos_x`/`pos_y` 0–10000, `rotation` 0–359) or a publish-gate rule (`duplicate_label`) — so a red
@@ -52,8 +60,8 @@ function expectNoDuplicateLabels(seats: LayoutSeat[]) {
 
 function expectStorable(seats: LayoutSeat[]) {
   for (const s of seats) {
-    expect(Number.isInteger(s.x) && s.x >= 0 && s.x <= 10000).toBe(true);
-    expect(Number.isInteger(s.y) && s.y >= 0 && s.y <= 10000).toBe(true);
+    expect(Number.isInteger(s.x) && s.x >= LAYOUT_MIN && s.x <= LAYOUT_MAX).toBe(true);
+    expect(Number.isInteger(s.y) && s.y >= LAYOUT_MIN && s.y <= LAYOUT_MAX).toBe(true);
     expect(Number.isInteger(s.rotation) && s.rotation >= 0 && s.rotation <= 359).toBe(true);
     expect(Number.isInteger(s.seatNumber) && s.seatNumber >= 1).toBe(true);
     expect(s.rowLabel.length).toBeGreaterThan(0);
@@ -234,6 +242,25 @@ describe("supporting contracts the editor leans on", () => {
     }
   });
 
+  // The grid step is chosen by the organizer, so every offered step has to be honoured — `true` and
+  // `false` remain the default-step and off spellings the older callers still pass.
+  it("snap honours whichever step it is given", () => {
+    for (const step of GRID_STEPS) {
+      for (const v of [-4999.7, 0.4, 37.5, 1249.9, 9999.6]) {
+        expect(Math.abs(snap(v, step) % step)).toBe(0);
+        // Never further than half a cell from where the organizer put it.
+        expect(Math.abs(snap(v, step) - v)).toBeLessThanOrEqual(step / 2);
+      }
+    }
+    expect(snapStep(true)).toBe(GRID);
+    expect(snapStep(false)).toBe(0);
+    expect(snapStep(0)).toBe(0);
+    // A negative step is nonsense rather than a fine grid; it must read as "off", not throw or
+    // invert the rounding.
+    expect(snapStep(-50)).toBe(0);
+    expect(snap(1249.9, -50)).toBe(1250);
+  });
+
   it("seatsInRect selects exactly the seats whose centre is inside", () => {
     const seats = makeGrid({ x1: 1000, y1: 1000, x2: 4000, y2: 4000 }, f(), false);
     const rect = { x1: 1000, y1: 1000, x2: 2500, y2: 2500 };
@@ -380,7 +407,67 @@ describe("row letters", () => {
     expect(m.y).toBeCloseTo(500);
   });
 
+  it("does not draw a row label for a seat outside every section", () => {
+    expect(rowMarkers([seat("A", 1, 1000, 500, null)], 100)).toEqual([]);
+  });
+
   it("ignores seats with no row label rather than drawing an empty marker", () => {
     expect(rowMarkers([seat("", 1, 1000, 500)], 100)).toEqual([]);
+  });
+});
+
+/*
+ * translateElement — the live drag preview.
+ *
+ * The bug this pins: a drawn outline is rendered as a `<polygon points=…>`, so `x`/`y` are its
+ * rotation origin and nothing else. The preview offset only the origin, which moved not one pixel on
+ * screen; the commit translated the points as well. So a shape stood still for the whole drag and
+ * appeared at the drop — the landing spot was always right, it was just invisible until the pointer
+ * was released.
+ */
+describe("translateElement", () => {
+  it("carries the points along, not just the rotation origin", () => {
+    const shape = {
+      x: 100,
+      y: 100,
+      points: [
+        { x: 0, y: 0 },
+        { x: 200, y: 0 },
+        { x: 200, y: 200 },
+      ],
+    };
+    const moved = translateElement(shape, 50, -30);
+    expect(moved.x).toBe(150);
+    expect(moved.y).toBe(70);
+    // Every vertex travels the same delta, or the drawn outline does not follow the pointer.
+    expect(moved.points).toEqual([
+      { x: 50, y: -30 },
+      { x: 250, y: -30 },
+      { x: 250, y: 170 },
+    ]);
+  });
+
+  it("keeps the shape RIGID — the exact property the broken preview lost", () => {
+    const shape = {
+      x: 400,
+      y: 400,
+      points: [
+        { x: 380, y: 390 },
+        { x: 460, y: 430 },
+      ],
+    };
+    const moved = translateElement(shape, 120, 240);
+    // Every vertex keeps its offset from the rotation origin. The old preview moved the origin
+    // alone, which silently deformed that relationship — and since the polygon is drawn from the
+    // points, what the organizer saw was a shape that had not moved at all.
+    for (const [i, p] of shape.points.entries()) {
+      expect(moved.points![i].x - moved.x).toBe(p.x - shape.x);
+      expect(moved.points![i].y - moved.y).toBe(p.y - shape.y);
+    }
+  });
+
+  it("leaves a box element with no points untouched beyond its origin", () => {
+    const box = { x: 10, y: 20, points: null };
+    expect(translateElement(box, 5, 5)).toEqual({ x: 15, y: 25, points: null });
   });
 });

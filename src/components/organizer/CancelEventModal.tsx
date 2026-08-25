@@ -42,8 +42,8 @@ export const CancelEventModal: React.FC<CancelEventModalProps> = ({
       <div className="w-full max-w-lg space-y-6 border border-beige-kem/25 bg-surface-2 p-6">
         {/* Modal Header */}
         <div className="flex items-center justify-between border-b border-beige-kem/25 pb-3">
-          <h2 className="flex items-center gap-2 font-display text-title-s font-black text-burgundy-ink">
-            <span>⚠️</span> Xác Nhận Hủy Sự Kiện
+          <h2 className="font-display text-title-s font-black text-burgundy-ink">
+            Xác Nhận Hủy Sự Kiện
           </h2>
           <button
             onClick={onClose}

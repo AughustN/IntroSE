@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { MyEvent, MyVenue, organizerApi } from "../../services/catalogClient";
 import EventEditor from "./EventEditor";
 import EventList from "./EventList";
+import EventOverview from "./EventOverview";
 import { ErrorRetry, Loading } from "./states";
 
 /**
@@ -15,6 +16,10 @@ import { ErrorRetry, Loading } from "./states";
  * Four levels — events → one event → its showtimes → a showtime's tiers — instead of the single flat
  * screen the panel used to be. Loading, empty and error are handled here and in `states.tsx` once,
  * rather than reinvented per screen.
+ *
+ * Opening an event lands on the READ-ONLY overview first; the editor mounts only on an explicit
+ * "Chỉnh sửa". Mostly an organizer opens a row to remember, not to change — and a click that was
+ * only looking must not leave edit state lying around behind their back.
  */
 export default function OrganizerConsole({
   selectedEventId,
@@ -35,6 +40,15 @@ export default function OrganizerConsole({
   const [events, setEvents] = useState<MyEvent[] | null>(null);
   const [venues, setVenues] = useState<MyVenue[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+
+  // A different row (or the list itself) starts reading again — never mid-edit. Adjusted during
+  // render against the previous value, the same URL-sync pattern OrganizerEventsPage uses.
+  const [selectionSeen, setSelectionSeen] = useState<number | null>(selectedEventId);
+  if (selectedEventId !== selectionSeen) {
+    setSelectionSeen(selectedEventId);
+    setEditing(false);
+  }
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -61,13 +75,20 @@ export default function OrganizerConsole({
     selectedEventId === null ? null : (events.find((e) => e.id === selectedEventId) ?? null);
 
   if (selected) {
-    return (
+    // Reading first, editing on demand: the overview is the default face of an open event.
+    return editing ? (
       <EventEditor
         event={selected}
         venues={venues}
-        onBack={() => onSelectEvent(null)}
+        onBack={() => setEditing(false)}
         onRefresh={load}
         onOpenSeatMap={onOpenSeatMap}
+      />
+    ) : (
+      <EventOverview
+        event={selected}
+        onEdit={() => setEditing(true)}
+        onBack={() => onSelectEvent(null)}
       />
     );
   }
