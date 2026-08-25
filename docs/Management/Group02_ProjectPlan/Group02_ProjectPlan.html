@@ -1,0 +1,899 @@
+<!DOCTYPE html><html><head>
+      <title>Group02_ProjectPlan</title>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      
+      <link rel="stylesheet" href="file:///c:\Users\LENOVO\.vscode\extensions\shd101wyy.markdown-preview-enhanced-0.8.30\crossnote\dependencies\katex\katex.min.css">
+      
+      
+      
+      <script type="text/javascript" src="file:///c:\Users\LENOVO\.vscode\extensions\shd101wyy.markdown-preview-enhanced-0.8.30\crossnote\dependencies\mermaid\mermaid.min.js" charset="UTF-8"></script>
+      
+      
+      
+      <style>
+      code[class*=language-],pre[class*=language-]{color:#333;background:0 0;font-family:Consolas,"Liberation Mono",Menlo,Courier,monospace;text-align:left;white-space:pre;word-spacing:normal;word-break:normal;word-wrap:normal;line-height:1.4;-moz-tab-size:8;-o-tab-size:8;tab-size:8;-webkit-hyphens:none;-moz-hyphens:none;-ms-hyphens:none;hyphens:none}pre[class*=language-]{padding:.8em;overflow:auto;border-radius:3px;background:#f5f5f5}:not(pre)>code[class*=language-]{padding:.1em;border-radius:.3em;white-space:normal;background:#f5f5f5}.token.blockquote,.token.comment{color:#969896}.token.cdata{color:#183691}.token.doctype,.token.macro.property,.token.punctuation,.token.variable{color:#333}.token.builtin,.token.important,.token.keyword,.token.operator,.token.rule{color:#a71d5d}.token.attr-value,.token.regex,.token.string,.token.url{color:#183691}.token.atrule,.token.boolean,.token.code,.token.command,.token.constant,.token.entity,.token.number,.token.property,.token.symbol{color:#0086b3}.token.prolog,.token.selector,.token.tag{color:#63a35c}.token.attr-name,.token.class,.token.class-name,.token.function,.token.id,.token.namespace,.token.pseudo-class,.token.pseudo-element,.token.url-reference .token.variable{color:#795da3}.token.entity{cursor:help}.token.title,.token.title .token.punctuation{font-weight:700;color:#1d3e81}.token.list{color:#ed6a43}.token.inserted{background-color:#eaffea;color:#55a532}.token.deleted{background-color:#ffecec;color:#bd2c00}.token.bold{font-weight:700}.token.italic{font-style:italic}.language-json .token.property{color:#183691}.language-markup .token.tag .token.punctuation{color:#333}.language-css .token.function,code.language-css{color:#0086b3}.language-yaml .token.atrule{color:#63a35c}code.language-yaml{color:#183691}.language-ruby .token.function{color:#333}.language-markdown .token.url{color:#795da3}.language-makefile .token.symbol{color:#795da3}.language-makefile .token.variable{color:#183691}.language-makefile .token.builtin{color:#0086b3}.language-bash .token.keyword{color:#0086b3}pre[data-line]{position:relative;padding:1em 0 1em 3em}pre[data-line] .line-highlight-wrapper{position:absolute;top:0;left:0;background-color:transparent;display:block;width:100%}pre[data-line] .line-highlight{position:absolute;left:0;right:0;padding:inherit 0;margin-top:1em;background:hsla(24,20%,50%,.08);background:linear-gradient(to right,hsla(24,20%,50%,.1) 70%,hsla(24,20%,50%,0));pointer-events:none;line-height:inherit;white-space:pre}pre[data-line] .line-highlight:before,pre[data-line] .line-highlight[data-end]:after{content:attr(data-start);position:absolute;top:.4em;left:.6em;min-width:1em;padding:0 .5em;background-color:hsla(24,20%,50%,.4);color:#f4f1ef;font:bold 65%/1.5 sans-serif;text-align:center;vertical-align:.3em;border-radius:999px;text-shadow:none;box-shadow:0 1px #fff}pre[data-line] .line-highlight[data-end]:after{content:attr(data-end);top:auto;bottom:.4em}html body{font-family:'Helvetica Neue',Helvetica,'Segoe UI',Arial,freesans,sans-serif;font-size:16px;line-height:1.6;color:#333;background-color:#fff;overflow:initial;box-sizing:border-box;word-wrap:break-word}html body>:first-child{margin-top:0}html body h1,html body h2,html body h3,html body h4,html body h5,html body h6{line-height:1.2;margin-top:1em;margin-bottom:16px;color:#000}html body h1{font-size:2.25em;font-weight:300;padding-bottom:.3em}html body h2{font-size:1.75em;font-weight:400;padding-bottom:.3em}html body h3{font-size:1.5em;font-weight:500}html body h4{font-size:1.25em;font-weight:600}html body h5{font-size:1.1em;font-weight:600}html body h6{font-size:1em;font-weight:600}html body h1,html body h2,html body h3,html body h4,html body h5{font-weight:600}html body h5{font-size:1em}html body h6{color:#5c5c5c}html body strong{color:#000}html body del{color:#5c5c5c}html body a:not([href]){color:inherit;text-decoration:none}html body a{color:#08c;text-decoration:none}html body a:hover{color:#00a3f5;text-decoration:none}html body img{max-width:100%}html body>p{margin-top:0;margin-bottom:16px;word-wrap:break-word}html body>ol,html body>ul{margin-bottom:16px}html body ol,html body ul{padding-left:2em}html body ol.no-list,html body ul.no-list{padding:0;list-style-type:none}html body ol ol,html body ol ul,html body ul ol,html body ul ul{margin-top:0;margin-bottom:0}html body li{margin-bottom:0}html body li.task-list-item{list-style:none}html body li>p{margin-top:0;margin-bottom:0}html body .task-list-item-checkbox{margin:0 .2em .25em -1.8em;vertical-align:middle}html body .task-list-item-checkbox:hover{cursor:pointer}html body blockquote{margin:16px 0;font-size:inherit;padding:0 15px;color:#5c5c5c;background-color:#f0f0f0;border-left:4px solid #d6d6d6}html body blockquote>:first-child{margin-top:0}html body blockquote>:last-child{margin-bottom:0}html body hr{height:4px;margin:32px 0;background-color:#d6d6d6;border:0 none}html body table{margin:10px 0 15px 0;border-collapse:collapse;border-spacing:0;display:block;width:100%;overflow:auto;word-break:normal;word-break:keep-all}html body table th{font-weight:700;color:#000}html body table td,html body table th{border:1px solid #d6d6d6;padding:6px 13px}html body dl{padding:0}html body dl dt{padding:0;margin-top:16px;font-size:1em;font-style:italic;font-weight:700}html body dl dd{padding:0 16px;margin-bottom:16px}html body code{font-family:Menlo,Monaco,Consolas,'Courier New',monospace;font-size:.85em;color:#000;background-color:#f0f0f0;border-radius:3px;padding:.2em 0}html body code::after,html body code::before{letter-spacing:-.2em;content:'\00a0'}html body pre>code{padding:0;margin:0;word-break:normal;white-space:pre;background:0 0;border:0}html body .highlight{margin-bottom:16px}html body .highlight pre,html body pre{padding:1em;overflow:auto;line-height:1.45;border:#d6d6d6;border-radius:3px}html body .highlight pre{margin-bottom:0;word-break:normal}html body pre code,html body pre tt{display:inline;max-width:initial;padding:0;margin:0;overflow:initial;line-height:inherit;word-wrap:normal;background-color:transparent;border:0}html body pre code:after,html body pre code:before,html body pre tt:after,html body pre tt:before{content:normal}html body blockquote,html body dl,html body ol,html body p,html body pre,html body ul{margin-top:0;margin-bottom:16px}html body kbd{color:#000;border:1px solid #d6d6d6;border-bottom:2px solid #c7c7c7;padding:2px 4px;background-color:#f0f0f0;border-radius:3px}@media print{html body{background-color:#fff}html body h1,html body h2,html body h3,html body h4,html body h5,html body h6{color:#000;page-break-after:avoid}html body blockquote{color:#5c5c5c}html body pre{page-break-inside:avoid}html body table{display:table}html body img{display:block;max-width:100%;max-height:100%}html body code,html body pre{word-wrap:break-word;white-space:pre}}.markdown-preview{width:100%;height:100%;box-sizing:border-box}.markdown-preview ul{list-style:disc}.markdown-preview ul ul{list-style:circle}.markdown-preview ul ul ul{list-style:square}.markdown-preview ol{list-style:decimal}.markdown-preview ol ol,.markdown-preview ul ol{list-style-type:lower-roman}.markdown-preview ol ol ol,.markdown-preview ol ul ol,.markdown-preview ul ol ol,.markdown-preview ul ul ol{list-style-type:lower-alpha}.markdown-preview .newpage,.markdown-preview .pagebreak{page-break-before:always}.markdown-preview pre.line-numbers{position:relative;padding-left:3.8em;counter-reset:linenumber}.markdown-preview pre.line-numbers>code{position:relative}.markdown-preview pre.line-numbers .line-numbers-rows{position:absolute;pointer-events:none;top:1em;font-size:100%;left:0;width:3em;letter-spacing:-1px;border-right:1px solid #999;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none}.markdown-preview pre.line-numbers .line-numbers-rows>span{pointer-events:none;display:block;counter-increment:linenumber}.markdown-preview pre.line-numbers .line-numbers-rows>span:before{content:counter(linenumber);color:#999;display:block;padding-right:.8em;text-align:right}.markdown-preview .mathjax-exps .MathJax_Display{text-align:center!important}.markdown-preview:not([data-for=preview]) .code-chunk .code-chunk-btn-group{display:none}.markdown-preview:not([data-for=preview]) .code-chunk .status{display:none}.markdown-preview:not([data-for=preview]) .code-chunk .output-div{margin-bottom:16px}.markdown-preview .md-toc{padding:0}.markdown-preview .md-toc .md-toc-details{margin:0;padding:0;border:none}.markdown-preview .md-toc summary.md-toc-link-wrapper{cursor:pointer;list-style-position:outside}.markdown-preview .md-toc summary.md-toc-link-wrapper::marker{font-size:.85em}.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link{display:inline;padding:.25rem 0}.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link div,.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link p{display:inline}.markdown-preview .md-toc .md-toc-link-wrapper.highlighted .md-toc-link{font-weight:800}.markdown-preview .md-toc .md-toc-link-wrapper[data-level='0']{margin-left:12px}.markdown-preview .md-toc .md-toc-link-wrapper[data-level='1']{margin-left:28px}.markdown-preview .md-toc .md-toc-link-wrapper[data-level='2']{margin-left:44px}.markdown-preview .md-toc .md-toc-link-wrapper[data-level='3']{margin-left:60px}.markdown-preview .md-toc .md-toc-link-wrapper[data-level='4']{margin-left:76px}.markdown-preview .md-toc .md-toc-link-wrapper[data-level='5']{margin-left:80px}.markdown-preview a.tag,.markdown-preview a.tag:active,.markdown-preview a.tag:link,.markdown-preview a.tag:visited,.markdown-preview span.tag:not(.token){display:inline-block;background-color:var(--vscode-badge-background,rgba(127,127,127,.18));color:var(--vscode-badge-foreground,currentColor);border-radius:2em;font-size:.85em;font-weight:500;padding:.05em .55em;line-height:1.5;white-space:nowrap;text-decoration:none;text-shadow:none;box-shadow:none;transition:background-color .12s ease,opacity .12s ease}.markdown-preview a.tag{cursor:pointer}.markdown-preview a.tag:focus,.markdown-preview a.tag:hover{background-color:var(--vscode-badge-background,rgba(127,127,127,.32));color:var(--vscode-badge-foreground,currentColor);opacity:.85;text-decoration:none;outline:0}.markdown-preview .wikilink-embed-content{border-left:3px solid var(--vscode-textBlockQuote-border,rgba(128,128,128,.3));background:var(--vscode-textBlockQuote-background,rgba(128,128,128,.05));margin:.5em 0;padding:.5em .75em;border-radius:0 3px 3px 0}.markdown-preview .wikilink-embed-content.wikilink-embed-error{border-left-color:var(--vscode-errorForeground,#cf222e);color:var(--vscode-errorForeground,#cf222e);font-style:italic;opacity:.8}.markdown-preview .wikilink-embed-content h1:first-child,.markdown-preview .wikilink-embed-content h2:first-child,.markdown-preview .wikilink-embed-content h3:first-child,.markdown-preview .wikilink-embed-content h4:first-child,.markdown-preview .wikilink-embed-content h5:first-child,.markdown-preview .wikilink-embed-content h6:first-child{margin-top:.25em}.markdown-preview .wikilink-embed-content .wikilink-embed-content{margin:.25em 0;padding:.25em .5em}.markdown-preview .block-id{display:none}.scrollbar-style::-webkit-scrollbar{width:8px}.scrollbar-style::-webkit-scrollbar-track{border-radius:10px;background-color:transparent}.scrollbar-style::-webkit-scrollbar-thumb{border-radius:5px;background-color:var(--vscode-scrollbarSlider-background,rgba(150,150,150,.66));border:4px solid var(--vscode-scrollbarSlider-background,rgba(150,150,150,.66));background-clip:content-box}.scrollbar-style::-webkit-scrollbar-thumb:hover{background-color:var(--vscode-scrollbarSlider-hoverBackground,rgba(120,120,120,.66))}html body[for=html-export]:not([data-presentation-mode]){position:relative;width:100%;height:100%;top:0;left:0;margin:0;padding:0;overflow:auto}html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{position:relative;top:0;min-height:100vh}@media screen and (min-width:914px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{padding:2em calc(50% - 457px + 2em)}}@media screen and (max-width:914px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{padding:2em}}@media screen and (max-width:450px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{font-size:14px!important;padding:1em}}@media print{html body[for=html-export]:not([data-presentation-mode]) #sidebar-toc-btn{display:none}}html body[for=html-export]:not([data-presentation-mode]) #sidebar-toc-btn{position:fixed;bottom:8px;left:8px;font-size:28px;cursor:pointer;color:inherit;z-index:99;width:32px;text-align:center;opacity:.4}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] #sidebar-toc-btn{opacity:1}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc{position:fixed;top:0;left:0;width:300px;height:100%;padding:32px 0 48px 0;font-size:14px;box-shadow:0 0 4px rgba(150,150,150,.33);box-sizing:border-box;overflow:auto;background-color:inherit}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar{width:8px}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar-track{border-radius:10px;background-color:transparent}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar-thumb{border-radius:5px;background-color:var(--vscode-scrollbarSlider-background,rgba(150,150,150,.66));border:4px solid var(--vscode-scrollbarSlider-background,rgba(150,150,150,.66));background-clip:content-box}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar-thumb:hover{background-color:var(--vscode-scrollbarSlider-hoverBackground,rgba(120,120,120,.66))}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc a{text-decoration:none}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc{padding:0 16px}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-details{margin:0;padding:0;border:none}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link{display:inline;padding:.25rem 0}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link div,html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link p{display:inline}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper.highlighted .md-toc-link{font-weight:800}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper[data-level='0']{padding-left:0}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper[data-level='1']{padding-left:16px}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper[data-level='2']{padding-left:32px}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper[data-level='3']{padding-left:48px}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper[data-level='4']{padding-left:64px}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper[data-level='5']{padding-left:80px}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{left:300px;width:calc(100% - 300px);padding:2em calc(50% - 457px - 300px / 2);margin:0;box-sizing:border-box}@media screen and (max-width:1274px){html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{padding:2em}}@media screen and (max-width:450px){html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{width:100%}}html body[for=html-export]:not([data-presentation-mode]):not([html-show-sidebar-toc]) .markdown-preview{left:50%;transform:translateX(-50%)}html body[for=html-export]:not([data-presentation-mode]):not([html-show-sidebar-toc]) .md-sidebar-toc{display:none}
+/* Please visit the URL below for more information: */
+/*   https://shd101wyy.github.io/markdown-preview-enhanced/#/customize-css */
+
+      </style>
+      <!-- The content below will be included at the end of the <head> element. -->
+<script type="text/javascript">
+  document.addEventListener("DOMContentLoaded", function () {
+    // your code here
+  });
+</script>
+    </head>
+    <body for="html-export">
+      <div class="crossnote markdown-preview  ">
+      
+<div align="center">
+<h1 id="project-plan">Project Plan </h1>
+<img src="../Image/HCMUS.jpg" width="130">
+<h2 id="tixhub-event-ticket-sales-web-application">TixHub: Event Ticket Sales Web Application </h2>
+<p><strong>Introduction to Software Engineering  — 24C11</strong></p>
+<p>Group 02 · SoE</p>
+<p><em>June, 2026</em></p>
+</div>
+<hr>
+<blockquote>
+<p><strong>Disclaimer:</strong> The content has since been re adjusted from its version in PA2. The team has added an in platform wallet that allow the payment and refund features.</p>
+</blockquote>
+<hr>
+<style>
+/* ---- Page rhythm -------------------------------------------------- */
+body {
+  max-width: 62rem;
+  margin: 0 auto;
+  padding: 0 2rem 4rem;
+  line-height: 1.65;
+}
+
+/* ---- Headings ----------------------------------------------------- */
+/* h3 = numbered section band (1. Introduction, 2. ...) */
+body h3 {
+  margin-top: 3.2rem;
+  padding: 0.5rem 0 0.6rem;
+  border-top: 3px solid currentColor;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.35);
+  font-size: 1.75rem;
+  letter-spacing: 0.01em;
+}
+
+/* h4 = subsection (2.1, 2.2, ...) */
+body h4 {
+  margin-top: 2.6rem;
+  padding-left: 0.7rem;
+  border-left: 4px solid rgba(128, 128, 128, 0.55);
+  border-bottom: none;
+  font-size: 1.3rem;
+}
+
+/* h5 = minor grouping inside a subsection */
+body h5 {
+  margin-top: 1.8rem;
+  margin-bottom: 0.4rem;
+  font-size: 1.02rem;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+}
+
+/* ---- Field labels (Planned tasks:, Project materials, ...) --------- */
+/* a paragraph that is nothing but bold text reads as a sub-heading */
+body p > strong:only-child {
+  display: inline-block;
+  margin-top: 0.9rem;
+  font-size: 0.82rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+/* ---- Cover block keeps its plain, centred look --------------------- */
+div[align="center"] h1,
+div[align="center"] h2 {
+  margin-top: 0.6rem;
+  padding: 0;
+  border: none;
+  text-transform: none;
+}
+
+div[align="center"] p > strong:only-child {
+  display: inline;
+  margin-top: 0;
+  font-size: 1em;
+  letter-spacing: normal;
+  text-transform: none;
+  opacity: 1;
+}
+
+/* ---- Tables ------------------------------------------------------- */
+body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.9rem 0 1.4rem;
+}
+
+body table th,
+body table td {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  vertical-align: top;
+  text-align: left;
+}
+
+body table thead th {
+  background: rgba(128, 128, 128, 0.14);
+}
+
+body table tbody tr:nth-child(even) {
+  background: rgba(128, 128, 128, 0.06);
+}
+
+/* ---- Lists -------------------------------------------------------- */
+body ul,
+body ol {
+  padding-left: 1.5rem;
+}
+
+body li {
+  margin: 0.28rem 0;
+}
+
+body li > p {
+  margin: 0.2rem 0;
+}
+
+/* ---- Inline tags: [SEC-02], code, identifiers ---------------------- */
+body :not(pre) > code {
+  padding: 0.08em 0.42em;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 4px;
+  background: rgba(128, 128, 128, 0.12);
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+/* ---- Disclaimer / note blockquote ---------------------------------- */
+body blockquote {
+  margin: 1.4rem 0;
+  padding: 0.85rem 1.2rem;
+  border: none;
+  border-left: 4px solid rgba(128, 128, 128, 0.5);
+  background: rgba(128, 128, 128, 0.08);
+  border-radius: 0 6px 6px 0;
+}
+
+body blockquote p:first-child { margin-top: 0; }
+body blockquote p:last-child { margin-bottom: 0; }
+
+/* ---- Table of contents -------------------------------------------- */
+.toc {
+  margin: 1rem 0 2rem;
+  padding: 1.2rem 1.6rem 0.6rem;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 8px;
+  column-count: 2;
+  column-gap: 2.5rem;
+}
+
+.toc ol {
+  margin: 0 0 0.6rem;
+  padding-left: 1.4rem;
+}
+
+.toc ol > li {
+  margin: 0.3rem 0;
+  font-weight: 600;
+  break-inside: avoid;
+}
+
+.toc ul {
+  margin: 0.2rem 0 0.5rem;
+  padding-left: 0.9rem;
+  list-style: none;
+  font-weight: 400;
+}
+
+.toc ul li {
+  margin: 0.18rem 0;
+}
+
+.toc a { text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+
+/* narrow preview pane: one column instead of two */
+@media (max-width: 52rem) {
+  .toc { column-count: 1; }
+  body { padding: 0 1rem 3rem; }
+}
+
+/* ---- Section separators ------------------------------------------- */
+body hr {
+  height: 1px;
+  margin: 2.4rem 0;
+  border: none;
+  background: rgba(128, 128, 128, 0.3);
+}
+</style>
+<h3 id="table-of-contents">Table of Contents </h3>
+<div class="toc">
+<ol>
+<li><a href="#1-introduction">Introduction</a></li>
+<li><a href="#2-project-overview">Project Overview</a>
+<ul>
+<li><a href="#21-goals">2.1 Goals</a></li>
+<li><a href="#22-scope">2.2 Scope</a></li>
+<li><a href="#23-deliverables">2.3 Deliverables</a></li>
+<li><a href="#24-assumptions">2.4 Assumptions</a></li>
+</ul>
+</li>
+<li><a href="#3-project-organization">Project Organization</a></li>
+<li><a href="#4-risk-management">Risk Management</a></li>
+<li><a href="#5-project-plan">Project Plan</a></li>
+<li><a href="#6-schedule">Schedule</a></li>
+<li><a href="#7-build-plan">Build Plan</a></li>
+<li><a href="#8-appendix--ai-usage-notes">Appendix — AI Usage Notes</a></li>
+</ol>
+</div>
+<hr>
+<h3 id="1-introduction">1. Introduction </h3>
+<blockquote>
+<p><em>Conducted by Nguyễn Minh Khoa.</em></p>
+</blockquote>
+<p>TixHub is a web based event ticketing platform developed by Group 02. The platform connects three groups of users, a platform <strong>Admin</strong>, event <strong>Organizers</strong>, and <strong>Attendees</strong> on a single marketplace where events are created, tickets are sold securely, and attendees are checked in at the door with QR codes.</p>
+<p>This document is the initial project plan for TixHub. It describes how the team will deliver the product across five Scrum sprints over an academic semester. The plan covers team organization and responsibilities, risk identification and mitigation, a detail task breakdown, the overall project schedule, and the build strategy for testing and final delivery.</p>
+<hr>
+<h3 id="2-project-overview">2. Project Overview </h3>
+<blockquote>
+<p><em>Conducted by Lương Hưng Phát.</em></p>
+</blockquote>
+<h4 id="goals">Goals </h4>
+<p>The goal of TixHub is to deliver a complete, production shaped event ticketing platform while applying disciplined Agile engineering practice. Specific goals include:</p>
+<p><em>1. <strong>Enable end to end ticket sales:</strong></em> Allow organizers to create events and attendees to discover, purchase, and receive tickets entirely online through a secure, integrated sandbox checkout.<br>
+<em>2. <strong>Eliminate ticket fraud at the door:</strong></em> Issue every ticket as a unique QR code and provide a web based scanner so each ticket can be checked in exactly once, with live attendance data for organizers.<br>
+<em>3. <strong>Support real reserved seating:</strong></em> Provide a real time interactive seat map where attendees select specific seats and different buyers can never be sold the same seat.<br>
+<em>4. <strong>Apply AI to real product problems:</strong></em> Use the third party API to recommend relevant events to attendees and to help organizers produce better event listings.<br>
+<em>5. <strong>Give organizers actionable data:</strong></em> Provide an analytics dashboard of sales, revenue, remaining inventory, and check ins.<br>
+<em>6. <strong>Keep the marketplace safe and credible:</strong></em> Provide admin moderation and organizer approval to maintain trust and transparency in the platform.<br>
+<em>7. <strong>Practise disciplined Agile delivery:</strong></em> Complete the product across structured sprints with planning, reviews, testing, and CI/CD.</p>
+<h4 id="22-scope">2.2 Scope </h4>
+<p>TixHub delivers <strong>eleven core features</strong> across three user roles Admin, Organizer, and Attendee as a single web application. This section defines the boundary of the work.</p>
+<h5 id="in-scope">In Scope </h5>
+<ul>
+<li><em><strong>Attendee:</strong></em> Browse, search, and filter events; hold seats on a live map — or a quantity for general admission — for a <strong>7-minute configurable window, max 8 tickets per showtime</strong>, sign-in required; top up a <strong>store-credit wallet</strong> via the VNPay sandbox; buy tickets by <strong>debiting that wallet in one atomic transaction</strong>; receive QR-code digital tickets; cancel a ticket to free the seat and get its <strong>refundable amount back to the wallet</strong>; AI event recommendations (via third party AI API); submit reviews &amp; ratings; receive notifications and join waitlists.</li>
+<li><em><strong>Organizer:</strong></em> Event creation &amp; management; AI listing assistant (via third party AI API); phone browser door QR scanner and check-in; real time analytics dashboard.</li>
+<li><em><strong>Admin:</strong></em> Organizer approval workflow; <strong>pre-publish event approval</strong> and content moderation; platform-wide analytics.</li>
+<li><em><strong>Platform wide:</strong></em> Authentication — Google OAuth sign in and own membership (email, nickname, password, optional unique phone); single deployment reachable via a public URL for grading.</li>
+</ul>
+<h5 id="out-of-scope">Out of Scope </h5>
+<ul>
+<li>Real money / production payment settlement and <strong>payouts to organizers</strong> (VNPay sandbox only; organizers are settled off-platform).</li>
+<li><strong>Cash-out from the wallet.</strong> The wallet is a closed loop: money enters by top-up and leaves only as tickets. Refunds go <strong>back to the wallet</strong>, never to a card or bank account (schema decision D3, constitution v2.0.0).</li>
+<li>Multi-currency and international payment methods.</li>
+<li>Native mobile applications (iOS/Android).</li>
+<li>Online / streaming events — physical venues only.</li>
+<li>Ongoing post-PA5 maintenance and support.</li>
+<li>Third party AI API hosting or model training; no custom model.</li>
+</ul>
+<h5 id="constraints">Constraints </h5>
+<ul>
+<li>Hosting: a single team-managed <strong>VPS</strong> (<code>tixhub.fit</code>, Nginx serving the SPA and reverse-proxying the API same-origin) plus free-tier <strong>Neon</strong> PostgreSQL.</li>
+<li>Third-party AI API free-tier quota.</li>
+<li>VNPay <strong>sandbox</strong> only; no real funds are processed.</li>
+<li>External integrations capped at <strong>four</strong> — VNPay, Gemini, Google OAuth, Resend (constitution v2.0.0); a fifth needs an amendment.</li>
+<li>Real-time seat updates run over <strong><a href="http://Socket.IO">Socket.IO</a></strong> on the same Node process and origin (constitution technology stack) — no message broker, no second service; the database stays the source of truth and socket updates are advisory.</li>
+<li>13 week semester, 5 sprints (PA1–PA5), 5 member team.</li>
+<li>The deployed application will be reachable via a public URL for evaluator grading.</li>
+</ul>
+<h5 id="acceptance-criteria">Acceptance Criteria </h5>
+<ul>
+<li>All eleven features are deployed and demonstrable end to end on the public URL.</li>
+<li>The core flow works: register/login → create event → admin approves it → top up wallet → buy ticket (GA + reserved) → receive QR ticket → check in at the door.</li>
+<li>Concurrent seat <strong>holds</strong> and purchases never double book a seat, and no general-admission tier is oversold (verified under load test; ≥ 60 concurrent viewers on one map, seat update &lt; 1 s p95).</li>
+<li>A hold left alone is auto-released within ~1 minute of its 7-minute window, even with the client disconnected; the only extension is the one-time top-up grace (+7 min, ceiling 14 min).</li>
+<li>Wallet top-ups are credited only through a signed, idempotent VNPay sandbox IPN; the wallet ledger explains every balance (DATA-04).</li>
+<li>All four builds pass the CI quality gates (see §7) with no open P0/P1 defects.</li>
+<li>Each PA deliverable is accepted by the course evaluators.</li>
+</ul>
+<h4 id="deliverables">Deliverables </h4>
+<table>
+<thead>
+<tr>
+<th>Sprint</th>
+<th>PA</th>
+<th>Key Deliverables</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sprint 1</td>
+<td>PA1</td>
+<td>Identify problem, project proposal, team contract, and workflow principle</td>
+</tr>
+<tr>
+<td>Sprint 2</td>
+<td>PA2</td>
+<td>Project Plan, Vision Document, SpecKit setup + project constitution, account &amp; authentication module (feature <code>001-account-auth</code>)</td>
+</tr>
+<tr>
+<td>Sprint 3</td>
+<td>PA3</td>
+<td>Use-Case Specification, event catalog &amp; discovery incl. admin pre-publish approval (<code>002-event-catalog</code>), real-time seat map &amp; holds (<code>003-seat-holds</code>), wallet top-up + wallet checkout, QR ticketing &amp; door scanner, real time analytics dashboard, fully integrated build; revised project plan</td>
+</tr>
+<tr>
+<td>Sprint 4</td>
+<td>PA4</td>
+<td>AI recommendations chatbot, AI listing assistant, notifications &amp; waitlist, ticket cancellation with wallet refund</td>
+</tr>
+<tr>
+<td>Sprint 5</td>
+<td>PA5</td>
+<td>Reviews &amp; ratings, reported-content moderation, admin platform analytics, complete test reports, production deployment, PA5 feature demo</td>
+</tr>
+</tbody>
+</table>
+<h4 id="assumptions">Assumptions </h4>
+<ul>
+<li>All five team members remain available and fully commited to the project.</li>
+<li>VNPay sandbox remains accessible and stable throughout the project; no real money will be processed.</li>
+<li>API free tier quotas are sufficient for development and demonstration purposes.</li>
+<li>The single VPS (<code>tixhub.fit</code>) plus free-tier Neon PostgreSQL provide adequate capacity for development, testing, and the PA5 demo.</li>
+<li>Course evaluators can access the deployed application via a public URL for grading.</li>
+<li>A shared API contract agreed in Sprint 1 remains valid unless a breaking change is unanimously approved by the team.</li>
+<li>The team's personal laptops meet the minimum requirements: modern multi core CPU, ≥ 8 GB RAM, internet access.</li>
+</ul>
+<hr>
+<h3 id="3-project-organization">3. Project Organization </h3>
+<blockquote>
+<p><em>Conducted by Nguyễn Minh Khoa.</em></p>
+</blockquote>
+<h4 id="group-02">Group 02 </h4>
+<table>
+  <tbody><tr>
+    <th>Lương Hưng Phát</th>
+    <th>Nguyễn Thành Đạt</th>
+    <th>Nguyễn Minh Khoa</th>
+    <th>Nguyễn Tấn Hiệu</th>
+    <th>Nguyễn Anh Khôi</th>
+  </tr>
+  <tr align="center">
+    <td>24127298</td>
+    <td>24127021</td>
+    <td>24127188</td>
+    <td>24127373</td>
+    <td>24127430</td>
+  </tr>
+  <tr align="center">
+    <td>PM / Backend Engineer<br><b>(Team Leader)</b></td>
+    <td>Fullstack Dev / Tester</td>
+    <td>Backend Developer</td>
+    <td>Frontend Dev / DevOps</td>
+    <td>Database Management</td>
+  </tr>
+</tbody></table>
+<h4 id="roles-and-responsibilities">Roles and Responsibilities </h4>
+<ul>
+<li>
+<p><em><strong>Lương Hưng Phát:</strong></em> Team Leader, Project Manager, and Backend Engineer. Owns the sprint planning process, maintains the Jira backlog, conducts the sprint review and retrospective, leads backend development, and signs off on each sprint's deliverables. Acts as the primary point of contact between the team and course instructors.</p>
+</li>
+<li>
+<p><em><strong>Nguyễn Thành Đạt:</strong></em> Fullstack Developer and Tester. Implements cross features that span both frontend and backend, owns QA strategy, writes and runs test cases (unit, integration, and acceptance), and coordinates the test report deliverables for each PA.</p>
+</li>
+<li>
+<p><em><strong>Nguyễn Minh Khoa:</strong></em> Backend Developer. Implements core backend modules and REST API endpoints, owns payment integration (VNPay) and AI integration (Gemini), and supports architectural decisions on the server side.</p>
+</li>
+<li>
+<p><em><strong>Nguyễn Tấn Hiệu:</strong></em> Frontend Developer and DevOps Engineer. Implements and owns the React SPA and all user facing interfaces, configures and maintains the CI/CD pipeline (GitHub Actions), manages deployment to the team-managed VPS (<code>tixhub.fit</code>: Nginx TLS, static SPA, reverse-proxied API) and the Neon database, and monitors hosting infrastructure.</p>
+</li>
+<li>
+<p><em><strong>Nguyễn Anh Khôi:</strong></em> Database Manager. Designs and owns the PostgreSQL schema, writes and runs all database migrations, ensures data integrity, and supports performance tuning for concurrent seat hold queries.</p>
+</li>
+</ul>
+<h4 id="communication-and-collaboration">Communication and Collaboration </h4>
+<ul>
+<li><em><strong>Daily stand ups:</strong></em> short async updates posted on Discord each working day (blocker, progress, plan).</li>
+<li><em><strong>Sprint ceremonies:</strong></em> sprint planning, review, and retrospective conducted on Google Meet at the start and end of each sprint.</li>
+<li><em><strong>Code review:</strong></em> every change is submitted as a GitHub pull request; at least one other member must review and approve before merging.</li>
+<li><em><strong>Documentation:</strong></em> all written deliverables authored in Markdown and committed to the shared repository.</li>
+</ul>
+<hr>
+<h3 id="4-risk-management">4. Risk Management </h3>
+<blockquote>
+<p><em>Conducted by Nguyễn Minh Khoa.</em></p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Risk</th>
+<th style="text-align:center">Likelihood</th>
+<th style="text-align:center">Impact</th>
+<th>Mitigation Strategy</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>Member unavailability:</strong> A team member becomes temporarily unavailable due to illness, academic commitments, or personal circumstances, stalling their assigned tasks.</td>
+<td style="text-align:center">Medium</td>
+<td style="text-align:center">High</td>
+<td>Tasks are documented clearly in Jira so any member can pick them up. The team maintains a shared knowledge of all modules via code review and weekly syncs. If a member is unavailable, the PM redistributes their sprint tasks immediately and make sure that member has to compensate the work they had missed after they return.</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Infrastructure / free tier limits:</strong> The VPS runs out of capacity, or the Neon database or AI API free quotas are exceeded during development, testing, or the PA5 demo, causing service interruptions. TLS certificates and OS patching are now the team's own responsibility.</td>
+<td style="text-align:center">Medium</td>
+<td style="text-align:center">Medium</td>
+<td>The DevOps member (Hiệu) monitors VPS resources and Neon usage throughout the semester, and automates certificate renewal. Scaling out is a config change (more Node workers behind Nginx, or a bigger VPS), not a rewrite. If no complimentary alternative is available, the team contacts the supervisor for advice. Demo traffic is controlled and pre-staged.</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Scope creep:</strong> Eleven features including a real time concurrent seat map across 13 weeks threatening the sprint schedule.</td>
+<td style="text-align:center">Medium</td>
+<td style="text-align:center">High</td>
+<td>The eleven features and the explicit out of scope list are locked in the Product Backlog. The PM protects sprint commitments: non-essential polish or new ideas are deferred to later sprints or dropped if they delay PA delivery dates.</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Integration risk from parallel development:</strong> The frontend and backend are developed independently in Sprint 2 and 3 which may diverge, causing integration failures when combined in Sprint 4.</td>
+<td style="text-align:center">Medium</td>
+<td style="text-align:center">Medium</td>
+<td>A <strong>single shared contract</strong> — request/response shapes declared once as TypeScript types in <code>shared/</code> and imported by both sides, plus an OpenAPI file per feature — was agreed in Sprint 2 and is mandated by constitution Principle VI, so a breaking change fails at compile time rather than in the browser. Frontend and backend now live in one monorepo and are integrated per feature as it ships, not in a late big-bang phase.</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>Payment integration failures:</strong> VNPay top-up IPNs may be delayed, duplicated, or fail mid flow, risking a wallet credited twice or money paid but not credited.</td>
+<td style="text-align:center">Low</td>
+<td style="text-align:center">High</td>
+<td>Wallet-only checkout (schema decision D2) keeps the gateway out of the seat and ticket lifecycle entirely — a failed top-up costs a seat at worst, never a ticket issued without payment. IPN handling is <strong>idempotent</strong> (guarded on <code>status='initiated'</code> plus a unique reference), so a replay credits nothing. A <code>querydr</code> reconciliation sweep settles top-ups still <code>initiated</code> after ~15 minutes; until then the attendee sees <em>Pending</em>, never lost money.</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3 id="5-project-plan">5. Project Plan </h3>
+<blockquote>
+<p><em>Conducted by Nguyễn Minh Khoa.</em></p>
+</blockquote>
+<p>This project follows the <strong>Scrum</strong> process model, organized into five sprints that correspond to the five PA deliverables (PA1–PA5). Each sprint lasts 2–3 weeks. <strong>Sprint 3 is the current sprint</strong> (PA3); Sprint 2 is closed. Detailed tasks with assigned performers, reviewers, and due dates are provided for Sprints 2 and 3. For Sprints 4–5, planned tasks are listed; detailed assignments will be finalized when each sprint begins.</p>
+<blockquote>
+<p><strong>Delivery method.</strong> Each feature is specified with <strong>SpecKit</strong> before it is coded — spec → plan →<br>
+tasks → implement — and lives under <code>src/specs/&lt;id&gt;-&lt;name&gt;/</code>. Status as of <strong>July 24, 2026</strong>:<br>
+<code>001-account-auth</code> <strong>done</strong> (38 tests), <code>002-event-catalog</code> <strong>done</strong> (19 tests),<br>
+<code>003-seat-holds</code> <strong>specified and planned, build in progress</strong>. The seat-hold tasks below were<br>
+re-dated accordingly; the slip is inside Sprint 3 and does not move the PA3 date.</p>
+</blockquote>
+<blockquote>
+<p><strong>Task convention:</strong> each task is performed by two member and reviewed by another. All project related activities like coding, report writing, testing, and self-training is counted as valid tasks.</p>
+</blockquote>
+<hr>
+<h4 id="sprint-1-planning">Sprint 1: Planning </h4>
+<p><strong>Focus:</strong> Identify problem, project proposal, team contract, and workflow principle</p>
+<p><strong>Completed deliverables:</strong> Project Proposal, team contract, working pipeline (Jira, Drive, version control and spec driven techinque), GitHub repository initialization.</p>
+<hr>
+<h4 id="sprint-2-core">Sprint 2: Core </h4>
+<p><strong>Focus:</strong> project plan, vision document, speckit initialization, and AI, weekly report. For implmenation, the landing page with authentication &amp; role-based access, and event creation (general admission) will be started.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Task</th>
+<th>Performer</th>
+<th>Reviewer</th>
+<th>Due Date</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Write project plan document</td>
+<td>Nguyễn Minh Khoa</td>
+<td>Lương Hưng Phát</td>
+<td>June 29, 2026</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Create first version of Landing page, Google Oauth</td>
+<td>Nguyễn Tấn Hiệu</td>
+<td>Lương Hưng Phát</td>
+<td>June 29, 2026</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Write stakeholder and user description for Vision document</td>
+<td>Lương Hưng Phát</td>
+<td>Nguyễn Minh Khoa</td>
+<td>June 29, 2026</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Write introducition and positioning for Vision document</td>
+<td>Nguyễn Thành Đạt, Nguyễn Anh Khôi</td>
+<td>Lương Hưng Phát</td>
+<td>June 29, 2026</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Training SpecKit</td>
+<td>All members</td>
+<td>-</td>
+<td>June 29, 2026</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Sprint 2 review, retrospective, and Jira board update</td>
+<td>All members</td>
+<td>Lương Hưng Phát</td>
+<td>July 10, 2026</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h4 id="sprint-3-tickets--data">Sprint 3: Tickets &amp; Data </h4>
+<p><strong>Focus:</strong> event catalog &amp; discovery, wallet top-up and wallet checkout, real-time seat map &amp; holds, QR ticketing &amp; door scanner, real-time analytics, front-end / back-end full integration, and revised project plan.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Task</th>
+<th>Performer</th>
+<th>Reviewer</th>
+<th>Due Date</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>Implement event catalog &amp; discovery: public browse/detail/showtimes/<strong>read-only</strong> seat-map, organizer event CRUD, admin <strong>pre-publish approval</strong> queue (<strong>done</strong>, feature <code>002-event-catalog</code>, 19 integration tests)</td>
+<td>Lương Hưng Phát, Nguyễn Anh Khôi</td>
+<td>Nguyễn Thành Đạt</td>
+<td>July 24, 2026</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Implement seat holds &amp; reservations backend (feature <code>003-seat-holds</code>, migration <code>0003_holds.sql</code>): concurrency-safe hold on click (<code>SELECT … FOR UPDATE</code>), <code>reservations</code> + <code>reservation_items</code>, one active reservation per (user, showtime), 8-ticket cap, GA quantity holds, 7-min TTL sweeper with auto-release on disconnect, one-time top-up grace (<strong>spec + plan done Jul 24; build in progress</strong>)</td>
+<td>Nguyễn Anh Khôi, Nguyễn Minh Khoa</td>
+<td>Lương Hưng Phát</td>
+<td>July 26, 2026 <em>(revised from Jul 16)</em></td>
+</tr>
+<tr>
+<td>1b</td>
+<td>Implement wallet: VNPay sandbox <strong>top-up</strong> (signed IPN, idempotent, <code>querydr</code> reconciliation) and <strong>wallet checkout</strong> (single ACID transaction: order, debit, ledger row, seats → sold, tickets)</td>
+<td>Nguyễn Minh Khoa, Nguyễn Anh Khôi</td>
+<td>Lương Hưng Phát</td>
+<td>July 20, 2026</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Generate unique QR code digital tickets inside the committed wallet-purchase transaction</td>
+<td>Nguyễn Minh Khoa, Nguyễn Anh Khôi</td>
+<td>Lương Hưng Phát</td>
+<td>July 18, 2026</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Implement public event browse page with keyword, category, date, location, price, and availability filters</td>
+<td>Nguyễn Tấn Hiệu, Nguyễn Anh Khôi</td>
+<td>Nguyễn Thành Đạt</td>
+<td>July 18, 2026</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Build organizer door scanner UI (phone browser); implement check in validation API</td>
+<td>Nguyễn Tấn Hiệu, Nguyễn Minh Khoa</td>
+<td>Lương Hưng Phát</td>
+<td>July 20, 2026</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Implement the real-time seat map front end (feature <code>003-seat-holds</code>): <a href="http://Socket.IO">Socket.IO</a> channel per showtime, hold-on-click with countdown, live availability for other viewers, resync on reconnect — replaces the read-only map from task 0</td>
+<td>Nguyễn Tấn Hiệu, Lương Hưng Phát</td>
+<td>Nguyễn Minh Khoa</td>
+<td>July 26, 2026 <em>(revised from Jul 21)</em></td>
+</tr>
+<tr>
+<td>6</td>
+<td>Build real time analytics dashboard: live charts (Recharts) for sales, revenue, remaining inventory, and check-ins</td>
+<td>Nguyễn Tấn Hiệu, Lương Hưng Phát</td>
+<td>Nguyễn Thành Đạt</td>
+<td>July 22, 2026</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Complete frontend ↔ backend integration; resolve any API contract drift</td>
+<td>Nguyễn Thành Đạt, Nguyễn Tấn Hiệu</td>
+<td>Lương Hưng Phát</td>
+<td>July 25, 2026</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Run integration tests across all Sprint 2 and Sprint 3 features</td>
+<td>Nguyễn Thành Đạt, Nguyễn Minh Khoa</td>
+<td>Lương Hưng Phát</td>
+<td>July 26, 2026</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Update and revise project plan (PA3 report)</td>
+<td>Nguyễn Minh Khoa, Lương Hưng Phát</td>
+<td>Nguyễn Thành Đạt</td>
+<td>July 27, 2026</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Sprint 3 review, retrospective, and Jira board update</td>
+<td>All members</td>
+<td>Lương Hưng Phát</td>
+<td>July 28, 2026</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h4 id="sprint-4-ai--engagement">Sprint 4: AI &amp; Engagement </h4>
+<p><strong>Focus:</strong> AI-powered features (Gemini), automated notifications, and waitlist.</p>
+<p><strong>Planned tasks:</strong></p>
+<ul>
+<li>Implement AI Personalized Event Recommendations chatbot (API, attendee facing)</li>
+<li>Integrate browsing history and past ticket data into the LLM prompt context</li>
+<li>Implement AI Event Listing Assistant for organizers (API, organizer facing): auto-generate description, suggest titles, tags, and pricing</li>
+<li>Build notification system: in web and email alerts for booking confirmation, event reminders (1 week / 1 day before), and cancellations</li>
+<li>Implement ticket cancellation with <strong>wallet refund</strong>: self-cancel up to T-24h voids the ticket, returns the seat to inventory, credits the ticket's stored <code>refundable_amount</code> back to the buyer's wallet (service fee kept), and notifies the waitlist; event cancellation refunds 100% including the fee</li>
+<li>Implement waitlist feature: join waitlist for sold out events; auto notify and offer tickets when seats are released</li>
+<li>Implement AI response caching and rate limiting to stay within Gemini free-tier quotas</li>
+<li>Write unit and integration tests for all Sprint 4 features</li>
+<li>Sprint 4 review, retrospective, and Jira board update</li>
+</ul>
+<hr>
+<h4 id="sprint-5--validation--release">Sprint 5 — Validation &amp; Release </h4>
+<p><strong>Focus:</strong> reviews &amp; ratings, admin moderation &amp; organizer approval, system testing, production deployment, and PA5 demo.</p>
+<p><strong>Planned tasks:</strong></p>
+<ul>
+<li>Implement reviews and ratings: attendees rate events (1–5 stars) and leave written reviews after attending</li>
+<li>Display aggregated ratings on organizer profiles and event pages</li>
+<li>Implement the remaining admin moderation tools: approve / suspend organizers, review reported events and reviews, remove policy-violating content (pre-publish event approval shipped in Sprint 3)</li>
+<li>Implement admin platform wide analytics view</li>
+<li>Conduct system testing and user acceptance testing across all three roles</li>
+<li>Conduct performance testing on real time seat map and analytics under concurrent load</li>
+<li>Fix defects identified during testing and produce final Build 4 (release / demo build)</li>
+<li>Finalize production deployment; confirm all environment variables and secrets are set</li>
+<li>Prepare and rehearse PA5 demo covering all eleven features</li>
+<li>Write final test report and complete PA5 deliverables</li>
+<li>Sprint 5 review and project retrospective</li>
+</ul>
+<hr>
+<h3 id="6-schedule">6. Schedule </h3>
+<blockquote>
+<p><em>Conducted by Nguyễn Minh Khoa.</em></p>
+</blockquote>
+<p>The table below summarizes the sprint timeline and key milestones. The sprint boundaries and task assignments are reflected on the team's Jira board.</p>
+<table>
+<thead>
+<tr>
+<th>Sprint</th>
+<th>PA</th>
+<th>Dates</th>
+<th>Key Milestone</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sprint 1 — Planning</td>
+<td>PA1</td>
+<td>May 25 – Jun 7, 2026</td>
+<td>Problem identified; project proposal, team contract, workflow pipeline, and repository initialized</td>
+<td>Done</td>
+</tr>
+<tr>
+<td>Sprint 2 — Core</td>
+<td>PA2</td>
+<td>Jun 9 – Jul 12, 2026</td>
+<td>Project plan, vision document, SpecKit + constitution; landing page with authentication &amp; role-based access</td>
+<td>Done</td>
+</tr>
+<tr>
+<td>Sprint 3 — Tickets &amp; Data</td>
+<td>PA3</td>
+<td>Jul 16 – Jul 28, 2026</td>
+<td>Use-case specification, event catalog &amp; discovery with admin approval, wallet top-up &amp; checkout, QR tickets, door scanner, real-time seat map &amp; analytics, full integration; PA3 report</td>
+<td>In Progress</td>
+</tr>
+<tr>
+<td>Sprint 4 — AI &amp; Engagement</td>
+<td>PA4</td>
+<td>Jul 29 – Aug 11, 2026</td>
+<td>AI recommendations chatbot, AI listing assistant, notifications, waitlist</td>
+<td>Planned</td>
+</tr>
+<tr>
+<td>Sprint 5 — Validation &amp; Release</td>
+<td>PA5</td>
+<td>Aug 12 – Aug 25, 2026</td>
+<td>Reviews &amp; ratings, admin moderation, system testing, production deployment, PA5 demo</td>
+<td>Planned</td>
+</tr>
+</tbody>
+</table>
+<div class="mermaid">timeline
+    title TixHub — Project Schedule
+    May 2026 : Planning &amp; Setup
+    Jun 2026  : PA1 delivered
+              : Plan, Auth, Events
+    Jul 2026  : PA2 / Build 1
+              : QR, Search, Analytics
+              : PA3 / Build 2
+              : AI, Notify, Waitlist
+    Aug 2026  : PA4 / Build 3
+              : Reviews, Admin, Demo
+              : PA5 / Build 4
+</div><hr>
+<h3 id="7-build-plan">7. Build Plan </h3>
+<blockquote>
+<p><em>Conducted by Nguyễn Minh Khoa.</em></p>
+</blockquote>
+<p>TixHub will produce <strong>four builds</strong> across Sprints 2–5. Sprint 1 produces no deployable build (only design artifacts and tooling), but establishes the CI/CD pipeline so every subsequent commit is auto deployed to the staging environment.</p>
+<table>
+<thead>
+<tr>
+<th>Build</th>
+<th>Sprint</th>
+<th>Target Date</th>
+<th>Scope</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Build 1:</strong> Internal Alpha</td>
+<td>Sprint 2</td>
+<td>Jul 12, 2026</td>
+<td>Authentication (login / register / RBAC)</td>
+<td>First deployable build; validates the core user flow from registration through ticket purchase. Tested manually by the team.</td>
+</tr>
+<tr>
+<td><strong>Build 2:</strong> Integration Build</td>
+<td>Sprint 3</td>
+<td>Jul 28, 2026</td>
+<td>All Sprint 2 features + event catalog &amp; discovery with admin approval, wallet top-up &amp; wallet checkout, QR ticketing, door scanner, real-time seat map, live analytics dashboard</td>
+<td>First fully integrated frontend ↔ backend build. Integration tests executed against this build. Regression-tested to confirm Sprint 2 features remain stable.</td>
+</tr>
+<tr>
+<td><strong>Build 3:</strong> Feature-Complete Beta</td>
+<td>Sprint 4</td>
+<td>Aug 11, 2026</td>
+<td>All previous features + AI recommendations, AI listing assistant, notifications &amp; waitlist, ticket cancellation with wallet refund</td>
+<td>Beta build covering all eleven feature areas. Performance-tested under concurrent load (seat map &amp; analytics). Remaining defects from prior builds resolved.</td>
+</tr>
+<tr>
+<td><strong>Build 4:</strong> Release / Demo Build</td>
+<td>Sprint 5</td>
+<td>Aug 25, 2026</td>
+<td>All eleven features complete + reviews &amp; ratings, reported-content moderation, admin analytics</td>
+<td>Final production build deployed on the VPS (<code>tixhub.fit</code>) with Neon PostgreSQL. Full system test and UAT completed against this build. Used for the PA5 demo covering all project features.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="build-quality-gates">Build Quality Gates </h4>
+<p>Each build must pass the following checks before it is considered ready:</p>
+<ul>
+<li>All GitHub Actions CI checks pass (lint, type-check, unit tests) on the <code>main</code> branch.</li>
+<li>No P0 (application crash) or P1 (core feature broken) defects open.</li>
+<li>The deployed URL is reachable and the build can be demonstrated end-to-end.</li>
+<li>The Jira sprint board is updated: all planned tasks are either <strong>Done</strong> or explicitly deferred with a documented reason.</li>
+</ul>
+<hr>
+<h3 id="8-appendix-ai-usage-notes">8. Appendix: AI usage notes </h3>
+<p>In accordance with the course AI Usage Guidelines, the team declares the use of AI tools in preparing this document. AI was used as a <strong>structuring, and editing assistant only</strong>. Every decision (scope, roles, risks, task assignments, schedule dates, build plan) was made by the team, and all AI output was reviewed, edited, and validated by the responsible members before inclusion. No section was auto generated and submitted without revision.</p>
+<h4 id="tool">Tool </h4>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Detail</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tool name &amp; version</td>
+<td>Claude (Claude Opus 4.8), running in <strong>Claude Code</strong> CLI</td>
+</tr>
+<tr>
+<td>Provider / platform</td>
+<td>Anthropic — Claude Code (terminal agent), with the <code>grill-me</code> and <code>grill-with-docs</code> interview skills</td>
+</tr>
+<tr>
+<td>Access dates</td>
+<td>June 20, 2026 and June 23, 2026</td>
+</tr>
+</tbody>
+</table>
+<h4 id="summary-of-prompts-used">Summary of prompts used </h4>
+<p>Only the prompts with a significant impact on the document's content are listed below. Small formatting or tutorial prompts (e.g. how to number a TOC sub-section, fixing an image path) are omitted. Full chat history is retained by the team and available on request.</p>
+<p><strong>Full name:</strong> Nguyễn Minh Khoa (24127188), Lương Hưng Phát (24127298)</p>
+<ul>
+<li>
+<p>Claude Opus 4.8, Anthropic, Claude Code CLI, accessed on June 20, 2026</p>
+<ul>
+<li>
+<p><em>Prompt</em>: "How industry often define their products' scope in a technical doc. Reconstruct the scope part that way, group scope by their role for me. The AI should just list as third party API as we are not sure about the API yet."</p>
+</li>
+<li>
+<p><em>Usage</em>: used to restructure the Scope section (Section 2.2) into an industry-style layout grouped by user role, with the AI feature kept as a generic third-party API.</p>
+</li>
+<li>
+<p><em>How the output was used</em>: I supplied every actual feature and constraint and confirmed each item against our agreed product scope; AI only reorganized and worded the section, no new features were invented.</p>
+</li>
+</ul>
+</li>
+<li>
+<p>Claude Opus 4.8, Anthropic, Claude Code CLI, accessed on June 23, 2026</p>
+<ul>
+<li>
+<p><em>Prompt</em>: "Fix the entire schedule to base on the section 5, fix the mermaid as well, reallocate figures and text so they dont overlap and misalign with each other."</p>
+</li>
+<li>
+<p><em>Usage</em>: used to align the Schedule table (Section 6), the mermaid timeline, and the Build Plan (Section 7) with the task dates in Section 5.</p>
+</li>
+<li>
+<p><em>How the output was used</em>: I checked the regenerated dates and milestones against our sprint plan and Jira board to confirm they were consistent before committing.</p>
+</li>
+</ul>
+</li>
+</ul>
+<h4 id="content-generated-with-ai-vs-done-independently">Content generated with AI vs. done independently </h4>
+<ul>
+<li><strong>AI-assisted:</strong> initial Markdown structure and table layouts; prose phrasing of the Scope, disclaimer, and build plan descriptions; formatting fixes.</li>
+<li><strong>Done independently by the team:</strong> all factual and planning content like the eleven features, role assignments, risk register, sprint task ownership, <strong>all due dates</strong>, milestone dates, and acceptance criteria. These were decided by the team (partly via the grill interview sessions) and only worded with AI help.</li>
+<li><strong>Validation:</strong> every AI suggestion was read, edited, and cross-checked against the team's actual plan, Jira board, and member roles before being committed. The members listed under each section ("<em>Conducted by …</em>") are responsible for and can explain their content.</li>
+</ul>
+<blockquote>
+<p>No fabricated results, analysis, or data were produced by AI. The document was not written end to end by AI.</p>
+</blockquote>
+
+      </div>
+      
+      
+    
+    
+    <script type="module">
+// TODO: If ZenUML gets integrated into mermaid in the future,
+//      we can remove the following lines.
+
+
+var MERMAID_CONFIG = ({"startOnLoad":false});
+if (typeof MERMAID_CONFIG !== 'undefined') {
+  MERMAID_CONFIG.startOnLoad = false
+  MERMAID_CONFIG.cloneCssStyles = false
+  MERMAID_CONFIG.theme = "default"
+}
+
+mermaid.initialize(MERMAID_CONFIG || {})
+if (typeof(window['Reveal']) !== 'undefined') {
+  function mermaidRevealHelper(event) {
+    var currentSlide = event.currentSlide
+    var diagrams = currentSlide.querySelectorAll('div.mermaid')
+    for (var i = 0; i < diagrams.length; i++) {
+      var diagram = diagrams[i]
+      if (!diagram.hasAttribute('data-processed')) {
+        mermaid.init(null, diagram, ()=> {
+          Reveal.slide(event.indexh, event.indexv)
+        })
+      }
+    }
+  }
+  Reveal.addEventListener('slidetransitionend', mermaidRevealHelper)
+  Reveal.addEventListener('ready', mermaidRevealHelper)
+  await mermaid.run({
+    nodes: document.querySelectorAll('div.mermaid')
+  })
+} else {
+  await mermaid.run({
+    nodes: document.querySelectorAll('div.mermaid')
+  })
+}
+</script>
+    
+    
+    
+  
+    </body></html>

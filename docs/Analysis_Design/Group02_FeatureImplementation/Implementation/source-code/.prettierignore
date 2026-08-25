@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+coverage/
+package-lock.json
+cloneweb/
+.codegraph/
+
+# Spec Kit: authored markdown, formatted by hand
+src/specs/
+src/.specify/
+docs/

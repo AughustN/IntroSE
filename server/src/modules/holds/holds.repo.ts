@@ -2,7 +2,7 @@ import type { Reservation, ReservationItem, ReservationStatus } from '@shared/ho
 import type pg from 'pg';
 import type { Db } from '../../db/pool.js';
 import { pool } from '../../db/pool.js';
-import { VISIBLE_JOIN, VISIBLE_WHERE } from '../catalog/visibility.js';
+import { SHOWTIME_ON_SALE, VISIBLE_JOIN } from '../catalog/visibility.js';
 
 /**
  * Every write here runs under a row lock (`SELECT … FOR UPDATE`), which is what makes the hold
@@ -80,7 +80,7 @@ export interface ShowtimeInfo {
 export async function getShowtimeInfo(showtimeId: number, db: Db = pool): Promise<ShowtimeInfo | null> {
   const { rows } = await db.query<{ id: number; event_type: 'general_admission' | 'seated'; sellable: boolean }>(
     `SELECT s.id, e.event_type,
-            (${VISIBLE_WHERE} AND s.starts_at > now() AND s.status NOT IN ('cancelled', 'finished')) AS sellable
+            (${SHOWTIME_ON_SALE}) AS sellable
        FROM showtimes s
        JOIN events e ON e.id = s.event_id
        ${VISIBLE_JOIN}

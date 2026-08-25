@@ -1,0 +1,46 @@
+[Unit]
+Description=TixHub API (Express + Socket.IO)
+# Neon is remote, so only the network matters here — no local database to wait for.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# `uploads/` is resolved from process.cwd() (server/src/app.ts), NOT from the module
+# path. A wrong WorkingDirectory means avatars are written somewhere Nginx does not
+# serve and existing ones read as missing — silently, with no error.
+WorkingDirectory=/var/www/tixhub
+
+# Loaded before Environment= below, so the explicit NODE_ENV wins over anything in .env.
+# Keep .env at mode 600 owned by this user (SEC-11) — it holds JWT_SECRET, the Neon URL,
+# and the VNPay hash secret.
+EnvironmentFile=/var/www/tixhub/.env
+# Load-bearing, not cosmetic: `secure: config.isProd` reads this. Without it the refresh
+# cookie ships without the Secure flag (ADR 0003 amendment).
+Environment=NODE_ENV=production
+
+# `npm run dev:server` is `tsx watch` — a development runner. It holds file watches and
+# restarts on source edits, neither of which belongs on a live host. `start:server` is
+# the same entrypoint without the watcher.
+ExecStart=/usr/bin/npm run start:server
+
+Restart=always
+RestartSec=5
+
+User=tixhub
+Group=tixhub
+
+# The process needs to write uploads/ and read .env, and nothing else on the disk.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/tixhub/uploads
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tixhub-api
+
+[Install]
+WantedBy=multi-user.target

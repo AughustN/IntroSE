@@ -1,6 +1,9 @@
+import type pg from 'pg';
 import type { ApplyChange, ApplyPreview, ApplyRefusal } from '@shared/catalog/seatmap.js';
 import { clampCoord, normaliseRotation } from '@shared/catalog/seatmap-validate.js';
 import { type Db, pool, withTransaction } from '../../db/pool.js';
+import { err } from '../../http.js';
+import { SHOWTIME_ON_SALE, VISIBLE_JOIN } from '../catalog/visibility.js';
 
 /**
  * Applying a map edit to a showtime that already has bookable seats (FR-027..FR-029).
@@ -17,6 +20,38 @@ import { type Db, pool, withTransaction } from '../../db/pool.js';
  *
  * Any refused seat rejects the WHOLE edit — the map is left exactly as it was (FR-029).
  */
+
+/**
+ * Refuse to reshape or reprice a map once its showtime is on sale.
+ *
+ * The per-seat rules above protect seats that are already spoken for, one at a time. They do not
+ * protect the map: with them alone an organizer may, mid-sale, delete every seat still available,
+ * add new ones, or move a sold seat's position — and `setTier` may reprice any seat nobody has
+ * bought yet. A buyer watching the picker sees inventory and prices change under them.
+ *
+ * So the gate is the sale itself, not the individual seat. `SHOWTIME_ON_SALE` is the buy path's own
+ * predicate, which makes the boundary exact rather than approximate: anything a buyer may hold a
+ * seat on is closed to the editor, by the same test, with no third state in between.
+ *
+ * **Callers must hold the row locks before calling this.** Under those locks no hold can commit
+ * between this check and the write it guards, which is what makes the check meaningful rather than
+ * a hopeful glance — the same reason `apply` locks before it classifies.
+ */
+async function assertNotOnSale(client: pg.PoolClient, showtimeId: number): Promise<void> {
+  const { rows } = await client.query<{ on_sale: boolean }>(
+    `SELECT (${SHOWTIME_ON_SALE}) AS on_sale
+       FROM showtimes s
+       JOIN events e ON e.id = s.event_id
+       ${VISIBLE_JOIN}
+      WHERE s.id = $1`,
+    [showtimeId],
+  );
+  if (rows[0]?.on_sale) {
+    throw err.refused(409, 'sale_started', 'Suất diễn đã mở bán, không thể sửa sơ đồ ghế.', {
+      refusals: [],
+    });
+  }
+}
 
 /** One seat as the organizer wants it to end up. */
 export interface DesiredSeat {
@@ -177,6 +212,7 @@ export async function apply(showtimeId: number, desired: DesiredSeat[]): Promise
   return withTransaction(async (client) => {
     // Lock first, then read: whatever we classify cannot move underneath us.
     await client.query(`SELECT id FROM showtime_seats WHERE showtime_id = $1 FOR UPDATE`, [showtimeId]);
+    await assertNotOnSale(client, showtimeId);
     const current = await readCurrent(showtimeId, client);
     const outcome = classify(desired, current);
     if (!outcome.wouldSucceed) return outcome; // caller turns this into 409; the txn wrote nothing
@@ -402,6 +438,9 @@ export async function setTier(
          FROM showtime_seats WHERE showtime_id = $1 AND id = ANY($2::bigint[]) FOR UPDATE`,
       [showtimeId, showtimeSeatIds],
     );
+    // A retier is a price change. Refusing it only for seats already sold left every unsold seat
+    // repriceable while the picker was showing its old price.
+    await assertNotOnSale(client, showtimeId);
 
     const refusals: ApplyRefusal[] = [];
     for (const s of rows) {

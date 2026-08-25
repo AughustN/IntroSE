@@ -1,5 +1,5 @@
 import type { HoldRequest, Reservation, SeatUpdate } from "@shared/holds/types.js";
-import { pool, withTransaction } from "../../db/pool.js";
+import { LOCK_TIMEOUT, pool, withTransaction } from "../../db/pool.js";
 import { err } from "../../http.js";
 import { broadcastSeatUpdate } from "../../realtime/io.js";
 import { getSettings } from "../admin/settings.service.js";
@@ -72,6 +72,24 @@ async function requireSellableShowtime(showtimeId: number): Promise<repo.Showtim
     throw err.unprocessable("showtime_unavailable", "Suất diễn này không còn mở bán.");
   }
   return info;
+}
+
+/**
+ * Rethrow a lock-wait timeout as the refusal it actually is.
+ *
+ * Reaching `lock_timeout` on this path means the seat rows stayed locked by someone else's
+ * transaction for the whole wait. That contender commits with the seat held, so the honest answer
+ * to this request is the same one rule 4 gives every loser — `seat_taken`, 409 — not a 500 for an
+ * error the attendee can do nothing with. The alternative is worse than wrong: without the timeout
+ * the request would still be queueing, holding a pool connection while it does.
+ *
+ * Only lock waits are translated. Every other database failure keeps its own shape.
+ */
+function asSeatTaken(error: unknown): never {
+  if ((error as { code?: string }).code === LOCK_TIMEOUT) {
+    throw err.conflict("seat_taken", "Ghế vừa được người khác giữ.");
+  }
+  throw error;
 }
 
 // ---- Hold (create or join the single active reservation) -------------------
@@ -215,7 +233,7 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
       created: true,
       update: { showtimeId: body.showtimeId, tier: { ticketTierId: tier.id, remaining: left } },
     };
-  });
+  }).catch(asSeatTaken);
 
   if (outcome.update) broadcastSeatUpdate(outcome.update);
   return { reservation: await view(outcome.reservationId), created: outcome.created };

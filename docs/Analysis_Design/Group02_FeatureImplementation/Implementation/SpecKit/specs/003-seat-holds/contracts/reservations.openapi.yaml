@@ -1,0 +1,111 @@
+openapi: 3.1.0
+info:
+  title: TixHub — Seat Holds & Reservations (003)
+  version: 0.1.0
+  description: >
+    Reservation (hold) lifecycle. All routes require a signed-in attendee (Bearer access token,
+    same auth as 001). Holds transition showtime_seats / ticket_tiers under a row lock (DATA-02).
+    Money is whole VND đồng. Order conversion, wallet, tickets are feature 004, not here.
+servers:
+  - url: /api
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    HoldRequest:
+      type: object
+      required: [showtimeId]
+      properties:
+        showtimeId: { type: integer }
+        seatIds:
+          type: array
+          items: { type: integer }
+          description: Seated — the showtime_seat ids to hold. Omit for GA.
+        tier:
+          type: object
+          description: General admission — a tier quantity. Omit for seated.
+          required: [ticketTierId, quantity]
+          properties:
+            ticketTierId: { type: integer }
+            quantity: { type: integer, minimum: 1 }
+    Reservation:
+      type: object
+      properties:
+        id: { type: integer }
+        showtimeId: { type: integer }
+        status: { type: string, enum: [active, expired, converted, cancelled] }
+        eventType: { type: string, enum: [seated, general_admission] }
+        expiresAt: { type: string, format: date-time, description: authoritative expiry; client countdown is display-only }
+        extendedOnce: { type: boolean }
+        totalAmount: { type: integer, description: whole VND đồng }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              ticketTierId: { type: integer }
+              showtimeSeatId: { type: integer, nullable: true }
+              seatLabel: { type: string, nullable: true, description: e.g. "A12" for display }
+              quantity: { type: integer }
+              unitPriceAmount: { type: integer }
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+        message: { type: string, description: Vietnamese user message }
+security:
+  - bearerAuth: []
+paths:
+  /reservations:
+    post:
+      summary: Create or extend the caller's single active reservation for a showtime (hold seats/qty)
+      description: >
+        Hold-on-select. If the caller has no active reservation for this showtime, one is created and
+        the 7-minute window starts; otherwise the seats/quantity join the existing active reservation.
+        Refused if a seat is not available, the per-reservation cap (default 8) would be exceeded, the
+        showtime is not on sale, or the caller is a guest.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/HoldRequest' } } }
+      responses:
+        '201': { description: held, content: { application/json: { schema: { $ref: '#/components/schemas/Reservation' } } } }
+        '200': { description: already held (idempotent re-hold), content: { application/json: { schema: { $ref: '#/components/schemas/Reservation' } } } }
+        '401': { description: not signed in, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: seat_taken — the seat was just held/sold by someone else, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422':
+          description: >
+            cap_exceeded (over the 8 cap) · insufficient_stock (GA qty > remaining) ·
+            showtime_unavailable · invalid_selection (empty / wrong showtime / blocked seat)
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '429': { description: rate_limited (hold-spam), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /reservations/{id}:
+    patch:
+      summary: Add or remove seats / adjust GA quantity while the reservation is active
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                add: { $ref: '#/components/schemas/HoldRequest' }
+                removeSeatIds: { type: array, items: { type: integer } }
+      responses:
+        '200': { description: updated, content: { application/json: { schema: { $ref: '#/components/schemas/Reservation' } } } }
+        '403': { description: not_owner, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: not_found or not active, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: seat_taken, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: cap_exceeded / insufficient_stock, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      summary: Cancel the reservation, releasing every seat / GA quantity at once
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '204': { description: cancelled and released }
+        '403': { description: not_owner }
+        '404': { description: not_found or already ended }
+# extendOnce (the +7/ceiling-14 top-up grace, FR-010) is NOT a public route here: it is an internal
+# reservation-service operation invoked by feature 004's POST /wallet/topups when it carries a
+# reservationId. Documented in data-model.md / contract with 004.

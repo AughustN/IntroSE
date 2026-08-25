@@ -185,6 +185,23 @@ export const HOLD_SWEEP_INTERVAL_MS = ms("HOLD_SWEEP_INTERVAL_MS", 60 * 1000);
 export const HOLD_RATE_LIMIT = ms("HOLD_RATE_LIMIT", 30);
 export const HOLD_RATE_WINDOW_MS = ms("HOLD_RATE_WINDOW_MS", 10 * 1000);
 
+// ---- Database ----
+
+/**
+ * How long a transaction may WAIT for a row lock before Postgres aborts the statement (55P03).
+ *
+ * Not a limit on how long a statement runs — only on how long it queues behind someone else's
+ * `FOR UPDATE`. Without it that wait is unbounded, and the wait is what makes seat contention
+ * everyone's problem: a waiter is holding one of the pool's 20 connections the whole time it
+ * queues, so enough contenders for one hot seat starve every unrelated request — a catalog read
+ * that touches no locked row still cannot get a connection. Bounding the wait bounds the damage.
+ *
+ * Two seconds is far above a healthy hold transaction (a handful of statements, no network I/O
+ * inside the transaction, single-digit milliseconds), so a legitimate waiter never trips it. What
+ * trips it is a queue deep enough that this caller was going to lose the seat anyway.
+ */
+export const DB_LOCK_TIMEOUT_MS = ms("DB_LOCK_TIMEOUT_MS", 2000);
+
 // ---- Wallet & top-ups (feature 004, UC-40). Admin-adjustable (UC-36). VND đồng, integers [STD-03].
 /** Smallest top-up VNPay is worth a round trip for. */
 export const TOPUP_MIN_AMOUNT = ms("TOPUP_MIN_AMOUNT", 5_000);

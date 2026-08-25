@@ -1,0 +1,275 @@
+openapi: 3.1.0
+info:
+  title: TixHub Account & Authentication API
+  version: 0.1.0
+  description: >
+    Auth contract for feature 001-account-auth. This YAML is the single source of the
+    request/response shapes; the shared TypeScript types in `shared/auth/` derive from it and are
+    imported by both server and web (Principle VI). All user-facing messages are Vietnamese (USE-03).
+    Session model per D7: short-lived access token (JSON body / Authorization header) + rotating
+    refresh token in an httpOnly Secure SameSite=Lax cookie (`tix_refresh`).
+
+servers:
+  - url: /api
+
+components:
+  securitySchemes:
+    accessToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Short-lived access token, held in memory by the SPA (never localStorage). FR-016.
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string, description: stable machine code; see per-endpoint enums }
+        message: { type: string, description: Vietnamese user-facing text }
+      additionalProperties: false
+    AuthSuccess:
+      type: object
+      required: [accessToken, user]
+      properties:
+        accessToken: { type: string }
+        user: { $ref: '#/components/schemas/Me' }
+      additionalProperties: false
+    Me:
+      type: object
+      required: [id, email, nickname, isAdmin, status, provider, isOrganizer]
+      properties:
+        id: { type: integer, format: int64 }
+        email: { type: string, format: email }
+        phone: { type: [string, 'null'] }
+        nickname: { type: [string, 'null'], description: display handle; canonical name DB→UI (CONTEXT.md) }
+        avatarUrl: { type: [string, 'null'] }
+        isAdmin: { type: boolean }
+        status: { type: string, enum: [active, suspended] }
+        provider: { type: string, enum: [email, google] }
+        isOrganizer: { type: boolean, description: derived per request from an approved organizers row (FR-021) }
+      additionalProperties: false
+
+paths:
+  /auth/register:
+    post:
+      summary: Register a password account (US1, FR-001..FR-008)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, passwordConfirm, nickname]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8, description: "≥8, ≥1 letter, ≥1 digit (FR-003)" }
+                passwordConfirm: { type: string }
+                nickname: { type: string }
+                phone: { type: [string, 'null'], description: optional; VN format, unique (FR-009) }
+      responses:
+        '201':
+          description: Account + wallet created in one transaction, signed in (FR-007, FR-043). Sets `tix_refresh` cookie.
+          content: { application/json: { schema: { $ref: '#/components/schemas/AuthSuccess' } } }
+        '400': { description: "validation_failed / password_mismatch / weak_password", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409':
+          description: "email_taken | phone_taken | email_registered_with_google (D5, FR-047)"
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '429': { description: throttled per source (FR-039), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /auth/login:
+    post:
+      summary: Sign in by email OR phone + password (US1, FR-010..FR-014)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identifier, password]
+              properties:
+                identifier: { type: string, description: "classified by strict parse — valid email -> email column, else canonical VN phone -> phone column; exactly one column, never both (R-8). Malformed is NOT 400: accepted, then uniform 401 in constant time." }
+                password: { type: string }
+      responses:
+        '200':
+          description: Signed in. Sets `tix_refresh` cookie.
+          content: { application/json: { schema: { $ref: '#/components/schemas/AuthSuccess' } } }
+        '401':
+          description: "invalid_credentials — same code & indistinguishable time for unknown identifier and wrong password (FR-011, FR-012, SC-006)"
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '403':
+          description: "account_suspended — only after the password is verified (FR-013)"
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '409':
+          description: "account_uses_google — only after the identifier is known to exist and be a Google account (FR-014)"
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '429': { description: throttled (FR-039/040/048), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /auth/oauth/google:
+    post:
+      summary: Sign in or register with Google (US3, FR-024..FR-026, FR-045..FR-047)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credential]
+              properties:
+                credential: { type: string, description: Google ID token; verified server-side before trust (FR-026) }
+      responses:
+        '200':
+          description: Signed in (existing account, looked up by provider subject — FR-025). Sets cookie.
+          content: { application/json: { schema: { $ref: '#/components/schemas/AuthSuccess' } } }
+        '201':
+          description: New Attendee account created holding no password, **and its wallet row**, in one transaction (FR-024, FR-007). Sets cookie.
+          content: { application/json: { schema: { $ref: '#/components/schemas/AuthSuccess' } } }
+        '401': { description: invalid_google_credential, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: account_suspended (after provider confirms identity, FR-013), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409':
+          description: "email_registered_with_password — refuse, never link (D5, FR-046)"
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  /auth/refresh:
+    post:
+      summary: Rotate the session (D7, FR-019)
+      security: []
+      description: Reads `tix_refresh` cookie. Rotates; reuse of a superseded token revokes the whole family and rejects.
+      responses:
+        '200':
+          description: New access token; new `tix_refresh` cookie set.
+          content: { application/json: { schema: { $ref: '#/components/schemas/AuthSuccess' } } }
+        '401': { description: "invalid_or_revoked_session (includes reuse_detected → family killed)", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /auth/logout:
+    post:
+      summary: End this session (US2, FR-017)
+      security: [{ accessToken: [] }]
+      responses: { '204': { description: session revoked; cookie cleared } }
+
+  /auth/logout-all:
+    post:
+      summary: End every session for the account (US2, FR-018)
+      security: [{ accessToken: [] }]
+      responses: { '204': { description: all live refresh tokens revoked } }
+
+  /auth/password/forgot:
+    post:
+      summary: Request a reset link (US4, FR-027, FR-028, FR-032)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [email], properties: { email: { type: string, format: email } } }
+      responses:
+        '200': { description: "Always identical whether or not the address is registered or is a Google account (FR-028, FR-053, D5). Never discloses." }
+        '429': { description: "throttled (R-13). Keyed on hash(identifier)+source_ip, NOT on account existence, so it fires identically for registered and unregistered addresses (FR-032 intent without the FR-028/FR-040 enumeration leak).", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /auth/password/reset:
+    post:
+      summary: Set a new password from a reset link (US4, FR-029, FR-030, FR-031)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password, passwordConfirm]
+              properties:
+                token: { type: string, description: single-use link token }
+                password: { type: string, minLength: 8 }
+                passwordConfirm: { type: string }
+      responses:
+        '200': { description: Password replaced; all sessions revoked (FR-030); link consumed (FR-029). }
+        '400': { description: "invalid_or_expired_token | password_mismatch | weak_password", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /me:
+    get:
+      summary: Current account (US5)
+      security: [{ accessToken: [] }]
+      responses:
+        '200': { description: profile, content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+        '401': { description: unauthenticated, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    patch:
+      summary: Update nickname, phone, avatar ONLY (US5, FR-033, FR-035, FR-050)
+      security: [{ accessToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: any field not listed here is ignored, including privilege fields (FR-008, FR-035)
+              properties:
+                nickname: { type: string, minLength: 1, maxLength: 50 }
+                phone: { type: [string, 'null'] }
+              additionalProperties: false
+              description: "avatar is NOT set here — it is uploaded via POST /me/avatar (Q8). Any other field, incl. avatarUrl / privilege fields, is ignored (FR-035/008)."
+      responses:
+        '200': { description: updated, content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+        '409': { description: phone_taken (same uniqueness rule as registration, FR-050), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /me/avatar:
+    post:
+      summary: Upload an avatar image from the user's device (US5, Q8 / ADR 0004)
+      security: [{ accessToken: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: "raster image only — jpeg/png/webp, ≤2MB, verified by magic bytes (not Content-Type/extension). SVG rejected. Re-encoded via sharp (strips EXIF/payload), stored to VPS disk under a random uuid name, served by Nginx static."
+      responses:
+        '200': { description: "Stored. Returns the updated profile; avatarUrl now points to https://tixhub.fit/uploads/avatars/<uuid>.webp. Any previous uploaded avatar is deleted.", content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+        '400': { description: "invalid_image (bad magic bytes / disallowed type incl. SVG) | file_too_large", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /me/password:
+    post:
+      summary: Change password with the current one (US5, FR-034, FR-057)
+      security: [{ accessToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword, newPasswordConfirm]
+              properties:
+                currentPassword: { type: string }
+                newPassword: { type: string, minLength: 8 }
+                newPasswordConfirm: { type: string }
+      responses:
+        '200': { description: "Changed. Every OTHER session revoked; this one stays alive (FR-057)." }
+        '400': { description: "weak_password | password_mismatch", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: wrong_current_password (existing password still valid), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /organizers/apply:
+    post:
+      summary: Apply to become an organizer (US6, FR-036..FR-038, FR-058..FR-060)
+      security: [{ accessToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [displayName, description]
+              properties:
+                displayName: { type: string }
+                description: { type: string }
+                logoUrl: { type: [string, 'null'] }
+      responses:
+        '201': { description: pending application created; under review }
+        '409':
+          description: "already_pending | already_approved | suspended_cannot_reapply (FR-059)"
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }

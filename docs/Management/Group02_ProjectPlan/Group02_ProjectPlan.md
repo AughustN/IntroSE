@@ -16,11 +16,192 @@ Group 02 · SoE
 
 ---
 
-> **Disclaimer:** Some portions of this document were originally drafted as part of the project proposal. The content has since been re adjusted to reflect the group's current progress and shared understanding of the project. All planning for future sprints represents the team's assumptions at this stage and will be discussed in detail with the supervisor for a clearer and better aligned vision.
+> **Disclaimer:** The content has since been re adjusted from its version in PA2. The team has added an in platform wallet that allow the payment and refund features.
 
 ---
 
+<style>
+/* ---- Page rhythm -------------------------------------------------- */
+body {
+  max-width: 62rem;
+  margin: 0 auto;
+  padding: 0 2rem 4rem;
+  line-height: 1.65;
+}
+
+/* ---- Headings ----------------------------------------------------- */
+/* h3 = numbered section band (1. Introduction, 2. ...) */
+body h3 {
+  margin-top: 3.2rem;
+  padding: 0.5rem 0 0.6rem;
+  border-top: 3px solid currentColor;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.35);
+  font-size: 1.75rem;
+  letter-spacing: 0.01em;
+}
+
+/* h4 = subsection (2.1, 2.2, ...) */
+body h4 {
+  margin-top: 2.6rem;
+  padding-left: 0.7rem;
+  border-left: 4px solid rgba(128, 128, 128, 0.55);
+  border-bottom: none;
+  font-size: 1.3rem;
+}
+
+/* h5 = minor grouping inside a subsection */
+body h5 {
+  margin-top: 1.8rem;
+  margin-bottom: 0.4rem;
+  font-size: 1.02rem;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+}
+
+/* ---- Field labels (Planned tasks:, Project materials, ...) --------- */
+/* a paragraph that is nothing but bold text reads as a sub-heading */
+body p > strong:only-child {
+  display: inline-block;
+  margin-top: 0.9rem;
+  font-size: 0.82rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+/* ---- Cover block keeps its plain, centred look --------------------- */
+div[align="center"] h1,
+div[align="center"] h2 {
+  margin-top: 0.6rem;
+  padding: 0;
+  border: none;
+  text-transform: none;
+}
+
+div[align="center"] p > strong:only-child {
+  display: inline;
+  margin-top: 0;
+  font-size: 1em;
+  letter-spacing: normal;
+  text-transform: none;
+  opacity: 1;
+}
+
+/* ---- Tables ------------------------------------------------------- */
+body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.9rem 0 1.4rem;
+}
+
+body table th,
+body table td {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  vertical-align: top;
+  text-align: left;
+}
+
+body table thead th {
+  background: rgba(128, 128, 128, 0.14);
+}
+
+body table tbody tr:nth-child(even) {
+  background: rgba(128, 128, 128, 0.06);
+}
+
+/* ---- Lists -------------------------------------------------------- */
+body ul,
+body ol {
+  padding-left: 1.5rem;
+}
+
+body li {
+  margin: 0.28rem 0;
+}
+
+body li > p {
+  margin: 0.2rem 0;
+}
+
+/* ---- Inline tags: [SEC-02], code, identifiers ---------------------- */
+body :not(pre) > code {
+  padding: 0.08em 0.42em;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 4px;
+  background: rgba(128, 128, 128, 0.12);
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+/* ---- Disclaimer / note blockquote ---------------------------------- */
+body blockquote {
+  margin: 1.4rem 0;
+  padding: 0.85rem 1.2rem;
+  border: none;
+  border-left: 4px solid rgba(128, 128, 128, 0.5);
+  background: rgba(128, 128, 128, 0.08);
+  border-radius: 0 6px 6px 0;
+}
+
+body blockquote p:first-child { margin-top: 0; }
+body blockquote p:last-child { margin-bottom: 0; }
+
+/* ---- Table of contents -------------------------------------------- */
+.toc {
+  margin: 1rem 0 2rem;
+  padding: 1.2rem 1.6rem 0.6rem;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 8px;
+  column-count: 2;
+  column-gap: 2.5rem;
+}
+
+.toc ol {
+  margin: 0 0 0.6rem;
+  padding-left: 1.4rem;
+}
+
+.toc ol > li {
+  margin: 0.3rem 0;
+  font-weight: 600;
+  break-inside: avoid;
+}
+
+.toc ul {
+  margin: 0.2rem 0 0.5rem;
+  padding-left: 0.9rem;
+  list-style: none;
+  font-weight: 400;
+}
+
+.toc ul li {
+  margin: 0.18rem 0;
+}
+
+.toc a { text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+
+/* narrow preview pane: one column instead of two */
+@media (max-width: 52rem) {
+  .toc { column-count: 1; }
+  body { padding: 0 1rem 3rem; }
+}
+
+/* ---- Section separators ------------------------------------------- */
+body hr {
+  height: 1px;
+  margin: 2.4rem 0;
+  border: none;
+  background: rgba(128, 128, 128, 0.3);
+}
+</style>
+
+
 ### Table of Contents
+
+<div class="toc">
+
 1. [Introduction](#1-introduction)
 2. [Project Overview](#2-project-overview)
     - [2.1 Goals](#21-goals)
@@ -33,6 +214,9 @@ Group 02 · SoE
 6. [Schedule](#6-schedule)
 7. [Build Plan](#7-build-plan)
 8. [Appendix — AI Usage Notes](#8-appendix--ai-usage-notes)
+
+</div>
+
 
 ---
 

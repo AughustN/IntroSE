@@ -1,0 +1,386 @@
+openapi: 3.1.0
+info:
+  title: TixHub Seat Map Designer API
+  version: 0.1.0
+  description: >
+    Seat-map authoring contract for feature 005. Single source of the request/response shapes; the
+    shared TypeScript types in `shared/catalog/` derive from it and are imported by both server and web
+    (Principle VI). Every route here is scoped on the server to the organizer that owns the venue: a
+    layout, seat, element, or upload belonging to someone else is a REFUSAL (403 not_owner), never a
+    filtered-out result (SEC-04, FR-042). Coordinates are integers in 0-10000 on each axis; every seat
+    has a nominal diameter of 100 units and rotation is cosmetic (FR-008). Money is whole VND integers.
+    Vietnamese user-facing text.
+
+servers:
+  - url: /api
+
+components:
+  securitySchemes:
+    accessToken: { type: http, scheme: bearer, bearerFormat: JWT }   # reused from feature 001
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties: { error: { type: string }, message: { type: string } }
+
+    Coord: { type: integer, minimum: 0, maximum: 10000, description: layout unit on one axis (FR-008) }
+    Rotation: { type: integer, minimum: 0, maximum: 359, description: cosmetic only; never affects footprint (FR-008) }
+
+    LayoutSeat:
+      type: object
+      required: [rowLabel, seatNumber, seatType, x, y, rotation]
+      properties:
+        id: { type: integer, description: absent for a seat being created }
+        sectionId: { type: [integer, "null"], description: null is allowed in draft; blocks publishing (FR-030) }
+        rowLabel: { type: string, maxLength: 8 }
+        seatNumber: { type: integer, minimum: 1 }
+        seatType: { type: string, enum: [single, double, standing] }
+        x: { $ref: '#/components/schemas/Coord' }
+        y: { $ref: '#/components/schemas/Coord' }
+        rotation: { $ref: '#/components/schemas/Rotation' }
+
+    LayoutElement:
+      type: object
+      description: non-sellable decoration; can never enter ticket inventory (FR-017)
+      required: [kind, x, y, width, height, rotation]
+      properties:
+        id: { type: integer }
+        kind: { type: string, enum: [stage, aisle, door, bar, label] }
+        x: { $ref: '#/components/schemas/Coord' }
+        y: { $ref: '#/components/schemas/Coord' }
+        width: { type: integer, minimum: 1 }
+        height: { type: integer, minimum: 1 }
+        rotation: { $ref: '#/components/schemas/Rotation' }
+        label: { type: [string, "null"], maxLength: 60, description: output-encoded everywhere, never markup (FR-018) }
+
+    FloorPlan:
+      type: object
+      description: >
+        Background layer only. Never creates a seat and never determines a status (FR-020, Principle I).
+        The file is served as a static asset under an unguessable name with no per-request access check;
+        `visibleToBuyers` governs display, not reachability (FR-026a).
+      required: [url, scale, offsetX, offsetY, opacity, visibleToBuyers]
+      properties:
+        url: { type: [string, "null"] }
+        scale: { type: integer, minimum: 1, description: per-mille of the coordinate space }
+        offsetX: { type: integer }
+        offsetY: { type: integer }
+        opacity: { type: integer, minimum: 0, maximum: 100 }
+        visibleToBuyers: { type: boolean, default: false }
+
+    Layout:
+      type: object
+      required: [id, venueId, name, status, version, sections, seats, elements, floorPlan]
+      properties:
+        id: { type: integer }
+        venueId: { type: integer }
+        name: { type: string, maxLength: 80 }
+        status: { type: string, enum: [draft, published] }
+        isTemplate: { type: boolean }
+        version: { type: integer, description: send back on save; a stale value is refused (FR-015) }
+        sections:
+          type: array
+          items:
+            type: object
+            required: [name]
+            properties: { id: { type: integer }, name: { type: string, maxLength: 60 }, description: { type: [string, "null"] } }
+        seats: { type: array, maxItems: 2000, items: { $ref: '#/components/schemas/LayoutSeat' } }
+        elements: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/LayoutElement' } }
+        floorPlan: { $ref: '#/components/schemas/FloorPlan' }
+
+    ValidationIssue:
+      type: object
+      description: one problem found by the pre-publish pass; names the seats or sections at fault (FR-031)
+      required: [code, message]
+      properties:
+        code: { type: string, enum: [overlapping_seats, duplicate_label, seat_without_section, section_without_tier, zero_capacity] }
+        message: { type: string, description: Vietnamese }
+        seatIds: { type: array, items: { type: integer }, description: for overlapping_seats this is the PAIR }
+        sectionIds: { type: array, items: { type: integer } }
+
+    ApplyChange:
+      type: object
+      required: [kind, seatLabel]
+      properties:
+        kind: { type: string, enum: [add, move, relabel, retier, remove] }
+        showtimeSeatId: { type: [integer, "null"] }
+        seatLabel: { type: string, description: "e.g. Khu A / B12" }
+
+    ApplyRefusal:
+      type: object
+      required: [reason, seatLabel]
+      properties:
+        reason: { type: string, enum: [seat_sold, seat_held] }
+        showtimeSeatId: { type: integer }
+        seatLabel: { type: string }
+        message: { type: string, description: Vietnamese; names the sale or the live hold (FR-028) }
+
+    ApplyPreview:
+      type: object
+      required: [changes, refusals, wouldSucceed]
+      properties:
+        changes: { type: array, items: { $ref: '#/components/schemas/ApplyChange' } }
+        refusals: { type: array, items: { $ref: '#/components/schemas/ApplyRefusal' } }
+        wouldSucceed: { type: boolean }
+
+paths:
+  # ---------------- Layouts (FR-001..FR-007, FR-036, FR-037) ----------------
+  /organizer/venues/{venueId}/layouts:
+    get:
+      summary: List the layouts of a venue I own
+      security: [{ accessToken: [] }]
+      parameters: [{ name: venueId, in: path, required: true, schema: { type: integer } }]
+      responses:
+        '200': { description: layouts of this venue }
+        '403': { description: not_owner, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    post:
+      summary: Create an empty draft layout (FR-001)
+      security: [{ accessToken: [] }]
+      parameters: [{ name: venueId, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string, maxLength: 80 } } } } }
+      responses:
+        '201': { description: draft layout created }
+        '409': { description: "layout_name_taken | layout_limit_reached (20 per venue, FR-007)", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: not_owner }
+
+  /organizer/layouts/{id}:
+    get:
+      summary: Read one layout in full (sections, seats, elements, floor plan)
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        '200': { content: { application/json: { schema: { $ref: '#/components/schemas/Layout' } } }, description: the layout }
+        '403': { description: not_owner }
+    put:
+      summary: >
+        Save the whole layout (FR-013). Not rate-limited and never checked against inventory: a
+        generated map is a snapshot, so editing a layout cannot disturb a showtime (FR-005, FR-027).
+        Positions are clamped into range and rotations normalised before write (FR-014).
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, sections, seats, elements]
+              properties:
+                version: { type: integer }
+                name: { type: string }
+                sections: { type: array }
+                seats: { type: array, maxItems: 2000, items: { $ref: '#/components/schemas/LayoutSeat' } }
+                elements: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/LayoutElement' } }
+      responses:
+        '200': { description: saved; returns the layout with its bumped version }
+        '409': { description: "stale_version (reload and retry, FR-015) | seat_limit_reached | element_limit_reached", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: not_owner }
+    delete:
+      summary: Delete a layout (FR-006)
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        '204': { description: deleted }
+        '409': { description: layout_in_use (a live showtime generated from it), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: not_owner }
+
+  /organizer/layouts/{id}/generate-seats:
+    post:
+      summary: >
+        The Section / Row / Count generator, kept as the fast first step (FR-010). Seeds seats onto a
+        grid with editable positions; never silently overwrites existing seats.
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sectionId, rowLabel, count]
+              properties:
+                sectionId: { type: integer }
+                rowLabel: { type: string, maxLength: 8 }
+                count: { type: integer, minimum: 1, maximum: 200 }
+                replaceExisting: { type: boolean, default: false }
+      responses:
+        '201': { description: seats added with seeded positions }
+        '409': { description: seat_limit_reached }
+
+  /organizer/layouts/{id}/validate:
+    post:
+      summary: Run the five pre-publish checks in one pass (FR-030, FR-031)
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        '200':
+          description: every problem present, reported together; empty list means publishable
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [issues, valid]
+                properties:
+                  valid: { type: boolean }
+                  issues: { type: array, items: { $ref: '#/components/schemas/ValidationIssue' } }
+
+  /organizer/layouts/{id}/publish:
+    post:
+      summary: Move a layout draft -> published; blocked while any validation issue remains (FR-004, FR-030)
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        '200': { description: published }
+        '422':
+          description: layout_invalid — the issue list, so the organizer sees what to fix
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  issues: { type: array, items: { $ref: '#/components/schemas/ValidationIssue' } }
+
+  /organizer/layouts/{id}/clone:
+    post:
+      summary: >
+        Clone into another venue I own (FR-036). An independent copy of seats, sections, elements and
+        background alignment, carrying no sales, holds or blocks. Cloning someone else's is refused.
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [targetVenueId, name], properties: { targetVenueId: { type: integer }, name: { type: string } } } } }
+      responses:
+        '201': { description: new independent draft layout }
+        '403': { description: not_owner (source or target), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: layout_limit_reached }
+
+  # ---------------- Floor plan (FR-020..FR-026a) ----------------
+  /organizer/layouts/{id}/floorplan:
+    post:
+      summary: >
+        Upload the background image. Accepts jpeg/png/webp decided by MAGIC BYTES (never Content-Type
+        or extension); SVG is refused outright; the image is re-encoded to strip metadata and stored
+        under a random uuid, served with X-Content-Type-Options nosniff (ADR-0004, FR-021/022).
+        Dimensions are checked BEFORE re-encoding so a decompression bomb is refused, not allocated.
+        Rate-limited per organizer with a cap on concurrent processing (FR-023a).
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { multipart/form-data: { schema: { type: object, properties: { file: { type: string, format: binary } } } } }
+      responses:
+        '200': { description: stored; returns the layout's floorPlan block }
+        '400': { description: "invalid_image (not a raster jpeg/png/webp by its own bytes, incl. SVG) | image_too_large (>4000 px long edge)", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '400': { description: "file_too_large (>5 MB) — 400 not 413, matching the shipped avatar upload handler from ADR-0004, which feature 001 asserts" }
+        '429': { description: upload_rate_limited (try again shortly), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    patch:
+      summary: Alignment and visibility — scale, offset, opacity, buyer visibility (FR-024, FR-026). Seats never move.
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/FloorPlan' } } }
+      responses: { '200': { description: updated } }
+    delete:
+      summary: Remove the plan (FR-025). The previous file becomes unreachable; every seat keeps its exact position.
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      responses: { '204': { description: removed } }
+
+  # ---------------- Showtime map: generate, preview, re-apply (FR-005, FR-027..FR-029) ----------------
+  /organizer/showtimes/{id}/seat-map:
+    post:
+      summary: >
+        Bind a published layout and generate the bookable seats — SNAPSHOTTING the layout onto this
+        showtime (FR-005). REPLACES feature 002's blanket `409 seat_map_exists`: a showtime that already
+        has a map is corrected through PUT below or re-apply, never refused wholesale.
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [layoutId, sectionTiers]
+              properties:
+                layoutId: { type: integer }
+                sectionTiers:
+                  type: array
+                  items: { type: object, required: [sectionId, ticketTierId], properties: { sectionId: { type: integer }, ticketTierId: { type: integer } } }
+      responses:
+        '201': { description: one showtime_seat per layout seat, all available, geometry copied }
+        '400': { description: "section_without_tier | layout_not_published | not_seated (a GA showtime may not bind a layout, FR-005)", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    put:
+      summary: >
+        Edit this showtime's already-generated map (FR-027). Evaluated PER SEAT against live inventory:
+        an available or blocked seat is free; a sold seat may change position/rotation only; a seat under
+        a live hold from feature 003 is refused any change and its hold is never cancelled (FR-028).
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [seats], properties: { seats: { type: array, items: { $ref: '#/components/schemas/LayoutSeat' } }, elements: { type: array, items: { $ref: '#/components/schemas/LayoutElement' } } } } } }
+      responses:
+        '200': { description: applied }
+        '409':
+          description: >
+            map_edit_refused — the WHOLE edit is rejected and the map is left exactly as it was
+            (FR-029). The body names which seats were refused and why.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  refusals: { type: array, items: { $ref: '#/components/schemas/ApplyRefusal' } }
+
+  /organizer/showtimes/{id}/seat-map/reapply:
+    post:
+      summary: >
+        Re-apply the source layout to THIS showtime only (FR-027a). `dryRun: true` returns the preview
+        and writes nothing; the preview is advisory and re-checked inside the transaction on confirm, so
+        a sale or hold landing in between refuses the whole apply rather than being overwritten.
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [dryRun], properties: { dryRun: { type: boolean } } } } }
+      responses:
+        '200': { description: preview (dryRun) or applied, content: { application/json: { schema: { $ref: '#/components/schemas/ApplyPreview' } } } }
+        '409': { description: map_edit_refused (see PUT above) }
+
+  # ---------------- Inventory controls on the map (FR-033..FR-035) ----------------
+  /organizer/showtimes/{id}/seats/block:
+    post:
+      summary: >
+        Block or unblock individual seats on a live map (FR-033). Refused on a held or sold seat —
+        blocking never takes a seat from someone who has it. Broadcasts on the existing seat channel.
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [showtimeSeatIds, blocked], properties: { showtimeSeatIds: { type: array, items: { type: integer } }, blocked: { type: boolean } } } } }
+      responses:
+        '200': { description: applied; seat:update broadcast to viewers of this showtime }
+        '409': { description: map_edit_refused (seat_held / seat_sold), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /organizer/showtimes/{id}/seats/tier:
+    post:
+      summary: >
+        Assign a ticket tier to a marquee selection, across sections (FR-034). A selection containing a
+        sold seat is refused rather than silently repricing an owned ticket. Tier CRUD is feature 006 —
+        this only assigns an existing tier of this showtime.
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [showtimeSeatIds, ticketTierId], properties: { showtimeSeatIds: { type: array, items: { type: integer } }, ticketTierId: { type: integer } } } } }
+      responses:
+        '200': { description: applied; seat:update broadcast }
+        '400': { description: validation_failed (tier does not belong to this showtime) }
+        '409': { description: map_edit_refused (names the sold seat), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }

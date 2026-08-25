@@ -1,0 +1,22 @@
+// The live public-visibility predicate (R-1, D-B/D-E). An event is public only when it is on sale,
+// admin-approved, AND its owning organizer is currently approved (not suspended). Composed into EVERY
+// public read — the single most important anti-leak control (SC-004). Assumes the query aliases the
+// events row as `e` and joins its organizer as `o` (organizers).
+
+export const VISIBLE_JOIN = `JOIN organizers o ON o.id = e.organizer_id`;
+
+export const VISIBLE_WHERE = `e.status = 'on_sale' AND e.moderation_status = 'approved' AND o.status = 'approved'`;
+
+// Upcoming, sellable showtime of event alias `e` (excludes past/cancelled/finished).
+export const UPCOMING_SHOWTIME = `s.event_id = e.id AND s.starts_at > now() AND s.status NOT IN ('cancelled', 'finished')`;
+
+// Whether a showtime `s` still has availability, branching on the event's type (R-2):
+//   seated → an available showtime_seat;  GA → a tier with remaining (or unlimited).
+export const SHOWTIME_HAS_AVAILABILITY = `(
+  (e.event_type = 'seated' AND EXISTS (
+     SELECT 1 FROM showtime_seats ss WHERE ss.showtime_id = s.id AND ss.status = 'available'))
+  OR
+  (e.event_type = 'general_admission' AND EXISTS (
+     SELECT 1 FROM ticket_tiers tt WHERE tt.showtime_id = s.id
+       AND (tt.total_quantity IS NULL OR tt.sold_quantity + tt.reserved_quantity < tt.total_quantity)))
+)`;

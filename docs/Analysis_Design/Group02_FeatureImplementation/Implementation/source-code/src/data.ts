@@ -1,0 +1,287 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { MovieEvent, PromoVoucher } from "./types";
+
+const LOCAL_TRAILER_URL = "/cloneweb/clone/assets/images/hero.mp4";
+
+export const SAMPLE_MOVIES: MovieEvent[] = [
+  {
+    id: "lmt-7",
+    eventType: "general_admission",
+    category: "movie",
+    title: "Lật Mặt 7: Một Điều Ước",
+    originalTitle: "Face Off 7: One Wish",
+    tags: ["2D", "Lồng Tiếng", "Phụ Đề"],
+    ageRating: "T13",
+    ageDescription: "Phim được phổ biến đến người xem từ đủ 13 tuổi trở lên",
+    duration: 138,
+    genre: ["Tâm Lý", "Gia Đình", "Hài Hước"],
+    director: "Lý Hải",
+    cast: ["Thanh Hiền", "Trương Minh Cường", "Đinh Y Nhung", "Quách Ngọc Tuyên"],
+    releaseDate: "2026-04-26",
+    rating: 9.2,
+    reviewCount: 1842,
+    description: "Câu chuyện gia đình ấm áp nhưng đầy day dứt của người mẹ tảo tần cùng 5 người con xấp xỉ trưởng thành. Khi mẹ gặp tai nạn, một chuỗi những mâu thuẫn gia đình bắt đầu nảy sinh, lý giải cho câu hỏi: Một triệu điều ước, liệu mẹ có ước gì cho riêng mình?",
+    price: 95000,
+    doublePrice: 210000,
+    ticketTiers: [
+      { id: "standard", label: "Standard", price: 95000, description: "Ghế thường, chọn vị trí trực quan" },
+      { id: "couple", label: "Couple", price: 210000, description: "Ghế đôi Sweetbox cho 2 người", badge: "Cặp đôi" },
+      { id: "early", label: "Early Bird", price: 79000, description: "Số lượng giới hạn cho suất sớm", badge: "Tiết kiệm" }
+    ],
+    imageUrl: "https://images.unsplash.com/photo-1536440136628-849c177e76a1?auto=format&fit=crop&q=80&w=600",
+    trailerUrl: LOCAL_TRAILER_URL,
+    times: ["09:30", "12:15", "15:00", "18:20", "20:45", "23:15"],
+    dates: ["2026-08-01", "2026-08-02", "2026-08-03", "2026-08-04", "2026-08-05"],
+    city: "TP.HCM",
+    location: "TixHub Cinema - Chi nhánh Pasteur Quận 1",
+    venueName: "TixHub Pasteur",
+    venueMapUrl: "https://maps.google.com/?q=Pasteur+Quan+1",
+    venueGuide: "Gửi xe tại hầm trung tâm, vào cổng A và quét QR tại line ưu tiên trước giờ chiếu 15 phút.",
+    refundPolicy: "Đổi vé trước giờ chiếu 24 giờ. Không hoàn vé sau khi QR đã được quét.",
+    status: "available",
+    ticketsLeft: 148,
+    isFeatured: true,
+    comboOffer: "Combo bắp nước 2 người giảm 20% khi mua cùng vé đôi.",
+    affiliateCode: "LMT7-FAN"
+  },
+  {
+    id: "mat-biec",
+    eventType: "general_admission",
+    category: "theatre",
+    title: "Mắt Biếc - Live Theatre Show",
+    originalTitle: "Dreamy Eyes - Musical Event",
+    tags: ["Sân Khấu", "Live Music", "VVIP"],
+    ageRating: "P",
+    ageDescription: "Phim được phép phổ biến rộng rãi đến mọi đối tượng khán giả",
+    duration: 150,
+    genre: ["Nhạc Kịch", "Học Đường", "Lãng Mạn"],
+    director: "Victor Vũ - Nguyễn Hữu Vấp",
+    cast: ["Trần Nghĩa", "Trúc Anh", "Trang Hấu", "Khánh Vân"],
+    releaseDate: "2026-06-15",
+    rating: 9.5,
+    reviewCount: 932,
+    description: "Lần đầu tiên tác phẩm văn học kinh điển của nhà văn Nguyễn Nhật Ánh được hiện thực hóa trên sân khấu kịch nghệ TixHub, lồng ghép nhạc phẩm đình đám của Phan Mạnh Quỳnh. Những rạo rực, hoài niệm tuổi học sinh và rừng sim đầy mơ mộng.",
+    price: 120000,
+    doublePrice: 260000,
+    ticketTiers: [
+      { id: "standard", label: "Standard", price: 120000, description: "Khu ghế tầng trệt, góc nhìn sân khấu rõ" },
+      { id: "vip", label: "VIP", price: 360000, description: "Ghế trung tâm, lối vào riêng", badge: "VIP" },
+      { id: "vvip", label: "VVIP", price: 520000, description: "Hàng đầu, quà lưu niệm sau show", badge: "VVIP" }
+    ],
+    imageUrl: "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&q=80&w=600",
+    trailerUrl: LOCAL_TRAILER_URL,
+    times: ["14:00", "17:30", "20:00"],
+    dates: ["2026-08-01", "2026-08-06", "2026-08-08", "2026-08-09"],
+    city: "TP.HCM",
+    location: "Nhà hát TP. Hồ Chí Minh - Tràng Tiền Plaza",
+    venueName: "Nhà hát Thành phố",
+    venueMapUrl: "https://maps.google.com/?q=Nha+hat+Thanh+pho+Ho+Chi+Minh",
+    venueGuide: "Không mang đồ ăn vào khán phòng. Vé VIP vào cửa số 2, vé thường vào cửa số 4.",
+    refundPolicy: "Đổi ngày diễn một lần trước 48 giờ nếu còn ghế cùng hạng.",
+    status: "low",
+    ticketsLeft: 21,
+    isFeatured: true,
+    comboOffer: "Gói couple tặng postcard và nước suối tại quầy.",
+    affiliateCode: "MATBIEC-STAGE"
+  },
+  {
+    id: "indie-concert",
+    eventType: "general_admission",
+    category: "music",
+    title: "Đêm Nhạc Indie: Những Thành Phố Mơ Màng",
+    originalTitle: "Vietnamese Indie Dreamers 2026",
+    tags: ["Nhạc Sống", "Outdoor Fest", "GA Ticket"],
+    ageRating: "T16",
+    ageDescription: "Chương trình dành cho độ tuổi từ đủ 16 tuổi trở lên",
+    duration: 240,
+    genre: ["Live Concert", "Pop-Rock Indie"],
+    director: "Ban tổ chức NTPMM",
+    cast: ["Ngọt", "Đen Vâu", "Lân Nhã", "Thịnh Suy", "Vũ."],
+    releaseDate: "2026-06-20",
+    rating: 8.9,
+    reviewCount: 2210,
+    description: "Đại hội âm nhạc quy tụ hàng ngàn bạn trẻ chìm đắm trong giai điệu của những thành phố mơ màng. Chốn nương náu tâm hồn ấm áp với các bản nhạc tự sự trữ tình hàng đầu Việt Nam.",
+    price: 350000,
+    doublePrice: 800000,
+    ticketTiers: [
+      { id: "ga", label: "GA", price: 350000, description: "Vé đứng khu thường, check-in bằng QR" },
+      { id: "fanpit", label: "Fanpit", price: 690000, description: "Gần sân khấu, số lượng giới hạn", badge: "Hot" },
+      { id: "vip", label: "VIP Lounge", price: 1200000, description: "Khu lounge riêng, ưu tiên vào cổng", badge: "VIP" }
+    ],
+    imageUrl: "https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?auto=format&fit=crop&q=80&w=600",
+    trailerUrl: LOCAL_TRAILER_URL,
+    times: ["18:00"],
+    dates: ["2026-08-01", "2026-08-07", "2026-08-14"],
+    city: "TP.HCM",
+    location: "Trung tâm Hội chợ và Triển lãm Sài Gòn (SECC) - Q.7",
+    venueName: "SECC Hall A",
+    venueMapUrl: "https://maps.google.com/?q=SECC+Ho+Chi+Minh",
+    venueGuide: "Cổng check-in mở từ 15:30. Khán giả Fanpit đi line B để nhận vòng tay.",
+    refundPolicy: "Không hoàn vé sau khi mua. Hỗ trợ đổi thông tin người nhận trước ngày diễn 72 giờ.",
+    status: "low",
+    ticketsLeft: 37,
+    isFeatured: true,
+    comboOffer: "Combo nhóm 4 vé GA giảm thêm 8%.",
+    affiliateCode: "NTPMM2026"
+  },
+  {
+    id: "ts-tribute",
+    eventType: "general_admission",
+    category: "movie",
+    title: "Taylor Swift: The Eras Tour Concert Film",
+    originalTitle: "Taylor Swift: The Eras Tour (Extended)",
+    tags: ["2D", "Dolby Atmos", "Sing-Along"],
+    ageRating: "P",
+    ageDescription: "Phim được phép phổ biến rộng rãi đến mọi đối tượng khán giả",
+    duration: 181,
+    genre: ["Âm Nhạc", "Tài Liệu"],
+    director: "Sam Wrench",
+    cast: ["Taylor Swift"],
+    releaseDate: "2026-03-15",
+    rating: 9.8,
+    reviewCount: 3144,
+    description: "Trải nghiệm rạp chiếu siêu thực tái hiện show diễn thế kỷ của nữ ca sĩ nhạc Pop hàng đầu thế giới Taylor Swift. Toàn bộ chặng hành trình âm nhạc kéo dài 3 tiếng đồng hồ nay được mở rộng đầy đủ các set diễn biểu tượng.",
+    price: 110000,
+    doublePrice: 240000,
+    ticketTiers: [
+      { id: "standard", label: "Standard", price: 110000, description: "Ghế thường, âm thanh Dolby Atmos" },
+      { id: "singalong", label: "Sing-Along", price: 145000, description: "Khu khán giả hát theo, quà glow stick", badge: "Fan" },
+      { id: "couple", label: "Couple", price: 240000, description: "Ghế đôi Sweetbox cho 2 người" }
+    ],
+    imageUrl: "https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&q=80&w=600",
+    trailerUrl: LOCAL_TRAILER_URL,
+    times: ["10:00", "13:30", "16:45", "19:00", "21:30"],
+    dates: ["2026-08-01", "2026-08-02", "2026-08-03", "2026-08-04"],
+    city: "Hà Nội",
+    location: "TixHub Cinema - Chi nhánh Hai Bà Trưng Hà Nội",
+    venueName: "TixHub Hai Bà Trưng",
+    venueMapUrl: "https://maps.google.com/?q=Hai+Ba+Trung+Ha+Noi",
+    venueGuide: "Vào cửa qua sảnh B2. Suất Sing-Along nhận vòng tay tại quầy chăm sóc khách hàng.",
+    refundPolicy: "Đổi suất trước 12 giờ nếu chưa dùng mã QR.",
+    status: "available",
+    ticketsLeft: 184,
+    isFeatured: false,
+    comboOffer: "Mua 2 vé Sing-Along tặng 1 poster mini.",
+    affiliateCode: "ERAS-HN"
+  },
+  {
+    id: "chuyen-ma-gan-nha",
+    eventType: "general_admission",
+    category: "movie",
+    title: "Chuyện Ma Gần Nhà",
+    originalTitle: "Vietnamese Urban Horror Tales",
+    tags: ["2D", "Kinh Dị", "T18"],
+    ageRating: "T18",
+    ageDescription: "Phim cấm khán giả dưới 18 tuổi",
+    duration: 110,
+    genre: ["Kinh Dị", "Kịch Tính"],
+    director: "Trần Hữu Tấn",
+    cast: ["Mạc Can", "Khả Như", "Vân Trang", "Huỳnh Thanh Trực"],
+    releaseDate: "2026-05-12",
+    rating: 8.1,
+    reviewCount: 642,
+    description: "Gom nhặt các câu chuyện truyền thuyết đô thị Việt Nam rùng rợn: Câu chuyện chiếc xe nước mía của cô gái biến mất bí ẩn, nhà ngoại cảm đi tìm xác người, hũ tro cốt của chung cư ma ám, lôi cuốn và đầy hồi hộp gay cấn.",
+    price: 85000,
+    doublePrice: 190000,
+    ticketTiers: [
+      { id: "standard", label: "Standard", price: 85000, description: "Ghế thường, phụ đề tiếng Việt" },
+      { id: "late", label: "Late Night", price: 99000, description: "Suất khuya kèm nước ngọt", badge: "Khuya" },
+      { id: "couple", label: "Couple", price: 190000, description: "Ghế đôi Sweetbox" }
+    ],
+    imageUrl: "https://images.unsplash.com/photo-1509248961158-e54f6934749c?auto=format&fit=crop&q=80&w=600",
+    trailerUrl: LOCAL_TRAILER_URL,
+    times: ["18:30", "20:45", "22:50", "00:15"],
+    dates: ["2026-08-01", "2026-08-02", "2026-08-03"],
+    city: "TP.HCM",
+    location: "TixHub Cinema - Chi nhánh Pasteur Quận 1",
+    venueName: "TixHub Pasteur",
+    venueMapUrl: "https://maps.google.com/?q=Pasteur+Quan+1",
+    venueGuide: "Khán giả T18 cần xuất trình giấy tờ tùy thân khi soát vé.",
+    refundPolicy: "Vé T18 không hỗ trợ đổi người nhận sau khi thanh toán.",
+    status: "sold_out",
+    ticketsLeft: 0,
+    isFeatured: false,
+    comboOffer: "Chờ mở thêm suất khuya, có thể bấm nhắc lịch.",
+    affiliateCode: "HORROR-NIGHT"
+  },
+  {
+    /*
+     * The only cancelled sample. Kept deliberately: it is the sole card that exercises the
+     * cancelled status badge and the disabled booking button, and its million-đồng price is what
+     * drives the card price tag into its "Tr" short form. Omitting `comboOffer` also shows the
+     * card's fallback offer line.
+     */
+    id: "sym-hanoi-cancelled",
+    eventType: "seated",
+    category: "concert",
+    title: "Đêm Giao Hưởng Hà Nội - Bốn Mùa",
+    originalTitle: "Hanoi Symphony Night: Four Seasons",
+    tags: ["Giao Hưởng", "Ghế Ngồi", "VIP"],
+    ageRating: "P",
+    ageDescription: "Chương trình được phép phổ biến rộng rãi đến mọi đối tượng khán giả",
+    duration: 120,
+    genre: ["Giao Hưởng", "Cổ Điển"],
+    director: "Lê Phi Phi",
+    cast: ["Dàn nhạc Giao hưởng Quốc gia", "Bùi Công Duy", "Nguyễn Thu Hà"],
+    releaseDate: "2026-09-14",
+    rating: 8.8,
+    reviewCount: 214,
+    description: "Bốn chương nhạc theo bốn mùa Hà Nội, trình diễn cùng dàn dây thính phòng và phần độc tấu violin. Đêm diễn đã bị hủy do sự cố kỹ thuật tại nhà hát; ban tổ chức sẽ hoàn tiền toàn bộ về ví TixHub.",
+    price: 1200000,
+    doublePrice: 2200000,
+    ticketTiers: [
+      { id: "standard", label: "Standard", price: 1200000, description: "Tầng 2, tầm nhìn trọn sân khấu" },
+      { id: "vip", label: "VIP", price: 1800000, description: "Tầng 1, 10 hàng đầu", badge: "VIP" },
+      { id: "box", label: "Lô riêng", price: 2200000, description: "Lô 2 chỗ có phục vụ riêng", badge: "Cặp đôi" }
+    ],
+    imageUrl: "https://images.unsplash.com/photo-1465847899084-d164df4dedc6?auto=format&fit=crop&q=80&w=600",
+    trailerUrl: LOCAL_TRAILER_URL,
+    times: ["20:00"],
+    dates: ["2026-09-14"],
+    city: "Hà Nội",
+    location: "Nhà hát Lớn Hà Nội - 01 Tràng Tiền, Hoàn Kiếm",
+    venueName: "Nhà hát Lớn Hà Nội",
+    venueMapUrl: "https://maps.google.com/?q=Nha+hat+Lon+Ha+Noi",
+    venueGuide: "Cửa soát vé mở trước giờ diễn 45 phút. Khán giả vào muộn chờ hết chương đầu.",
+    refundPolicy: "Đêm diễn bị hủy: hoàn 100% về ví TixHub trong vòng 5 ngày làm việc.",
+    status: "cancelled",
+    ticketsLeft: 0,
+    isFeatured: false,
+    affiliateCode: "SYM-HN-2026"
+  }
+];
+
+export const TIXHUB_CATEGORIES = [
+  { id: "all", label: "Tất cả" },
+  { id: "movie", label: "Phim Chiếu Rạp" },
+  { id: "music", label: "Âm Nhạc & Concert" },
+  { id: "theatre", label: "Kịch Nghệ & Sân Khấu" }
+];
+
+export const PROMO_VOUCHERS: PromoVoucher[] = [
+  {
+    code: "WEEKEND50",
+    label: "Giảm 50.000đ cho đơn cuối tuần",
+    discountAmount: 50000,
+    minOrder: 300000,
+    expiresAt: "2026-06-30"
+  },
+  {
+    code: "FIRSTBOOK",
+    label: "Khách mới giảm 30.000đ",
+    discountAmount: 30000,
+    minOrder: 120000,
+    expiresAt: "2026-12-31"
+  },
+  {
+    code: "GROUP4",
+    label: "Nhóm bạn đi 4 người giảm 80.000đ",
+    discountAmount: 80000,
+    minOrder: 700000,
+    expiresAt: "2026-08-15"
+  }
+];

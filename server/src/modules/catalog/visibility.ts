@@ -10,6 +10,17 @@ export const VISIBLE_WHERE = `e.status = 'on_sale' AND e.moderation_status = 'ap
 // Upcoming, sellable showtime of event alias `e` (excludes past/cancelled/finished).
 export const UPCOMING_SHOWTIME = `s.event_id = e.id AND s.starts_at > now() AND s.status NOT IN ('cancelled', 'finished')`;
 
+/**
+ * Is showtime `s` open for sale right now? Assumes `s` joined to its event `e` and `VISIBLE_JOIN`.
+ *
+ * The one definition of "on sale", shared by the two sides that must agree about it: the buy path
+ * uses it to decide whether a hold may be placed, and the seat-map editor uses it to decide whether
+ * an organizer may still restructure or reprice the map. Written twice, the two drift, and the gap
+ * between them is precisely the window where a buyer holds a seat on a map being edited underneath
+ * them. Whatever counts as sellable is by construction off-limits to the editor.
+ */
+export const SHOWTIME_ON_SALE = `${VISIBLE_WHERE} AND s.starts_at > now() AND s.status NOT IN ('cancelled', 'finished')`;
+
 // Whether a showtime `s` still has availability, branching on the event's type (R-2):
 //   seated → an available showtime_seat, OR a capacity zone with room;  GA → a tier with remaining.
 //

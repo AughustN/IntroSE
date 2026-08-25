@@ -1,0 +1,30 @@
+import { type NextFunction, type Request, type Response, Router } from 'express';
+import { z } from 'zod';
+import { err } from '../../http.js';
+import { requireAdmin } from '../../middleware/authz.js';
+import { requireAuth } from '../../middleware/requireAuth.js';
+import { validate } from '../../middleware/validate.js';
+import { listAuditLogs } from './audit.js';
+import { approveOrganizer, dismissReport, moderateEvent, queue, rejectOrganizer, resolveReportedEvent, suspendOrganizer } from './admin.service.js';
+
+export const adminRouter = Router();
+adminRouter.use(requireAuth, requireAdmin);
+const asyncH = (fn: (req: Request, res: Response) => Promise<void>) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
+const id = (req: Request) => { const value = Number(req.params.id); if (!Number.isInteger(value) || value < 1) throw err.badRequest('validation_failed'); return value; };
+const reason = z.object({ reason: z.string().trim().min(1).max(2000) });
+const optionalReason = z.object({ reason: z.string().trim().min(1).max(2000).optional() });
+const reportDecision = z.object({ decision: z.enum(['flag', 'remove']), reason: z.string().trim().min(1).max(2000) });
+
+adminRouter.get('/moderation', asyncH(async (_req, res) => { res.json((await queue()).events); }));
+adminRouter.get('/moderation/queue', asyncH(async (_req, res) => { res.json(await queue()); }));
+adminRouter.get('/organizers', asyncH(async (_req, res) => { res.json((await queue()).organizers); }));
+adminRouter.post('/organizers/:id/approve', asyncH(async (req, res) => { res.json(await approveOrganizer(req.auth!.userId, id(req))); }));
+adminRouter.post('/organizers/:id/reject', validate(reason), asyncH(async (req, res) => { res.json(await rejectOrganizer(req.auth!.userId, id(req), req.body.reason)); }));
+adminRouter.post('/organizers/:id/suspend', validate(reason), asyncH(async (req, res) => { res.json(await suspendOrganizer(req.auth!.userId, id(req), req.body.reason)); }));
+adminRouter.post('/events/:id/approve', asyncH(async (req, res) => { res.json(await moderateEvent(req.auth!.userId, id(req), 'approved', null)); }));
+adminRouter.post('/events/:id/reject', validate(reason), asyncH(async (req, res) => { res.json(await moderateEvent(req.auth!.userId, id(req), 'removed', req.body.reason)); }));
+adminRouter.post('/events/:id/flag', validate(optionalReason), asyncH(async (req, res) => { res.json(await moderateEvent(req.auth!.userId, id(req), 'flagged', req.body.reason ?? null)); }));
+adminRouter.post('/events/:id/remove', validate(optionalReason), asyncH(async (req, res) => { res.json(await moderateEvent(req.auth!.userId, id(req), 'removed', req.body.reason ?? null)); }));
+adminRouter.post('/reports/:id/dismiss', validate(optionalReason), asyncH(async (req, res) => { res.json(await dismissReport(req.auth!.userId, id(req), req.body.reason ?? null)); }));
+adminRouter.post('/reports/:id/resolve', validate(reportDecision), asyncH(async (req, res) => { res.json(await resolveReportedEvent(req.auth!.userId, id(req), req.body.decision, req.body.reason)); }));
+adminRouter.get('/audit-logs', asyncH(async (_req, res) => { res.json(await listAuditLogs()); }));

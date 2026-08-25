@@ -1,0 +1,68 @@
+import { type NextFunction, type Request, type Response, Router } from 'express';
+import { err } from '../../http.js';
+import { getEventDetail, getSeatMap, getShowtimes, listEvents } from './catalog.repo.js';
+
+// Public catalog reads — no auth. Every query composes the live visibility predicate (R-1).
+export const catalogPublicRouter = Router();
+
+const asyncH =
+  (fn: (req: Request, res: Response) => Promise<void>) => (req: Request, res: Response, next: NextFunction) =>
+    fn(req, res).catch(next);
+
+const num = (v: unknown): number | undefined => {
+  if (v === undefined) return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+};
+const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+
+// GET /api/events (US1)
+catalogPublicRouter.get(
+  '/events',
+  asyncH(async (req, res) => {
+    const q = req.query;
+    const result = await listEvents({
+      q: str(q.q),
+      category: str(q.category),
+      city: str(q.city),
+      date: str(q.date),
+      minPrice: num(q.minPrice),
+      maxPrice: num(q.maxPrice),
+      availability: q.availability === 'available' ? 'available' : 'all',
+      page: num(q.page),
+    });
+    res.json(result);
+  }),
+);
+
+// GET /api/events/:slug (US2) — 404 also for drafts/pending/removed (never leaked, FR-009/SC-004)
+catalogPublicRouter.get(
+  '/events/:slug',
+  asyncH(async (req, res) => {
+    const detail = await getEventDetail(req.params.slug);
+    if (!detail) throw err.notFound('not_found', 'Không tìm thấy sự kiện.');
+    res.json(detail);
+  }),
+);
+
+// GET /api/events/:id/showtimes (US2/US3)
+catalogPublicRouter.get(
+  '/events/:id/showtimes',
+  asyncH(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) throw err.notFound('not_found');
+    res.json(await getShowtimes(id));
+  }),
+);
+
+// GET /api/showtimes/:id/seat-map (US3) — read-only; selecting requires login (later feature)
+catalogPublicRouter.get(
+  '/showtimes/:id/seat-map',
+  asyncH(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) throw err.notFound('not_found');
+    const map = await getSeatMap(id);
+    if (!map) throw err.notFound('not_found', 'Không tìm thấy suất chiếu.');
+    res.json(map);
+  }),
+);

@@ -1,5 +1,5 @@
 import pg from "pg";
-import { config } from "../config.js";
+import { config, DB_LOCK_TIMEOUT_MS } from "../config.js";
 
 type PromiseQuery = (...args: unknown[]) => Promise<pg.QueryResult>;
 
@@ -86,18 +86,43 @@ export type Db = pg.Pool | pg.PoolClient;
  *  A Postgres deadlock (40P01) means the server picked THIS transaction as the victim and already
  *  rolled it back — re-running the same work from a clean BEGIN is the sanctioned recovery, so the
  *  helper retries a few times with jitter before surfacing the error. Every caller wraps its whole
- *  statement set in one transaction, so the retry never observes its own half-applied writes. */
+ *  statement set in one transaction, so the retry never observes its own half-applied writes.
+ *
+ *  Every transaction also opens with a `lock_timeout`, so no caller can sit on a pool connection
+ *  indefinitely waiting for a row another transaction holds. See `DB_LOCK_TIMEOUT_MS`. A caller
+ *  whose work legitimately queues longer than the default passes its own `lockTimeoutMs`; the
+ *  ceiling still has to exist, because an unbounded one is what turns seat contention into a
+ *  site-wide outage. */
 const DEADLOCK = "40P01";
 const DEADLOCK_RETRIES = 3;
 
-export async function withTransaction<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+/** `lock_not_available` — this transaction waited out `lock_timeout` and was aborted. */
+export const LOCK_TIMEOUT = "55P03";
+
+export interface TransactionOptions {
+  /** Overrides `DB_LOCK_TIMEOUT_MS` for this transaction only. Rounded to whole milliseconds. */
+  lockTimeoutMs?: number;
+}
+
+export async function withTransaction<T>(
+  fn: (client: pg.PoolClient) => Promise<T>,
+  options: TransactionOptions = {},
+): Promise<T> {
+  // `SET` takes no bind parameters, so the value is interpolated — hence the coercion to a positive
+  // integer here rather than trusting the caller. `lock_timeout` counts milliseconds by default.
+  const requested = Math.trunc(options.lockTimeoutMs ?? DB_LOCK_TIMEOUT_MS);
+  const lockTimeout = Number.isFinite(requested) && requested > 0 ? requested : DB_LOCK_TIMEOUT_MS;
+
   for (let attempt = 1; ; attempt += 1) {
     const client = await pool.connect();
     const originalClientQuery = client.query.bind(client) as unknown as PromiseQuery;
     (client.query as unknown as PromiseQuery) = (...args) => logQuery(args, originalClientQuery);
 
     try {
-      await client.query("BEGIN");
+      // One round trip, not two: the pool talks to Neon over the network, and an extra RTT on every
+      // transaction in the app is a real cost next to the milliseconds a hold transaction takes.
+      // `SET LOCAL` reverts at COMMIT/ROLLBACK, so the pooled connection goes back unmodified.
+      await client.query(`BEGIN; SET LOCAL lock_timeout = ${lockTimeout}`);
       const result = await fn(client);
       await client.query("COMMIT");
       return result;

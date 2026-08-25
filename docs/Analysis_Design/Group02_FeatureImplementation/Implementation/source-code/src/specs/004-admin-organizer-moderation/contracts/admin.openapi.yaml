@@ -1,0 +1,159 @@
+openapi: 3.1.0
+info:
+  title: TixHub Admin Moderation API
+  version: 0.1.0
+  description: Admin-only UC-33/UC-34 contract. All money is whole VND wallet credit.
+servers:
+  - url: /api
+components:
+  securitySchemes:
+    accessToken: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        message: { type: string }
+    ReasonBody:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+        actionKey: { type: string, format: uuid }
+    OrganizerApplication:
+      type: object
+      required: [id, userId, displayName, status, appliedAt]
+      properties:
+        id: { type: integer }
+        userId: { type: integer }
+        displayName: { type: string }
+        description: { type: [string, 'null'] }
+        status: { type: string, enum: [pending, approved, rejected, suspended] }
+        reviewNote: { type: [string, 'null'] }
+        appliedAt: { type: string, format: date-time }
+    ModerationItem:
+      type: object
+      required: [id, type, status, title, createdAt]
+      properties:
+        id: { type: integer }
+        type: { type: string, enum: [organizer, event, report, review] }
+        status: { type: string }
+        title: { type: string }
+        reason: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+    AuditLog:
+      type: object
+      required: [id, actorUserId, action, targetType, createdAt, outcome]
+      properties:
+        id: { type: integer }
+        actorUserId: { type: integer }
+        action: { type: string }
+        targetType: { type: string }
+        targetId: { type: [integer, 'null'] }
+        outcome: { type: string, enum: [applied, conflict, rejected] }
+        detail: { type: object }
+        createdAt: { type: string, format: date-time }
+paths:
+  /admin/organizers:
+    get:
+      summary: List organizer applications for admin review
+      security: [{ accessToken: [] }]
+      responses:
+        '200': { description: organizer queue }
+        '401': { description: unauthenticated }
+        '403': { description: admin required }
+  /admin/organizers/{id}/approve:
+    post:
+      summary: Approve pending organizer application
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/ReasonBody' } } } }
+      responses:
+        '200': { description: approved and audited }
+        '409': { description: incompatible current state }
+  /admin/organizers/{id}/reject:
+    post:
+      summary: Reject pending organizer application
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ReasonBody' } } } }
+      responses:
+        '200': { description: rejected and audited }
+        '409': { description: incompatible current state }
+  /admin/organizers/{id}/suspend:
+    post:
+      summary: Suspend approved organizer and hide owned events
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ReasonBody' } } } }
+      responses:
+        '200': { description: suspended, public visibility removed, audited }
+        '409': { description: incompatible current state }
+  /admin/moderation:
+    get:
+      summary: Unified organizer, event, and report queue
+      security: [{ accessToken: [] }]
+      responses:
+        '200': { description: moderation queue }
+  /admin/events/{id}/approve:
+    post:
+      summary: Approve pending-review event
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/ReasonBody' } } } }
+      responses:
+        '200': { description: approved and audited }
+        '409': { description: incompatible current state }
+  /admin/events/{id}/reject:
+    post:
+      summary: Reject pending-review event with reason
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { $ref: '#/components/schemas/ReasonBody' } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ReasonBody' } } } }
+      responses: { '200': { description: rejected and audited } }
+  /admin/events/{id}/flag:
+    post:
+      summary: Flag reported event and hide it
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/ReasonBody' } } } }
+      responses: { '200': { description: flagged and audited } }
+  /admin/events/{id}/remove:
+    post:
+      summary: Remove event, void future tickets, and refund wallets
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ReasonBody' } } } }
+      responses:
+        '200': { description: removed with exactly-once wallet refunds and audit }
+        '409': { description: already removed or conflicting state }
+  /admin/reports/{id}/dismiss:
+    post:
+      summary: Dismiss report and retain content
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/ReasonBody' } } } }
+      responses: { '200': { description: dismissed and audited } }
+  /admin/reports/{id}/resolve:
+    post:
+      summary: Resolve report by flagging or removing target
+      security: [{ accessToken: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: integer } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, reason]
+              properties:
+                decision: { type: string, enum: [flag, remove] }
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+                actionKey: { type: string, format: uuid }
+      responses: { '200': { description: report resolved and target action audited } }
+  /admin/audit-logs:
+    get:
+      summary: Read immutable moderation audit history
+      security: [{ accessToken: [] }]
+      responses: { '200': { description: audit rows; no update/delete operation exists } }
