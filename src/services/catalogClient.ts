@@ -518,6 +518,11 @@ export const catalogClient = {
   featuredEvents(): Promise<EventCard[]> {
     return get<EventCard[]>("/events/featured");
   },
+  searchSemantic(query: string, limit = 10): Promise<{ events: EventCard[] }> {
+    return get<{ events: EventCard[] }>(
+      `/events/search/semantic?q=${encodeURIComponent(query)}&limit=${limit}`,
+    );
+  },
   listCategories(): Promise<EventCategory[]> {
     return get<EventCategory[]>("/categories");
   },

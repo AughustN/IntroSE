@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Me } from "@/shared/auth/types";
-import type { OrganizerApplicationView } from "../../services/authClient";
+import type { OrganizerApplicationView, OrganizerAppealView } from "../../services/authClient";
 import { authClient } from "../../services/authClient";
 import ConfirmDialog, { ConfirmRequest } from "../ConfirmDialog";
 import OrganizerSection from "./OrganizerSection";
@@ -129,6 +129,8 @@ export default function AccountPage({
   const [me, setMe] = useState<Me | null>(null);
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [applications, setApplications] = useState<OrganizerApplicationView[]>([]);
+  const [latestAppeal, setLatestAppeal] = useState<OrganizerAppealView | null>(null);
+  const [appeals, setAppeals] = useState<OrganizerAppealView[]>([]);
   const [loadFailed, setLoadFailed] = useState(false);
   const [section, setSection] = useState<SectionId>(initialSection);
   const [notice, setNotice] = useState<string | null>(null);
@@ -146,6 +148,8 @@ export default function AccountPage({
       .then((s) => {
         setIsOrganizer(s.isOrganizer);
         setApplications(s.applications);
+        setLatestAppeal(s.latestAppeal ?? null);
+        setAppeals(s.appeals ?? []);
       })
       .catch(() => {});
   }, []);
@@ -554,6 +558,8 @@ export default function AccountPage({
               <OrganizerSection
                 isOrganizer={isOrganizer}
                 latest={latest}
+                latestAppeal={latestAppeal}
+                appeals={appeals}
                 onApplied={loadOrganizer}
                 onNotice={notify}
                 onError={fail}

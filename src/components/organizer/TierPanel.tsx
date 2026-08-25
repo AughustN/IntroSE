@@ -11,7 +11,7 @@ import { Empty, ErrorRetry, Loading, Refusal, dong } from "./states";
 const MAX_ACTIVE_TIERS = 4;
 
 const input =
-  "h-10 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
+  "h-10 min-w-0 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
 const btn =
   " bg-burgundy px-3 py-2 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-50";
 const ghost =
@@ -100,7 +100,7 @@ export default function TierPanel({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between">
         <h4 className="font-display text-sm font-bold">
           Hạng vé ({active.length}/{MAX_ACTIVE_TIERS} đang bán)
         </h4>
@@ -120,7 +120,11 @@ export default function TierPanel({
       <div className="border-2 border-dashed border-beige-kem/40 p-3">
         <p className="mb-2 font-mono text-[11px] text-beige-kem/60">Thêm hạng vé</p>
         <div
-          className={`grid gap-2 ${seated ? "sm:grid-cols-[1fr_1fr_auto]" : "sm:grid-cols-[1fr_1fr_1fr_auto]"}`}
+          className={`grid gap-2 ${
+            seated
+              ? "sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
+              : "sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
+          }`}
         >
           <input
             value={newLabel}
@@ -199,7 +203,7 @@ function TierRow({
     <div
       className={`border-2 p-3 ${tier.archived ? "border-beige-kem/25 opacity-70" : "border-beige-kem"}`}
     >
-      <div className="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
+      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
         <input
           value={label}
           onChange={(e) => setLabel(e.target.value)}
@@ -221,7 +225,7 @@ function TierRow({
           placeholder={seated ? "Từ sơ đồ ghế" : "Sức chứa"}
           className={input}
         />
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {tier.archived ? (
             <button
               onClick={() => run(() => studioApi.restoreTier(tier.id))}

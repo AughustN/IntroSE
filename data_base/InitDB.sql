@@ -237,6 +237,24 @@ ALTER TABLE "public"."organizers" ADD CONSTRAINT "organizers_pkey" PRIMARY KEY (
 ALTER TABLE "public"."organizers" ADD CONSTRAINT "organizers_status_check" CHECK (status = ANY (ARRAY['pending'::text, 'approved'::text, 'suspended'::text, 'rejected'::text]));
 
 -- ----------------------------------------------------------------------------
+-- Table: organizer_appeals
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS "public"."organizer_appeals" (
+  "id" int8 NOT NULL DEFAULT nextval('organizer_appeals_id_seq'::regclass),
+  "organizer_id" int8 NOT NULL,
+  "user_id" int8 NOT NULL,
+  "reason" text COLLATE "pg_catalog"."default" NOT NULL,
+  "status" text COLLATE "pg_catalog"."default" NOT NULL DEFAULT 'pending'::text,
+  "review_note" text COLLATE "pg_catalog"."default",
+  "reviewed_by" int8,
+  "reviewed_at" timestamptz(6),
+  "created_at" timestamptz(6) NOT NULL DEFAULT now(),
+  "updated_at" timestamptz(6) NOT NULL DEFAULT now()
+);
+ALTER TABLE "public"."organizer_appeals" ADD CONSTRAINT "organizer_appeals_pkey" PRIMARY KEY ("id");
+ALTER TABLE "public"."organizer_appeals" ADD CONSTRAINT "organizer_appeals_status_check" CHECK (status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text]));
+
+-- ----------------------------------------------------------------------------
 -- Table: venues
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS "public"."venues" (
@@ -5649,6 +5667,16 @@ CREATE INDEX IF NOT EXISTS "idx_organizers_user_history" ON "public"."organizers
 CREATE UNIQUE INDEX IF NOT EXISTS "uq_organizers_live_application" ON "public"."organizers" USING btree (
   "user_id" "pg_catalog"."int8_ops" ASC NULLS LAST
 ) WHERE status = ANY (ARRAY['pending'::text, 'approved'::text, 'suspended'::text]);
+-- Indexes for organizer_appeals
+CREATE INDEX IF NOT EXISTS "idx_organizer_appeals_org" ON "public"."organizer_appeals" USING btree (
+  "organizer_id" "pg_catalog"."int8_ops" ASC NULLS LAST
+);
+CREATE INDEX IF NOT EXISTS "idx_organizer_appeals_user" ON "public"."organizer_appeals" USING btree (
+  "user_id" "pg_catalog"."int8_ops" ASC NULLS LAST
+);
+CREATE INDEX IF NOT EXISTS "idx_organizer_appeals_status" ON "public"."organizer_appeals" USING btree (
+  "status" COLLATE "pg_catalog"."default" "pg_catalog"."text_ops" ASC NULLS LAST
+);
 -- Indexes for venues
 CREATE INDEX IF NOT EXISTS "idx_venues_city_trgm" ON "public"."venues" USING gin (
   immutable_unaccent(city) COLLATE "pg_catalog"."default" "public"."gin_trgm_ops"
@@ -6061,5 +6089,9 @@ ALTER TABLE "public"."notification_logs" ADD CONSTRAINT "notification_logs_notif
 -- Foreign Keys for refresh_tokens
 ALTER TABLE "public"."refresh_tokens" ADD CONSTRAINT "refresh_tokens_parent_id_fkey" FOREIGN KEY ("parent_id") REFERENCES "public"."refresh_tokens" ("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 ALTER TABLE "public"."refresh_tokens" ADD CONSTRAINT "refresh_tokens_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."users" ("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+-- Foreign Keys for organizer_appeals
+ALTER TABLE "public"."organizer_appeals" ADD CONSTRAINT "organizer_appeals_organizer_id_fkey" FOREIGN KEY ("organizer_id") REFERENCES "public"."organizers" ("id") ON DELETE CASCADE ON UPDATE NO ACTION;
+ALTER TABLE "public"."organizer_appeals" ADD CONSTRAINT "organizer_appeals_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."users" ("id") ON DELETE CASCADE ON UPDATE NO ACTION;
+ALTER TABLE "public"."organizer_appeals" ADD CONSTRAINT "organizer_appeals_reviewed_by_fkey" FOREIGN KEY ("reviewed_by") REFERENCES "public"."users" ("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 COMMIT;

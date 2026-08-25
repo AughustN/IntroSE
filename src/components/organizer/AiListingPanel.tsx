@@ -9,7 +9,7 @@ import { aiApi } from "../../services/catalogClient";
 import { dong } from "./states";
 
 const input =
-  "h-10 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
+  "h-10 min-w-0 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
 const btn =
   " bg-burgundy px-3 py-2 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-50";
 const ghost = " border-2 border-beige-kem px-3 py-1.5 text-xs font-bold text-beige-kem/80";
@@ -72,9 +72,9 @@ export default function AiListingPanel({
 
   return (
     <div className="border-2 border-dashed border-beige-kem/50 p-4">
-      <div className="flex items-center justify-between">
-        <h4 className="font-display text-sm font-bold">Trợ lý viết nội dung (tuỳ chọn)</h4>
-        <span className="font-mono text-[10px] text-beige-kem/45">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <h4 className="min-w-0 font-display text-sm font-bold">Trợ lý viết nội dung (tuỳ chọn)</h4>
+        <span className="text-right font-mono text-[10px] text-beige-kem/45 sm:text-left">
           Gợi ý — bạn luôn sửa được trước khi dùng
         </span>
       </div>

@@ -83,6 +83,7 @@ async function denseRanking(query: string, limit: number, db: Db): Promise<numbe
        JOIN showtimes s ON ${UPCOMING_SHOWTIME}
       WHERE c.embedding IS NOT NULL AND ${VISIBLE_WHERE} AND ${SHOWTIME_HAS_AVAILABILITY}
       GROUP BY e.id
+      HAVING min(c.embedding <=> $1::vector) < 0.72
       ORDER BY min(c.embedding <=> $1::vector)
       LIMIT $2`,
     [toVectorLiteral(vector), limit],
@@ -116,6 +117,7 @@ export async function candidates(
   query = '',
   limit = CANDIDATE_LIMIT,
   db: Db = pool,
+  options?: { requireSignal?: boolean },
 ): Promise<AICandidateEvent[]> {
   const terms = query.trim();
 
@@ -144,10 +146,15 @@ export async function candidates(
 
   // No question, no fusion: an empty query has nothing to embed, and the lexical branch has already
   // fallen back to soonest-first, which is the right answer to "what is on".
-  if (!terms) return ranked.slice(0, unfocused);
+  if (!terms) {
+    return options?.requireSignal ? [] : ranked.slice(0, unfocused);
+  }
 
   const dense = await denseRanking(terms, limit, db);
-  if (!dense || !dense.length) return ranked.slice(0, hasSignal ? limit : unfocused);
+  if (!dense || !dense.length) {
+    if (options?.requireSignal && !hasSignal) return [];
+    return ranked.slice(0, hasSignal ? limit : unfocused);
+  }
 
   const byId = new Map(eligible.map((event) => [event.id, event]));
 
@@ -172,6 +179,11 @@ export async function candidates(
     const event = byId.get(id);
     return event ? [event] : [];
   });
+
+  if (options?.requireSignal && !hasSignal && !fused.length) {
+    return [];
+  }
+
   /*
    * The lexical branch decides how many, because it is the only one that can say "no".
    *
@@ -181,7 +193,8 @@ export async function candidates(
    * hết hạn" ship nineteen events to the model and time out. Lexical silence is the honest signal
    * that the question was not about a particular event, and six is the most an answer may contain.
    */
-  return (fused.length ? fused : ranked).slice(0, hasSignal ? limit : unfocused);
+  const fallback = options?.requireSignal && !hasSignal ? [] : ranked;
+  return (fused.length ? fused : fallback).slice(0, hasSignal || dense.length ? limit : unfocused);
 }
 
 /**
@@ -219,7 +232,7 @@ async function lexicalCandidates(
          immutable_unaccent($1) AS raw,
          length(btrim($1)) > 0 AS asked
      )
-     SELECT e.id, e.slug, e.title, ec.code AS category, v.city,
+     SELECT e.id, e.slug, e.title, ec.code AS category, min(v.city) AS city,
             min(s.starts_at)::text AS "startsAt",
             min(tt.price_amount)::bigint AS "startingPrice",
             CASE WHEN (SELECT asked FROM q) THEN
@@ -233,7 +246,7 @@ async function lexicalCandidates(
        JOIN venues v ON v.id = s.venue_id
        LEFT JOIN ticket_tiers tt ON tt.showtime_id = s.id
       WHERE ${VISIBLE_WHERE} AND ${SHOWTIME_HAS_AVAILABILITY}
-      GROUP BY e.id, e.slug, e.title, e.search_doc, ec.code, v.city
+      GROUP BY e.id, e.slug, e.title, e.search_doc, ec.code
       ORDER BY relevance DESC, min(s.starts_at), e.id
       LIMIT $2`,
     [terms, limit],

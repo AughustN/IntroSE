@@ -64,7 +64,7 @@ Tùy từng trường hợp, TixHub sẽ áp dụng biện pháp xử lý phù h
 
 ### 3.4. Xóa tài khoản/dữ liệu cá nhân
 
-Khách hàng có toàn quyền quyết định việc ngừng sử dụng dịch vụ của TixHub. Trường hợp muốn xóa tài khoản và dữ liệu cá nhân, Khách hàng vui lòng gửi yêu cầu qua email hỗ trợ: `support@tixhub.vn` để được đội ngũ quản trị hỗ trợ xử lý trong thời gian sớm nhất.
+Khách hàng có toàn quyền quyết định việc ngừng sử dụng dịch vụ của TixHub. Trường hợp muốn xóa tài khoản và dữ liệu cá nhân, Khách hàng vui lòng gửi yêu cầu qua email hỗ trợ: `support@tixhub.fit` để được đội ngũ quản trị hỗ trợ xử lý trong thời gian sớm nhất.
 
 ---
 

@@ -4,6 +4,7 @@ import type { Db } from '../../db/pool.js';
 import { pool } from '../../db/pool.js';
 import { buildTierLegend } from '@shared/catalog/tier-palette.js';
 import { SHOWTIME_HAS_AVAILABILITY, UPCOMING_SHOWTIME, VISIBLE_JOIN, VISIBLE_WHERE } from './visibility.js';
+import { candidates } from '../ai/ai.repo.js';
 
 // Correlated subqueries reused in the list projection (event alias `e`).
 const EARLIEST = `(SELECT min(s.starts_at) FROM showtimes s WHERE ${UPCOMING_SHOWTIME})`;
@@ -452,3 +453,37 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
     })),
   };
 }
+
+/**
+ * Semantic vector search (dense embeddings + lexical RRF fusion) over the live visible catalog.
+ * Uses the exact same retrieval pipeline as the AI assistant without invoking full LLM completion.
+ */
+export async function searchEventsSemantic(
+  query: string,
+  limit = 20,
+  db: Db = pool,
+): Promise<EventCard[]> {
+  const terms = query.trim();
+  if (!terms) return [];
+
+  // Get ranked event candidates from AI retrieval in requireSignal mode (no false fallbacks)
+  const aiCandidates = await candidates(terms, limit, db, { requireSignal: true });
+  if (!aiCandidates.length) return [];
+
+  // Deduplicate IDs while preserving the exact rank order
+  const ids = [...new Set(aiCandidates.map((c) => c.id))];
+
+  // Fetch full EventCard representations while preserving the exact semantic rank order
+  const { rows } = await db.query<Row>(
+    `SELECT e.id, e.slug, e.title, e.image_url, e.trailer_url, ec.code AS category, ec.label_vi AS category_label, e.release_phase,
+            ${EARLIEST} AS earliest_showtime, ${START_PRICE} AS starting_price, ${CITY} AS city,
+            ${HAS_UPCOMING} AS has_upcoming, ${HAS_AVAILABLE} AS has_available
+       FROM events e ${VISIBLE_JOIN} JOIN event_categories ec ON ec.id = e.category_id
+      WHERE e.id = ANY($1::int[]) AND ${VISIBLE_WHERE}`,
+    [ids],
+  );
+
+  const cardMap = new Map(rows.map((r) => [r.id, toCard(r)]));
+  return ids.map((id) => cardMap.get(id)).filter((c): c is EventCard => Boolean(c));
+}
+

@@ -51,7 +51,7 @@ Chính sách chỉ quy định việc hủy vé, bao gồm việc giải phóng 
 
 ## 7. Khiếu Nại Và Giải Quyết Tranh Chấp
 
-- Mọi khiếu nại liên quan đến việc hủy vé, giữ chỗ, hoặc sự kiện bị hoãn/hủy/thay đổi được gửi đến Quản trị viên nền tảng qua email hỗ trợ: `support@tixhub.vn`.
+- Mọi khiếu nại liên quan đến việc hủy vé, giữ chỗ, hoặc sự kiện bị hoãn/hủy/thay đổi được gửi đến Quản trị viên nền tảng qua email hỗ trợ: `support@tixhub.fit`.
 - Quản trị viên nền tảng tiếp nhận, xem xét và phản hồi khiếu nại trong thời gian sớm nhất, trên cơ sở đối chiếu với dữ liệu giao dịch, lịch sử vé và các bằng chứng liên quan do Khách hàng cung cấp.
 - Mọi tranh chấp không thể giải quyết qua thương lượng trực tiếp được xử lý theo quy định về luật điều chỉnh và giải quyết tranh chấp tại Điều khoản sử dụng TixHub.
 
@@ -59,6 +59,6 @@ Chính sách chỉ quy định việc hủy vé, bao gồm việc giải phóng 
 
 ## 8. Liên Hệ Hỗ Trợ
 
-Mọi thắc mắc liên quan đến Chính sách này, Quý khách vui lòng liên hệ TixHub qua email: `support@tixhub.vn`.
+Mọi thắc mắc liên quan đến Chính sách này, Quý khách vui lòng liên hệ TixHub qua email: `support@tixhub.fit`.
 
 ---

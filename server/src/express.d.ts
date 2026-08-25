@@ -6,3 +6,8 @@ declare module 'express-serve-static-core' {
     auth?: { userId: number; familyId: string; user: Me };
   }
 }
+
+declare module 'disposable-email-domains' {
+  const domains: string[];
+  export default domains;
+}

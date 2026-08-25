@@ -229,6 +229,109 @@ describe("T024 [US2] organizer suspension hides owned events immediately", () =>
       .expect(409);
     expect((await organizerStatus(pending.organizerId)).status).toBe("pending");
   });
+
+  it("unsuspend → capability restored, events public again, notification sent, audit logged", async () => {
+    const admin = await seedAdmin();
+    const org = await seedApprovedOrganizer();
+    const ev = await seedApprovedEvent(org, admin, "Đêm nhạc Trở Lại");
+
+    // Suspend organizer
+    await request(app)
+      .post(`/api/admin/organizers/${org.organizerId}/suspend`)
+      .set(admin.h)
+      .send({ reason: "Tạm khoá kiểm tra." })
+      .expect(200);
+
+    expect(await isPublic("Đêm nhạc Trở Lại")).toBe(false);
+    await request(app).get("/api/organizers/dashboard").set(bearer(org.token)).expect(403);
+
+    // Unsuspend organizer with reason
+    const unsuspendReason = "Khiếu nại hợp lệ, đã mở lại hoạt động.";
+    await request(app)
+      .post(`/api/admin/organizers/${org.organizerId}/unsuspend`)
+      .set(admin.h)
+      .send({ reason: unsuspendReason })
+      .expect(200);
+
+    // Organizer status is approved
+    expect(await organizerStatus(org.organizerId)).toMatchObject({
+      status: "approved",
+      review_note: unsuspendReason,
+    });
+
+    // Capability is restored immediately
+    await request(app).get("/api/organizers/dashboard").set(bearer(org.token)).expect(200);
+
+    // Events are public again on the very next request
+    expect(await isPublic("Đêm nhạc Trở Lại")).toBe(true);
+    const detail = await request(app).get(`/api/events/${ev.slug}`).expect(200);
+    expect(detail.body.title).toBe("Đêm nhạc Trở Lại");
+
+    // Notification is sent to organizer
+    const notes = await notificationsFor("organizer", org.organizerId);
+    expect(notes.some((n) => n.kind === "organizer_approved" && (n.payload as { reason?: string })?.reason === unsuspendReason)).toBe(true);
+
+    // Audit log is created with before: suspended, after: approved
+    const audit = await auditRows("organizer_approved", org.organizerId);
+    const unsuspendAudit = audit.find((a) => (a.detail as { before?: string })?.before === "suspended");
+    expect(unsuspendAudit).toBeDefined();
+    expect(unsuspendAudit).toMatchObject({
+      actor_user_id: admin.userId,
+      target_type: "organizer",
+      outcome: "applied",
+    });
+    expect(unsuspendAudit?.detail).toMatchObject({
+      before: "suspended",
+      after: "approved",
+      reason: unsuspendReason,
+    });
+  });
+
+  it("unsuspending a non-suspended organizer is a 409 conflict, and non-admin is refused (RBAC)", async () => {
+    const admin = await seedAdmin();
+    const attendee = await registerUser();
+    const org = await seedApprovedOrganizer();
+    const pending = await seedPendingOrganizer();
+
+    // Cannot unsuspend an already approved organizer
+    await request(app)
+      .post(`/api/admin/organizers/${org.organizerId}/unsuspend`)
+      .set(admin.h)
+      .send({ reason: "x" })
+      .expect(409);
+
+    // Cannot unsuspend a pending organizer
+    await request(app)
+      .post(`/api/admin/organizers/${pending.organizerId}/unsuspend`)
+      .set(admin.h)
+      .send({ reason: "x" })
+      .expect(409);
+
+    // Suspend org
+    await request(app)
+      .post(`/api/admin/organizers/${org.organizerId}/suspend`)
+      .set(admin.h)
+      .send({ reason: "Vi phạm." })
+      .expect(200);
+
+    // RBAC: anonymous and non-admin rejected
+    await request(app)
+      .post(`/api/admin/organizers/${org.organizerId}/unsuspend`)
+      .send({ reason: "x" })
+      .expect(401);
+    await request(app)
+      .post(`/api/admin/organizers/${org.organizerId}/unsuspend`)
+      .set(bearer(attendee.token))
+      .send({ reason: "x" })
+      .expect(403);
+    await request(app)
+      .post(`/api/admin/organizers/${org.organizerId}/unsuspend`)
+      .set(bearer(org.token))
+      .send({ reason: "x" })
+      .expect(403);
+
+    expect((await organizerStatus(org.organizerId)).status).toBe("suspended");
+  });
 });
 
 describe("T025 [US3] pre-publish approve/reject gate", () => {
@@ -886,3 +989,119 @@ describe("T029 [US5] audit log is append-only at the database level", () => {
     expect(await countAudit()).toBe(1);
   });
 });
+
+describe("In-app organizer appeal workflow", () => {
+  it("allows suspended organizer to submit in-app appeal, admin to review/reject/unsuspend, and enforces idempotency", async () => {
+    const admin = await seedAdmin();
+    const org = await seedApprovedOrganizer();
+
+    // 1. Not suspended yet -> submitting appeal is refused (409)
+    await request(app)
+      .post("/api/organizers/appeal")
+      .set(bearer(org.token))
+      .send({ reason: "Tôi muốn khiếu nại nhưng chưa bị khóa" })
+      .expect(409);
+
+    // 2. Admin suspends organizer
+    await request(app)
+      .post(`/api/admin/organizers/${org.organizerId}/suspend`)
+      .set(admin.h)
+      .send({ reason: "Nghi vấn vi phạm điều khoản bán vé." })
+      .expect(200);
+
+    expect((await organizerStatus(org.organizerId)).status).toBe("suspended");
+
+    // 3. Suspended organizer submits in-app appeal
+    const appealRes = await request(app)
+      .post("/api/organizers/appeal")
+      .set(bearer(org.token))
+      .send({ reason: "Chúng tôi đã kiểm tra lại và gửi kèm hóa đơn chứng từ hợp lệ." })
+      .expect(201);
+
+    expect(appealRes.body.ok).toBe(true);
+    expect(appealRes.body.appeal).toMatchObject({
+      organizer_id: org.organizerId,
+      status: "pending",
+      reason: "Chúng tôi đã kiểm tra lại và gửi kèm hóa đơn chứng từ hợp lệ.",
+    });
+
+    // 4. Submitting duplicate appeal while one is already pending is rejected
+    await request(app)
+      .post("/api/organizers/appeal")
+      .set(bearer(org.token))
+      .send({ reason: "Gửi thêm đơn nữa khi đơn cũ đang chờ" })
+      .expect(409);
+
+    // 5. GET /api/organizers/me shows latestAppeal
+    const meRes = await request(app).get("/api/organizers/me").set(bearer(org.token)).expect(200);
+    expect(meRes.body.latestAppeal).toMatchObject({
+      status: "pending",
+      reason: "Chúng tôi đã kiểm tra lại và gửi kèm hóa đơn chứng từ hợp lệ.",
+    });
+
+    // 6. Admin sees appeal in list and detail
+    const listRes = await request(app).get("/api/admin/organizers").set(admin.h).expect(200);
+    const orgRow = listRes.body.find((o: { id: number }) => o.id === org.organizerId);
+    expect(orgRow?.latestAppeal).toMatchObject({
+      status: "pending",
+      reason: "Chúng tôi đã kiểm tra lại và gửi kèm hóa đơn chứng từ hợp lệ.",
+    });
+
+    const detailRes = await request(app)
+      .get(`/api/admin/organizers/${org.organizerId}/detail`)
+      .set(admin.h)
+      .expect(200);
+    expect(detailRes.body.appeals).toHaveLength(1);
+    expect(detailRes.body.appeals[0]).toMatchObject({
+      status: "pending",
+      reason: "Chúng tôi đã kiểm tra lại và gửi kèm hóa đơn chứng từ hợp lệ.",
+    });
+
+    // 7. Admin rejects the first appeal
+    await request(app)
+      .post(`/api/admin/organizers/${org.organizerId}/reject-appeal`)
+      .set(admin.h)
+      .send({ reason: "Chứng từ chưa có mộc đỏ xác thực." })
+      .expect(200);
+
+    // Verify appeal status in database
+    const meAfterReject = await request(app)
+      .get("/api/organizers/me")
+      .set(bearer(org.token))
+      .expect(200);
+    expect(meAfterReject.body.latestAppeal).toMatchObject({
+      status: "rejected",
+      review_note: "Chứng từ chưa có mộc đỏ xác thực.",
+    });
+
+    // 8. Organizer submits a second appeal with updated details
+    await request(app)
+      .post("/api/organizers/appeal")
+      .set(bearer(org.token))
+      .send({ reason: "Đã bổ sung chứng từ có mộc đỏ xác thực đầy đủ." })
+      .expect(201);
+
+    // 9. Admin accepts appeal and unsuspends organizer
+    await request(app)
+      .post(`/api/admin/organizers/${org.organizerId}/unsuspend`)
+      .set(admin.h)
+      .send({ reason: "Hồ sơ giải trình hợp lệ, mở lại hoạt động." })
+      .expect(200);
+
+    expect((await organizerStatus(org.organizerId)).status).toBe("approved");
+
+    // Detail shows second appeal is now approved
+    const detailAfterUnsuspend = await request(app)
+      .get(`/api/admin/organizers/${org.organizerId}/detail`)
+      .set(admin.h)
+      .expect(200);
+    expect(detailAfterUnsuspend.body.appeals[0]).toMatchObject({
+      status: "approved",
+      reviewNote: "Hồ sơ giải trình hợp lệ, mở lại hoạt động.",
+    });
+
+    // Organizer capability is restored immediately
+    await request(app).get("/api/organizers/dashboard").set(bearer(org.token)).expect(200);
+  });
+});
+

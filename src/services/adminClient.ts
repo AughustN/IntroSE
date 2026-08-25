@@ -66,6 +66,10 @@ export const adminClient = {
   approveOrganizer: (id: number) => post(`/organizers/${id}/approve`),
   rejectOrganizer: (id: number, reason: string) => post(`/organizers/${id}/reject`, { reason }),
   suspendOrganizer: (id: number, reason: string) => post(`/organizers/${id}/suspend`, { reason }),
+  unsuspendOrganizer: (id: number, reason?: string) =>
+    post(`/organizers/${id}/unsuspend`, reason ? { reason } : undefined),
+  rejectOrganizerAppeal: (id: number, reason: string) =>
+    post(`/organizers/${id}/reject-appeal`, { reason }),
   approveEvent: (id: number) => post(`/events/${id}/approve`),
   rejectEvent: (id: number, reason: string) => post(`/events/${id}/reject`, { reason }),
   flagEvent: (id: number, reason?: string) =>

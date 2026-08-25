@@ -114,8 +114,9 @@ export async function listPurchases(organizerId: number, db: Db = pool): Promise
  * Everything below happens in ONE transaction, and the rows it decides on are locked inside it: the
  * wallet, so two purchases cannot both read the same balance and both pass the affordability check;
  * and the event, so the sellability test cannot go stale between the check and the debit. The
- * partial unique index `uq_ad_purchases_live_per_event` is what actually forbids a second running
- * campaign on one event — the read below only turns that into a sentence the organizer can act on.
+ * exclusion constraint `ad_purchases_no_overlap` (0034) is what actually forbids two OVERLAPPING
+ * campaigns on one event while letting an expired one be followed by a new purchase — the read
+ * below only turns that into a sentence the organizer can act on.
  */
 export async function purchase(input: {
   userId: number;

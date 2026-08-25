@@ -4,7 +4,31 @@ import { pool } from '../../db/pool.js';
 import { err } from '../../http.js';
 
 export async function organizerQueue(db: Db = pool) {
-  return (await db.query(`SELECT id, user_id AS "userId", display_name AS "displayName", description, status, review_note AS "reviewNote", applied_at AS "appliedAt" FROM organizers WHERE status IN ('pending', 'approved', 'suspended') ORDER BY applied_at`)).rows;
+  return (
+    await db.query(
+      `SELECT o.id, o.user_id AS "userId", o.display_name AS "displayName", o.description, o.status, o.review_note AS "reviewNote", o.applied_at AS "appliedAt",
+              (
+                SELECT json_build_object(
+                  'id', oa.id,
+                  'organizerId', oa.organizer_id,
+                  'userId', oa.user_id,
+                  'reason', oa.reason,
+                  'status', oa.status,
+                  'reviewNote', oa.review_note,
+                  'reviewedBy', oa.reviewed_by,
+                  'reviewedAt', oa.reviewed_at,
+                  'createdAt', oa.created_at
+                )
+                FROM organizer_appeals oa
+                WHERE oa.organizer_id = o.id
+                ORDER BY oa.created_at DESC
+                LIMIT 1
+              ) AS "latestAppeal"
+         FROM organizers o
+        WHERE o.status IN ('pending', 'approved', 'suspended')
+        ORDER BY o.applied_at`,
+    )
+  ).rows;
 }
 
 /**
@@ -88,6 +112,24 @@ export async function organizerDetail(id: number, db: Db = pool): Promise<AdminO
     )
   ).rows[0]!;
 
+  const appeals = await db.query<{
+    id: number;
+    organizer_id: number;
+    user_id: number;
+    reason: string;
+    status: "pending" | "approved" | "rejected";
+    review_note: string | null;
+    reviewed_by: number | null;
+    reviewed_at: Date | null;
+    created_at: Date;
+  }>(
+    `SELECT id, organizer_id, user_id, reason, status, review_note, reviewed_by, reviewed_at, created_at
+       FROM organizer_appeals
+      WHERE organizer_id = $1
+      ORDER BY created_at DESC`,
+    [id],
+  );
+
   return {
     id: profile.id,
     displayName: profile.display_name,
@@ -105,6 +147,17 @@ export async function organizerDetail(id: number, db: Db = pool): Promise<AdminO
       status: row.status,
       reviewNote: row.review_note,
       appliedAt: row.applied_at.toISOString(),
+    })),
+    appeals: appeals.rows.map((row) => ({
+      id: row.id,
+      organizerId: row.organizer_id,
+      userId: row.user_id,
+      reason: row.reason,
+      status: row.status,
+      reviewNote: row.review_note,
+      reviewedBy: row.reviewed_by,
+      reviewedAt: row.reviewed_at?.toISOString() ?? null,
+      createdAt: row.created_at.toISOString(),
     })),
     events: events.rows.map((row) => ({
       id: row.id,

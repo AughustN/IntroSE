@@ -2,6 +2,18 @@ export type OrganizerStatus = "pending" | "approved" | "rejected" | "suspended";
 export type EventModerationStatus = "pending_review" | "approved" | "flagged" | "removed";
 export type AuditOutcome = "applied" | "conflict" | "rejected";
 
+export interface OrganizerAppeal {
+  id: number;
+  organizerId: number;
+  userId: number;
+  reason: string;
+  status: "pending" | "approved" | "rejected";
+  reviewNote: string | null;
+  reviewedBy: number | null;
+  reviewedAt: string | null;
+  createdAt: string;
+}
+
 export interface OrganizerQueueItem {
   id: number;
   userId: number;
@@ -10,6 +22,7 @@ export interface OrganizerQueueItem {
   status: OrganizerStatus;
   reviewNote: string | null;
   appliedAt: string;
+  latestAppeal?: OrganizerAppeal | null;
 }
 
 export interface EventModerationItem {
@@ -358,6 +371,7 @@ export interface AdminOrganizerDetail {
     reviewNote: string | null;
     appliedAt: string;
   }>;
+  appeals?: OrganizerAppeal[];
   events: Array<{
     id: number;
     title: string;

@@ -16,13 +16,13 @@ Group 02 · SoE
 
 ---
 
-> **Scope:** Specifies all 41 use cases in the project and its use case diagrams. Requirement IDs in brackets (e.g. `SEC-10`, `REL-02`, `DATA-03`) trace to the Vision Document, Section 6.
+> **Scope:** Specifies all 42 use cases in the project and its use case diagrams. Requirement IDs in brackets (e.g. `SEC-10`, `REL-02`, `DATA-03`) trace to the Vision Document, Section 6.
 >
 > **Prototype:** Each use case ends with a **Prototype** block listing the screens in its flows plus a screenshot placeholder. The team generates the UI images in Google Stitch and pastes them under the matching use case before submission.
 >
-> **Implementation trace (2026-08-19).** The 41 use cases are mapped to the current SpecKit
+> **Implementation trace (2026-08-21).** The 42 use cases are mapped to the current SpecKit
 > feature directories under `src/specs/` in the trace table below. UC numbering is intentionally
-> non-sequential in the document because UC-37 to UC-41 are interleaved with the earlier domains.
+> non-sequential in the document because UC-37 to UC-42 are interleaved with the earlier domains.
 > **Primary UC ownership** identifies the feature whose scope directly implements the use-case
 > behavior. **Supporting / extended UCs** identify infrastructure, sub-flows, read-side integration,
 > or data dependencies; they do not transfer ownership of the whole use case.
@@ -31,15 +31,17 @@ Group 02 · SoE
 > `built (trace carried forward)` preserves the statuses previously recorded here for
 > **`001-account-auth`**, **`002-event-catalog`**, and **`003-seat-holds`**. Later feature directories
 > are marked *specified / implementation status not certified* unless this document has an explicit,
-> verified implementation status. `004-static-info-pages` and `012-cloudinary-media-upload` are
-> cross-cutting features with no direct UC ownership stated. Full directory slugs are used because
-> both `011-waitlist` and `011-organizer-business-analytics` exist.
+> verified implementation status. `004-static-info-pages`, `012-cloudinary-media-upload`, and
+> `013-anti-bot-protection` are cross-cutting features with no direct UC ownership stated. Full
+> directory slugs are used because both `011-waitlist` and `011-organizer-business-analytics` exist.
+> Advertising packages (UC-42) are implemented directly in the codebase (migration `0033_ads`,
+> `server/src/modules/ads/`) with no SpecKit feature directory.
 >
 > Feature specifications remain authoritative for the detailed behavior they explicitly own. A
 > known disagreement must be recorded in the trace note and resolved in the relevant UC section; it
 > must not silently change this document's requirements.
 >
-> | Feature | Status as of 2026-08-19 | Primary UC ownership | Supporting / extended UCs | Authority or deviation note |
+> | Feature | Status as of 2026-08-21 | Primary UC ownership | Supporting / extended UCs | Authority or deviation note |
 > |---|---|---|---|---|
 > | `001-account-auth` | *built (trace carried forward)* | UC-01–UC-06, UC-37 | — | Account/authentication scope from the feature spec. |
 > | `002-event-catalog` | *built (trace carried forward)* | UC-07–UC-09 | UC-20, UC-21 (read-side), UC-23, UC-24, UC-26, UC-34 | Catalog foundation; later organizer/studio features extend the organizer and moderation areas. |
@@ -55,6 +57,8 @@ Group 02 · SoE
 > | `011-organizer-business-analytics` | *specified / implementation status not certified* | UC-31 | UC-25 refund/cancellation audit data | Full slug disambiguates this feature from `011-waitlist`. |
 > | `011-waitlist` | *specified / implementation status not certified* | UC-17 | UC-09 A2, UC-16 inventory release, UC-19 notification delivery | Full slug disambiguates this feature from `011-organizer-business-analytics`. |
 > | `012-cloudinary-media-upload` | *cross-cutting / no direct UC mapping* | — | UC-06, UC-20, UC-21, UC-23, UC-37 media paths | Media storage/transport infrastructure; it does not own the domain workflows. |
+> | `013-anti-bot-protection` | *built* | — | UC-01, UC-03, UC-11, UC-40 hardening sub-flows | Cross-cutting bot defense: Turnstile CAPTCHA, disposable-email blocking, virtual waiting room, interaction-timing tickets, top-up abuse limits. |
+> | *(no feature directory — advertising packages)* | *built* | UC-42 | UC-07 placement slots, UC-32 ad revenue, UC-41 ledger kinds | Implemented directly in code (migration `0033_ads`, `server/src/modules/ads/`); no SpecKit directory exists. |
 
 ---
 
@@ -105,6 +109,7 @@ Group 02 · SoE
 &nbsp;&nbsp;&nbsp;&nbsp;5.5 &nbsp; [UC-24 Publish event](#uc-24-publish-event)
 &nbsp;&nbsp;&nbsp;&nbsp;5.6 &nbsp; [UC-25 Cancel event](#uc-25-cancel-event)
 &nbsp;&nbsp;&nbsp;&nbsp;5.7 &nbsp; [UC-26 Manage ticket types & capacity](#uc-26-manage-ticket-types--capacity)
+&nbsp;&nbsp;&nbsp;&nbsp;5.8 &nbsp; [UC-42 Purchase advertising package](#uc-42-purchase-advertising-package)
 
 **6. Organizer: Door & Analytics**
 
@@ -141,21 +146,23 @@ Group 02 · SoE
 **Basic flow**
 1. Guest opens the registration page.
 2. Guest enters email, nickname, and password (with confirmation), and optionally a phone number.
-3. System validates every field against the schema (type, length, format) `[SEC-07]`; the email is lowercased and trimmed and the phone normalised to one canonical form before any uniqueness check.
-4. System checks the email — and the phone, if one was supplied — are not already registered.
-5. System hashes the password with bcrypt (cost factor 12) `[SEC-02]`.
-6. In one transaction the system creates the account (Attendee capability, `provider='email'`) **and its zero-balance wallet**, so no later flow has to cope with a walletless account.
-7. System signs the guest in immediately and shows a success confirmation. **There is no email-verification step** and nothing is gated on proving the address (schema decision D4).
+3. System validates every field against the schema (type, length, format) `[SEC-07]`; the email is lowercased and trimmed — with provider sub-addressing aliases normalised to the canonical mailbox (`+tag` stripped, dots collapsed for Gmail) before any uniqueness check — and the phone normalised to one canonical form.
+4. System rejects emails from known disposable / temporary mail providers with a request to use a permanent address `[SEC-10]`.
+5. System checks the email — and the phone, if one was supplied — are not already registered.
+6. System hashes the password with bcrypt (cost factor 12) `[SEC-02]`.
+7. In one transaction the system creates the account (Attendee capability, `provider='email'`) **and its zero-balance wallet**, so no later flow has to cope with a walletless account.
+8. System signs the guest in immediately and shows a success confirmation. **There is no email-verification step** and nothing is gated on proving the address (schema decision D4).
 
 **Alternative flows**
 - **A1 — Invalid field format:** at step 3 a field fails validation; system highlights the field with an inline error and stays on the form.
-- **A2 — Email/phone already registered:** at step 4 the identifier exists; system shows "account already exists" and offers a link to log in (UC-03).
+- **A2 — Email/phone already registered:** at step 5 the identifier exists; system shows "account already exists" and offers a link to log in (UC-03).
 - **A3 — Password mismatch:** password and confirmation differ; system shows a mismatch error.
 - **A4 — Weak password:** password fails strength rules; system shows the requirement and rejects.
-- **A5 — Registration rate limit hit:** too many attempts from one source; the system throttles that source `[SEC-10]`. It never locks an account — there is no lockout state anywhere (schema decision D6).
-- **A6 — Guest chooses Google instead:** guest clicks "Sign in with Google"; flow switches to UC-02.
-- **A7 — Email belongs to a Google account:** registration is refused with an instruction to use the Google button. The two account kinds are **never** linked or merged (D5).
-- **A8 — Simultaneous registration on one identifier:** two requests race; the database's uniqueness constraint decides, so exactly one account is created and the other is refused.
+- **A5 — Registration rate limit hit:** too many attempts from one source; the system throttles that source `[SEC-10]`. When an IP exceeds the account-creation threshold (6 accounts/hour), further registrations from it require solving an interactive CAPTCHA challenge rather than being hard-blocked, so legitimate users on shared Wi-Fi / NAT can still register. Registration never locks an existing account.
+- **A6 — Disposable email domain:** at step 4 the domain is on the disposable-provider list; registration is refused with a message asking for a permanent email address.
+- **A7 — Guest chooses Google instead:** guest clicks "Sign in with Google"; flow switches to UC-02.
+- **A8 — Email belongs to a Google account:** registration is refused with an instruction to use the Google button. The two account kinds are **never** linked or merged (D5).
+- **A9 — Simultaneous registration on one identifier:** two requests race; the database's uniqueness constraint decides, so exactly one account is created and the other is refused.
 
 **Postconditions**
 - **Success:** a new Attendee account and its wallet exist, with a salted password hash; guest is authenticated.
@@ -232,17 +239,17 @@ Group 02 · SoE
 **Alternative flows**
 - **A1 — Wrong credentials:** verification fails; system shows a generic "invalid email or password" (no account enumeration), in time indistinguishable from A2.
 - **A2 — Account not found:** treated as A1 — same message, same response time.
-- **A3 — Repeated failures:** the **source** is throttled once its rate is exceeded, and the response to a repeatedly-failing **identifier** is delayed progressively — applied identically to identifiers that match no account. **A correct password is always accepted; there is no lockout state** (schema decision D6) `[SEC-10]`.
+- **A3 — Repeated failures:** the **source** is throttled once its rate is exceeded (15 attempts per IP per 15 minutes). Once an **identifier/source pair** accumulates 3 failures within a 15-minute window, further attempts from that source must solve a CAPTCHA challenge before the credentials are even evaluated. The response to a repeatedly-failing identifier/source pair is progressively delayed — applied identically to identifiers that match no account, so the delay curve cannot enumerate accounts `[SEC-10]`. Failures from one source never lock the account out for its owner on another source.
 - **A4 — Suspended / banned account:** login refused with a suspension notice, checked only **after** the password verifies `[SEC-03]`.
 - **A5 — User has no password (Google account):** system says this account uses Google sign-in (UC-02).
 - **A6 — User forgot password:** user clicks "forgot password" → UC-05.
 
 **Postconditions**
-- **Success:** the user is authenticated; an access token and a refresh-token family are issued.
-- **Failure:** no session; a `login_failure` auth event is recorded against a **hashed** form of the attempted identifier (which may match no account). No counter is kept on the account — there is nothing to lock.
+- **Success:** the user is authenticated; an access token and a refresh-token family are issued; the identifier's rolling failure count no longer counts against it.
+- **Failure:** no session; a `login_failure` auth event is recorded against a **hashed** form of the attempted identifier (which may match no account). Failures are counted per identifier/source pair in a rolling 15-minute window and drive the source throttle, CAPTCHA challenge, and progressive delay of A3.
 
 **Special requirements**
-- Per-source throttle plus a progressive per-identifier delay, never an account lockout `[SEC-10]`; HTTPS `[SEC-01]`.
+- Per-source throttle, adaptive CAPTCHA challenge, and progressive per-identifier/source delay — never an account lockout `[SEC-10]`; HTTPS `[SEC-01]`.
 
 **Prototype.** Screens: *Login form*, *Invalid-credentials state*, *Throttled-source notice*.
 `![UC-03 prototype](../prototypes/uc-03-login.png)`
@@ -375,10 +382,10 @@ Group 02 · SoE
 
 **Basic flow**
 1. Attendee opens "Become an organizer".
-2. Attendee fills the organizer application (organizer/display name, description, contact, and any required verification details).
+2. Attendee fills the organizer application: an **organizer display name** — the public name of the organizer as a brand, stored on the application and distinct from the account's nickname — a description, and an optional logo image (uploaded through the backend to Cloudinary, sanitised like any other image upload).
 3. System validates the input `[SEC-07]`.
 4. System creates an organizer application in `pending` state and links it to the account.
-5. System notifies the admin queue (feeds UC-33) and confirms submission to the attendee.
+5. System notifies the admin queue (feeds UC-33) and confirms submission to the attendee. The attendee can view their application status and full application history at any time.
 
 **Alternative flows**
 - **A1 — Validation error:** field-level errors; application not submitted.
@@ -416,7 +423,7 @@ Group 02 · SoE
 
 **Basic flow**
 1. Visitor opens the homepage / events listing.
-2. System loads publicly-visible events (paginated) with cover image, title, earliest upcoming showtime, city, and price-from. Drafts, events awaiting review, flagged, removed, cancelled, and suspended-organizer events are never included.
+2. System loads publicly-visible events (paginated) with cover image, title, earliest upcoming showtime, city, and price-from. Drafts, events awaiting review, flagged, removed, cancelled, and suspended-organizer events are never included. The landing page additionally renders two **paid placement slots** — the hero trailer and the "sự kiện hot" rail — fed by active advertising campaigns (UC-42); placements never override the visibility predicate, so only sellable events can appear in them.
 3. Visitor scrolls / paginates through the catalog.
 4. Visitor selects an event to view details → UC-09.
 
@@ -519,7 +526,7 @@ Group 02 · SoE
 **Basic flow**
 1. Attendee opens the recommendation chatbot and asks a natural-language question, optionally with the bounded recent conversation history.
 2. System derives candidate events and the attendee's own purchase, saved-event, and browsing context on the server; it checks the response cache before any usage allowance is consumed `[SCAL-02]`.
-3. On a cache miss, system checks the per-user allowance (≤ 10 model-backed requests/hour) and platform quota, then calls the configured AI provider through `AIProvider` `[SEC-08]` `[PERF-05]`.
+3. On a cache miss, system checks the per-user allowance (≤ 50 requests/hour) and platform quota, then calls the configured AI provider through `AIProvider` `[SEC-08]` `[PERF-05]`.
 4. System grounds every returned recommendation against the server-supplied candidate set, caches the result, and displays zero to six recommended events, each linking to UC-09.
 5. Attendee opens a recommended event → UC-09.
 
@@ -527,7 +534,7 @@ Group 02 · SoE
 - **A1 — Cache hit:** system returns the cached recommendation without calling the provider or consuming per-user/platform allowance `[SCAL-02]`.
 - **A2 — Per-user rate limit exceeded:** system blocks a new model-backed call and shows "try again later" `[SEC-08]`.
 - **A3 — Platform-wide quota threshold reached:** system serves the last cached result or a non-AI fallback, never an error `[SCAL-03]` `«extend»`.
-- **A4 — Provider timeout (~8 s), error, or unusable output:** system falls back to non-AI suggestions `[PERF-05]` `[SCAL-03]`.
+- **A4 — Provider timeout (default ~25 s, configurable), error, or unusable output:** system falls back to non-AI suggestions `[PERF-05]` `[SCAL-03]`. The timeout is a deliberate, recorded deviation from PERF-05's 8 s figure: the configured reasoning models are slower than that budget, and at 8 s every real question timed out. The guarantee PERF-05 protects — AI never blocks a purchase — still holds: the call is off the critical path and the panel stays interactive with a typing indicator.
 - **A5 — Off-domain question:** system declines briefly and offers event-discovery help without recommendations.
 - **A6 — New user with no history or no matching events:** system returns an appropriate catalog-based fallback without an external call where no candidate exists.
 
@@ -595,10 +602,12 @@ Group 02 · SoE
 - **Viewing the map is open to guests** (Feature 002 FR-012). **Placing a hold requires a signed-in
   account**: a hold records its owner (`hold_owner_id`) and there are no anonymous holds, so the first
   click that would hold a seat prompts sign-in (UC-01/UC-03) and resumes afterwards.
+- If the event is flagged **high-demand** (an explicit per-event toggle the organizer or admin sets),
+  the attendee must first clear the anti-bot gate (A11) before any hold is accepted.
 
 **Basic flow**
 1. Attendee opens the seat map for a seated event.
-2. System loads the authoritative seat map (REST) and subscribes to the showtime's live channel, showing available / held / sold seats `[PERF-03]`.
+2. System loads the authoritative seat map (REST) and subscribes to the showtime's live channel, showing available / held / sold seats `[PERF-03]`. For a high-demand event the map load also issues a signed interaction-timing ticket (A11).
 3. Attendee clicks one or more available seats.
 4. System places a concurrency-safe hold on each selected seat (DB row lock) and broadcasts the new status to all viewers `[DATA-02]`. The **first** hold creates the attendee's reservation for that showtime and starts the hold TTL (**7 min, configurable**) `[REL-02]`; every later seat joins that **same** reservation and shares its one clock — adding a seat never extends the window.
 5. System reflects the held seats in the attendee's selection and shows the running total in VND integers `[STD-03]` and the remaining time.
@@ -615,6 +624,7 @@ Group 02 · SoE
 - **A8 — General admission (no seat map):** the attendee picks a **quantity** in a tier instead of seats; the system holds that quantity, the tier's remaining drops for all viewers, and it is restored on release or expiry. More than the remaining stock is refused, and concurrent reservations are serialized so a tier is never oversold `[DATA-02]`.
 - **A9 — Re-clicking a seat the attendee already holds:** treated as an idempotent success — no duplicate hold, no error.
 - **A10 — Showtime withdrawn while holding** (organizer cancels, admin removes the event, or the showtime starts): new holds are refused and the existing ones release on the next sweep; the attendee is told the showtime is no longer on sale.
+- **A11 — High-demand event gate (anti-bot):** when the event carries the high-demand flag, the hold request must carry three proofs, checked before any row lock is taken: (1) a **virtual waiting-room queue token** — the attendee joins the showtime's queue and is admitted in batches; the token is valid for **3 minutes** from admission and is consumed by the hold that uses it; (2) the **signed interaction-timing ticket** issued at map load — the server verifies its HMAC signature and that at least **1.5 s** elapsed between map view and submission, rejecting inhumanly fast requests without storing session state; (3) a valid **CAPTCHA token**. A missing, expired, or forged proof is refused with a queue/verification error; the attendee rejoins the waiting room and retries. Events without the flag skip this gate entirely.
 
 **Postconditions**
 - **Success:** the selected seats (or GA quantity) are `held` for this attendee inside **one active reservation** for that showtime; checkout can begin.
@@ -697,6 +707,8 @@ Group 02 · SoE
 - **A6 — Returning to an expired hold:** the one-time grace from step 4 usually carries the hold across the VNPay detour, but it is bounded — if the grace was already spent, or the 14-min ceiling passed, the seats were released while the attendee was paying. System says so plainly and returns them to seat selection. **The money is safely in the wallet**; only the seat was lost `[REL-02]`.
 - **A7 — Duplicate/replayed IPN:** credits nothing `[REL-03]`, `[SEC-06]`.
 - **A8 — Second top-up during the same hold:** the window is **not** extended again; the reservation still expires at its ceiling. A top-up started after the ceiling revives nothing.
+- **A9 — Top-up creation rate exceeded:** the attendee has already created 5 top-ups within the last 10 minutes; the request is throttled with a rate-limit error `[SEC-10]`.
+- **A10 — Two pending top-ups already open:** the attendee already has 2 uncompleted (`initiated`) top-ups; a third is refused until one completes or expires — this stops top-up spam from being used to hoard holds via repeated grace requests `[SEC-10]`.
 
 **Postconditions**
 - **Success:** balance increased by exactly the paid amount; one `topup` ledger row joins 1:1 to a successful gateway transaction `[DATA-04]`.
@@ -771,6 +783,7 @@ Group 02 · SoE
 - **A1 — Ticket generation fails mid-transaction:** the whole order+ticket transaction rolls back; nothing partial persists `[DATA-01]`.
 - **A2 — Confirmation email delivery fails:** the ticket still exists in-app; system retries the email.
 - **A3 — Attendee closes the page:** tickets remain accessible under "My tickets" (UC-15).
+- **A4 — Attendee requests a resend:** from an order the attendee may re-send the ticket confirmation, at most **3 times per hour per order**; beyond that the request is rate-limited.
 
 **Postconditions**
 - **Success:** unique QR ticket(s) exist and are visible to the attendee.
@@ -790,7 +803,7 @@ Group 02 · SoE
 |---|---|
 | **Use-case ID** | UC-41 |
 | **Actor(s)** | Attendee (primary) |
-| **Description** | Attendee sees their current balance and the full statement of what moved it: every top-up, purchase, and refund, newest first. Answers the question "why is my balance this number?" |
+| **Description** | Attendee sees their current balance and the full statement of what moved it: every top-up, purchase, refund, and advertising-package debit, newest first. Answers the question "why is my balance this number?" |
 
 **Preconditions**
 - Attendee is signed in.
@@ -798,7 +811,7 @@ Group 02 · SoE
 **Basic flow**
 1. Attendee opens Wallet.
 2. System shows the current balance, the per-transaction and ceiling limits, and a Top up action (UC-40).
-3. System lists the ledger, newest first: each entry's type (top-up / ticket purchase / refund), signed amount, resulting balance, timestamp, and a link to the related order or event.
+3. System lists the ledger, newest first: each entry's type (top-up / ticket purchase / refund / ad purchase / ad refund), signed amount, resulting balance, timestamp, and a link to the related order, event, or ad campaign.
 4. Attendee scrolls; the system pages through older entries.
 5. Attendee opens an entry to reach the order or event it refers to (UC-15).
 
@@ -1011,6 +1024,7 @@ Group 02 · SoE
 **Special requirements**
 - Reminder defaults match survey demand (1 week / 1 day) `[Vision §3.1]`.
 - A `waitlist_open` notification is an invitation to buy, not a reservation. Its action link leads to the ordinary purchase flow (UC-11/UC-12) and the inventory may already be gone on arrival (UC-17).
+- Purchase confirmations can be re-sent on demand, rate-limited per order (UC-14 A4).
 
 **Prototype.** Screens: *In-app notification center*, *Email reminder*, *Cancellation notice*.
 `![UC-19 prototype](../prototypes/uc-19-notifications.png)`
@@ -1111,19 +1125,20 @@ Group 02 · SoE
 > **layout** layer, and A2/A4 — left open by 002 — are closed by the per-seat rules in step 6.
 
 **Basic flow**
-1. Organizer opens the seat-map designer for one of **their own** venues — a venue belongs to the organizer that created it and is used only in that organizer's events.
+1. Organizer opens the seat-map designer for one of **their own** venues — a venue belongs to the organizer that created it and is used only in that organizer's events. The owner may grant **collaborator** access per owner account: a *viewer* may read charts and validation, a *designer* may additionally draw and save, and a *manager* may additionally publish, archive, delete, and act on a showtime's live inventory. Every level contains the one below; the owner's own access can never be revoked.
 2. Organizer picks or creates a named **layout** of that venue (a venue owns several: standing concert, seated theatre, U-shaped workshop). Sections and seats belong to the layout, not to the venue.
-3. Organizer seeds seats with the Section / Row / Count generator, then refines them by hand on a canvas: place, drag, multi-select, align, distribute, rotate, curve a row along an arc, delete. Every seat carries a **position and rotation**; undo/redo and a saveable draft are available. Optionally the organizer uploads a floor-plan image to trace over — a **background layer only**, which never creates a seat and never determines a seat's status.
+3. Organizer seeds seats with the Section / Row / Count generator, then refines them by hand on a canvas: place, drag, multi-select, align, distribute, rotate, curve a row along an arc, delete. Every seat carries a **position and rotation**; undo/redo and a saveable draft are available. Optionally the organizer uploads a floor-plan image to trace over — a **background layer only**, which never creates a seat and never determines a seat's status. Beyond ordinary seats the designer supports: **tables** (a drawing object owning 2–20 seats moved as one thing, for gala-dinner layouts), **standing areas** (a drawn polygon filled with standing-position seats sold through the ordinary hold path), and **capacity zones** (a polygon with a headcount capacity, independent of the per-seat ceiling, for stadium-scale floors).
 4. Organizer adds non-sellable elements — stage, aisles, doors, bar, free text labels — stored apart from seats so they can never enter ticket inventory.
 5. System validates the layout in one pass and blocks publishing while any of these remain: overlapping seats, duplicate labels within a section, a seat belonging to no section, a section with seats but no tier, zero capacity. Each is reported with the seats or sections at fault. Seat labels are unique **within their section**, not within the venue.
 6. Organizer generates the **showtime's** seat map, assigning each section a price tier: exactly one bookable seat per physical seat, each starting `available` and carrying its tier's price. Generation **snapshots** the layout onto the showtime — from then on the showtime owns its map, and a later layout edit reaches it only through an explicit, previewed re-apply.
+7. Each **publish** of a layout records a **revision** (the authoring document at that moment); the organizer can later restore an earlier revision, and a restore passes through every guard an ordinary save has. Publish/archive/delete decisions are written to the audit trail.
 
 **Alternative flows**
 - **A1 — Invalid layout (duplicate/overlapping seats):** system flags every problem in one pass and blocks publishing.
 - **A2 — Organizer edits an existing map with sold seats:** *(closed by 005)* the edit is evaluated **per seat** against live inventory rather than refused wholesale. A `sold` seat may have only its **position and rotation** changed — never its label, section, tier, or existence. Any refused seat rejects the **whole** edit and the map is left exactly as it was.
 - **A3 — Organizer cancels:** map reverts to last saved.
 - **A4 — Deleting a seat that is part of a live seat map:** *(closed by 005)* refused only when the seat is `sold` or under a **live hold**; an `available` or `blocked` seat may be freely deleted. A held seat is never released to make room for an organizer's edit — the organizer retries once the hold lapses.
-- **A5 — Another organizer's venue:** refused; venues are not shared, so the same physical place may legitimately be entered by more than one organizer. Layouts, seats, uploads and clones follow the same ownership rule, enforced on the server.
+- **A5 — Another organizer's venue:** refused; venues are not shared between organizers, so the same physical place may legitimately be entered by more than one organizer. The owner may grant collaborator roles (viewer/designer/manager) within their own account's venues; access beyond that is refused. Layouts, seats, uploads and clones follow the same ownership rule, enforced on the server.
 - **A6 — Organizer blocks a seat on a live map:** an `available` seat can be blocked (broken seat, technical seat, comp) and unblocked; blocking a `held` or `sold` seat is refused.
 - **A7 — Stale save:** two organizer sessions editing one layout — the second save is refused and the organizer reloads, so neither silently overwrites the other.
 
@@ -1145,7 +1160,7 @@ Group 02 · SoE
 |---|---|
 | **Use-case ID** | UC-22 |
 | **Actor(s)** | Organizer (primary); configured AI provider behind `AIProvider` (secondary) |
-| **Description** | The configured AI provider drafts a polished description and suggests titles, tags, and a sensible price from the organizer's rough inputs. Assistive; output always editable. |
+| **Description** | The configured AI provider drafts a polished description and suggests titles and tags from the organizer's rough inputs; the price suggestion comes from platform data, not the model. Assistive; output always editable. |
 
 **Preconditions**
 - Organizer is signed in and creating/editing an event (UC-20/UC-23).
@@ -1153,16 +1168,18 @@ Group 02 · SoE
 **Basic flow**
 1. Organizer enters a few rough inputs (topic, keywords, draft price idea) and clicks "Generate".
 2. System checks the per-user rate limit (≤ 10 req/hour) `[SEC-08]` and cache `[SCAL-02]`.
-3. On a cache miss, system calls configured AI provider `«include» configured AI provider` `[PERF-05]`.
-4. System shows the suggested title(s), description, tags, and price.
-5. Organizer edits/accepts any field before it goes into the event form.
+3. On a cache miss, system calls configured AI provider `«include» configured AI provider` `[PERF-05]`. The model authors **prose only** (titles, description, tags) and is never asked for a price.
+4. System computes the price suggestion from **platform comparables** — published events in the same category/city — and only when at least 5 comparables exist; below that the price is omitted rather than guessed.
+5. System shows the suggested title(s), description, tags, and price.
+6. Organizer edits/accepts any field before it goes into the event form.
 
 **Alternative flows**
 - **A1 — Cache hit:** system returns the cached suggestion `[SCAL-02]`.
 - **A2 — Per-user rate limit exceeded:** system blocks and shows "try again later" `[SEC-08]`.
 - **A3 — Platform-wide quota reached:** AI disabled gracefully; organizer fills fields manually, no error `[SCAL-03]` `«extend»`.
-- **A4 — configured AI provider timeout (~8 s)/error:** system shows a fallback message; manual entry continues `[PERF-05]`.
+- **A4 — configured AI provider timeout (default ~25 s, configurable)/error:** system shows a fallback message; manual entry continues `[PERF-05]`. The timeout carries the same deliberate, recorded deviation from PERF-05's 8 s figure as UC-10 A4: the configured reasoning models are slower than that budget, and the guarantee PERF-05 protects — AI never blocks the organizer's own saving — still holds.
 - **A5 — Organizer rejects all suggestions:** nothing is written to the form.
+- **A6 — Too few comparables:** the suggestion is returned without a price; titles/description/tags are unaffected.
 
 **Postconditions**
 - **Success:** suggestions available; only organizer-accepted content enters the event.
@@ -1236,7 +1253,7 @@ Group 02 · SoE
 - **A3 — Admin rejects the submission:** the event never becomes public; the organizer sees the rejection and its reason and may correct and resubmit (UC-34).
 - **A4 — Event later flagged or removed by admin moderation:** UC-34 pulls it from the catalog on the next request; it stays visible to its organizer with the reason.
 - **A5 — Organizer unpublishes:** the event disappears from the public catalog and is retained as a draft.
-- **A6 — Material edit after approval:** **every** organizer edit to an approved event returns it to `pending_review` and pulls it from the catalog until re-approved. The rule is stated as an *exemption* list rather than an enumerated one, because an enumerated list is exactly what leaves the hole — the day a new editable field is added and nobody remembers to list it, the gate silently reopens. The **only** exempt changes are pure-inventory ones: a general-admission tier's capacity, and the per-seat block/unblock from UC-21. Without this, moderation is bypassable by approving an empty shell and then editing it (UC-23). *(Amended by feature `006-organizer-studio`, which widened this from the four fields it originally named — title, description, pricing, showtimes. A return to review removes the listing from discovery only: no hold is released, no ticket voided, and the on-sale state is untouched.)*
+- **A6 — Material edit after approval:** **every** organizer edit to an approved event returns it to `pending_review` and pulls it from the catalog until re-approved. The rule is stated as an *exemption* list rather than an enumerated one, because an enumerated list is exactly what leaves the hole — the day a new editable field is added and nobody remembers to list it, the gate silently reopens. The **only** exempt changes are pure-inventory ones: a general-admission tier's capacity, the per-seat block/unblock from UC-21, and the event's high-demand anti-bot flag. Without this, moderation is bypassable by approving an empty shell and then editing it (UC-23). *(Amended by feature `006-organizer-studio`, which widened this from the four fields it originally named — title, description, pricing, showtimes. A return to review removes the listing from discovery only: no hold is released, no ticket voided, and the on-sale state is untouched.)*
 
 **Postconditions**
 - **Success:** the event is on sale and awaiting review; it becomes public only on admin approval.
@@ -1276,6 +1293,7 @@ Group 02 · SoE
 - **A3 — Job interrupted or retried mid-run:** already-refunded tickets are skipped and the remainder completes. A ticket is refundable at most once, so the job is safely resumable `[REL-03]`, `[DATA-04]`.
 - **A4 — A ticket was already self-cancelled (UC-16):** it is skipped; the attendee keeps the earlier partial refund and is not refunded twice.
 - **A5 — A buyer's refund would exceed their balance ceiling:** the credit is applied regardless. A refund reverses money they already paid, never a new deposit, so the cap does not block it.
+- **A6 — Event ends normally instead of being cancelled:** the organizer marks the event **complete** once it has taken place. No refund is issued — attendees already attended — and the event moves to the finished lifecycle state.
 
 **Postconditions**
 - **Success:** event cancelled; every affected ticket void and refunded exactly once; seats released; orders `cancelled`; attendees notified; ledger fully explains every credit.
@@ -1324,6 +1342,47 @@ Group 02 · SoE
 
 **Prototype.** Screens: *Ticket-types list*, *Add/edit type form*, *Validation error*.
 `![UC-26 prototype](../prototypes/uc-26-ticket-types.png)`
+
+---
+
+## UC-42 Purchase advertising package
+
+| Field | Value |
+|---|---|
+| **Use-case ID** | UC-42 |
+| **Actor(s)** | Organizer (primary); Admin (package catalogue owner) |
+| **Description** | An approved organizer buys one of the admin-defined advertising packages for one of their events, paying from their wallet. The package promotes the event in the landing page's two paid slots — the hero trailer and the "sự kiện hot" rail — for a fixed run length. |
+
+**Preconditions**
+- Organizer is signed in and approved `[UC-33]`.
+- The organizer owns at least one event that is on sale and not already running a campaign.
+
+**Basic flow**
+1. Organizer opens the advertising panel and views the package catalogue (public — an organizer deciding whether to promote sees the price list before committing): three packages combining placements and run length (e.g. hot-rail only for 7 days; hot rail + hero trailer for 14 days; both placements for 30 days).
+2. Organizer picks a package and one of their eligible events.
+3. System validates the event is sellable (on sale, approved, organizer-approved owner) and that no campaign for that event overlaps the requested run.
+4. In one ACID transaction `[DATA-01]` the system locks the wallet row and the event, verifies the balance covers the package price, debits the wallet, appends an `ad_purchase` ledger row, and creates the purchase with the price and placements **snapshotted** off the package — a later re-pricing never restates what past buyers paid.
+5. The campaign renders from its `starts_at` to `ends_at`; the landing page's public placement feed picks it up with no further action. Expiry needs no sweeper: a campaign simply stops rendering at `ends_at`.
+6. System confirms the purchase and shows it in the organizer's purchase list.
+
+**Alternative flows**
+- **A1 — Insufficient balance:** the debit is refused with the exact shortfall; the organizer tops up (UC-40) and retries. Nothing is created.
+- **A2 — Event already has a running campaign:** refused — at most one live campaign per event at a time, enforced by a database constraint, so an event cannot occupy a slot twice or be billed for a placement it already holds.
+- **A3 — Event not sellable:** refused; only events that buyers can actually purchase may be promoted.
+- **A4 — Admin retires a package:** the package becomes inactive and unpurchasable, but past purchases keep rendering their snapshotted placements until their `ends_at`.
+- **A5 — Event taken down mid-campaign:** the placement feed only surfaces sellable events, so a flagged/removed/cancelled event stops rendering even though the campaign row runs to its term.
+
+**Postconditions**
+- **Success:** an active campaign exists for the event; the wallet is debited by exactly the package price with a ledger row explaining it; the landing page slots reflect the campaign.
+- **Failure:** nothing persists; balance unchanged.
+
+**Special requirements**
+- Single ACID transaction with wallet row lock `[DATA-01]`, `[DATA-02]`; ledger invariants hold — one debit per purchase, enforced by a unique index `[DATA-04]`; VND integers `[STD-03]`.
+- The placement feed and the package catalogue are public reads; purchases are organizer-scoped on the server `[SEC-04]`.
+- Ad revenue is platform revenue in full (no commission split) and surfaces in the admin analytics (UC-32); cancelled campaigns are excluded from revenue figures.
+
+**Prototype.** Screens: *Package catalogue*, *Event picker*, *Insufficient-balance state*, *Purchase confirmation*, *Organizer purchase list*.
+`![UC-42 prototype](../prototypes/uc-42-ad-packages.png)`
 
 ---
 
@@ -1425,7 +1484,7 @@ Group 02 · SoE
 **Alternative flows**
 - **A1 — No attendees yet:** empty state.
 - **A2 — Export fails:** system shows an error and offers retry.
-- **A3 — Large list:** results paginate.
+- **A3 — Large list:** the organizer's own door/list view returns the whole list unpaged (its only consumer is the organizer's door screen); the admin console's attendee view paginates.
 
 **Postconditions**
 - Organizer has viewed/exported the list; no state change.
@@ -1513,15 +1572,15 @@ Group 02 · SoE
 |---|---|
 | **Use-case ID** | UC-32 |
 | **Actor(s)** | Admin (primary) |
-| **Description** | Admin sees platform-wide metrics across all organizers and events. Generalizes the organizer dashboard (UC-31). |
+| **Description** | Admin sees platform-wide metrics across all organizers and events: revenue (ticket commission plus advertising), tickets sold, active users, pending queues, and check-in rate. Generalizes the organizer dashboard (UC-31). |
 
 **Preconditions**
 - Admin is signed in.
 
 **Basic flow**
 1. Admin opens the platform analytics view.
-2. System aggregates metrics across all events/organizers (total sales, revenue, active events, check-ins).
-3. Admin filters by organizer / category / date range.
+2. System aggregates metrics across all events/organizers: revenue over the last 30 days (ticket commission **plus advertising-package revenue**, with ad revenue broken out separately), tickets sold, live-event count, pending moderation queues, open reports, check-in rate, revenue by day, tickets by category, and **daily/rolling-30-day active users** (DAU/MAU, counted from per-user-per-day activity rows in the local timezone).
+3. Admin filters by organizer / category / date range and drills into orders, wallet transactions, and ad-package sales (revenue by week and by package).
 4. Admin optionally drills into a specific organizer or event.
 
 **Alternative flows**
@@ -1658,14 +1717,14 @@ Group 02 · SoE
 |---|---|
 | **Use-case ID** | UC-36 |
 | **Actor(s)** | Admin (primary) |
-| **Description** | Admin configures platform-level settings (e.g. seat-hold TTL and its one-time top-up grace, per-buyer hold cap, wallet top-up limits, notification defaults, AI toggles) within allowed bounds. |
+| **Description** | Admin configures platform-level settings (e.g. seat-hold TTL and its one-time top-up grace, per-buyer hold cap, wallet top-up limits) within allowed bounds. AI operating settings are visible but not editable from the console. |
 
 **Preconditions**
 - Admin is signed in.
 
 **Basic flow**
 1. Admin opens system settings.
-2. Admin adjusts configurable values (seat-hold TTL — default 7 min — plus its one-time top-up grace and 14-min absolute ceiling `[REL-02]`, the per-buyer hold cap — default 8 tickets per showtime (UC-11 A7), wallet top-up minimum/maximum and balance ceiling `[DATA-04]`, reminder defaults, AI on/off).
+2. Admin adjusts configurable values (seat-hold TTL — default 7 min — plus its one-time top-up grace and 14-min absolute ceiling `[REL-02]`, the per-buyer hold cap — default 8 tickets per showtime (UC-11 A7), wallet top-up minimum/maximum and balance ceiling `[DATA-04]`).
 3. System validates each value against allowed bounds.
 4. System saves and applies the settings.
 
@@ -1673,6 +1732,7 @@ Group 02 · SoE
 - **A1 — Out-of-bounds value:** system rejects with the allowed range.
 - **A2 — Change affecting live holds/orders:** system applies new settings to future holds only, not in-flight ones.
 - **A3 — Admin cancels:** settings unchanged.
+- **A4 — AI settings:** the AI on/off switch and the platform-wide AI request quota are **read-only in the console** — the stored values win whatever a request sends. They are an operator decision made where the API key lives (env), not a dial on a screen any admin can reach; a misconfiguration there is an unbounded bill, so the switch in front of it stays out of casual reach.
 
 **Postconditions**
 - **Success:** settings updated and applied going forward.
@@ -1711,6 +1771,8 @@ Group 02 · SoE
 | `011-organizer-business-analytics` | UC-31 | UC-25 | Organizer analytics consumes cancellation/refund audit data. |
 | `011-waitlist` | UC-17 | UC-09 A2, UC-16, UC-19 | Sold-out queue, inventory-release, and notification integration. |
 | `012-cloudinary-media-upload` | — | UC-06, UC-20, UC-21, UC-23, UC-37 | **No direct mapping:** cross-cutting media storage and transport. |
+| `013-anti-bot-protection` | — | UC-01, UC-03, UC-11, UC-40 | **No direct mapping:** cross-cutting bot defense (Turnstile CAPTCHA, disposable-email blocking, virtual waiting room, interaction-timing tickets, top-up abuse limits). |
+| *(advertising packages — no feature directory)* | UC-42 | UC-07, UC-32, UC-41 | Implemented directly in code (migration `0033_ads`, `server/src/modules/ads/`); no SpecKit directory exists. |
 | *No dedicated feature owner identified in `src/specs/`* | UC-12–UC-16, UC-19; UC-27–UC-30; UC-32; UC-38; UC-41 | — | Registry gap only; not a claim that these UCs have no code implementation. |
 
 ---

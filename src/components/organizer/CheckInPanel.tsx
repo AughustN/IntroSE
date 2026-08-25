@@ -49,7 +49,9 @@ export default function CheckInPanel({
    * a full card per guest would push that log off the screen. A deliberate look-up still gets one.
    */
   const [viaCamera, setViaCamera] = useState(false);
-  const [log, setLog] = useState<{ id: number; kind: "ok" | "warning" | "bad"; text: string }[]>([]);
+  const [log, setLog] = useState<{ id: number; kind: "ok" | "warning" | "bad"; text: string }[]>(
+    [],
+  );
   const [okCount, setOkCount] = useState(0);
   const [failCount, setFailCount] = useState(0);
 
@@ -182,11 +184,11 @@ export default function CheckInPanel({
   }
 
   return (
-    <div className="mt-3 space-y-3 border-2 border-beige-kem/40 bg-surface-2 p-4">
+    <div className="mt-3 min-w-0 space-y-3 border-2 border-beige-kem/40 bg-surface-2 p-4">
       <div className="flex items-start justify-between gap-3 border-b border-beige-kem/15 pb-2">
-        <div>
+        <div className="min-w-0">
           <h3 className="font-display text-sm font-bold text-beige-kem">Quét vé &amp; check-in</h3>
-          <p className="font-meta text-xs text-ink-soft">{eventTitle}</p>
+          <p className="break-words font-meta text-xs text-ink-soft">{eventTitle}</p>
         </div>
         <button
           type="button"
@@ -198,7 +200,7 @@ export default function CheckInPanel({
         </button>
       </div>
 
-      <div className="flex gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:flex sm:items-stretch">
         <input
           type="text"
           value={code}
@@ -211,13 +213,13 @@ export default function CheckInPanel({
             void checkIn(code);
           }}
           placeholder="Quét hoặc nhập mã vé…"
-          className="h-10 flex-1 border-2 border-beige-kem/60 bg-surface-2 px-3 font-mono text-sm text-beige-kem outline-none focus:border-burgundy"
+          className="col-span-2 h-10 min-w-0 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 font-mono text-sm text-beige-kem outline-none focus:border-burgundy sm:flex-1"
         />
         <button
           type="button"
           onClick={() => void checkIn(code)}
           disabled={busy || !code.trim()}
-          className="bg-burgundy px-4 py-2 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-50"
+          className="h-10 w-full bg-burgundy px-3 py-2 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-50 sm:w-auto sm:px-4"
         >
           Check-in
         </button>
@@ -229,7 +231,7 @@ export default function CheckInPanel({
               return !on;
             })
           }
-          className={`border-2 px-3 py-1.5 text-xs font-bold transition ${
+          className={`h-10 w-full border-2 px-2 py-1.5 text-xs font-bold transition sm:w-auto sm:px-3 ${
             cameraOn
               ? "border-burgundy bg-burgundy text-white"
               : "border-beige-kem text-beige-kem/80 hover:bg-beige-kem/10"
@@ -288,9 +290,7 @@ export default function CheckInPanel({
         </div>
       )}
 
-      {busy && (
-        <p className="font-mono text-[11px] text-beige-kem/70">Đang kiểm tra mã vé…</p>
-      )}
+      {busy && <p className="font-mono text-[11px] text-beige-kem/70">Đang kiểm tra mã vé…</p>}
 
       {error && (
         <p className="border-2 border-burgundy bg-burgundy/20 p-3 font-mono text-[11px] text-beige-kem">
@@ -331,9 +331,9 @@ export default function CheckInPanel({
               ["Email", result.customerEmail],
               ["Chỗ ngồi", result.seatLabel || "Vé thường"],
             ].map(([term, value]) => (
-              <div key={term}>
+              <div key={term} className="min-w-0">
                 <dt className="block text-[10px] font-bold uppercase text-beige-kem/50">{term}</dt>
-                <dd className="font-semibold text-beige-kem">{value}</dd>
+                <dd className="break-words font-semibold text-beige-kem">{value}</dd>
               </div>
             ))}
           </dl>

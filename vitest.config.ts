@@ -18,6 +18,8 @@ export default defineConfig({
     // Integration tests share one Postgres database and truncate between tests,
     // so they must not run concurrently against each other.
     fileParallelism: false,
+    maxConcurrency: 1,
+    sequence: { concurrent: false },
     /*
      * 20s was written against a database on the same machine. The suite now runs on a Neon branch
      * in us-east-2, where one round trip costs ~230ms measured from here — so a case that drives a

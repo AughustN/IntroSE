@@ -18,7 +18,7 @@
 
 import type { MovieEvent } from "../types";
 
-function fold(text: string): string {
+export function fold(text: string): string {
   return text
     .toLowerCase()
     .normalize("NFD")
@@ -49,7 +49,11 @@ function blob(event: MovieEvent): string {
 /** An empty query matches everything — it is not a filter until something is typed. */
 export function matchesQuery(event: MovieEvent, query: string): boolean {
   const needle = fold(query.trim());
-  return needle === "" || blob(event).includes(needle);
+  if (needle === "") return true;
+  const eventBlob = blob(event);
+  if (eventBlob.includes(needle)) return true;
+  const tokens = needle.split(/\s+/).filter(Boolean);
+  return tokens.length > 0 && tokens.every((token) => eventBlob.includes(token));
 }
 
 /**
@@ -64,14 +68,20 @@ export function searchEvents(events: MovieEvent[], query: string, limit: number)
   const needle = fold(query.trim());
   if (!needle) return [];
 
+  const tokens = needle.split(/\s+/).filter(Boolean);
   const bookable = (event: MovieEvent) => event.status === "available";
 
   return events
     .filter((event) => matchesQuery(event, query))
     .sort((a, b) => {
-      const titleA = fold(a.title).includes(needle);
-      const titleB = fold(b.title).includes(needle);
-      if (titleA !== titleB) return titleA ? -1 : 1;
+      const fullA = fold(a.title).includes(needle);
+      const fullB = fold(b.title).includes(needle);
+      if (fullA !== fullB) return fullA ? -1 : 1;
+
+      const tokensA = tokens.filter((t) => fold(a.title).includes(t)).length;
+      const tokensB = tokens.filter((t) => fold(b.title).includes(t)).length;
+      if (tokensA !== tokensB) return tokensB - tokensA;
+
       if (bookable(a) !== bookable(b)) return bookable(a) ? -1 : 1;
       return (a.dates[0] ?? "").localeCompare(b.dates[0] ?? "");
     })

@@ -23,7 +23,7 @@ import {
   updateProfile,
 } from './auth.repo.js';
 import { deleteAvatar, processAvatar, saveAvatar } from './avatar.js';
-import { createApplication, getLiveApplication, listApplications } from './organizer.js';
+import { createApplication, createAppeal, getLatestAppeal, getLiveApplication, listApplications, listAppeals } from './organizer.js';
 import { googleVerifier } from './oauth.google.js';
 import { hashIdentifier, hashToken, randomToken } from './crypto.js';
 import { classifyIdentifier, normalizeEmail, normalizePhone } from './identifier.js';
@@ -635,14 +635,49 @@ authRouter.post(
   }),
 );
 
+const appealSchema = z.object({
+  reason: z.string().trim().min(5, 'Vui lòng nhập lý do giải trình chi tiết (tối thiểu 5 ký tự).').max(2000),
+});
+
+authRouter.post(
+  '/organizers/appeal',
+  requireAuth,
+  validate(appealSchema),
+  asyncH(async (req, res) => {
+    const { reason } = req.body as z.infer<typeof appealSchema>;
+    const live = await getLiveApplication(req.auth!.userId);
+    if (!live || live.status !== 'suspended') {
+      throw err.conflict('not_suspended', 'Chỉ tài khoản ban tổ chức đang bị đình chỉ mới có thể gửi khiếu nại.');
+    }
+
+    const existingPending = await getLatestAppeal(live.id);
+    if (existingPending && existingPending.status === 'pending') {
+      throw err.conflict('appeal_already_pending', 'Đơn khiếu nại của bạn đang được Admin xem xét, vui lòng không gửi lại.');
+    }
+
+    const appeal = await createAppeal(live.id, req.auth!.userId, reason);
+    res.status(201).json({
+      ok: true,
+      message: 'Đã gửi đơn khiếu nại thành công. Vui lòng chờ Admin xem xét.',
+      appeal,
+    });
+  }),
+);
+
 // Applicant's own status + history (for the FE).
 authRouter.get(
   '/organizers/me',
   requireAuth,
   asyncH(async (req, res) => {
+    const applications = await listApplications(req.auth!.userId);
+    const live = applications.find((a) => ['pending', 'approved', 'suspended'].includes(a.status));
+    const appeals = live ? await listAppeals(live.id) : [];
+    const latestAppeal = appeals[0] ?? null;
     res.json({
       isOrganizer: req.auth!.user.isOrganizer,
-      applications: await listApplications(req.auth!.userId),
+      applications,
+      latestAppeal,
+      appeals,
     });
   }),
 );

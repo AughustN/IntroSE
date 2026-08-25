@@ -75,7 +75,6 @@ export const OrganizerEventsPage: React.FC<{
     window.history.replaceState(null, "", url.toString());
   };
 
-
   // The server-backed console (feature 006) owns the event list and its drill-down — event →
   // editor → showtimes → tiers — while this page keeps the shell (analytics / ads) and the create
   // form around it. State below is therefore console plumbing, not its own copy of the portfolio.
@@ -222,7 +221,15 @@ export const OrganizerEventsPage: React.FC<{
     const id = window.setTimeout(() => saveDraft(draftNow), 500);
     return () => window.clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [createTitle, createDescription, createCategory, createEventType, createVenueName, createVenueAddress, createCity]);
+  }, [
+    createTitle,
+    createDescription,
+    createCategory,
+    createEventType,
+    createVenueName,
+    createVenueAddress,
+    createCity,
+  ]);
 
   /*
    * The browser's own "leave site?" prompt, and ONLY while there is something to lose.
@@ -237,7 +244,6 @@ export const OrganizerEventsPage: React.FC<{
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty, activeSection]);
-
 
   // AI Description Assistant State
   const [aiBrief, setAiBrief] = useState("");
@@ -325,7 +331,9 @@ export const OrganizerEventsPage: React.FC<{
     // checked in JS, so it has to place its own.
     if (!createPictureUrl && !stagedBannerFile) {
       setMediaRefusal("Cần tải lên hình ảnh sự kiện trước khi tạo bản nháp.");
-      document.getElementById("create-media")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      document
+        .getElementById("create-media")
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
     setMediaRefusal(null);
@@ -368,18 +376,18 @@ export const OrganizerEventsPage: React.FC<{
   };
 
   return (
-    <div className="min-h-screen bg-xanh-pho text-beige-kem p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6 transition-colors duration-200">
+    <div className="mx-auto min-h-screen min-w-0 max-w-7xl space-y-6 bg-xanh-pho p-4 text-beige-kem transition-colors duration-200 sm:p-6 lg:p-8">
       {/* Toast Notification */}
       {toastMsg && (
         <div
-          className={`fixed top-4 right-4 z-50 px-4 py-3 border text-xs font-medium flex items-center space-x-2 animate-bounce ${
+          className={`fixed inset-x-4 top-4 z-50 flex max-w-[calc(100vw-2rem)] items-start gap-2 border px-4 py-3 text-xs font-medium animate-bounce sm:left-auto sm:items-center ${
             toastMsg.type === "success"
               ? "border-la-co bg-la-co/25 text-beige-kem"
               : "bg-burgundy text-white border-beige-kem"
           }`}
         >
           <span>{toastMsg.type === "success" ? "✓" : "✕"}</span>
-          <span>{toastMsg.text}</span>
+          <span className="min-w-0 break-words">{toastMsg.text}</span>
         </div>
       )}
 
@@ -497,7 +505,7 @@ export const OrganizerEventsPage: React.FC<{
       ) : activeSection === "events" ? (
         <div className="space-y-6">
           {/* The server-backed 006 console: events → editor → showtimes → tiers. */}
-          {(
+          {
             <OrganizerConsole
               selectedEventId={selectedEventId}
               onSelectEvent={(id) => {
@@ -510,12 +518,11 @@ export const OrganizerEventsPage: React.FC<{
               onOpenSeatMap={(eventId) => setSeatMapEventId(eventId)}
               reloadKey={reloadKey}
             />
-          )}
-
+          }
         </div>
       ) : (
         <div className="space-y-6">
-          {(
+          {
             <div className="bg-surface-2 border border-beige-kem/25 p-6 sm:p-8 max-w-3xl mx-auto space-y-6 transition-colors">
               {/*
                 Offered, never applied automatically. Someone who walked away from an event on
@@ -603,8 +610,8 @@ export const OrganizerEventsPage: React.FC<{
                         🎫 Vé đại trà — không chọn chỗ
                       </span>
                       <span className="mt-1 block text-[11px] text-ink-soft">
-                        Bán theo số lượng từng hạng vé, không cần sơ đồ. Tạo bản nháp, rồi thêm
-                        suất chiếu và hạng vé ở màn quản lý.
+                        Bán theo số lượng từng hạng vé, không cần sơ đồ. Tạo bản nháp, rồi thêm suất
+                        chiếu và hạng vé ở màn quản lý.
                       </span>
                     </button>
                   </div>
@@ -861,7 +868,7 @@ export const OrganizerEventsPage: React.FC<{
                 </div>
               </form>
             </div>
-          )}
+          }
         </div>
       )}
 

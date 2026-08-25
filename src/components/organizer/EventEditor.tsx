@@ -25,7 +25,7 @@ import ShowtimeList from "./ShowtimeList";
 import { Refusal } from "./states";
 
 const input =
-  "h-10 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
+  "h-10 min-w-0 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
 const label = "mb-1 block font-mono text-[11px] text-beige-kem/70";
 const btn =
   " bg-burgundy px-4 py-2 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-50";
@@ -265,12 +265,12 @@ export default function EventEditor({
   };
 
   return (
-    <div className="space-y-5">
+    <div className="min-w-0 space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <button onClick={onBack} className={ghost}>
           ← Danh sách sự kiện
         </button>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
           {event.eventType === "seated" && (
             <button onClick={() => onOpenSeatMap(event.id)} className={ghost}>
               Sơ đồ ghế
@@ -325,41 +325,41 @@ export default function EventEditor({
         Rail beside the work, not above it: the steps stay legible while the organizer edits, which is
         the whole point of a rail rather than a banner. It collapses to a scrolling strip under `lg`.
       */}
-      <div className="grid gap-5 lg:grid-cols-[15rem_minmax(0,1fr)]">
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[15rem_minmax(0,1fr)]">
         <div className="lg:order-1">
           <EventFlowRail steps={steps} onAction={runAction} />
         </div>
 
-        <div className="space-y-5 lg:order-2">
-      <div className="border-2 border-beige-kem bg-surface-2 p-5">
-        <h3 className="mb-3 font-display text-lg font-bold">{event.title}</h3>
+        <div className="min-w-0 space-y-5 lg:order-2">
+          <div className="min-w-0 border-2 border-beige-kem bg-surface-2 p-5">
+            <h3 className="mb-3 break-words font-display text-lg font-bold">{event.title}</h3>
 
-        <label className="block">
-          <span className={label}>Tiêu đề</span>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} className={input} />
-        </label>
+            <label className="block">
+              <span className={label}>Tiêu đề</span>
+              <input value={title} onChange={(e) => setTitle(e.target.value)} className={input} />
+            </label>
 
-        <label className="mt-3 block">
-          <span className={label}>Mô tả (để trống nếu không đổi)</span>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={4}
-            className={`${input} h-auto py-2`}
-          />
-        </label>
+            <label className="mt-3 block">
+              <span className={label}>Mô tả (để trống nếu không đổi)</span>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={4}
+                className={`${input} h-auto py-2`}
+              />
+            </label>
 
-        <label className="mt-3 block">
-          <span className={label}>Danh mục</span>
-          <Select
-            value={categoryCode}
-            options={categories.map((c) => ({ value: c.code, label: c.labelVi }))}
-            onChange={setCategoryCode}
-            triggerClassName={input}
-          />
-        </label>
+            <label className="mt-3 block">
+              <span className={label}>Danh mục</span>
+              <Select
+                value={categoryCode}
+                options={categories.map((c) => ({ value: c.code, label: c.labelVi }))}
+                onChange={setCategoryCode}
+                triggerClassName={input}
+              />
+            </label>
 
-        {/*
+            {/*
           Films only. The column exists on every event and nothing outside the cinema band reads it,
           so offering the choice on a concert would be asking a question whose answer is discarded.
 
@@ -367,81 +367,86 @@ export default function EventEditor({
           between on a known date, not a flag that is on or off, and the pair names both so the
           organizer is not left inferring what unticking means.
         */}
-        {isCinema && (
-          <fieldset className="mt-3">
-            <legend className={label}>Trạng thái phát hành</legend>
-            <div className="flex flex-wrap gap-4">
-              {(
-                [
-                  ["upcoming", "Sắp chiếu"],
-                  ["now_showing", "Đang chiếu"],
-                ] as const
-              ).map(([value, text]) => (
-                <label key={value} className="flex cursor-pointer select-none items-center gap-2">
-                  <input
-                    type="radio"
-                    name="releasePhase"
-                    value={value}
-                    checked={releasePhase === value}
-                    onChange={() => setReleasePhase(value)}
-                    className="h-4 w-4 accent-burgundy"
-                  />
-                  <span className="font-mono text-xs text-beige-kem">{text}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-        )}
+            {isCinema && (
+              <fieldset className="mt-3">
+                <legend className={label}>Trạng thái phát hành</legend>
+                <div className="flex flex-wrap gap-4">
+                  {(
+                    [
+                      ["upcoming", "Sắp chiếu"],
+                      ["now_showing", "Đang chiếu"],
+                    ] as const
+                  ).map(([value, text]) => (
+                    <label
+                      key={value}
+                      className="flex cursor-pointer select-none items-center gap-2"
+                    >
+                      <input
+                        type="radio"
+                        name="releasePhase"
+                        value={value}
+                        checked={releasePhase === value}
+                        onChange={() => setReleasePhase(value)}
+                        className="h-4 w-4 accent-burgundy"
+                      />
+                      <span className="font-mono text-xs text-beige-kem">{text}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            )}
 
-        <label className="mt-3 flex items-center gap-2 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={isHighDemand}
-            onChange={(e) => setIsHighDemand(e.target.checked)}
-            className="h-4 w-4 rounded border-beige-kem/60 accent-burgundy"
+            <label className="mt-3 flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={isHighDemand}
+                onChange={(e) => setIsHighDemand(e.target.checked)}
+                className="h-4 w-4 rounded border-beige-kem/60 accent-burgundy"
+              />
+              <span className="font-mono text-xs text-beige-kem">
+                🛡️ Phòng Chờ Vé Hot - Bảo Vệ Chống Bot
+              </span>
+            </label>
+
+            {isLive && changedFields().length > 0 && isMaterialEdit(changedFields()) && (
+              <p className="mt-3 font-mono text-[11px] text-cam-dat">
+                Thay đổi này cần duyệt lại: sự kiện sẽ tạm ẩn khỏi trang công khai cho đến khi được
+                duyệt.
+              </p>
+            )}
+
+            <button
+              onClick={save}
+              disabled={busy || changedFields().length === 0}
+              className={`${btn} mt-4`}
+            >
+              Lưu thay đổi
+            </button>
+
+            {notice && <p className="mt-3 font-mono text-[11px] text-la-co">{notice}</p>}
+            <Refusal message={refusal} />
+          </div>
+
+          {/* Never on a critical path: the whole editor above works with this panel broken (FR-029). */}
+          <AiListingPanel
+            eventId={isLive ? undefined : event.id}
+            onAccept={(field, value) =>
+              field === "title" ? setTitle(value) : setDescription(value)
+            }
           />
-          <span className="font-mono text-xs text-beige-kem">
-            🛡️ Phòng Chờ Vé Hot - Bảo Vệ Chống Bot
-          </span>
-        </label>
 
-        {isLive && changedFields().length > 0 && isMaterialEdit(changedFields()) && (
-          <p className="mt-3 font-mono text-[11px] text-cam-dat">
-            Thay đổi này cần duyệt lại: sự kiện sẽ tạm ẩn khỏi trang công khai cho đến khi được
-            duyệt.
-          </p>
-        )}
-
-        <button
-          onClick={save}
-          disabled={busy || changedFields().length === 0}
-          className={`${btn} mt-4`}
-        >
-          Lưu thay đổi
-        </button>
-
-        {notice && <p className="mt-3 font-mono text-[11px] text-la-co">{notice}</p>}
-        <Refusal message={refusal} />
-      </div>
-
-      {/* Never on a critical path: the whole editor above works with this panel broken (FR-029). */}
-      <AiListingPanel
-        eventId={isLive ? undefined : event.id}
-        onAccept={(field, value) => (field === "title" ? setTitle(value) : setDescription(value))}
-      />
-
-      <div ref={showtimesRef} className="border-2 border-beige-kem bg-surface-2 p-5">
-        <h3 className="mb-3 font-display text-base font-bold">Suất chiếu</h3>
-        <ShowtimeList
-          eventId={event.id}
-          venues={venues}
-          onChanged={() => {
-            onRefresh();
-            // The rail reads showtimes, tiers and the chart binding — all of which this list edits.
-            loadRows();
-          }}
-        />
-      </div>
+          <div ref={showtimesRef} className="min-w-0 border-2 border-beige-kem bg-surface-2 p-5">
+            <h3 className="mb-3 font-display text-base font-bold">Suất chiếu</h3>
+            <ShowtimeList
+              eventId={event.id}
+              venues={venues}
+              onChanged={() => {
+                onRefresh();
+                // The rail reads showtimes, tiers and the chart binding — all of which this list edits.
+                loadRows();
+              }}
+            />
+          </div>
         </div>
       </div>
 

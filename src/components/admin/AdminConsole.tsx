@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { Menu, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import Section from "../Section";
 import AdsScreen from "./screens/AdsScreen";
@@ -130,6 +131,7 @@ function screenFromUrl(): ScreenId {
 
 export default function AdminConsole({ onBack }: { onBack: () => void }) {
   const [screen, setScreenState] = useState<ScreenId>(screenFromUrl);
+  const [navOpen, setNavOpen] = useState(false);
 
   /*
    * A screen change is a history entry, so Back walks the console rather than leaving it.
@@ -140,12 +142,60 @@ export default function AdminConsole({ onBack }: { onBack: () => void }) {
    */
   const setScreen = useCallback((next: ScreenId) => {
     setScreenState(next);
+    setNavOpen(false);
     const url = new URL(window.location.href);
     if (next === "overview") url.searchParams.delete("screen");
     else url.searchParams.set("screen", next);
     window.history.pushState({}, "", url);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
+
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setNavOpen(false);
+    };
+    const onResize = () => {
+      if (window.innerWidth >= 1024) setNavOpen(false);
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", onResize);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [navOpen]);
+
+  const navigation = (
+    <div className="space-y-6">
+      {NAV.map((group) => (
+        <div key={group.label} className="space-y-px">
+          <p className="label-eyebrow pb-2 text-ink-soft">{group.label}</p>
+          {group.items.map((item) => {
+            const selected = screen === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setScreen(item.id)}
+                aria-current={selected ? "page" : undefined}
+                className={`flex w-full items-center border-l-2 px-3 py-2 text-left font-meta text-meta transition ${
+                  selected
+                    ? "border-burgundy bg-surface-2 font-bold text-beige-kem"
+                    : "border-transparent text-ink-soft hover:bg-bubblegum/20 hover:text-beige-kem"
+                }`}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
 
   // Back and Forward move between screens; the URL stays the one authority on which is open.
   useEffect(() => {
@@ -173,13 +223,24 @@ export default function AdminConsole({ onBack }: { onBack: () => void }) {
               Sảnh điều hành
             </h1>
           </div>
-          <button
-            onClick={onBack}
-            className="label-eyebrow inline-flex items-center gap-2 text-ink-soft transition hover:text-beige-kem"
-          >
-            <span aria-hidden="true">&lt;</span>
-            Quay về trang chủ
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setNavOpen(true)}
+              aria-label="Mở menu quản trị"
+              title="Mở menu quản trị"
+              className="grid h-9 w-9 place-items-center border border-beige-kem/30 text-beige-kem transition hover:bg-bubblegum/20 lg:hidden"
+            >
+              <Menu className="h-4 w-4" aria-hidden="true" />
+            </button>
+            <button
+              onClick={onBack}
+              className="label-eyebrow inline-flex items-center gap-2 text-ink-soft transition hover:text-beige-kem"
+            >
+              <span aria-hidden="true">&lt;</span>
+              Quay về trang chủ
+            </button>
+          </div>
         </div>
 
         {/*
@@ -194,30 +255,33 @@ export default function AdminConsole({ onBack }: { onBack: () => void }) {
             The rail. Sticky for the same reason the filter rail on `/events` is: the screens beside
             it run long, and a nav that scrolls away is a nav you have to scroll back for.
           */}
-          <nav className="space-y-6 lg:sticky lg:top-24 lg:h-fit">
-            {NAV.map((group) => (
-              <div key={group.label} className="space-y-px">
-                <p className="label-eyebrow pb-2 text-ink-soft">{group.label}</p>
-                {group.items.map((item) => {
-                  const selected = screen === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => setScreen(item.id)}
-                      aria-current={selected ? "page" : undefined}
-                      className={`flex w-full items-center border-l-2 px-3 py-2 text-left font-meta text-meta transition ${
-                        selected
-                          ? "border-burgundy bg-surface-2 font-bold text-beige-kem"
-                          : "border-transparent text-ink-soft hover:bg-bubblegum/20 hover:text-beige-kem"
-                      }`}
-                    >
-                      {item.label}
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
-          </nav>
+          <nav className="hidden space-y-6 lg:sticky lg:top-24 lg:block lg:h-fit">{navigation}</nav>
+
+          {navOpen && (
+            <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true">
+              <button
+                type="button"
+                aria-label="Đóng menu quản trị"
+                onClick={() => setNavOpen(false)}
+                className="absolute inset-0 bg-black/55"
+              />
+              <aside className="relative h-full w-[min(20rem,85vw)] overflow-y-auto bg-xanh-pho p-5 text-beige-kem shadow-2xl">
+                <div className="mb-5 flex items-center justify-between border-b border-beige-kem/20 pb-4">
+                  <p className="font-display text-sm font-bold">Menu quản trị</p>
+                  <button
+                    type="button"
+                    onClick={() => setNavOpen(false)}
+                    aria-label="Đóng menu quản trị"
+                    title="Đóng menu quản trị"
+                    className="grid h-9 w-9 place-items-center border border-beige-kem/30 text-beige-kem transition hover:bg-bubblegum/20"
+                  >
+                    <X className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                </div>
+                {navigation}
+              </aside>
+            </div>
+          )}
 
           <section className="min-w-0 space-y-5">
             {screen === "overview" && <OverviewScreen onOpen={(next) => setScreen(next)} />}

@@ -4,7 +4,7 @@ import { err } from '../../http.js';
 import { requireAuth } from '../../middleware/requireAuth.js';
 import { validate } from '../../middleware/validate.js';
 import { listCategories } from '../admin/admin.repo.js';
-import { getEventDetail, getSeatMap, getShowtimes, listEvents, listFeaturedEvents } from './catalog.repo.js';
+import { getEventDetail, getSeatMap, getShowtimes, listEvents, listFeaturedEvents, searchEventsSemantic } from './catalog.repo.js';
 import { reportEvent } from './report.service.js';
 import { generateTimingTicket } from '../../services/timingTicket.js';
 import { createSlidingRateLimiter } from '../../middleware/rateLimit.js';
@@ -46,6 +46,22 @@ catalogPublicRouter.get('/categories', asyncH(async (_req, res) => { res.json(aw
 
 // GET /api/events/featured
 catalogPublicRouter.get('/events/featured', asyncH(async (_req, res) => { res.json(await listFeaturedEvents()); }));
+
+// GET /api/events/search/semantic — vector embedding + lexical RRF search
+catalogPublicRouter.get(
+  '/events/search/semantic',
+  asyncH(async (req, res) => {
+    const q = str(req.query.q);
+    if (!q) {
+      res.json({ events: [] });
+      return;
+    }
+    const limit = Math.min(50, Math.max(1, num(req.query.limit) ?? 10));
+    const events = await searchEventsSemantic(q, limit);
+    res.setHeader('Cache-Control', 'public, max-age=10, s-maxage=10');
+    res.json({ events });
+  }),
+);
 
 // GET /api/events (US1)
 catalogPublicRouter.get(

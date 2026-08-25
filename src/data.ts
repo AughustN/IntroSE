@@ -258,6 +258,47 @@ export const SAMPLE_MOVIES: MovieEvent[] = [
     status: "cancelled",
     isFeatured: false,
     affiliateCode: "SYM-HN-2026"
+  },
+  {
+    id: "spider-man-no-way-home",
+    eventId: null,
+    eventType: "general_admission",
+    category: "movie",
+    categoryLabel: "Phim",
+    title: "Người Nhện: Không Còn Nhà",
+    originalTitle: "Spider-Man: No Way Home",
+    tags: ["2D", "3D", "IMAX", "Phụ Đề"],
+    ageRating: "T13",
+    ageDescription: "Phim được phổ biến đến người xem từ đủ 13 tuổi trở lên",
+    duration: 148,
+    genre: ["Hành Động", "Viễn Tưởng", "Siêu Anh Hùng"],
+    director: "Jon Watts",
+    cast: ["Tom Holland", "Zendaya", "Benedict Cumberbatch", "Tobey Maguire", "Andrew Garfield"],
+    releaseDate: "2026-07-15",
+    rating: 9.6,
+    reviewCount: 4250,
+    description: "Peter Parker đối mặt với khủng hoảng danh tính khi bị tiết lộ là Người Nhện. Nhờ sự trợ giúp của Doctor Strange, đa vũ trụ được mở ra mang theo các siêu ác nhân huyền thoại trở lại.",
+    price: 105000,
+    doublePrice: 230000,
+    ticketTiers: [
+      { id: "standard", label: "Standard", price: 105000, description: "Ghế thường, màn chiếu IMAX sắc nét" },
+      { id: "vip", label: "VIP", price: 165000, description: "Khu vực ghế trung tâm, âm thanh sống động", badge: "VIP" },
+      { id: "couple", label: "Couple", price: 230000, description: "Ghế đôi Sweetbox dành cho 2 người" }
+    ],
+    imageUrl: "https://images.unsplash.com/photo-1635805737707-575885ab0820?auto=format&fit=crop&q=80&w=600",
+    trailerUrl: LOCAL_TRAILER_URL,
+    times: ["10:30", "13:45", "16:30", "19:15", "22:00"],
+    dates: ["2026-08-01", "2026-08-02", "2026-08-03", "2026-08-04", "2026-08-05"],
+    city: "TP.HCM",
+    location: "TixHub Cinema - Chi nhánh Landmark 81 Bình Thạnh",
+    venueName: "TixHub Landmark 81",
+    venueMapUrl: "https://maps.google.com/?q=Landmark+81",
+    venueGuide: "Lối vào rạp tại tầng B1, xuất trình mã vé điện tử QR trước giờ chiếu 10 phút.",
+    refundPolicy: "Đổi suất chiếu trước giờ bắt đầu 24 giờ. Không hoàn tiền sau khi vé đã quét.",
+    status: "available",
+    isFeatured: true,
+    comboOffer: "Tặng 1 ly nước phiên bản Người Nhện khi mua vé đôi.",
+    affiliateCode: "SPIDERMAN-NWH"
   }
 ];
 
