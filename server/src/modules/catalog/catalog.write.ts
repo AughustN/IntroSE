@@ -7,6 +7,7 @@ import { refreshSnapshot, syncCompanionLinks } from "../seatmap/apply.js";
 import { defaultCategoryId } from "../seatmap/layouts.repo.js";
 import { err } from "../../http.js";
 import { CATEGORY_COLORS } from "@shared/catalog/tier-palette.js";
+import { UPCOMING_SHOWTIME } from "./visibility.js";
 
 /** The caller's approved organizer row id, or null (events bind to this — D-E). */
 export async function getApprovedOrganizerId(
@@ -135,7 +136,12 @@ export async function listMyEvents(userId: number, db: Db = pool) {
                         CASE WHEN s3.starts_at >= now() THEN s3.starts_at END ASC,
                         s3.starts_at DESC
                LIMIT 1
-            ) AS "venueName"
+            ) AS "venueName",
+            -- Separate from "nextShowtimeAt" on purpose: that field falls back to the latest PAST
+            -- showtime so a finished event still prints a date, which makes it useless as a "still
+            -- live" signal on its own — an event with only past showtimes read as indistinguishable
+            -- from one still selling. This is the one column that actually answers it.
+            EXISTS (SELECT 1 FROM showtimes s WHERE ${UPCOMING_SHOWTIME}) AS "hasUpcoming"
        FROM events e
        JOIN organizers o ON o.id = e.organizer_id
        JOIN event_categories ec ON ec.id = e.category_id

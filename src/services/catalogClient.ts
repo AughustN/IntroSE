@@ -112,6 +112,8 @@ export interface MyEvent {
    */
   nextShowtimeAt: string | null;
   venueName: string | null;
+  /** Whether ANY of the event's showtimes are still ahead — `nextShowtimeAt` alone cannot say. */
+  hasUpcoming: boolean;
 }
 export interface MyVenue {
   id: number;

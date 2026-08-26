@@ -15,7 +15,7 @@ import {
   PANEL,
   ScreenHead,
 } from "../adminUi";
-import Select from "../../Select";
+import Combobox from "../../Combobox";
 import { useAsync } from "../useAsync";
 
 /**
@@ -47,7 +47,7 @@ export default function FeaturedScreen() {
    */
   const eligible = useAsync(() => adminClient.queue(), "featured-eligible");
   const candidates = (eligible.data?.approvedEvents ?? []).filter(
-    (event) => event.moderation === "approved" && event.status === "on_sale",
+    (event) => event.moderation === "approved" && event.status === "on_sale" && event.hasUpcoming,
   );
 
   /** Titles from either source, so a freshly added row reads as itself and not as an id. */
@@ -60,6 +60,12 @@ export default function FeaturedScreen() {
   const addable = candidates
     .filter((event) => !draft.some((row) => row.eventId === event.id))
     .map((event) => ({ value: String(event.id), label: `${event.title} · /${event.slug}` }));
+  /*
+   * `Combobox` works in plain strings — see its own docstring — so the id/label pair above is
+   * flattened to labels for it to search over, and looked back up on commit. Slugs are unique
+   * (`events.slug UNIQUE`), so the label carrying one is too; there is no collision to worry about.
+   */
+  const labelToId = new Map(addable.map((event) => [event.label, event.value]));
 
   const move = (index: number, direction: -1 | 1) => {
     const next = [...draft];
@@ -111,16 +117,20 @@ export default function FeaturedScreen() {
         The endpoint only accepts events that are on sale, approved, and whose organizer is approved
         — so a typed id was a guess that the admin found out about on save, and the row until then
         read "Sự kiện #418". The picker offers exactly the events the server would accept.
+
+        A search field, not a dropdown to scroll: the catalogue runs past 500 events (event most of
+        it eligible), and finding one by eye down a list that long is slower than typing three
+        letters of its title — the same tradeoff `Combobox` already makes for the province field.
       */}
       <div className={`${PANEL} flex flex-wrap items-end gap-3`}>
         <div className="min-w-[320px] flex-1">
-          <Select
+          <Combobox
             label="Thêm sự kiện"
-            value={newId}
-            options={addable}
-            placeholder={eligible.loading ? "Đang tải sự kiện…" : "— Chọn sự kiện đủ điều kiện —"}
-            onChange={setNewId}
-            triggerClassName={`${FIELD} w-full justify-between`}
+            value={addable.find((event) => event.value === newId)?.label ?? ""}
+            options={addable.map((event) => event.label)}
+            placeholder={eligible.loading ? "Đang tải sự kiện…" : "— Tìm sự kiện đủ điều kiện —"}
+            onChange={(label) => setNewId(labelToId.get(label) ?? "")}
+            className={`${FIELD} w-full`}
           />
         </div>
         <button

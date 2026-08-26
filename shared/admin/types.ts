@@ -34,6 +34,8 @@ export interface EventModerationItem {
   organizer: string;
   reviewNote: string | null;
   createdAt: string;
+  /** Whether the event still has a sellable showtime ahead of it — `status` alone does not say. */
+  hasUpcoming: boolean;
 }
 
 /**

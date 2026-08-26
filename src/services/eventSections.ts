@@ -138,8 +138,10 @@ const BANDS: ReadonlyArray<Pick<LandingSection, "id" | "title" | "eyebrow" | "em
 ];
 
 /**
- * Whether an event is worth putting in front of someone. Sold-out, finished and cancelled events
- * still appear — the catalogue is honest about them — but never ahead of one that can be bought.
+ * Whether an event is worth putting in front of someone. Sold out still counts — it is a real,
+ * upcoming event that could sell more later — and is only sorted behind one that can be bought
+ * right now. `finished` is excluded before this ever runs (see `buildLandingSections`): the
+ * landing page is a shortlist of what to do next, not an archive of what already happened.
  */
 const bookable = (event: MovieEvent): boolean =>
   event.status === "available";
@@ -179,6 +181,10 @@ export function buildLandingSections(events: MovieEvent[], perSection = 4): Land
 
   for (const event of events) {
     if (!event.category) continue;
+    // An event whose last showtime has already passed has nothing left to invite anyone to — it
+    // is dropped here, before grouping, so it can never fill a band's last empty slot the way a
+    // sold-out (still upcoming) event legitimately can.
+    if (event.status === "finished") continue;
     const id = sectionOfCategory(event.category, event.categoryLabel || "");
     (grouped.get(id) ?? grouped.set(id, []).get(id)!).push(event);
     (codes.get(id) ?? codes.set(id, new Set()).get(id)!).add(event.category);

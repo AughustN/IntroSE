@@ -23,7 +23,7 @@ const ReactMarkdown = lazy(() => import("react-markdown"));
  */
 const BUBBLE_MARKDOWN = {
   p: ({ children }: { children?: React.ReactNode }) => (
-    <p className="mb-2 leading-6 last:mb-0">{children}</p>
+    <p className="mb-2 leading-5 last:mb-0">{children}</p>
   ),
   ul: ({ children }: { children?: React.ReactNode }) => (
     <ul className="mb-2 list-disc space-y-1 pl-5 last:mb-0">{children}</ul>
@@ -31,7 +31,7 @@ const BUBBLE_MARKDOWN = {
   ol: ({ children }: { children?: React.ReactNode }) => (
     <ol className="mb-2 list-decimal space-y-1 pl-5 last:mb-0">{children}</ol>
   ),
-  li: ({ children }: { children?: React.ReactNode }) => <li className="leading-6">{children}</li>,
+  li: ({ children }: { children?: React.ReactNode }) => <li className="leading-5">{children}</li>,
   strong: ({ children }: { children?: React.ReactNode }) => (
     <strong className="font-bold">{children}</strong>
   ),
@@ -239,7 +239,7 @@ export default function AIChatPanel({ signedIn, onOpenEvent }: AIChatPanelProps)
               <p className="truncate font-display text-body font-black uppercase tracking-[0.04em]">
                 Trợ lý TixHub
               </p>
-              <p className="font-meta text-eyebrow text-white/70">
+              <p className="font-ui text-eyebrow text-white/70">
                 {busy ? "Đang soạn tin…" : "Thường trả lời ngay"}
               </p>
             </div>
@@ -271,7 +271,7 @@ export default function AIChatPanel({ signedIn, onOpenEvent }: AIChatPanelProps)
 
           {!signedIn ? (
             <div className="px-4 py-8 text-center">
-              <p className="font-meta text-body text-beige-kem/80">
+              <p className="font-ui text-body text-beige-kem/80">
                 Đăng nhập để hỏi trợ lý về sự kiện, giá vé và lịch diễn.
               </p>
             </div>
@@ -290,25 +290,25 @@ export default function AIChatPanel({ signedIn, onOpenEvent }: AIChatPanelProps)
                   first exchange the thread itself is the prompt.
                 */}
                 <Row from="assistant">
-                  <div className="rounded-2xl rounded-bl-md border border-beige-kem/25 bg-beige-kem/[0.06] p-3.5">
-                    <p className="font-meta text-meta leading-6 text-beige-kem">
+                  <div className="rounded-2xl rounded-bl-md border border-beige-kem/25 bg-beige-kem/[0.06] p-3">
+                    <p className="font-ui text-eyebrow leading-5 text-beige-kem">
                       Chào bạn! Mình là <strong className="font-bold">Trợ lý TixHub</strong>. Mình có
                       thể giúp bạn:
                     </p>
-                    <ul className="mt-2.5 space-y-2">
+                    <ul className="mt-2 space-y-1.5">
                       {CAPABILITIES.map((c) => (
-                        <li key={c.title} className="flex gap-2.5">
-                          <span aria-hidden="true" className="shrink-0 leading-6">
+                        <li key={c.title} className="flex gap-2">
+                          <span aria-hidden="true" className="shrink-0 leading-5">
                             {c.icon}
                           </span>
-                          <p className="font-meta text-meta leading-6 text-beige-kem/85">
+                          <p className="font-ui text-eyebrow leading-5 text-beige-kem/85">
                             <strong className="font-bold text-beige-kem">{c.title}</strong>{" "}
                             {c.detail}
                           </p>
                         </li>
                       ))}
                     </ul>
-                    <p className="mt-3 font-meta text-meta leading-6 text-ink-soft">
+                    <p className="mt-2.5 font-ui text-eyebrow leading-5 text-ink-soft">
                       Hôm nay bạn cần tìm gì?
                     </p>
                   </div>
@@ -324,7 +324,7 @@ export default function AIChatPanel({ signedIn, onOpenEvent }: AIChatPanelProps)
                       <Bubble from="assistant">{entry.answer.reply}</Bubble>
 
                       {entry.answer.message && (
-                        <p className="pl-1 font-meta text-eyebrow text-ink-soft">
+                        <p className="pl-1 font-ui text-eyebrow text-ink-soft">
                           {entry.answer.message}
                         </p>
                       )}
@@ -365,7 +365,7 @@ export default function AIChatPanel({ signedIn, onOpenEvent }: AIChatPanelProps)
                   </div>
                 )}
 
-                {error && <p className="font-meta text-eyebrow text-burgundy-ink">{error}</p>}
+                {error && <p className="font-ui text-eyebrow text-burgundy-ink">{error}</p>}
 
                 <div ref={endRef} />
               </div>
@@ -380,7 +380,7 @@ export default function AIChatPanel({ signedIn, onOpenEvent }: AIChatPanelProps)
                 fifth of it.
               */}
               {!busy && !openerUsed && (
-                <div className="no-scrollbar flex gap-2 overflow-x-auto border-t border-beige-kem/20 px-3 py-2.5">
+                <div className="chat-scrollbar-x flex gap-2 overflow-x-auto border-t border-beige-kem/20 px-3 pb-3.5 pt-2.5">
                   {OPENERS.map((opener) => (
                     <button
                       key={opener}
@@ -389,7 +389,7 @@ export default function AIChatPanel({ signedIn, onOpenEvent }: AIChatPanelProps)
                         setOpenerUsed(true);
                         void ask(opener);
                       }}
-                      className="shrink-0 whitespace-nowrap rounded-full border border-beige-kem/30 px-3 py-1.5 font-meta text-eyebrow text-ink-soft transition hover:border-burgundy hover:text-beige-kem"
+                      className="shrink-0 whitespace-nowrap rounded-full border border-beige-kem/30 px-3 py-1.5 font-ui text-eyebrow text-ink-soft transition hover:border-burgundy hover:text-beige-kem"
                     >
                       {opener}
                     </button>
@@ -408,7 +408,7 @@ export default function AIChatPanel({ signedIn, onOpenEvent }: AIChatPanelProps)
                   maxLength={600}
                   placeholder="Nhắn cho trợ lý…"
                   aria-label="Tin nhắn gửi trợ lý"
-                  className="h-10 min-w-0 flex-1 rounded-full border border-beige-kem/30 bg-xanh-pho px-4 font-meta text-meta text-beige-kem outline-none transition focus:border-burgundy"
+                  className="h-10 min-w-0 flex-1 rounded-full border border-beige-kem/30 bg-xanh-pho px-4 font-ui text-meta text-beige-kem outline-none transition focus:border-burgundy"
                 />
                 <button
                   type="submit"
@@ -465,7 +465,7 @@ function Suggestion({
           <span className="block font-display text-body font-black uppercase leading-tight tracking-[0.02em] text-beige-kem">
             {title}
           </span>
-          <span className="mt-1 block font-meta text-eyebrow text-ink-soft">{meta}</span>
+          <span className="mt-1 block font-ui text-eyebrow text-ink-soft">{meta}</span>
         </span>
         <ChevronDown
           aria-hidden="true"
@@ -476,11 +476,11 @@ function Suggestion({
 
       {open && (
         <div className="border-t border-beige-kem/20 px-3 pb-3 pt-2.5">
-          <p className="font-meta text-eyebrow leading-5 text-beige-kem/75">{reason}</p>
+          <p className="font-ui text-eyebrow leading-5 text-beige-kem/75">{reason}</p>
           <button
             type="button"
             onClick={onOpen}
-            className="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-burgundy px-3 py-1.5 font-meta text-eyebrow font-bold text-white transition hover:bg-burgundy-ink"
+            className="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-burgundy px-3 py-1.5 font-ui text-eyebrow font-bold text-white transition hover:bg-burgundy-ink"
           >
             Xem sự kiện
             <span aria-hidden="true">›</span>
@@ -526,7 +526,7 @@ function Bubble({ from, children }: { from: "user" | "assistant"; children: Reac
   return (
     <Row from={from}>
       <div
-        className={`px-4 py-2.5 font-meta text-meta leading-6 ${ mine
+        className={`px-3.5 py-2 font-ui text-eyebrow leading-5 ${ mine
             ? "max-w-[85%] rounded-2xl rounded-br-md bg-burgundy text-white"
             : "rounded-2xl rounded-bl-md bg-beige-kem/10 text-beige-kem"
         }`}

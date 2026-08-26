@@ -685,9 +685,16 @@ export default function EventDetail({
     { icon: Users, label: event.ageRating === "P" ? "Mọi lứa tuổi" : event.ageRating },
   ].filter((h) => h.label);
 
+  /*
+   * Địa điểm/Thành phố describe the SHOWTIME being bought, not the event in general — an event with
+   * more than one venue (a film playing at several cinemas) has no single true city, and printing
+   * `event.city` here regardless of what is selected showed a buyer a cinema they were not booking.
+   * `event.venueName`/`event.location` (the earliest showtime's venue) is the fallback only for the
+   * moment before any slot has resolved.
+   */
   const details: SummaryDetail[] = [
-    { label: "Địa điểm", value: event.venueName || event.location },
-    { label: "Thành phố", value: event.city },
+    { label: "Địa điểm", value: selectedSlot?.venue || event.venueName || event.location },
+    { label: "Thành phố", value: selectedSlot?.city || event.city },
     { label: "Suất diễn", value: selectedSlot ? `${selectedSlot.time}` : "Chưa chọn" },
     { label: "Tình trạng", value: statusLabels[event.status] },
     { label: "Giá từ", value: formatVnd(event.price) },

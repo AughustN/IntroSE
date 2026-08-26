@@ -2,6 +2,7 @@ import type { AdminOrganizerDetail } from '@shared/admin/types.js';
 import type { Db } from '../../db/pool.js';
 import { pool } from '../../db/pool.js';
 import { err } from '../../http.js';
+import { UPCOMING_SHOWTIME } from '../catalog/visibility.js';
 
 export async function organizerQueue(db: Db = pool) {
   return (
@@ -178,16 +179,21 @@ export async function organizerDetail(id: number, db: Db = pool): Promise<AdminO
  * the inbox is a decision, not a registry, and the two screens no longer share one list.
  */
 export async function eventQueue(db: Db = pool) {
-  return (await db.query(`SELECT e.id, e.slug, e.title, e.status, e.moderation_status AS moderation, o.display_name AS organizer, e.review_note AS "reviewNote", e.created_at AS "createdAt" FROM events e JOIN organizers o ON o.id = e.organizer_id WHERE e.moderation_status = 'pending_review' AND e.status = 'on_sale' ORDER BY e.created_at`)).rows;
+  return (await db.query(`SELECT e.id, e.slug, e.title, e.status, e.moderation_status AS moderation, o.display_name AS organizer, e.review_note AS "reviewNote", e.created_at AS "createdAt", EXISTS (SELECT 1 FROM showtimes s WHERE ${UPCOMING_SHOWTIME}) AS "hasUpcoming" FROM events e JOIN organizers o ON o.id = e.organizer_id WHERE e.moderation_status = 'pending_review' AND e.status = 'on_sale' ORDER BY e.created_at`)).rows;
 }
 
 /**
  * Every event that has been approved. Approving is the entry ticket — flagged and removed rows
  * stay here because they once carried an approval, and the screen needs them exactly to watch or
  * take them down (UC-34 list view).
+ *
+ * `hasUpcoming` rides along because the Featured screen's "eligible" dropdown (UC-35) needs it: an
+ * event can sit at `status = 'on_sale'` in the database long after its last showtime has passed —
+ * nothing flips that column on a clock, only an organizer or admin action does — so `status` alone
+ * says nothing about whether the event is still something to feature.
  */
 export async function approvedEvents(db: Db = pool) {
-  return (await db.query(`SELECT e.id, e.slug, e.title, e.status, e.moderation_status AS moderation, o.display_name AS organizer, e.review_note AS "reviewNote", e.created_at AS "createdAt" FROM events e JOIN organizers o ON o.id = e.organizer_id WHERE e.moderation_status IN ('approved', 'flagged', 'removed') ORDER BY e.created_at DESC`)).rows;
+  return (await db.query(`SELECT e.id, e.slug, e.title, e.status, e.moderation_status AS moderation, o.display_name AS organizer, e.review_note AS "reviewNote", e.created_at AS "createdAt", EXISTS (SELECT 1 FROM showtimes s WHERE ${UPCOMING_SHOWTIME}) AS "hasUpcoming" FROM events e JOIN organizers o ON o.id = e.organizer_id WHERE e.moderation_status IN ('approved', 'flagged', 'removed') ORDER BY e.created_at DESC`)).rows;
 }
 
 /*
@@ -278,7 +284,17 @@ export async function replaceFeatured(events: Array<{ eventId: number; displayOr
   const ids = events.map((entry) => entry.eventId);
   if (new Set(ids).size !== ids.length || new Set(events.map((entry) => entry.displayOrder)).size !== events.length) throw err.conflict('featured_conflict');
   if (ids.length) {
-    const result = await db.query(`SELECT e.id FROM events e JOIN organizers o ON o.id = e.organizer_id WHERE e.id = ANY($1::bigint[]) AND e.status = 'on_sale' AND e.moderation_status = 'approved' AND o.status = 'approved' FOR UPDATE`, [ids]);
+    // `status = 'on_sale'` alone is not "still worth featuring" — it stays true long after an
+    // event's last showtime, because nothing flips it automatically (see `approvedEvents` above).
+    // Without the `hasUpcoming` check, an admin could save a list that then shows as an empty or
+    // "đã diễn" card on the home page with no error at the point of saving.
+    const result = await db.query(
+      `SELECT e.id FROM events e JOIN organizers o ON o.id = e.organizer_id
+        WHERE e.id = ANY($1::bigint[]) AND e.status = 'on_sale' AND e.moderation_status = 'approved' AND o.status = 'approved'
+          AND EXISTS (SELECT 1 FROM showtimes s WHERE ${UPCOMING_SHOWTIME})
+        FOR UPDATE`,
+      [ids],
+    );
     if (result.rowCount !== ids.length) throw err.conflict('featured_unavailable', 'Sự kiện không còn đủ điều kiện nổi bật.');
   }
   await db.query('DELETE FROM featured_events');

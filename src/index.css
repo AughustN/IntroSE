@@ -1148,6 +1148,35 @@ select:focus-visible {
   }
 }
 
+/*
+ * A thin, visible drag handle for the same rail — the opposite tradeoff from `no-scrollbar`
+ * above. A hidden scrollbar reads as "not scrollable" to anyone who doesn't already know to
+ * swipe or drag the row itself; a slim bar is the one affordance every user already recognises
+ * as "there is more, grab this to see it". Sized to sit under the chips rather than over them
+ * (the row carries extra bottom padding to match), unlike the page's default scrollbar.
+ */
+@utility chat-scrollbar-x {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-beige-kem) transparent;
+
+  &::-webkit-scrollbar {
+    height: 5px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: var(--color-beige-kem);
+    border-radius: 999px;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: var(--color-burgundy);
+  }
+}
+
 ::-webkit-scrollbar-track {
   background: var(--color-xanh-pho);
 }

@@ -58,6 +58,17 @@ const DRAFT_BADGE = {
 };
 
 /**
+ * An event whose showtimes have all passed, distinct from `status` — nothing flips `events.status`
+ * off a clock, so `on_sale` stays true long after the last showtime has, and the moderation badge
+ * above kept calling a finished run "Đã duyệt" as if it were still something to buy. Takes priority
+ * over the moderation badge once true, because "it's over" is the fact an organizer needs first.
+ */
+const FINISHED_BADGE = {
+  cls: "text-beige-kem/70 border-beige-kem/30 bg-beige-kem/10",
+  text: "Đã diễn",
+};
+
+/**
  * Match "nha nhac" against "Nhạc hội": NFD strips the combining marks, `đ` folds to `d`, and the
  * rest lowercases. Without this an organizer typing without diacritics — most keyboards here make
  * them optional — would miss their own event sitting right there in the list.
@@ -75,15 +86,25 @@ const normalise = (value: string): string =>
  * raw 4×4 of `status` × `moderation_status` is a database matrix, not answers; each option here
  * names one answer in the words the badge below already uses.
  */
-type StatusFilter = "all" | "live" | "pending_review" | "draft" | "cancelled";
+type StatusFilter = "all" | "live" | "pending_review" | "draft" | "finished" | "cancelled";
 
 const FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "Tất cả" },
   { value: "live", label: "Đang mở bán" },
   { value: "pending_review", label: "Chờ duyệt" },
   { value: "draft", label: "Bản nháp" },
+  { value: "finished", label: "Đã diễn" },
   { value: "cancelled", label: "Đã hủy" },
 ];
+
+/**
+ * Had at least one showtime and none of them are still ahead — distinct from a draft or an
+ * approved-but-never-scheduled event, neither of which ever had a date to run out. Shared between
+ * the filter and the row badge below so the two can never disagree about which events qualify.
+ */
+function isFinished(ev: MyEvent): boolean {
+  return ev.status !== "cancelled" && ev.status !== "draft" && ev.nextShowtimeAt !== null && !ev.hasUpcoming;
+}
 
 function matchesFilter(ev: MyEvent, filter: StatusFilter): boolean {
   const cancelled = ev.status === "cancelled";
@@ -92,14 +113,18 @@ function matchesFilter(ev: MyEvent, filter: StatusFilter): boolean {
       return true;
     // Same compound predicate the header's "Sự kiện đang mở bán" counter uses — one definition of
     // "live" everywhere, so filtering to it can never disagree with the number above the list.
+    // `hasUpcoming` is what keeps a finished run (status still `on_sale`, nothing ever flips it)
+    // from counting as live just because nobody has gone back and cancelled it.
     case "live":
-      return !cancelled && ev.moderation === "approved" && ev.status === "on_sale";
+      return !cancelled && ev.moderation === "approved" && ev.status === "on_sale" && ev.hasUpcoming;
     // `moderation` alone is not enough — see `DRAFT_BADGE` — an untouched draft carries the same
     // `pending_review` default an actually-submitted event does, and this filter means the latter.
     case "pending_review":
       return !cancelled && ev.status !== "draft" && ev.moderation === "pending_review";
     case "draft":
       return ev.status === "draft";
+    case "finished":
+      return isFinished(ev);
     case "cancelled":
       return cancelled;
   }
@@ -265,12 +290,16 @@ export default function EventList({
           // Cancelled outranks whatever the moderation column says: an approved event that has been
           // cancelled and refunded is not "Đã duyệt" in any sense the organizer cares about.
           const cancelled = ev.status === "cancelled";
+          const finished = isFinished(ev);
           const badge = cancelled
             ? { cls: "text-beige-kem border-burgundy/60 bg-burgundy/25", text: "Đã hủy" }
             : ev.status === "draft"
               ? DRAFT_BADGE
-              : (BADGE[ev.moderation] ?? { cls: "", text: ev.moderation });
-          const isLive = !cancelled && ev.moderation === "approved" && ev.status === "on_sale";
+              : finished
+                ? FINISHED_BADGE
+                : (BADGE[ev.moderation] ?? { cls: "", text: ev.moderation });
+          const isLive =
+            !cancelled && ev.moderation === "approved" && ev.status === "on_sale" && ev.hasUpcoming;
           return (
             <button
               key={ev.id}
@@ -298,9 +327,18 @@ export default function EventList({
                   >
                     {badge.text}
                   </span>
-                  <span className="font-mono text-xs text-beige-kem/45">
-                    {isLive ? "Đang hiển thị công khai" : "Chưa hiển thị công khai"}
-                  </span>
+                  {/*
+                    A finished event is still publicly visible if it was approved — nothing hid it,
+                    its showtimes just ran out — so "chưa hiển thị công khai" would be a second,
+                    contradicting claim sitting under a badge that already said "Đã diễn". Skipped
+                    rather than reworded: whether it is still listed is not the question an organizer
+                    is asking about a run that is already over.
+                  */}
+                  {!finished && (
+                    <span className="font-mono text-xs text-beige-kem/45">
+                      {isLive ? "Đang hiển thị công khai" : "Chưa hiển thị công khai"}
+                    </span>
+                  )}
                 </div>
               </div>
 

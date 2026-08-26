@@ -1140,15 +1140,29 @@ export default function App() {
    * Ten, because that is what the band is: an editorial shortlist. The API allows fifty entries, so
    * the cap belongs on the reading side — a console that let an Admin add an eleventh and then never
    * showed it would be worse than one that refuses.
+   *
+   * A pick going stale should not just shrink the row — an Admin who curated five and comes back to
+   * three empty slots gets no signal that anything needs attention, and a reader gets a thinner band
+   * for no reason the catalogue can't fix on its own. So a shortfall is topped up from the ordinary
+   * browse listing's own "most bookable first" ordering, same one `/su-kien` sorts by, skipping
+   * anything already in the curated set so the row never repeats an event to fill space.
    */
   useEffect(() => {
     catalogClient
       .featuredEvents()
-      .then((cards) => {
-        const upcoming = cards
-          .map(cardToMovie)
-          .filter((movie) => movie.status !== "finished")
-          .slice(0, TRENDING_COUNT);
+      .then(async (cards) => {
+        const curated = cards.map(cardToMovie).filter((movie) => movie.status !== "finished");
+        let combined = curated;
+        if (combined.length < TRENDING_COUNT) {
+          const curatedIds = new Set(curated.map((movie) => movie.id));
+          const { events: fillers } = await catalogClient.listEvents({
+            availability: "available",
+            pageSize: TRENDING_COUNT,
+          });
+          const backfill = fillers.map(cardToMovie).filter((movie) => !curatedIds.has(movie.id));
+          combined = [...curated, ...backfill];
+        }
+        const upcoming = combined.slice(0, TRENDING_COUNT);
         if (upcoming.length === 0 && import.meta.env.DEV) {
           setTrendingEvents(SAMPLE_MOVIES.slice(0, TRENDING_COUNT));
           return;

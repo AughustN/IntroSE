@@ -214,6 +214,18 @@ export default function HeroVideo({
    */
   const userPausedRef = useRef(false);
 
+  /*
+   * Whether the reader has interacted with the page at all, across every trailer this hero has
+   * shown — not just the one currently loaded.
+   *
+   * A queue advancing past `onTrailerEnded`, or a new featured event landing, remounts the `<video>`
+   * (it is keyed on the trailer below) with a brand new element that starts `muted` again, same as
+   * the very first one did. The one-shot `window` listener further down only ever unmuted the
+   * element that happened to be mounted the moment it fired; every element mounted after that had
+   * no listener left to unmute it. This ref is what survives the remount.
+   */
+  const hasInteractedRef = useRef(false);
+
   const togglePlayback = () => {
     const video = videoRef.current;
     if (!video) return;
@@ -372,6 +384,9 @@ export default function HeroVideo({
     const video = videoRef.current;
     if (!video) return;
 
+    // The freshly mounted element (see the ref above) otherwise reopens muted even after the
+    // reader has already unmuted an earlier trailer.
+    video.muted = !hasInteractedRef.current;
     video.currentTime = 0;
     video.load();
     setShowPoster(true);
@@ -433,10 +448,12 @@ export default function HeroVideo({
    *
    * The first real gesture anywhere on the page lifts the restriction, and this unmutes on it. From
    * that moment the volume is whatever the machine's is, since nothing here sets `volume`. `once`
-   * on each listener makes the whole thing self-removing.
+   * on each listener makes the *listener* self-removing — `hasInteractedRef` is what makes the
+   * unmuting itself outlive it, for every trailer element mounted afterward.
    */
   useEffect(() => {
     const unmute = () => {
+      hasInteractedRef.current = true;
       const video = videoRef.current;
       if (video) video.muted = false;
     };
@@ -810,31 +827,43 @@ export default function HeroVideo({
           {/*
             The opened screen's control, and the hand-off partner of the tuning dial.
 
-            Same button, same two states, drawn where a player's controls live rather than on a
-            chin that no longer exists. It cross-fades in on `--player-opacity` exactly as the
-            cabinet fades out, so there is a control on the picture at every point of the scroll and
-            never two at once. Inside the screen, so the clip path carries it — by the time it is
-            visible the bow has gone and the path is a rectangle.
+            A corner button read as a video-player chrome; the opened screen is meant to read as the
+            picture itself, so the whole frame is the control instead — click anywhere to toggle,
+            same `togglePlayback` the tuning dial calls. Gated on `--player-events` exactly like the
+            button it replaces, so it stays inert (and the tuning dial stays the only control) until
+            the cabinet has actually faded out.
+
+            Paused is the one state that needs a visible affordance — a reader who stopped the video
+            has no other way to tell it will resume on another click — so only that state draws the
+            centered glyph, cross-fading with the same `--player-opacity` the corner button used.
           */}
           {!plain && (
-            <button
-              type="button"
-              onClick={togglePlayback}
-              aria-label={paused ? "Phát trailer" : "Tạm dừng trailer"}
-              title={paused ? "Phát trailer" : "Tạm dừng trailer"}
-              style={{
-                opacity: "var(--player-opacity, 0)",
-                visibility: "var(--player-vis, hidden)" as React.CSSProperties["visibility"],
-                pointerEvents: "var(--player-events, none)" as React.CSSProperties["pointerEvents"],
-              }}
-              className="absolute bottom-6 right-6 z-[5] grid h-12 w-12 place-items-center rounded-full border border-white/45 bg-black/40 text-white/85 backdrop-blur-sm transition hover:border-white hover:text-white sm:bottom-8 sm:right-8"
-            >
-              {paused ? (
-                <Play className="h-4 w-4" fill="currentColor" strokeWidth={0} />
-              ) : (
-                <Pause className="h-4 w-4" fill="currentColor" strokeWidth={0} />
+            <>
+              <button
+                type="button"
+                onClick={togglePlayback}
+                aria-label={paused ? "Phát trailer" : "Tạm dừng trailer"}
+                title={paused ? "Phát trailer" : "Tạm dừng trailer"}
+                style={{
+                  pointerEvents: "var(--player-events, none)" as React.CSSProperties["pointerEvents"],
+                }}
+                className="absolute inset-0 z-[5] cursor-pointer"
+              />
+              {paused && (
+                <div
+                  aria-hidden
+                  style={{
+                    opacity: "var(--player-opacity, 0)",
+                    visibility: "var(--player-vis, hidden)" as React.CSSProperties["visibility"],
+                  }}
+                  className="pointer-events-none absolute inset-0 z-[5] grid place-items-center"
+                >
+                  <span className="grid h-16 w-16 place-items-center rounded-full border border-white/45 bg-black/40 text-white/85 backdrop-blur-sm">
+                    <Play className="h-6 w-6" fill="currentColor" strokeWidth={0} />
+                  </span>
+                </div>
               )}
-            </button>
+            </>
           )}
         </div>
 

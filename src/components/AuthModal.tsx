@@ -62,11 +62,19 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [highlightGoogle, setHighlightGoogle] = useState(false);
 
   const fail = (e: unknown) => {
     if (e instanceof ApiClientError) {
       if (e.code === "captcha_required" || e.code === "captcha_failed") {
         setRequireCaptcha(true);
+      }
+      if (e.code === "account_uses_google") {
+        // The message alone leaves the Google button below the form easy to miss —
+        // pull the user's eye to it instead of just naming it in prose.
+        setHighlightGoogle(true);
+        googleBtnRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        setTimeout(() => setHighlightGoogle(false), 2500);
       }
       setError(e.userMessage || "Có lỗi xảy ra, vui lòng thử lại.");
     } else {
@@ -309,7 +317,13 @@ export default function AuthModal({ onClose, onLogin }: AuthModalProps) {
         </div>
 
         {GOOGLE_CLIENT_ID ? (
-          <div ref={googleBtnRef} className="flex justify-center" />
+          <div
+            className={`flex justify-center rounded-xl p-1 transition-shadow duration-300 ${
+              highlightGoogle ? "shadow-[0_0_0_4px_#d93025]" : ""
+            }`}
+          >
+            <div ref={googleBtnRef} className="flex justify-center" />
+          </div>
         ) : (
           <div className="rounded-xl border-2 border-beige-kem bg-surface-2 p-3 text-center text-eyebrow text-beige-kem/50">
             Đăng nhập Google chưa được cấu hình.

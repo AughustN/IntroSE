@@ -250,7 +250,9 @@ export const OrganizerEventsPage: React.FC<{
         (rows) =>
           alive &&
           setLiveEventCount(
-            rows.filter((e) => e.status === "on_sale" && e.moderation === "approved").length,
+            rows.filter(
+              (e) => e.status === "on_sale" && e.moderation === "approved" && e.hasUpcoming,
+            ).length,
           ),
       )
       .catch(() => alive && setLiveEventCount(null));

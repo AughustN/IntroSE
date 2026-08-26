@@ -25,6 +25,7 @@ const event = (over: Partial<MyEvent> = {}): MyEvent => ({
   totalRevenueVnd: 0,
   nextShowtimeAt: null,
   venueName: null,
+  hasUpcoming: false,
   // `flowSteps` reads none of these — here only because the fixture builds a whole MyEvent.
   venueId: null,
   ...over,
