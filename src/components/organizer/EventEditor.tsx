@@ -23,6 +23,7 @@ import EventPreviewOverlay from "./EventPreviewOverlay";
 import EventFlowRail from "./EventFlowRail";
 import FlowProgressStrip from "./FlowProgressStrip";
 import { flowSteps, type FlowStep } from "./flowSteps";
+import OrganizerConcessionsTab from "./OrganizerConcessionsTab";
 import ShowtimeList from "./ShowtimeList";
 import { Refusal } from "./states";
 import { VN_PROVINCES } from "../../vnProvinces";
@@ -631,6 +632,13 @@ export default function EventEditor({
               }}
             />
           </div>
+
+          {/*
+            Bắp nước (014): the menu belongs to the EVENT — every showtime sells the same list — so
+            it lives beside showtimes in the per-event editor rather than becoming a console section
+            of its own. A nav entry would advertise a page that does not exist.
+          */}
+          <OrganizerConcessionsTab eventId={event.id} />
         </div>
       </div>
 

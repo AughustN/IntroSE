@@ -168,6 +168,12 @@ export interface Booking {
    * do.
    */
   tickets?: Array<{ id: number; label: string; status: "valid" | "used" | "refunded" }>;
+  /**
+   * Snapshot snack lines of this order (014) and the ONE voucher that redeems them at the venue
+   * counter. Absent when the buyer bought none.
+   */
+  concessions?: Array<{ label: string; quantity: number; unitPriceAmount: number }>;
+  voucher?: { code: string; status: "unredeemed" | "redeemed" | "void"; redeemedAt: string | null };
 }
 
 export interface CheckoutPayload {

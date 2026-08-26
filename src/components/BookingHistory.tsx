@@ -245,6 +245,20 @@ export default function BookingHistory({ bookings, onBack, onSelectBooking, onCa
                               {booking.id}
                             </dd>
                           </div>
+                          {booking.concessions && booking.concessions.length > 0 && (
+                            <div>
+                              <dt className="label-eyebrow text-ink-soft">Bắp nước</dt>
+                              <dd className="mt-0.5 font-meta text-body text-beige-kem">
+                                {booking.concessions.reduce((sum, line) => sum + line.quantity, 0)}{" "}
+                                phần ·{" "}
+                                {booking.voucher?.status === "redeemed"
+                                  ? "Đã nhận"
+                                  : booking.voucher?.status === "void"
+                                    ? "Đã huỷ"
+                                    : "Chưa nhận"}
+                              </dd>
+                            </div>
+                          )}
                           {/*
                             The status labels the price, and the colour belongs to the status, not
                             to the money. Tinting the amount made a valid ticket and a cancelled one

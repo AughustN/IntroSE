@@ -33,6 +33,7 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
   const [resending, setResending] = useState(false);
   const [resendError, setResendError] = useState<string | null>(null);
   const [qrImage, setQrImage] = useState<string | null>(null);
+  const [voucherQr, setVoucherQr] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const ticketRef = useRef<HTMLDivElement>(null);
@@ -57,6 +58,28 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
       current = false;
     };
   }, [ticketCode]);
+
+  // The snack voucher is its own code and its own tile — one scan at the counter hands over every
+  // line of the order (014 FR-008/FR-009). The await keeps the state write out of the effect body,
+  // where it would fire a cascading render on every mount.
+  const voucherCode = booking.voucher?.code ?? null;
+  useEffect(() => {
+    let current = true;
+    void (async () => {
+      const url = voucherCode
+        ? await QRCode.toDataURL(voucherCode, {
+            width: 480,
+            margin: 2,
+            errorCorrectionLevel: "M",
+            color: { dark: QR_DARK, light: QR_LIGHT },
+          })
+        : null;
+      if (current) setVoucherQr(url);
+    })();
+    return () => {
+      current = false;
+    };
+  }, [voucherCode]);
 
   /*
    * Tell the mask where the seam is.
@@ -399,6 +422,57 @@ export default function TicketTicket({ booking, onHomeClick }: TicketTicketProps
             </p>
           </div>
         </div>
+
+        {/*
+          Bắp nước (014): its own strip under the ticket, because it is redeemed at a counter, not
+          at a door — and its QR is scanned once for the WHOLE order, so the lines ride with it.
+        */}
+        {booking.concessions && booking.concessions.length > 0 && (
+          <div className="grid grid-cols-1 gap-6 border-t border-dashed border-beige-kem/45 p-6 sm:p-8 md:grid-cols-12">
+            <div className="min-w-0 md:col-span-8">
+              <p className="label-eyebrow text-ink-soft">Bắp nước · nhận tại quầy sự kiện</p>
+              <ul className="mt-3 space-y-2">
+                {booking.concessions.map((line) => (
+                  <li
+                    key={line.label}
+                    className="flex items-baseline justify-between gap-4 font-meta text-body"
+                  >
+                    <span className="text-beige-kem">
+                      {line.label} ×{line.quantity}
+                    </span>
+                    <span className="tabular-nums text-beige-kem">
+                      {formatVnd(line.quantity * line.unitPriceAmount)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-4 font-meta text-meta leading-5 text-ink-soft">
+                Xuất trình mã bên phải tại quầy của ban tổ chức để nhận toàn bộ phần đã đặt.
+              </p>
+            </div>
+            <div className="flex flex-col items-center justify-center gap-3 border border-beige-kem/25 p-5 md:col-span-4">
+              <div className="grid h-32 w-32 place-items-center bg-white p-2">
+                {voucherQr ? (
+                  <img
+                    src={voucherQr}
+                    alt="Mã QR nhận bắp nước"
+                    className={booking.voucher?.status === "void" ? "opacity-40" : "h-full w-full"}
+                  />
+                ) : (
+                  <span className="font-meta text-meta text-ink-soft">Đang tạo QR…</span>
+                )}
+              </div>
+              <p className="label-eyebrow text-center text-beige-kem">Voucher bắp nước</p>
+              <p className="text-center font-meta text-eyebrow leading-5 text-ink-soft">
+                {booking.voucher?.status === "redeemed"
+                  ? "Đã nhận"
+                  : booking.voucher?.status === "void"
+                    ? "Đã huỷ"
+                    : "Chưa nhận"}
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Foot: the small print, and the barcode that makes the whole thing look printed. */}
         <div className="flex flex-col gap-4 border-t border-dashed border-beige-kem/45 px-6 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-8">

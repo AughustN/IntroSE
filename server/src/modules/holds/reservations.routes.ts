@@ -12,6 +12,7 @@ import {
   hold,
   removeQuantity,
   removeSeats,
+  setConcessions,
 } from './holds.service.js';
 import { verifyTimingTicket } from '../../services/timingTicket.js';
 import { verifyQueueToken } from '../../services/waitingRoom.service.js';
@@ -213,6 +214,28 @@ reservationsRouter.patch(
     }
     if (!result) result = await getReservation(userId, reservationId);
     res.json(result);
+  }),
+);
+
+// PUT /api/reservations/:id/concessions — replace the snack cart wholesale (014 FR-004/005).
+// Replacement-set, so an empty `items` clears. The 1..10 cap is validated here AND by the schema's
+// CHECK; the service re-checks it for a Vietnamese message rather than a raw constraint error.
+const concessionsBody = z.object({
+  items: z
+    // The 1..10 cap is the SERVICE's refusal with its own code; zod only bounds the payload's
+    // sanity so a hostile body cannot make the service loop over thousands of entries.
+    .array(z.object({ concessionItemId: id, quantity: z.number().int().min(1).max(50) }))
+    .max(50),
+});
+
+reservationsRouter.put(
+  '/reservations/:id/concessions',
+  validate(concessionsBody),
+  asyncH(async (req, res) => {
+    const body = req.body as z.infer<typeof concessionsBody>;
+    res.json(
+      await setConcessions(req.auth!.userId, numericParam(req.params.id), body.items),
+    );
   }),
 );
 

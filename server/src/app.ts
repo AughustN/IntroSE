@@ -5,6 +5,9 @@ import { config } from "./config.js";
 import { errorHandler, notFound } from "./middleware/error.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
 import { catalogPublicRouter } from "./modules/catalog/catalog.public.routes.js";
+import { concessionsPublicRouter } from "./modules/concessions/concessions.public.routes.js";
+import { concessionsOrganizerRouter } from "./modules/concessions/concessions.organizer.routes.js";
+import { concessionsCheckinRouter } from "./modules/concessions/concessions.checkin.routes.js";
 import { organizerRouter } from "./modules/catalog/organizer.routes.js";
 import { studioRouter } from "./modules/studio/studio.routes.js";
 import { adminRouter } from "./modules/admin/admin.routes.js";
@@ -67,6 +70,9 @@ export function createApp(): Express {
 
   app.use("/api", authRouter);
   app.use("/api", catalogPublicRouter);
+  // The public snack menu (014) lives in the catalogue's public zone: no auth, same IP bucket,
+  // and mounted before any router with a router-level `requireAuth` (same reason as reviews).
+  app.use("/api", concessionsPublicRouter);
   // Public, and mounted up here for the same reason the review listing is: everything below with a
   // router-level `requireAuth` would answer 401 for these paths before their own handler ran, and
   // the landing page reads its ad placements before anybody signs in.
@@ -87,12 +93,17 @@ export function createApp(): Express {
   // `reservationsRouter` has a router-wide auth guard. Mount wallet first so the
   // public, signature-verified VNPay IPN callback can reach its handler.
   app.use("/api", reservationsRouter);
+  // Counter-side voucher redemption (014 US3) — own guarded router at /api/checkin.
+  app.use("/api/checkin", concessionsCheckinRouter);
   app.use("/api/organizer", seatmapRouter);
   // Studio owns PATCH /events/:id — it widened the handler beyond four text fields and made it
   // transactional with re-moderation, so it must be mounted AHEAD of the catalog organizer router
   // that used to serve that path (feature 006).
   app.use("/api/organizer", studioRouter);
   app.use("/api/organizer", adsOrganizerRouter);
+  // Snack-menu CRUD (014 US2) — own router so it carries its own requireAuth+requireOrganizer
+  // without leaning on the catalog router's registration order.
+  app.use("/api/organizer", concessionsOrganizerRouter);
   app.use("/api/organizer", organizerRouter);
   // One router owns /api/admin.  supersedes the old catalog moderation router: it
   // serves every route that one did and adds organizers, reports and audit logs. Mounting both

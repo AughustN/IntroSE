@@ -1,4 +1,5 @@
 import type { Reservation, ReservationItem, ReservationStatus } from '@shared/holds/types.js';
+import type { ReservationConcessionLine } from '@shared/types/fnb.js';
 import type pg from 'pg';
 import type { Db } from '../../db/pool.js';
 import { pool } from '../../db/pool.js';
@@ -488,7 +489,11 @@ export async function listGaLines(
   return rows;
 }
 
-export function toReservationView(row: ReservationRow, items: ItemRow[]): Reservation {
+export function toReservationView(
+  row: ReservationRow,
+  items: ItemRow[],
+  concessionLines: ReservationConcessionLine[] = [],
+): Reservation {
   const mapped: ReservationItem[] = items.map((i) => ({
     id: i.id,
     ticketTierId: i.ticket_tier_id,
@@ -499,7 +504,14 @@ export function toReservationView(row: ReservationRow, items: ItemRow[]): Reserv
     unitPriceAmount: i.unit_price_amount,
   }));
 
-  return {
+  // Concession lines ride on the same total (feature 014). Absent when the cart is empty, so
+  // tickets-only payloads stay byte-identical to what every existing consumer expects.
+  const concessionsTotal = concessionLines.reduce(
+    (sum, line) => sum + line.quantity * line.unitPriceAmount,
+    0,
+  );
+
+  const view: Reservation = {
     id: row.id,
     showtimeId: row.showtime_id,
     status: row.status,
@@ -507,9 +519,11 @@ export function toReservationView(row: ReservationRow, items: ItemRow[]): Reserv
     createdAt: row.created_at.toISOString(),
     extendedOnce: row.extended_once,
     items: mapped,
-    // Whole VND đồng (D1/STD-03) — priced at hold time, never recomputed from the live tier.
-    totalAmount: mapped.reduce((sum, i) => sum + i.quantity * i.unitPriceAmount, 0),
+    // Whole VND đồng (D1/STD-03) — tickets priced at hold time plus the cart's live snack lines.
+    totalAmount: mapped.reduce((sum, i) => sum + i.quantity * i.unitPriceAmount, 0) + concessionsTotal,
   };
+  if (concessionLines.length > 0) view.concessions = concessionLines;
+  return view;
 }
 
 // ---- Sweep ----------------------------------------------------------------

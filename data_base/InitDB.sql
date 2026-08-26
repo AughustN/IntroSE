@@ -6094,4 +6094,81 @@ ALTER TABLE "public"."organizer_appeals" ADD CONSTRAINT "organizer_appeals_organ
 ALTER TABLE "public"."organizer_appeals" ADD CONSTRAINT "organizer_appeals_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."users" ("id") ON DELETE CASCADE ON UPDATE NO ACTION;
 ALTER TABLE "public"."organizer_appeals" ADD CONSTRAINT "organizer_appeals_reviewed_by_fkey" FOREIGN KEY ("reviewed_by") REFERENCES "public"."users" ("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
+-- ----------------------------------------------------------------------------
+-- Feature 014 — Concession add-ons (bắp nước): synced with 0039_concession_add_ons.sql
+-- ----------------------------------------------------------------------------
+
+CREATE SEQUENCE IF NOT EXISTS "public"."concession_items_id_seq" AS int8 START WITH 1 INCREMENT BY 1;
+CREATE TABLE IF NOT EXISTS "public"."concession_items" (
+  "id" int8 NOT NULL DEFAULT nextval('concession_items_id_seq'::regclass),
+  "event_id" int8 NOT NULL,
+  "label" text COLLATE "pg_catalog"."default" NOT NULL,
+  "description" text COLLATE "pg_catalog"."default",
+  "price_amount" int8 NOT NULL,
+  "state" text COLLATE "pg_catalog"."default" NOT NULL DEFAULT 'listed'::text,
+  "created_at" timestamptz(6) NOT NULL DEFAULT now(),
+  "updated_at" timestamptz(6) NOT NULL DEFAULT now()
+);
+ALTER TABLE "public"."concession_items" ADD CONSTRAINT "concession_items_pkey" PRIMARY KEY ("id");
+ALTER TABLE "public"."concession_items" ADD CONSTRAINT "concession_items_price_check" CHECK (price_amount >= 0);
+ALTER TABLE "public"."concession_items" ADD CONSTRAINT "concession_items_state_check" CHECK (state = ANY (ARRAY['listed'::text, 'stopped'::text]));
+
+CREATE SEQUENCE IF NOT EXISTS "public"."reservation_concessions_id_seq" AS int8 START WITH 1 INCREMENT BY 1;
+CREATE TABLE IF NOT EXISTS "public"."reservation_concessions" (
+  "id" int8 NOT NULL DEFAULT nextval('reservation_concessions_id_seq'::regclass),
+  "reservation_id" int8 NOT NULL,
+  "concession_item_id" int8 NOT NULL,
+  "quantity" int4 NOT NULL DEFAULT 1,
+  "unit_price_amount" int8 NOT NULL
+);
+ALTER TABLE "public"."reservation_concessions" ADD CONSTRAINT "reservation_concessions_pkey" PRIMARY KEY ("id");
+ALTER TABLE "public"."reservation_concessions" ADD CONSTRAINT "reservation_concessions_reservation_id_concession_item_id_key" UNIQUE ("reservation_id", "concession_item_id");
+ALTER TABLE "public"."reservation_concessions" ADD CONSTRAINT "reservation_concessions_quantity_check" CHECK (quantity BETWEEN 1 AND 10);
+
+CREATE SEQUENCE IF NOT EXISTS "public"."order_concessions_id_seq" AS int8 START WITH 1 INCREMENT BY 1;
+CREATE TABLE IF NOT EXISTS "public"."order_concessions" (
+  "id" int8 NOT NULL DEFAULT nextval('order_concessions_id_seq'::regclass),
+  "order_id" int8 NOT NULL,
+  "concession_item_id" int8 NOT NULL,
+  "item_label" text COLLATE "pg_catalog"."default" NOT NULL,
+  "unit_price_amount" int8 NOT NULL,
+  "quantity" int4 NOT NULL DEFAULT 1
+);
+ALTER TABLE "public"."order_concessions" ADD CONSTRAINT "order_concessions_pkey" PRIMARY KEY ("id");
+ALTER TABLE "public"."order_concessions" ADD CONSTRAINT "order_concessions_order_id_concession_item_id_key" UNIQUE ("order_id", "concession_item_id");
+ALTER TABLE "public"."order_concessions" ADD CONSTRAINT "order_concessions_quantity_check" CHECK (quantity BETWEEN 1 AND 10);
+
+CREATE SEQUENCE IF NOT EXISTS "public"."concession_vouchers_id_seq" AS int8 START WITH 1 INCREMENT BY 1;
+CREATE TABLE IF NOT EXISTS "public"."concession_vouchers" (
+  "id" int8 NOT NULL DEFAULT nextval('concession_vouchers_id_seq'::regclass),
+  "order_id" int8 NOT NULL,
+  "code" text COLLATE "pg_catalog"."default" NOT NULL,
+  "code_hash" text COLLATE "pg_catalog"."default" NOT NULL,
+  "status" text COLLATE "pg_catalog"."default" NOT NULL DEFAULT 'unredeemed'::text,
+  "redeemed_at" timestamptz(6),
+  "redeemed_by" int8,
+  "created_at" timestamptz(6) NOT NULL DEFAULT now()
+);
+ALTER TABLE "public"."concession_vouchers" ADD CONSTRAINT "concession_vouchers_pkey" PRIMARY KEY ("id");
+ALTER TABLE "public"."concession_vouchers" ADD CONSTRAINT "concession_vouchers_code_hash_key" UNIQUE ("code_hash");
+ALTER TABLE "public"."concession_vouchers" ADD CONSTRAINT "concession_vouchers_code_key" UNIQUE ("code");
+ALTER TABLE "public"."concession_vouchers" ADD CONSTRAINT "concession_vouchers_order_id_key" UNIQUE ("order_id");
+ALTER TABLE "public"."concession_vouchers" ADD CONSTRAINT "concession_vouchers_status_check" CHECK (status = ANY (ARRAY['unredeemed'::text, 'redeemed'::text, 'void'::text]));
+
+CREATE INDEX IF NOT EXISTS "idx_concession_items_event" ON "public"."concession_items" USING btree ("event_id") WHERE (state = 'listed'::text);
+CREATE INDEX IF NOT EXISTS "idx_order_concessions_order" ON "public"."order_concessions" USING btree ("order_id");
+CREATE INDEX IF NOT EXISTS "idx_reservation_concessions_reservation" ON "public"."reservation_concessions" USING btree ("reservation_id");
+
+-- Foreign Keys for concession_items
+ALTER TABLE "public"."concession_items" ADD CONSTRAINT "concession_items_event_id_fkey" FOREIGN KEY ("event_id") REFERENCES "public"."events" ("id") ON DELETE CASCADE ON UPDATE NO ACTION;
+-- Foreign Keys for reservation_concessions
+ALTER TABLE "public"."reservation_concessions" ADD CONSTRAINT "reservation_concessions_concession_item_id_fkey" FOREIGN KEY ("concession_item_id") REFERENCES "public"."concession_items" ("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+ALTER TABLE "public"."reservation_concessions" ADD CONSTRAINT "reservation_concessions_reservation_id_fkey" FOREIGN KEY ("reservation_id") REFERENCES "public"."reservations" ("id") ON DELETE CASCADE ON UPDATE NO ACTION;
+-- Foreign Keys for order_concessions
+ALTER TABLE "public"."order_concessions" ADD CONSTRAINT "order_concessions_concession_item_id_fkey" FOREIGN KEY ("concession_item_id") REFERENCES "public"."concession_items" ("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+ALTER TABLE "public"."order_concessions" ADD CONSTRAINT "order_concessions_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."orders" ("id") ON DELETE CASCADE ON UPDATE NO ACTION;
+-- Foreign Keys for concession_vouchers
+ALTER TABLE "public"."concession_vouchers" ADD CONSTRAINT "concession_vouchers_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."orders" ("id") ON DELETE CASCADE ON UPDATE NO ACTION;
+ALTER TABLE "public"."concession_vouchers" ADD CONSTRAINT "concession_vouchers_redeemed_by_fkey" FOREIGN KEY ("redeemed_by") REFERENCES "public"."users" ("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
+
 COMMIT;

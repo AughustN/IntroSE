@@ -1,3 +1,5 @@
+import { createHash, randomUUID } from "node:crypto";
+import type { PoolClient } from "pg";
 import { pool, withTransaction, type Db } from "../../db/pool.js";
 import { err } from "../../http.js";
 import { broadcastSeatUpdate } from "../../realtime/io.js";
@@ -8,6 +10,7 @@ import {
   closeWaitlistsForEvent,
 } from "../notifications/notifications.service.js";
 import { insertAudit } from "../admin/audit.js";
+import * as concessionRepo from "../concessions/concessions.repo.js";
 
 type RefundRow = {
   ticket_id: number;
@@ -133,13 +136,81 @@ export async function settleEventCancellation(
     [eventId],
   );
   for (const ticket of tickets.rows) await refundTicket(db, ticket);
+  const refundedConcessions = await refundConcessionOrders(db, eventId);
   await updateOrderRefundStatus(db, [...new Set(tickets.rows.map((ticket) => ticket.order_id))]);
   await closeWaitlistsForEvent(db, eventId, "cancelled");
   await queueEventNotification(db, eventId, "event_cancelled", body, "cancellation");
   return {
     refundedTickets: tickets.rowCount ?? 0,
-    refundedAmount: tickets.rows.reduce((sum, ticket) => sum + ticket.refundable_amount, 0),
+    refundedAmount:
+      tickets.rows.reduce((sum, ticket) => sum + ticket.refundable_amount, 0) +
+      refundedConcessions,
   };
+}
+
+/**
+ * Settle every snack order of the event being cancelled.
+ *
+ * The buyer paid tickets AND bắp nước in one debit, so a cancelled show owes both back — at the
+ * SNAPSHOT price on `order_concessions`, never today's menu (FR-010). An order whose voucher was
+ * already REDEEMED got its snacks and keeps its money; only unredeemed vouchers are paid out and
+ * voided, which is also what makes a later counter scan answer "đã hoàn tiền" instead of handing
+ * over snacks for a show that never happened. One 'refund' ledger row per ORDER here — the lines
+ * move as a set, so they settle as one.
+ *
+ * Double-payment is structurally impossible rather than merely guarded: this runs inside the
+ * transaction holding the event row's lock, and a second run returns before reaching here.
+ */
+async function refundConcessionOrders(db: Db, eventId: number): Promise<number> {
+  const orders = await db.query<{ order_id: string; user_id: number; amount: string }>(
+    `SELECT o.id AS order_id, o.user_id,
+            SUM(oc.quantity * oc.unit_price_amount)::bigint AS amount
+       FROM orders o
+       JOIN reservations r ON r.id = o.reservation_id
+       JOIN showtimes s ON s.id = r.showtime_id
+       JOIN order_concessions oc ON oc.order_id = o.id
+      WHERE s.event_id = $1
+        AND o.payment_status IN ('paid', 'partially_refunded', 'refunded')
+        AND NOT EXISTS (
+              SELECT 1 FROM concession_vouchers cv
+               WHERE cv.order_id = o.id AND cv.status IN ('void', 'redeemed'))
+      GROUP BY o.id, o.user_id
+      ORDER BY o.id`,
+    [eventId],
+  );
+
+  let total = 0;
+  const settledOrderIds: number[] = [];
+  for (const row of orders.rows) {
+    const amount = Number(row.amount);
+    const orderId = Number(row.order_id);
+    const wallet = await db.query<{ id: number }>(
+      `SELECT id FROM wallets WHERE user_id = $1 FOR UPDATE`,
+      [row.user_id],
+    );
+    if (!wallet.rows[0]) throw err.notFound("wallet_not_found");
+    const balance = await db.query<{ balance_amount: number }>(
+      `UPDATE wallets SET balance_amount = balance_amount + $2, updated_at = now()
+        WHERE id = $1 RETURNING balance_amount`,
+      [wallet.rows[0].id, amount],
+    );
+    await db.query(
+      `INSERT INTO wallet_transactions (wallet_id, kind, amount, balance_after, order_id)
+       VALUES ($1, 'refund', $2, $3, $4)`,
+      [wallet.rows[0].id, amount, balance.rows[0].balance_amount, orderId],
+    );
+    total += amount;
+    settledOrderIds.push(orderId);
+  }
+
+  if (settledOrderIds.length > 0) {
+    await db.query(
+      `UPDATE concession_vouchers SET status = 'void'
+        WHERE order_id = ANY($1::bigint[]) AND status = 'unredeemed'`,
+      [settledOrderIds],
+    );
+  }
+  return total;
 }
 
 /**
@@ -274,4 +345,24 @@ export async function checkInTicket(
     ticket: { ...existing, status: "checked_in" },
     already: false,
   };
+}
+
+/**
+ * Mint the ONE concession voucher an order carries (014 FR-008), inside the caller's checkout
+ * transaction. The code/hash pair is byte-for-byte the ticket pattern — `randomUUID` payload,
+ * SHA-256 at rest (wallet.service's ticket insert) — so the counter scanner speaks one language
+ * for both kinds of code. `UNIQUE(order_id)` in the schema makes "exactly once" a fact; the repo
+ * answers with the existing row if a retry ever races here.
+ */
+export async function mintConcessionVoucher(
+  client: PoolClient,
+  orderId: number,
+): Promise<concessionRepo.MintedVoucher> {
+  const code = randomUUID();
+  return concessionRepo.mintVoucher(
+    client,
+    orderId,
+    code,
+    createHash("sha256").update(code).digest("hex"),
+  );
 }

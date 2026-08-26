@@ -4,7 +4,42 @@
  */
 
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
-import { organizerApi, type ScanTicket } from "../../services/catalogClient";
+import {
+  ApiError,
+  organizerApi,
+  type ConcessionRedemption,
+  type ScanTicket,
+} from "../../services/catalogClient";
+import { formatVnd } from "../../services/currency";
+
+/**
+ * What one scanned code turned out to be. The counter scans TWO kinds of QR — a ticket admits its
+ * holder, a concession voucher (014) hands over the whole order's snacks — and staff should not
+ * have to know which is which.
+ */
+type ScanOutcome =
+  | { kind: "ticket"; ticket: ScanTicket; already: boolean }
+  | { kind: "concession"; voucher: ConcessionRedemption }
+  | { kind: "error"; message: string };
+
+/** Ticket first; only "no such ticket of yours" falls through to the voucher lookup. */
+async function scanCode(value: string): Promise<ScanOutcome> {
+  try {
+    const { ticket, already } = await organizerApi.checkIn(value);
+    return { kind: "ticket", ticket, already };
+  } catch (e) {
+    // A void ticket must keep its own refusal — only a clean miss tries the other kind.
+    if (!(e instanceof ApiError) || e.apiCode !== "ticket_not_found") {
+      return { kind: "error", message: e instanceof Error ? e.message : "Mã không đọc được." };
+    }
+  }
+  try {
+    const voucher = await organizerApi.concessionsRedeem(value);
+    return { kind: "concession", voucher };
+  } catch (e) {
+    return { kind: "error", message: e instanceof Error ? e.message : "Mã không đọc được." };
+  }
+}
 
 /*
  * The scanner, and its 316KB of `jsqr`, fetched when the camera is switched on.
@@ -39,7 +74,8 @@ export default function CheckInPanel({
 }) {
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState("");
-  const [result, setResult] = useState<ScanTicket | null>(null);
+  const [ticketResult, setTicketResult] = useState<ScanTicket | null>(null);
+  const [concessionResult, setConcessionResult] = useState<ConcessionRedemption | null>(null);
   const [already, setAlready] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -88,22 +124,38 @@ export default function CheckInPanel({
   const addLog = (kind: "ok" | "warning" | "bad", text: string) =>
     setLog((entries) => [{ id: Date.now() + Math.random(), kind, text }, ...entries].slice(0, 30));
 
+  /** Apply a finished scan to the panel's readouts. Shared by the typed and camera paths. */
+  const applyOutcome = (outcome: ScanOutcome): boolean => {
+    setTicketResult(null);
+    setConcessionResult(null);
+    setError(null);
+    setAlready(false);
+    if (outcome.kind === "error") {
+      setError(outcome.message);
+      return false;
+    }
+    if (outcome.kind === "ticket") {
+      setTicketResult(outcome.ticket);
+      setAlready(outcome.already);
+      return !outcome.already;
+    }
+    setConcessionResult(outcome.voucher);
+    return true;
+  };
+
+  const concessionSummary = (voucher: ConcessionRedemption): string => {
+    const units = voucher.lines.reduce((sum, line) => sum + line.quantity, 0);
+    return `${voucher.buyerName} · bắp nước ×${units}`;
+  };
+
   /** The deliberate path: typed, pressed, or confirmed from the card. Earns the full readout. */
   const checkIn = async (raw: string) => {
     const value = raw.trim();
     if (!value) return;
     setViaCamera(false);
     setBusy(true);
-    setError(null);
-    setAlready(false);
     try {
-      const { ticket, already: seen } = await organizerApi.checkIn(value);
-      setResult(ticket);
-      setAlready(seen);
-      if (!seen) onCheckedIn?.();
-    } catch (e) {
-      setResult(null);
-      setError(e instanceof Error ? e.message : "Không thể check-in cho vé này.");
+      applyOutcome(await scanCode(value));
     } finally {
       setBusy(false);
     }
@@ -132,27 +184,32 @@ export default function CheckInPanel({
 
     setViaCamera(true);
     setCode(value);
-    setError(null);
-    setAlready(false);
     try {
-      const { ticket, already: seen } = await organizerApi.checkIn(value);
-      setResult(ticket);
-      setAlready(seen);
-      setOkCount((n) => n + 1);
-      const seat = ticket.seatLabel ? ` · ${ticket.seatLabel}` : "";
-      addLog(
-        seen ? "warning" : "ok",
-        seen
-          ? `${ticket.customerName} — đã soát vé từ trước`
-          : `${ticket.customerName} · ${ticket.tierLabel}${seat} — OK`,
-      );
-      if (!seen) onCheckedIn?.();
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "không check-in được";
-      setResult(null);
-      setError(message);
-      setFailCount((n) => n + 1);
-      addLog("bad", `${value} — ${message}`);
+      const outcome = await scanCode(value);
+      const admitted = applyOutcome(outcome);
+      if (outcome.kind === "error") {
+        setFailCount((n) => n + 1);
+        addLog("bad", `${value} — ${outcome.message}`);
+      } else if (outcome.kind === "concession") {
+        setOkCount((n) => n + 1);
+        addLog(
+          outcome.voucher.already ? "warning" : "ok",
+          outcome.voucher.already
+            ? `${concessionSummary(outcome.voucher)} — đã nhận từ trước`
+            : `${concessionSummary(outcome.voucher)} — OK`,
+        );
+      } else {
+        setOkCount((n) => n + 1);
+        const ticket = outcome.ticket;
+        const seat = ticket.seatLabel ? ` · ${ticket.seatLabel}` : "";
+        addLog(
+          outcome.already ? "warning" : "ok",
+          outcome.already
+            ? `${ticket.customerName} — đã soát vé từ trước`
+            : `${ticket.customerName} · ${ticket.tierLabel}${seat} — OK`,
+        );
+      }
+      if (admitted) onCheckedIn?.();
     } finally {
       busyRef.current = false;
       if (!cooldownRef.current) {
@@ -166,7 +223,8 @@ export default function CheckInPanel({
   const close = () => {
     setOpen(false);
     setCameraOn(false);
-    setResult(null);
+    setTicketResult(null);
+    setConcessionResult(null);
     setError(null);
     resetCooldown();
   };
@@ -298,27 +356,27 @@ export default function CheckInPanel({
         </p>
       )}
 
-      {result && !viaCamera && (
+      {ticketResult && !viaCamera && (
         <div className="space-y-3 border border-beige-kem/30 bg-surface-2 p-4">
           <div className="flex items-start justify-between gap-3 border-b border-beige-kem/10 pb-2">
             <div>
-              <span className="font-mono text-xs font-bold text-burgundy-ink">{result.code}</span>
-              <h4 className="font-display text-sm font-bold text-beige-kem">{result.eventTitle}</h4>
+              <span className="font-mono text-xs font-bold text-burgundy-ink">{ticketResult.code}</span>
+              <h4 className="font-display text-sm font-bold text-beige-kem">{ticketResult.eventTitle}</h4>
             </div>
             <span
               className={`shrink-0 px-2.5 py-0.5 text-[11px] font-bold ${
-                result.status === "checked_in"
+                ticketResult.status === "checked_in"
                   ? "border border-la-co/40 bg-la-co/20 text-la-co"
-                  : result.status === "void"
+                  : ticketResult.status === "void"
                     ? "border border-burgundy/40 bg-burgundy/20 text-burgundy-ink"
                     : "border border-cam-dat/40 bg-cam-dat/20 text-cam-dat"
               }`}
             >
-              {result.status === "checked_in"
+              {ticketResult.status === "checked_in"
                 ? already
                   ? "Đã soát vé (quét lại)"
                   : "Đã check-in thành công"
-                : result.status === "void"
+                : ticketResult.status === "void"
                   ? "Vé đã bị hủy"
                   : "Chưa check-in"}
             </span>
@@ -326,10 +384,10 @@ export default function CheckInPanel({
 
           <dl className="grid grid-cols-2 gap-2 text-xs">
             {[
-              ["Khán giả", result.customerName],
-              ["Hạng vé", result.tierLabel],
-              ["Email", result.customerEmail],
-              ["Chỗ ngồi", result.seatLabel || "Vé thường"],
+              ["Khán giả", ticketResult.customerName],
+              ["Hạng vé", ticketResult.tierLabel],
+              ["Email", ticketResult.customerEmail],
+              ["Chỗ ngồi", ticketResult.seatLabel || "Vé thường"],
             ].map(([term, value]) => (
               <div key={term} className="min-w-0">
                 <dt className="block text-[10px] font-bold uppercase text-beige-kem/50">{term}</dt>
@@ -338,16 +396,55 @@ export default function CheckInPanel({
             ))}
           </dl>
 
-          {result.status === "unused" && (
+          {ticketResult.status === "unused" && (
             <button
               type="button"
-              onClick={() => void checkIn(result.code)}
+              onClick={() => void checkIn(ticketResult.code)}
               disabled={busy}
               className="w-full bg-burgundy py-2 text-xs font-black text-white transition hover:brightness-95 disabled:opacity-50"
             >
               Xác nhận check-in ngay
             </button>
           )}
+        </div>
+      )}
+
+      {/* The voucher's readout: what the counter just handed over, in one scan (014 US3). */}
+      {concessionResult && !viaCamera && (
+        <div className="space-y-3 border border-beige-kem/30 bg-surface-2 p-4">
+          <div className="flex items-start justify-between gap-3 border-b border-beige-kem/10 pb-2">
+            <div>
+              <span className="font-mono text-xs font-bold text-burgundy-ink">
+                Đơn #{concessionResult.orderId}
+              </span>
+              <h4 className="font-display text-sm font-bold text-beige-kem">
+                {concessionResult.eventTitle}
+              </h4>
+            </div>
+            <span
+              className={`shrink-0 px-2.5 py-0.5 text-[11px] font-bold ${
+                concessionResult.already
+                  ? "border border-cam-dat/40 bg-cam-dat/20 text-cam-dat"
+                  : "border border-la-co/40 bg-la-co/20 text-la-co"
+              }`}
+            >
+              {concessionResult.already ? "Đã nhận bắp nước (quét lại)" : "Đã nhận thành công"}
+            </span>
+          </div>
+
+          <p className="text-xs text-beige-kem/70">Khán giả: {concessionResult.buyerName}</p>
+          <ul className="space-y-1 text-xs">
+            {concessionResult.lines.map((line) => (
+              <li key={line.label} className="flex justify-between gap-3">
+                <span className="text-beige-kem">
+                  {line.label} ×{line.quantity}
+                </span>
+                <span className="tabular-nums text-beige-kem/70">
+                  {formatVnd(line.quantity * line.unitPriceAmount)}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </div>

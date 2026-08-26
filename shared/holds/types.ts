@@ -3,6 +3,7 @@
 // contracts/seat-socket.md. Money = whole VND đồng.
 
 import type { SeatStatus } from '../catalog/types.js';
+import type { ReservationConcessionLine } from '../types/fnb.js';
 
 export type ReservationStatus = 'active' | 'expired' | 'converted' | 'cancelled';
 
@@ -48,7 +49,12 @@ export interface Reservation {
   /** True once the one-time top-up grace has been spent (FR-010). */
   extendedOnce: boolean;
   items: ReservationItem[];
-  totalAmount: number; // VND integer
+  /**
+   * Concession lines ("bắp nước", feature 014) riding on this hold — present only when the buyer
+   * has added snacks. They reserve nothing (unlimited stock) and die with the reservation.
+   */
+  concessions?: ReservationConcessionLine[];
+  totalAmount: number; // VND integer — tickets AND concession lines combined
 }
 
 /** Refusals a hold can produce. Every one of them has an asserting test (SC-008). */
