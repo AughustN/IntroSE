@@ -1,5 +1,14 @@
 import { type NextFunction, type Request, type Response, Router } from "express";
 import { z } from "zod";
+import { createHmac } from "node:crypto";
+import { AD_POLICY } from "@shared/ads/types.js";
+import { config } from "../../config.js";
+import {
+  createSlidingRateLimiter,
+  getClientIp,
+  normalizeIpKey,
+} from "../../middleware/rateLimit.js";
+import { deliver, recordMetric } from "./ads.delivery.js";
 import { err } from "../../http.js";
 import { requireAuth } from "../../middleware/requireAuth.js";
 import { requireOrganizer } from "../../middleware/authz.js";
@@ -22,6 +31,47 @@ const asyncH =
 
 // ── Public ─────────────────────────────────────────────────────────────────────────────────────
 export const adsPublicRouter = Router();
+
+// No raw network identifiers are persisted; shared networks can be undercounted. This is
+// best-effort abuse reduction, not a claim of certified unique visitors or bot-free analytics.
+function visitorHash(req: Request): string {
+  return createHmac("sha256", config.authEventHashKey)
+    .update(
+      [
+        "ads-v1",
+        new Date().toISOString().slice(0, 10),
+        normalizeIpKey(getClientIp(req)),
+        (req.get("user-agent") ?? "").slice(0, 512),
+      ].join("|"),
+    )
+    .digest("hex");
+}
+function bot(req: Request): boolean {
+  return (
+    !req.get("user-agent") ||
+    /bot|crawler|spider|headless|curl|wget/i.test(req.get("user-agent") ?? "")
+  );
+}
+adsPublicRouter.post(
+  "/ads/delivery",
+  createSlidingRateLimiter("ads:delivery", { windowMs: 60_000, max: 60 }),
+  asyncH(async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json(bot(req) ? { legacy: [], deliveries: [] } : await deliver(visitorHash(req)));
+  }),
+);
+const metricBody = z
+  .object({ token: z.string().uuid(), kind: z.enum(["impression", "click", "play"]) })
+  .strict();
+adsPublicRouter.post(
+  "/ads/metrics",
+  createSlidingRateLimiter("ads:metrics", { windowMs: 60_000, max: 240 }),
+  validate(metricBody),
+  asyncH(async (req, res) => {
+    if (!bot(req)) await recordMetric(visitorHash(req), req.body.token, req.body.kind);
+    res.status(204).end();
+  }),
+);
 
 /** GET /api/ads/placements — what the landing page may render right now. */
 adsPublicRouter.get(
@@ -72,6 +122,7 @@ const purchaseBody = z
   .object({
     eventId: z.number().int().positive(),
     packageId: z.number().int().positive(),
+    acceptedPolicy: z.literal(AD_POLICY),
   })
   .strict();
 
@@ -86,6 +137,7 @@ adsOrganizerRouter.post(
       organizerId: await organizerOf(req),
       eventId: body.eventId,
       packageId: body.packageId,
+      acceptedPolicy: body.acceptedPolicy,
     });
     res.status(201).json(created);
   }),

@@ -106,6 +106,13 @@ export const adminClient = {
     params: { from?: string; to?: string; organizerId?: number; category?: string } = {},
   ) => request<AdminAnalytics>(`/analytics${qs(params)}`),
   ads: () => request<AdAnalytics>("/ads"),
+  compensateAd: (body: {
+    purchaseId: number;
+    incidentId: string;
+    from: string;
+    to: string;
+    reason: string;
+  }) => request<void>("/ads/compensations", { method: "POST", body: JSON.stringify(body) }),
   /* The two moderation previews: what is waiting, read in full before it is decided on. */
   eventDetail: (id: number) => request<ReportedEvent>(`/events/${id}/detail`),
   organizerDetail: (id: number) => request<AdminOrganizerDetail>(`/organizers/${id}/detail`),
@@ -138,8 +145,7 @@ export const adminClient = {
     } = {},
   ) => request<AttendeeList>(`/events/${eventId}/attendees${qs(params)}`),
   /** The event's showtimes, for narrowing the door list to one night. */
-  eventShowtimes: (eventId: number) =>
-    request<AttendeeShowtime[]>(`/events/${eventId}/showtimes`),
+  eventShowtimes: (eventId: number) => request<AttendeeShowtime[]>(`/events/${eventId}/showtimes`),
   /**
    * The same list as a file.
    *

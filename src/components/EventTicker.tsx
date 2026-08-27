@@ -4,6 +4,9 @@
  */
 
 import { Flame, Play } from "lucide-react";
+import { useRef } from "react";
+import type { AdDelivery } from "@shared/ads/types.js";
+import { trackAd, useAdExposure } from "../hooks/useAdExposure";
 import { MovieEvent } from "../types";
 import { formatEventDate } from "../services/formatDate";
 import { formatVnd } from "../services/currency";
@@ -20,16 +23,31 @@ interface EventTickerProps {
   events: MovieEvent[];
   onSelect: (event: MovieEvent) => void;
   onViewAll: () => void;
+  adDeliveries?: AdDelivery[];
 }
 
 /** Doron runs eight cards. Fewer than a screenful and the loop reads as a stutter, not a loop. */
 const MIN_ITEMS = 6;
 
-function TickerCard({ event, onSelect }: { event: MovieEvent; onSelect: () => void }) {
+function TickerCard({
+  event,
+  onSelect,
+  delivery,
+}: {
+  event: MovieEvent;
+  onSelect: () => void;
+  delivery?: AdDelivery;
+}) {
+  const ref = useRef<HTMLButtonElement>(null);
+  useAdExposure(ref, delivery);
   return (
     <button
+      ref={ref}
       type="button"
-      onClick={onSelect}
+      onClick={() => {
+        trackAd(delivery, "click");
+        onSelect();
+      }}
       className="group w-[300px] shrink-0 border-r border-beige-kem/25 p-4 text-left transition-colors hover:bg-bubblegum/20 sm:w-[360px]"
     >
       <div className="relative aspect-video overflow-hidden bg-surface-2">
@@ -48,6 +66,7 @@ function TickerCard({ event, onSelect }: { event: MovieEvent; onSelect: () => vo
           fill="currentColor"
         />
         <div className="min-w-0">
+          {delivery && <span className="text-xs text-ink-soft">Được tài trợ</span>}
           <p className="line-clamp-2 font-display text-lede font-bold leading-tight text-beige-kem">
             {event.title}
           </p>
@@ -71,7 +90,12 @@ function TickerCard({ event, onSelect }: { event: MovieEvent; onSelect: () => vo
  * and the loop has no visible seam. The clone is `aria-hidden` and its cards are removed from the
  * tab order, so a screen reader and a keyboard both see the list once.
  */
-export default function EventTicker({ events, onSelect, onViewAll }: EventTickerProps) {
+export default function EventTicker({
+  events,
+  onSelect,
+  onViewAll,
+  adDeliveries,
+}: EventTickerProps) {
   if (events.length === 0) return null;
 
   // Short catalogues get padded by repetition, or the row ends mid-viewport and the loop is obvious.
@@ -123,12 +147,22 @@ export default function EventTicker({ events, onSelect, onViewAll }: EventTicker
       >
         <div className="ticker-track">
           {items.map((event, i) => (
-            <TickerCard key={`a-${i}`} event={event} onSelect={() => onSelect(event)} />
+            <TickerCard
+              key={`a-${i}`}
+              event={event}
+              onSelect={() => onSelect(event)}
+              delivery={adDeliveries?.find((d) => d.eventId === event.eventId)}
+            />
           ))}
           {/* The seamless half. Hidden from assistive tech and from Tab. */}
           <div className="flex" aria-hidden="true" inert>
             {items.map((event, i) => (
-              <TickerCard key={`b-${i}`} event={event} onSelect={() => onSelect(event)} />
+              <TickerCard
+                key={`b-${i}`}
+                event={event}
+                onSelect={() => onSelect(event)}
+                delivery={adDeliveries?.find((d) => d.eventId === event.eventId)}
+              />
             ))}
           </div>
         </div>

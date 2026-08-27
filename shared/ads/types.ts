@@ -11,9 +11,36 @@ export type AdPlacement = "hero_trailer" | "hot_events";
 
 /** What each placement is called, and what it promises, in the words the organizer reads. */
 export const AD_PLACEMENT_LABELS: Record<AdPlacement, string> = {
-  hero_trailer: "Chiếu trailer đầu trang chủ",
-  hot_events: "Xuất hiện tại mục “Sự kiện hot”",
+  hero_trailer: "Luân phiên trailer đầu trang chủ",
+  hot_events: "Luân phiên tại mục “Sự kiện hot”",
 };
+
+export const AD_POLICY = "fair_v1" as const;
+export const AD_TERMS =
+  "Các chiến dịch cùng vị trí có trọng số ngang nhau, luân phiên trong thời hạn gói; không độc quyền, không cam kết số lượt xem, nhấp hay vé bán. Gói dài ngày không được ưu tiên lượt hơn. Sự kiện phải đủ điều kiện mở bán; thời hạn vẫn tính khi sự kiện bị ẩn. Lỗi nền tảng đã được xác minh được bù thời gian tương ứng, không áp dụng cho lượng truy cập thấp.";
+export const AD_REFRESH_MS = 30_000;
+export interface AdMetric {
+  placement: AdPlacement;
+  impressions: number;
+  clicks: number;
+  plays: number;
+}
+export interface AdAvailability {
+  placement: AdPlacement;
+  limit: number;
+  reserved: number;
+  legacy: boolean;
+}
+export interface AdDelivery extends ActiveAdPlacement {
+  placement: AdPlacement;
+  token: string;
+  expiresAt: string;
+}
+export interface AdFeed {
+  legacy: ActiveAdPlacement[];
+  deliveries: AdDelivery[];
+}
+export type AdMetricKind = "impression" | "click" | "play";
 
 export interface AdPackage {
   id: number;
@@ -24,6 +51,7 @@ export interface AdPackage {
   price: number;
   durationDays: number;
   placements: AdPlacement[];
+  availability?: AdAvailability[];
 }
 
 /** A campaign an organizer has paid for. */
@@ -45,11 +73,15 @@ export interface AdPurchase {
   live: boolean;
   /** Actually eligible for display; a paid window continues while its event is hidden. */
   serving: boolean;
+  policy?: "legacy" | typeof AD_POLICY;
+  metrics?: AdMetric[];
+  compensatedSeconds?: number;
 }
 
 export interface AdPurchaseInput {
   eventId: number;
   packageId: number;
+  acceptedPolicy: typeof AD_POLICY;
 }
 
 /**
@@ -101,6 +133,8 @@ export interface AdCampaignRow {
   startsAt: string;
   endsAt: string;
   live: boolean;
+  policy?: "legacy" | typeof AD_POLICY;
+  compensatedSeconds?: number;
 }
 
 export interface AdAnalytics {

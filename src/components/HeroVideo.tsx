@@ -7,6 +7,8 @@ import { useEffect, useRef, useState } from "react";
 import { MovieEvent } from "../types";
 import { Pause, Play } from "lucide-react";
 import { playableTrailer } from "./TrailerPanel";
+import type { AdDelivery } from "@shared/ads/types.js";
+import { useAdExposure } from "../hooks/useAdExposure";
 
 interface HeroVideoProps {
   movie: MovieEvent;
@@ -29,6 +31,7 @@ interface HeroVideoProps {
    * who has pinned this hero themselves — and it loops as before.
    */
   onTrailerEnded?: () => void;
+  adDelivery?: AdDelivery;
 }
 
 /**
@@ -186,6 +189,7 @@ export default function HeroVideo({
   onBookNow,
   variant = "cinema",
   onTrailerEnded,
+  adDelivery,
 }: HeroVideoProps) {
   const plain = variant === "plain";
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -195,6 +199,7 @@ export default function HeroVideo({
   const typeRef = useRef<HTMLDivElement>(null);
   const [showPoster, setShowPoster] = useState(true);
   const heroTrailer = playableTrailer(movie.trailerUrl);
+  useAdExposure(stageRef, adDelivery, videoRef);
 
   /*
    * Mirrors the element, rather than being the source of truth for it.
@@ -759,6 +764,12 @@ export default function HeroVideo({
             {heroTrailer && <source src={heroTrailer} />}
           </video>
 
+          {adDelivery && (
+            <span className="absolute left-4 top-4 z-[10] bg-black/65 px-2 py-1 text-xs text-white">
+              Được tài trợ · luân phiên
+            </span>
+          )}
+
           <div className="absolute inset-0 z-[3] bg-black/35" />
           <div className="absolute inset-0 z-[3] bg-gradient-to-t from-black/75 via-black/20 to-black/20" />
 
@@ -845,7 +856,8 @@ export default function HeroVideo({
                 aria-label={paused ? "Phát trailer" : "Tạm dừng trailer"}
                 title={paused ? "Phát trailer" : "Tạm dừng trailer"}
                 style={{
-                  pointerEvents: "var(--player-events, none)" as React.CSSProperties["pointerEvents"],
+                  pointerEvents:
+                    "var(--player-events, none)" as React.CSSProperties["pointerEvents"],
                 }}
                 className="absolute inset-0 z-[5] cursor-pointer"
               />

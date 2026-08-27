@@ -16,19 +16,19 @@ it("refuses past events before debit, and reports hidden campaigns without offer
   await api()
     .post("/api/organizer/ads/purchases")
     .set(auth(s.token))
-    .send({ eventId: s.eventId, packageId: pkg.id })
+    .send({ eventId: s.eventId, packageId: pkg.id, acceptedPolicy: "fair_v1" })
     .expect(409);
   expect(
     (await pool.query(`SELECT balance_amount::int AS n FROM wallets WHERE user_id=$1`, [s.userId]))
       .rows[0].n,
   ).toBe(pkg.price * 3);
-  await pool.query(`UPDATE showtimes SET starts_at=now()+interval '1 day' WHERE id=$1`, [
+  await pool.query(`UPDATE showtimes SET starts_at=now()+interval '90 days' WHERE id=$1`, [
     s.showtimeId,
   ]);
   const bought = await api()
     .post("/api/organizer/ads/purchases")
     .set(auth(s.token))
-    .send({ eventId: s.eventId, packageId: pkg.id })
+    .send({ eventId: s.eventId, packageId: pkg.id, acceptedPolicy: "fair_v1" })
     .expect(201);
   expect(bought.body).toMatchObject({ live: true, serving: true });
   await api()
@@ -38,13 +38,16 @@ it("refuses past events before debit, and reports hidden campaigns without offer
     .expect(200);
   const mine = await api().get("/api/organizer/ads/purchases").set(auth(s.token)).expect(200);
   expect(mine.body[0]).toMatchObject({ live: true, serving: false });
-  const feed = await api().get("/api/ads/placements").expect(200);
-  expect(feed.body).toEqual([]);
+  const feed = await api()
+    .post("/api/ads/delivery")
+    .set("User-Agent", "Mozilla/5.0 workflow-test")
+    .expect(200);
+  expect(feed.body.deliveries).toEqual([]);
   await pool.query(`UPDATE events SET moderation_status='approved' WHERE id=$1`, [s.eventId]);
   await api()
     .post("/api/organizer/ads/purchases")
     .set(auth(s.token))
-    .send({ eventId: s.eventId, packageId: pkg.id })
+    .send({ eventId: s.eventId, packageId: pkg.id, acceptedPolicy: "fair_v1" })
     .expect(409);
   expect(
     (

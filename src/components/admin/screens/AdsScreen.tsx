@@ -4,6 +4,8 @@
  */
 
 import { AD_PLACEMENT_LABELS } from "@shared/ads/types.js";
+import { useState } from "react";
+import AdCompensationForm from "../AdCompensationForm";
 import { formatVnd } from "../../../services/currency";
 import { adminClient } from "../../../services/adminClient";
 import {
@@ -37,6 +39,8 @@ const day = (iso: string) => new Date(iso).toLocaleDateString("vi-VN");
  */
 export default function AdsScreen() {
   const { data, error, loading, reload } = useAsync(() => adminClient.ads(), "ads");
+  const [compensating, setCompensating] = useState<number | null>(null);
+  const [notice, setNotice] = useState("");
 
   return (
     <>
@@ -51,6 +55,23 @@ export default function AdsScreen() {
       />
 
       {error && <Notice tone="error">{error}</Notice>}
+      {notice && (
+        <p role="status" className="text-sm text-beige-kem">
+          {notice}
+        </p>
+      )}
+      {compensating !== null && (
+        <AdCompensationForm
+          key={compensating}
+          purchaseId={compensating}
+          onClose={() => setCompensating(null)}
+          onDone={() => {
+            setCompensating(null);
+            setNotice("Đã ghi nhận bù thời gian. Hãy xem ngày kết thúc mới của chiến dịch.");
+            reload();
+          }}
+        />
+      )}
       {!data && loading && <EmptyState text="Đang tải số liệu…" />}
 
       {data && (
@@ -72,7 +93,7 @@ export default function AdsScreen() {
               label="Chiến dịch đang chạy"
               value={data.liveCampaigns.toLocaleString("vi-VN")}
               tone="rate"
-              note="Đang hiển thị trên trang chủ"
+              note="Còn hạn và đủ điều kiện hiển thị"
             />
             <Kpi
               label="Giá trị trung bình"
@@ -123,6 +144,7 @@ export default function AdsScreen() {
                       <Th>Thời gian</Th>
                       <Th>Doanh thu</Th>
                       <Th>Trạng thái</Th>
+                      <Th>Bù sự cố</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -132,7 +154,9 @@ export default function AdsScreen() {
                         <Td>{row.organizer}</Td>
                         <Td nowrap>{row.packageName}</Td>
                         <Td>
-                          {row.placements.map((slot) => AD_PLACEMENT_LABELS[slot]).join(" · ")}
+                          {row.policy === "fair_v1"
+                            ? row.placements.map((slot) => AD_PLACEMENT_LABELS[slot]).join(" · ")
+                            : "Điều khoản cũ"}
                         </Td>
                         <Td nowrap>
                           {day(row.startsAt)} – {day(row.endsAt)}
@@ -145,6 +169,20 @@ export default function AdsScreen() {
                             <Pill tone="good">Đang chạy</Pill>
                           ) : (
                             <Pill tone="neutral">Đã kết thúc</Pill>
+                          )}
+                        </Td>
+                        <Td>
+                          {!!row.compensatedSeconds && (
+                            <p>{Math.round(row.compensatedSeconds / 60)} phút đã bù</p>
+                          )}
+                          {row.policy === "fair_v1" && row.status === "active" && (
+                            <button
+                              type="button"
+                              className={ACTION_GHOST}
+                              onClick={() => setCompensating(row.id)}
+                            >
+                              Bù thời gian
+                            </button>
                           )}
                         </Td>
                       </tr>

@@ -23,8 +23,9 @@ import { authClient } from "./services/authClient";
 import { catalogClient } from "./services/catalogClient";
 import { aiClient } from "./services/aiClient";
 import { cardToMovie, detailToMovie } from "./services/catalogAdapter";
-import { adsClient } from "./services/adsClient";
-import type { ActiveAdPlacement, AdPlacement } from "@shared/ads/types.js";
+import type { AdPlacement } from "@shared/ads/types.js";
+import { useAdFeed } from "./hooks/useAdFeed";
+import { trackAd } from "./hooks/useAdExposure";
 import { applyEventSeo, clearEventSeo } from "./services/seo";
 import { matchesDateFilter, type DateFilter } from "./services/dateFilter";
 import { fold, matchesQuery, searchEvents } from "./services/eventSearch";
@@ -54,6 +55,7 @@ import { walletClient, WalletError, type OrderListItem, type Topup } from "./ser
 import WalletPanel from "./components/wallet/WalletPanel";
 import VnpayReturn from "./components/wallet/VnpayReturn";
 import { useHoldCountdown } from "./hooks/useHoldCountdown";
+import { useReleaseHold } from "./hooks/useReleaseHold";
 import BookingHistory from "./components/BookingHistory";
 import AIChatPanel from "./components/AIChatPanel";
 import ToastStack, { type ToastKind, type ToastMessage } from "./components/ToastStack";
@@ -765,11 +767,11 @@ export default function App() {
     if (!hold) clearCheckoutDetails();
   }, [hold]);
 
-  /**
-   * Give the seats back to everyone else. The server is the one that actually frees them, so a
-   * failure here is logged rather than swallowed silently — the TTL is the backstop either way.
-   */
-  const releaseHold = useCallback(async (session: HoldSession) => {
+  // Clear the selection and queue credentials only after the server confirms the release.
+  const onHoldReleased = useCallback((session: HoldSession) => {
+    if (holdRef.current?.reservationId !== session.reservationId) return;
+    // Async mode switches read this ref immediately, before React's next effect runs.
+    holdRef.current = null;
     setHold(null);
     setQueueTokens((prev) => {
       const next = { ...prev };
@@ -781,12 +783,18 @@ export default function App() {
       delete next[session.showtimeId];
       return next;
     });
-    try {
-      await holdsClient.cancel(session.reservationId);
-    } catch (e) {
-      console.error("Failed to release the hold (the TTL will):", e);
-    }
   }, []);
+  const onHoldReleaseError = useCallback(() => {
+    pushToast(
+      "error",
+      "Chưa xác nhận được việc hủy giữ chỗ. Vui lòng thử lại trước khi đổi vé hoặc rời quy trình.",
+    );
+  }, [pushToast]);
+  const releaseHold = useReleaseHold({
+    onReleased: onHoldReleased,
+    onError: onHoldReleaseError,
+    onBusyChange: setHoldBusy,
+  });
 
   const handleHoldExpired = useCallback(() => {
     const expired = holdRef.current;
@@ -1210,14 +1218,9 @@ export default function App() {
    * answer when nobody has bought anything, and inventing sample campaigns would make the landing
    * page look sold when it is not.
    */
-  const [adPlacements, setAdPlacements] = useState<ActiveAdPlacement[]>([]);
-
-  useEffect(() => {
-    adsClient
-      .placements()
-      .then(setAdPlacements)
-      .catch((err) => console.error("Failed to load ad placements:", err));
-  }, []);
+  const adFeed = useAdFeed(activeScreen === "home");
+  const adPlacements = adFeed.legacy;
+  const heroDelivery = adFeed.deliveries.find((d) => d.placement === "hero_trailer");
 
   /** The numeric ids entitled to one slot, as a set the render can test membership against. */
   const paidFor = useCallback(
@@ -1233,9 +1236,10 @@ export default function App() {
    * lists already in hand.
    */
   const promotedHeroSlug = useMemo(() => {
+    if (heroDelivery) return heroDelivery.slug;
     const ids = paidFor("hero_trailer");
     return events.find((movie) => movie.eventId !== null && ids.has(movie.eventId))?.id ?? null;
-  }, [events, paidFor]);
+  }, [events, paidFor, heroDelivery]);
 
   /*
    * The promoted event's full detail.
@@ -1280,7 +1284,7 @@ export default function App() {
    * Only entries with a trailer the browser can actually play are in it (`playableTrailer`), since
    * an entry with nothing to play would end the reel rather than advance it.
    */
-  /** False while a bought slot owns the hero — the one case the reel must not touch. */
+  /** Paid rotation is owned by useAdFeed; the editorial reel must not advance it. */
   const landingHeroIsAuto = !(promotedHero && promotedHero.id === promotedHeroSlug);
 
   const heroPlaylist = useMemo(() => {
@@ -1310,8 +1314,8 @@ export default function App() {
   /**
    * Hand the reel on when a trailer ends.
    *
-   * Only for the automatic hero. A paid `hero_trailer` slot was bought and must not rotate away
-   * from what it bought, and a reader who pressed a card chose that one — neither is a queue.
+   * Only for the editorial hero. Paid campaigns rotate through the server's feed, while a
+   * reader's pinned trailer stays on their own selection.
    */
   const heroRotates = !heroPinned && landingHeroIsAuto && heroPlaylist.length > 1;
   const advanceHero = useCallback(() => {
@@ -1334,21 +1338,24 @@ export default function App() {
   /**
    * The hot band: paid placements first, then the Admin's curation, capped at the same ten.
    *
-   * Paid first because that is what was sold — a promoted event that lands eleventh is a promotion
-   * nobody sees. Deduplicated by slug, so an event that is both curated and promoted appears once,
-   * in the promoted position.
+   * The server selects and shuffles at most ten fair campaigns. Preserve that order rather than
+   * reverting to catalog order, then fill unused slots with curation. Legacy remains unchanged.
    */
   const tickerEvents = useMemo(() => {
     const ids = paidFor("hot_events");
-    const promoted = events.filter(
+    const legacyPromoted = events.filter(
       (movie) => movie.eventId !== null && ids.has(movie.eventId) && movie.status !== "finished",
     );
+    const fairPromoted = adFeed.deliveries
+      .filter((d) => d.placement === "hot_events")
+      .flatMap((d) => events.filter((movie) => movie.eventId === d.eventId && movie.status !== "finished"));
+    const promoted = [...legacyPromoted, ...fairPromoted];
     const slugs = new Set(promoted.map((movie) => movie.id));
     return [...promoted, ...trendingEvents.filter((movie) => !slugs.has(movie.id))].slice(
       0,
       TRENDING_COUNT,
     );
-  }, [events, trendingEvents, paidFor]);
+  }, [events, trendingEvents, paidFor, adFeed.deliveries]);
 
   /** The landing page's four bands. Unfiltered — the landing page no longer carries any filter. */
   const landingSections = useMemo(() => buildLandingSections(events), [events]);
@@ -1642,8 +1649,7 @@ export default function App() {
     });
     // Leaving the flow releases the seats server-side, so they are back on sale immediately rather
     // than sitting held until the TTL sweeps them.
-    if (leaving) void releaseHold(hold);
-    return leaving;
+    return leaving ? releaseHold(hold) : false;
   };
 
   const leaveFlow = async (action: () => void) => {
@@ -1801,7 +1807,7 @@ export default function App() {
           tone: "danger",
         });
         if (!switching) return;
-        await releaseHold(hold);
+        if (!(await releaseHold(hold))) return;
       }
 
       setBookingDate(date);
@@ -1909,8 +1915,7 @@ export default function App() {
     if (!live || flowRank(from) < 2 || flowRank(to) >= flowRank(from)) return;
 
     void (async () => {
-      if (await confirmCancelOrder()) {
-        await releaseHold(live);
+      if ((await confirmCancelOrder()) && (await releaseHold(live))) {
         clearBookingSelection();
         return;
       }
@@ -1929,7 +1934,7 @@ export default function App() {
 
     if (live) {
       if (!(await confirmCancelOrder())) return;
-      await releaseHold(live);
+      if (!(await releaseHold(live))) return;
     }
 
     // Back to the first step carrying nothing. The selection is gone on the server, so leaving
@@ -1970,7 +1975,7 @@ export default function App() {
         tone: "danger",
       });
       if (!switching) return;
-      await releaseHold(base);
+      if (!(await releaseHold(base))) return;
       base = null;
     }
 
@@ -2071,7 +2076,7 @@ export default function App() {
         tone: "danger",
       });
       if (!switching) return;
-      await releaseHold(base);
+      if (!(await releaseHold(base))) return;
       base = null;
     }
 
@@ -2128,7 +2133,7 @@ export default function App() {
           tone: "danger",
         });
         if (!switching) return;
-        await releaseHold(current);
+        if (!(await releaseHold(current))) return;
       }
 
       // The same either-or from the standing side: a press that ADDS quantity while seats are held
@@ -2152,7 +2157,7 @@ export default function App() {
           tone: "danger",
         });
         if (!switching) return;
-        await releaseHold(seatedCurrent);
+        if (!(await releaseHold(seatedCurrent))) return;
       }
 
       const live = holdRef.current;
@@ -2558,7 +2563,11 @@ export default function App() {
             <>
               <HeroVideo
                 movie={landingHero}
-                onBookNow={() => void handleStartBookingInput(landingHero)}
+                adDelivery={landingHero.id === heroDelivery?.slug ? heroDelivery : undefined}
+                onBookNow={() => {
+                  if (landingHero.id === heroDelivery?.slug) trackAd(heroDelivery, "click");
+                  void handleStartBookingInput(landingHero);
+                }}
                 // Undefined when the hero must not rotate, which is also what makes the video loop.
                 onTrailerEnded={heroRotates ? advanceHero : undefined}
               />
@@ -2572,6 +2581,7 @@ export default function App() {
                */}
               <EventTicker
                 events={tickerEvents}
+                adDeliveries={adFeed.deliveries.filter((d) => d.placement === "hot_events")}
                 onSelect={(movie) => void handleStartBookingInput(movie)}
                 onViewAll={() => void leaveFlow(() => goTo("browse"))}
               />

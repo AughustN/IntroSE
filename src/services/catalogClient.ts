@@ -52,8 +52,8 @@ export class ApiError extends Error {
   }
 }
 
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(apiUrl(`/api${path}`), { headers: { Accept: "application/json" } });
+async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(apiUrl(`/api${path}`), { headers: { Accept: "application/json" }, signal });
   if (!res.ok) {
     const e = await readApiError(res);
     throw new Error(e.message ?? `catalog ${res.status}`);
@@ -706,8 +706,8 @@ export const catalogClient = {
   getShowtimes(eventId: number): Promise<Showtime[]> {
     return get<Showtime[]>(`/events/${eventId}/showtimes`);
   },
-  getSeatMap(showtimeId: number): Promise<SeatMap> {
-    return get<SeatMap>(`/showtimes/${showtimeId}/seat-map`);
+  getSeatMap(showtimeId: number, signal?: AbortSignal): Promise<SeatMap> {
+    return get<SeatMap>(`/showtimes/${showtimeId}/seat-map`, signal);
   },
   /**
    * Report an event (UC-39).

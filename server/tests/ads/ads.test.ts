@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { pool } from "../../src/db/pool.js";
 import { app } from "../helpers/app.js";
 import { bearer, registerUser } from "../helpers/authFixture.js";
-import { adminSession, seedSale } from "../helpers/salesSeed.js";
+import { adminSession, seedSale as baseSeedSale } from "../helpers/salesSeed.js";
 
 /*
  * Advertising packages (0033_ads.sql).
@@ -20,6 +20,14 @@ async function fund(userId: number, amount: number): Promise<void> {
      ON CONFLICT (user_id) DO UPDATE SET balance_amount = EXCLUDED.balance_amount`,
     [userId, amount],
   );
+}
+
+async function seedSale() {
+  const sale = await baseSeedSale({ startsInMs: 90 * 86_400_000 });
+  await pool.query(`UPDATE events SET trailer_url='https://example.test/trailer.mp4' WHERE id=$1`, [
+    sale.eventId,
+  ]);
+  return sale;
 }
 
 const packageByCode = async (code: string) =>
@@ -64,7 +72,7 @@ describe("buying a package", () => {
     const res = await request(app)
       .post("/api/organizer/ads/purchases")
       .set(bearer(sale.organizer.token))
-      .send({ eventId: sale.eventId, packageId: pkg.id })
+      .send({ eventId: sale.eventId, packageId: pkg.id, acceptedPolicy: "fair_v1" })
       .expect(201);
 
     expect(res.body.price).toBe(pkg.price_amount);
@@ -85,8 +93,13 @@ describe("buying a package", () => {
     expect(Number(ledger.rows[0].ad_purchase_id)).toBe(res.body.id);
 
     // The landing page can now see it.
-    const feed = await request(app).get("/api/ads/placements").expect(200);
-    const mine = feed.body.find((row: { eventId: number }) => row.eventId === sale.eventId);
+    const feed = await request(app)
+      .post("/api/ads/delivery")
+      .set("User-Agent", "Mozilla/5.0 ads-test")
+      .expect(200);
+    const mine = feed.body.deliveries.find(
+      (row: { eventId: number }) => row.eventId === sale.eventId,
+    );
     expect(mine.placements).toContain("hero_trailer");
   });
 
@@ -98,14 +111,14 @@ describe("buying a package", () => {
     await request(app)
       .post("/api/organizer/ads/purchases")
       .set(bearer(sale.organizer.token))
-      .send({ eventId: sale.eventId, packageId: basic.id })
+      .send({ eventId: sale.eventId, packageId: basic.id, acceptedPolicy: "fair_v1" })
       .expect(201);
 
     const after = await balance(sale.organizer.userId);
     await request(app)
       .post("/api/organizer/ads/purchases")
       .set(bearer(sale.organizer.token))
-      .send({ eventId: sale.eventId, packageId: basic.id })
+      .send({ eventId: sale.eventId, packageId: basic.id, acceptedPolicy: "fair_v1" })
       .expect(409);
 
     // The refusal must cost nothing — a rejected purchase that still debited would be theft.
@@ -120,7 +133,7 @@ describe("buying a package", () => {
     const res = await request(app)
       .post("/api/organizer/ads/purchases")
       .set(bearer(sale.organizer.token))
-      .send({ eventId: sale.eventId, packageId: pkg.id })
+      .send({ eventId: sale.eventId, packageId: pkg.id, acceptedPolicy: "fair_v1" })
       .expect(422);
 
     expect(res.body.details.shortfall).toBe(pkg.price_amount - 1_000_000);
@@ -136,7 +149,7 @@ describe("buying a package", () => {
     await request(app)
       .post("/api/organizer/ads/purchases")
       .set(bearer(mine.organizer.token))
-      .send({ eventId: theirs.eventId, packageId: pkg.id })
+      .send({ eventId: theirs.eventId, packageId: pkg.id, acceptedPolicy: "fair_v1" })
       .expect(403);
 
     expect(await balance(mine.organizer.userId)).toBe(pkg.price_amount * 2);
@@ -151,7 +164,7 @@ describe("buying a package", () => {
     await request(app)
       .post("/api/organizer/ads/purchases")
       .set(bearer(sale.organizer.token))
-      .send({ eventId: sale.eventId, packageId: pkg.id })
+      .send({ eventId: sale.eventId, packageId: pkg.id, acceptedPolicy: "fair_v1" })
       .expect(409);
   });
 
@@ -161,7 +174,7 @@ describe("buying a package", () => {
     await request(app)
       .post("/api/organizer/ads/purchases")
       .set(bearer(user.token))
-      .send({ eventId: 1, packageId: pkg.id })
+      .send({ eventId: 1, packageId: pkg.id, acceptedPolicy: "fair_v1" })
       .expect(403);
   });
 });
@@ -174,15 +187,20 @@ describe("a campaign stops rendering when its event does", () => {
     await request(app)
       .post("/api/organizer/ads/purchases")
       .set(bearer(sale.organizer.token))
-      .send({ eventId: sale.eventId, packageId: pkg.id })
+      .send({ eventId: sale.eventId, packageId: pkg.id, acceptedPolicy: "fair_v1" })
       .expect(201);
 
     await pool.query(`UPDATE events SET moderation_status = 'removed' WHERE id = $1`, [
       sale.eventId,
     ]);
 
-    const feed = await request(app).get("/api/ads/placements").expect(200);
-    expect(feed.body.some((row: { eventId: number }) => row.eventId === sale.eventId)).toBe(false);
+    const feed = await request(app)
+      .post("/api/ads/delivery")
+      .set("User-Agent", "Mozilla/5.0 ads-test")
+      .expect(200);
+    expect(
+      feed.body.deliveries.some((row: { eventId: number }) => row.eventId === sale.eventId),
+    ).toBe(false);
   });
 });
 
@@ -200,7 +218,7 @@ describe("what advertising does to the platform's revenue", () => {
     await request(app)
       .post("/api/organizer/ads/purchases")
       .set(bearer(sale.organizer.token))
-      .send({ eventId: sale.eventId, packageId: pkg.id })
+      .send({ eventId: sale.eventId, packageId: pkg.id, acceptedPolicy: "fair_v1" })
       .expect(201);
 
     const after = await request(app)
@@ -232,7 +250,7 @@ describe("what advertising does to the platform's revenue", () => {
     await request(app)
       .post("/api/organizer/ads/purchases")
       .set(bearer(sale.organizer.token))
-      .send({ eventId: sale.eventId, packageId: pkg.id })
+      .send({ eventId: sale.eventId, packageId: pkg.id, acceptedPolicy: "fair_v1" })
       .expect(201);
 
     const admin = await adminSession();
@@ -272,7 +290,7 @@ describe("campaign lifecycle without a sweeper", () => {
     const first = await request(app)
       .post("/api/organizer/ads/purchases")
       .set(bearer(sale.organizer.token))
-      .send({ eventId: sale.eventId, packageId: pkg.id })
+      .send({ eventId: sale.eventId, packageId: pkg.id, acceptedPolicy: "fair_v1" })
       .expect(201);
     expect(first.body.live).toBe(true);
 
@@ -285,14 +303,19 @@ describe("campaign lifecycle without a sweeper", () => {
       [first.body.id],
     );
 
-    const feed = await request(app).get("/api/ads/placements").expect(200);
-    expect(feed.body.some((row: { eventId: number }) => row.eventId === sale.eventId)).toBe(false);
+    const feed = await request(app)
+      .post("/api/ads/delivery")
+      .set("User-Agent", "Mozilla/5.0 ads-test")
+      .expect(200);
+    expect(
+      feed.body.deliveries.some((row: { eventId: number }) => row.eventId === sale.eventId),
+    ).toBe(false);
 
     // The expired campaign is history, not a blocker: a second purchase must succeed.
     const second = await request(app)
       .post("/api/organizer/ads/purchases")
       .set(bearer(sale.organizer.token))
-      .send({ eventId: sale.eventId, packageId: pkg.id })
+      .send({ eventId: sale.eventId, packageId: pkg.id, acceptedPolicy: "fair_v1" })
       .expect(201);
     expect(second.body.live).toBe(true);
 
@@ -330,7 +353,7 @@ describe("campaign lifecycle without a sweeper", () => {
     const res = await request(app)
       .post("/api/organizer/ads/purchases")
       .set(bearer(sale.organizer.token))
-      .send({ eventId: sale.eventId, packageId: pkg.id })
+      .send({ eventId: sale.eventId, packageId: pkg.id, acceptedPolicy: "fair_v1" })
       .expect(201);
     expect(res.body.live).toBe(true);
   });
@@ -344,11 +367,11 @@ describe("campaign lifecycle without a sweeper", () => {
       request(app)
         .post("/api/organizer/ads/purchases")
         .set(bearer(sale.organizer.token))
-        .send({ eventId: sale.eventId, packageId: pkg.id }),
+        .send({ eventId: sale.eventId, packageId: pkg.id, acceptedPolicy: "fair_v1" }),
       request(app)
         .post("/api/organizer/ads/purchases")
         .set(bearer(sale.organizer.token))
-        .send({ eventId: sale.eventId, packageId: pkg.id }),
+        .send({ eventId: sale.eventId, packageId: pkg.id, acceptedPolicy: "fair_v1" }),
     ]);
 
     // Whichever path refuses — the pre-read or the constraint — the loser pays nothing.
@@ -375,7 +398,7 @@ describe("what a purchase remembers about its package", () => {
     const bought = await request(app)
       .post("/api/organizer/ads/purchases")
       .set(bearer(sale.organizer.token))
-      .send({ eventId: sale.eventId, packageId: pkg.id })
+      .send({ eventId: sale.eventId, packageId: pkg.id, acceptedPolicy: "fair_v1" })
       .expect(201);
 
     try {

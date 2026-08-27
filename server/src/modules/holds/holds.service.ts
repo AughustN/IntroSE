@@ -128,6 +128,21 @@ export async function hold(userId: number, body: HoldRequest): Promise<HoldResul
       reservation = null;
     }
 
+    // Validate the WHOLE reservation, not only the incoming request (FR-012). The reservation
+    // row is locked above, so concurrent additions cannot bypass this check with different kinds.
+    if (reservation) {
+      const oppositeItems =
+        selection.kind === "seated"
+          ? await repo.listGaLines(client, reservation.id)
+          : await repo.listSeatIds(client, reservation.id);
+      if (oppositeItems.length > 0) {
+        throw err.unprocessable(
+          "invalid_selection",
+          "Một đơn không thể gồm cả ghế ngồi và vé đứng. Vui lòng hủy giữ chỗ hiện tại trước khi đổi loại vé.",
+        );
+      }
+    }
+
     const held = reservation ? await repo.countHeldTickets(client, reservation.id) : 0;
 
     if (selection.kind === "seated") {

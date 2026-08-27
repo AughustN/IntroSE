@@ -3,11 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { SeatMap, SeatMapSeat, SeatStatus, Tier } from "@/shared/catalog/types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { SeatMap, SeatMapSeat, SeatStatus } from "@/shared/catalog/types";
 import { MovieEvent, Seat } from "../types";
-import { catalogClient } from "../services/catalogClient";
-import { watchShowtime } from "../services/seatSocket";
+import { useBuyerSeatMap } from "./seatmap/useBuyerSeatMap";
 import { NEUTRAL_TIER_COLOR } from "@/shared/catalog/tier-palette";
 import SeatCanvas, { type CanvasBlock, type SeatCanvasHandle } from "./seatmap/SeatCanvas";
 import { bestSeats } from "./seatmap/bestAvailable";
@@ -75,28 +74,15 @@ export default function SeatLayout({
   onGoToStep,
   onProceedToCheckout,
 }: SeatLayoutProps) {
-  const [seats, setSeats] = useState<SeatMapSeat[]>([]);
-  /**
-   * Standing capacity zones (0027) on a seated chart — tiers sold by headcount, no seat rows.
-   * Empty on a chart with no zone and on every general-admission event (which this screen never
-   * serves anyway). The stock number follows the same live `tier` broadcast the GA page uses.
-   */
-  const [zoneTiers, setZoneTiers] = useState<Tier[]>([]);
-  const [mapMeta, setMapMeta] = useState<
-    Pick<
-      SeatMap,
-      | "space"
-      | "elements"
-      | "floorPlan"
-      | "tables"
-      | "tierLegend"
-      | "orphanRule"
-      | "focalPoint"
-      | "floors"
-    >
-  >({});
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const { map, loading, error: loadError, reload: loadMap } = useBuyerSeatMap(showtimeId);
+  const seats = useMemo(() => map?.seats ?? [], [map?.seats]);
+  const zoneTiers = map?.zoneTiers ?? [];
+  const mapMeta: Partial<SeatMap> = map ?? {};
+  const hasMap =
+    seats.length > 0 ||
+    !!mapMeta.elements?.length ||
+    !!mapMeta.floorPlan ||
+    !!mapMeta.tables?.length;
   /**
    * Jump-to-section (FR-071, Eventbrite/Humanitix parity). The canvas imperatively zooms when a chip
    * is pressed; the chip itself is a scroll anchor, not a filter, so every section stays selectable
@@ -262,74 +248,6 @@ export default function SeatLayout({
       ),
     [heldSeats],
   );
-
-  // The authoritative map, read from the database (002's read endpoint). The socket only patches it.
-  const loadMap = useCallback(async () => {
-    if (showtimeId === null) return;
-    try {
-      const map: SeatMap = await catalogClient.getSeatMap(showtimeId);
-      setSeats(map.seats ?? []);
-      setZoneTiers(map.zoneTiers ?? []);
-      // The static half of the map — coordinate space, decoration, background. It changes only when
-      // the organizer edits the map, never on a hold, so it is kept apart from the seat statuses
-      // that `seat:update` refreshes (feature 005, FR-041).
-      setMapMeta({
-        space: map.space,
-        elements: map.elements,
-        floorPlan: map.floorPlan,
-        tables: map.tables,
-        tierLegend: map.tierLegend,
-        orphanRule: map.orphanRule,
-        // Was declared in the Pick above and passed to `bestSeats`, but never actually SET — so the
-        // chart's explicit focal point (0043) reached the picker as `undefined` and every buyer map
-        // silently fell back to inferring it. Carried now, which is what the column was added for.
-        focalPoint: map.focalPoint,
-        floors: map.floors,
-      });
-      setLoadError(null);
-    } catch {
-      setLoadError("Không tải được sơ đồ ghế. Vui lòng thử lại.");
-    } finally {
-      setLoading(false);
-    }
-  }, [showtimeId]);
-
-  useEffect(() => {
-    setLoading(true);
-    void loadMap();
-  }, [loadMap]);
-
-  // Live updates from everyone else's holds and from the expiry sweep (FR-021). Advisory: a missed
-  // one only leaves a stale pixel — the server still refuses a stale click (FR-023).
-  useEffect(() => {
-    if (showtimeId === null) return;
-    const stop = watchShowtime(showtimeId, (update) => {
-      // Zone stock moves through the GA half of the channel — a quantity hold broadcasts `tier`,
-      // and the standing stepper here follows it the same way the GA page's "Còn N vé" does.
-      if (update.tier) {
-        const t = update.tier;
-        setZoneTiers((current) =>
-          current.map((zone) =>
-            zone.id === t.ticketTierId ? { ...zone, remaining: t.remaining } : zone,
-          ),
-        );
-      }
-      if (!update.seats?.length) return;
-      setSeats((current) =>
-        current.map((seat) => {
-          const changed = update.seats!.find((s) => s.showtimeSeatId === seat.id);
-          return changed ? { ...seat, status: changed.status } : seat;
-        }),
-      );
-    });
-    // Re-read the whole map on reconnect rather than trusting a patch stream we may have missed.
-    const onOnline = () => void loadMap();
-    window.addEventListener("online", onOnline);
-    return () => {
-      stop();
-      window.removeEventListener("online", onOnline);
-    };
-  }, [showtimeId, loadMap]);
 
   // When the buyer's own hold ends (countdown ran out, or they cancelled), re-read the map. The
   // seats are free on the server the instant the window passes, but the release broadcast only
@@ -528,7 +446,7 @@ export default function SeatLayout({
     // goes back to the tier's stock rather than to the map.
     if (seat.showtimeSeatId === undefined) {
       return {
-        key: `zone-${seat.ticketTierId ?? seat.id}`,
+        key: `zone-${seat.ticketTierId ?? seat.id}-${seat.number}`,
         label: seat.row,
         detail: `Vé đứng số ${seat.number}`,
         amount: seat.price,
@@ -560,9 +478,15 @@ export default function SeatLayout({
       <TicketStub event={event} date={selectedDate} time={selectedTime} />
 
       {loadError && (
-        <p className="border border-burgundy/50 px-4 py-3 font-meta text-meta leading-5 text-burgundy-ink">
-          {loadError}
-        </p>
+        <div
+          role="alert"
+          className="border border-burgundy/50 px-4 py-3 font-meta text-meta leading-5 text-burgundy-ink"
+        >
+          <p>{loadError}</p>
+          <button type="button" onClick={loadMap} className="mt-2 underline underline-offset-4">
+            Tải lại trạng thái vé
+          </button>
+        </div>
       )}
 
       <BookingLayout
@@ -579,14 +503,26 @@ export default function SeatLayout({
             ctaLabel="Tiếp tục thanh toán"
             onCta={onProceedToCheckout}
             ctaDisabled={selectedSeatsList.length === 0 || remainingMs <= 0 || busy}
-            note="Ghế được giữ ngay khi bấm chọn. Đồng hồ chạy từ ghế đầu tiên và không cộng thêm khi chọn thêm ghế; hết giờ, ghế trả lại cho người khác."
+            note="Vé được giữ ngay khi bấm chọn. Đồng hồ chạy từ vé đầu tiên và không cộng thêm khi chọn thêm vé; hết giờ, vé được trả lại để bán."
           />
         }
       >
         <BookingSection
           step="02"
-          title="Chọn ghế"
-          hint="Bấm vào ghế trên sơ đồ để giữ chỗ. Bấm lần nữa để bỏ."
+          title={
+            zoneTiers.length > 0
+              ? seats.length > 0
+                ? "Chọn chỗ"
+                : "Chọn khu vực đứng"
+              : "Chọn ghế"
+          }
+          hint={
+            zoneTiers.length > 0
+              ? seats.length > 0
+                ? "Chọn ghế ngồi trực tiếp trên sơ đồ hoặc chọn số lượng vé đứng bên dưới."
+                : "Xem vị trí các khu vực trên sơ đồ và chọn số lượng vé đứng bên dưới."
+              : "Bấm vào ghế trên sơ đồ để giữ chỗ. Bấm lần nữa để bỏ."
+          }
         >
           {/*
             The screen marker, then the map, then the legend — the order every cinema draws it in,
@@ -598,11 +534,13 @@ export default function SeatLayout({
               <p className="py-12 text-center font-meta text-meta text-ink-soft">
                 Đang tải sơ đồ ghế…
               </p>
-            ) : seats.length === 0 ? (
+            ) : !hasMap ? (
               <p className="py-12 text-center font-meta text-meta text-ink-soft">
-                {zoneTiers.length > 0
-                  ? "Suất này không có ghế — chọn vé đứng ở bên dưới."
-                  : "Suất diễn này chưa có sơ đồ ghế."}
+                {loadError
+                  ? "Chưa thể hiển thị sơ đồ. Hãy tải lại trạng thái vé."
+                  : zoneTiers.length > 0
+                    ? "Suất này không có ghế — chọn vé đứng ở bên dưới."
+                    : "Suất diễn này chưa có sơ đồ ghế."}
               </p>
             ) : (
               <>
@@ -633,35 +571,36 @@ export default function SeatLayout({
                     contiguous run nearest the stage — the buyer doesn't scan the map, the picker
                     does. Errors from the picker (none left, no run of that length) are shown
                     inline, not as a toast the buyer can miss. */}
-                <div className="mb-4 flex flex-wrap items-center gap-3 border-b border-beige-kem/25 pb-4">
-                  <label className="flex items-center gap-2 font-meta text-meta text-beige-kem/80">
-                    <span>Số ghế</span>
+                {seats.length > 0 && (
+                  <div className="mb-4 flex flex-wrap items-center gap-3 border-b border-beige-kem/25 pb-4">
+                    <label className="flex items-center gap-2 font-meta text-meta text-beige-kem/80">
+                      <span>Số ghế</span>
+                      <button
+                        onClick={() => setBestCount((n) => Math.max(1, n - 1))}
+                        disabled={busy || bestCount <= 1}
+                        className="h-8 w-8 rounded border-2 border-beige-kem/60 font-bold text-beige-kem transition hover:border-burgundy disabled:opacity-40"
+                        aria-label="Giảm số ghế"
+                      >
+                        −
+                      </button>
+                      <span className="w-6 text-center font-bold text-beige-kem">{bestCount}</span>
+                      <button
+                        onClick={() => setBestCount((n) => Math.min(BEST_SEAT_CAP, n + 1))}
+                        disabled={busy || bestCount >= BEST_SEAT_CAP}
+                        className="h-8 w-8 rounded border-2 border-beige-kem/60 font-bold text-beige-kem transition hover:border-burgundy disabled:opacity-40"
+                        aria-label="Tăng số ghế"
+                      >
+                        +
+                      </button>
+                    </label>
                     <button
-                      onClick={() => setBestCount((n) => Math.max(1, n - 1))}
-                      disabled={busy || bestCount <= 1}
-                      className="h-8 w-8 rounded border-2 border-beige-kem/60 font-bold text-beige-kem transition hover:border-burgundy disabled:opacity-40"
-                      aria-label="Giảm số ghế"
+                      onClick={chooseBestAvailable}
+                      disabled={busy || loading || !!loadError}
+                      className="rounded bg-burgundy px-5 py-2 font-meta text-sm font-black text-white transition hover:brightness-95 disabled:opacity-50"
                     >
-                      −
+                      Chọn giúp tôi
                     </button>
-                    <span className="w-6 text-center font-bold text-beige-kem">{bestCount}</span>
-                    <button
-                      onClick={() => setBestCount((n) => Math.min(BEST_SEAT_CAP, n + 1))}
-                      disabled={busy || bestCount >= BEST_SEAT_CAP}
-                      className="h-8 w-8 rounded border-2 border-beige-kem/60 font-bold text-beige-kem transition hover:border-burgundy disabled:opacity-40"
-                      aria-label="Tăng số ghế"
-                    >
-                      +
-                    </button>
-                  </label>
-                  <button
-                    onClick={chooseBestAvailable}
-                    disabled={busy || loading}
-                    className="rounded bg-burgundy px-5 py-2 font-meta text-sm font-black text-white transition hover:brightness-95 disabled:opacity-50"
-                  >
-                    Chọn giúp tôi
-                  </button>
-                  {/*
+                    {/*
                     Accessible-seat filter. Offered only when the chart actually has some, because a
                     toggle that finds nothing is worse than no toggle.
 
@@ -669,21 +608,22 @@ export default function SeatLayout({
                     turns it on is comparing accessible seats against the room, and a map that
                     deletes most of itself has stopped being a map. Everything stays selectable.
                   */}
-                  {seats.some((s) => s.isAccessible) && (
-                    <label className="flex items-center gap-2 font-meta text-meta text-beige-kem/80">
-                      <input
-                        type="checkbox"
-                        checked={accessibleOnly}
-                        onChange={(e) => setAccessibleOnly(e.target.checked)}
-                        className="h-4 w-4 accent-burgundy"
-                      />
-                      Chỉ hiện ghế cho người dùng xe lăn
-                    </label>
-                  )}
-                  {bestNotice && (
-                    <p className="w-full font-meta text-meta text-cam-dat-ink">{bestNotice}</p>
-                  )}
-                </div>
+                    {seats.some((s) => s.isAccessible) && (
+                      <label className="flex items-center gap-2 font-meta text-meta text-beige-kem/80">
+                        <input
+                          type="checkbox"
+                          checked={accessibleOnly}
+                          onChange={(e) => setAccessibleOnly(e.target.checked)}
+                          className="h-4 w-4 accent-burgundy"
+                        />
+                        Chỉ hiện ghế cho người dùng xe lăn
+                      </label>
+                    )}
+                    {bestNotice && (
+                      <p className="w-full font-meta text-meta text-cam-dat-ink">{bestNotice}</p>
+                    )}
+                  </div>
+                )}
 
                 {/*
                   The floor picker (0044).
@@ -749,7 +689,7 @@ export default function SeatLayout({
                   space={mapMeta.space}
                   tables={mapMeta.tables}
                   blocks={blocks}
-                  interactive={!busy}
+                  interactive={!busy && !loadError}
                   seatClass={seatClasses}
                   // Colour means PRICE on the buyer's map and nothing else (FR-067); status still
                   // outranks it, which `seatFillStyle`'s available-only rule enforces.
@@ -764,47 +704,49 @@ export default function SeatLayout({
               </>
             )}
 
-            <div className="mt-8 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-beige-kem/25 pt-6 font-meta text-meta text-beige-kem/80 sm:grid-cols-5">
-              <span className="flex items-center gap-2">
-                <span className="h-4 w-4 shrink-0 border-2 border-beige-kem/60" />
-                Còn trống
-              </span>
-              <span className="flex items-center gap-2">
-                <span className="h-4 w-4 shrink-0 border-2 border-beige-kem bg-burgundy" />
-                Bạn đang giữ
-              </span>
-              {/* Each swatch is drawn the way the seat itself is drawn. A key whose squares are all
+            {seats.length > 0 && (
+              <div className="mt-8 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-beige-kem/25 pt-6 font-meta text-meta text-beige-kem/80 sm:grid-cols-5">
+                <span className="flex items-center gap-2">
+                  <span className="h-4 w-4 shrink-0 border-2 border-beige-kem/60" />
+                  Còn trống
+                </span>
+                <span className="flex items-center gap-2">
+                  <span className="h-4 w-4 shrink-0 border-2 border-beige-kem bg-burgundy" />
+                  Bạn đang giữ
+                </span>
+                {/* Each swatch is drawn the way the seat itself is drawn. A key whose squares are all
                   the same shape in different greys explains nothing — these have to carry the same
                   three FORMS the map uses, or the legend is decoration. */}
-              <span className="flex items-center gap-2">
-                <span
-                  className="h-4 w-4 shrink-0 border border-stone-500"
-                  style={{
-                    backgroundImage:
-                      "repeating-linear-gradient(45deg, rgb(120 113 108) 0 3px, transparent 3px 6px)",
-                  }}
-                />
-                Người khác giữ
-              </span>
-              <span className="flex items-center gap-2">
-                <span className="h-4 w-4 shrink-0 bg-stone-800" />
-                Đã bán
-              </span>
-              <span className="flex items-center gap-2">
-                <span className="h-4 w-4 shrink-0 border-2 border-dashed border-stone-500" />
-                Không mở bán
-              </span>
-              {/* The canvas has always drawn a dashed ring around an accessible seat, and nothing on
+                <span className="flex items-center gap-2">
+                  <span
+                    className="h-4 w-4 shrink-0 border border-stone-500"
+                    style={{
+                      backgroundImage:
+                        "repeating-linear-gradient(45deg, rgb(120 113 108) 0 3px, transparent 3px 6px)",
+                    }}
+                  />
+                  Người khác giữ
+                </span>
+                <span className="flex items-center gap-2">
+                  <span className="h-4 w-4 shrink-0 bg-stone-800" />
+                  Đã bán
+                </span>
+                <span className="flex items-center gap-2">
+                  <span className="h-4 w-4 shrink-0 border-2 border-dashed border-stone-500" />
+                  Không mở bán
+                </span>
+                {/* The canvas has always drawn a dashed ring around an accessible seat, and nothing on
                   screen said so — a symbol with no key is a symbol a buyer has to guess at. Shown
                   only when the chart actually has such seats, so the key never explains a mark that
                   is not on the map. */}
-              {seats.some((s) => s.isAccessible) && (
-                <span className="flex items-center gap-2">
-                  <span className="h-4 w-4 shrink-0 border-2 border-dashed border-beige-kem/80" />
-                  Ghế cho người dùng xe lăn
-                </span>
-              )}
-            </div>
+                {seats.some((s) => s.isAccessible) && (
+                  <span className="flex items-center gap-2">
+                    <span className="h-4 w-4 shrink-0 border-2 border-dashed border-beige-kem/80" />
+                    Ghế cho người dùng xe lăn
+                  </span>
+                )}
+              </div>
+            )}
 
             {mapMeta.tierLegend && mapMeta.tierLegend.length > 0 ? (
               <div className="mt-4">
@@ -876,7 +818,7 @@ export default function SeatLayout({
                         onClick={() =>
                           onAdjustZoneQuantity({ id: String(tier.id), label: tier.label }, 1)
                         }
-                        disabled={busy || soldOut || quantity >= MAX_ZONE_PER_TIER}
+                        disabled={busy || !!loadError || soldOut || quantity >= MAX_ZONE_PER_TIER}
                         aria-label={`Thêm vé ${tier.label}`}
                         className="grid h-11 w-11 place-items-center border-2 border-beige-kem/50 font-display text-title-s font-black leading-none text-beige-kem transition hover:border-beige-kem hover:bg-bubblegum/20 disabled:cursor-not-allowed disabled:opacity-30"
                       >
@@ -893,7 +835,9 @@ export default function SeatLayout({
               <p className="mt-3 font-meta text-meta leading-5 text-ink-soft">
                 {seatsHeldCount > 0
                   ? `Bạn đang giữ ${seatsHeldCount} ghế. Thêm vé đứng sẽ hỏi hủy số ghế này — một đơn không gồm cả hai.`
-                  : `Bạn đang giữ ${zoneHeldCount} vé đứng. Bấm chọn ghế trên sơ đồ sẽ hỏi hủy vé đứng trước.`}
+                  : seats.length > 0
+                    ? `Bạn đang giữ ${zoneHeldCount} vé đứng. Bấm chọn ghế trên sơ đồ sẽ hỏi hủy vé đứng trước.`
+                    : `Bạn đang giữ ${zoneHeldCount} vé đứng. Vé không gắn với vị trí cố định trong khu vực.`}
               </p>
             )}
           </BookingSection>

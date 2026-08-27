@@ -331,4 +331,48 @@ describe("media and ads accessibility", () => {
       expect(document.activeElement).toBe(trigger);
     },
   );
+  it("requires the rotation agreement before enabling ad payment", async () => {
+    vi.mocked(adsClient.packages).mockResolvedValue([
+      {
+        id: 1,
+        code: "basic",
+        name: "Gói thử",
+        price: 100000,
+        durationDays: 7,
+        placements: ["hot_events"],
+        description: null,
+      },
+    ]);
+    vi.mocked(adsClient.purchases).mockResolvedValue([]);
+    vi.mocked(organizerApi.myEvents).mockResolvedValue([event]);
+    await mount(h(AdPackagesPanel));
+    await click("Chọn gói này");
+    const payment = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
+      b.textContent?.includes("Thanh toán"),
+    )!;
+    expect(payment.disabled).toBe(true);
+    const checkbox = container.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(checkbox.checked).toBe(false);
+    await act(async () => payment.click());
+    expect(adsClient.buy).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("không cam kết số lượt xem");
+  });
+  it("does not offer a full placement for purchase", async () => {
+    vi.mocked(adsClient.packages).mockResolvedValue([
+      {
+        id: 1,
+        code: "basic",
+        name: "Gói thử",
+        price: 100000,
+        durationDays: 7,
+        placements: ["hot_events"],
+        description: null,
+        availability: [{ placement: "hot_events", limit: 20, reserved: 20, legacy: false }],
+      },
+    ]);
+    vi.mocked(adsClient.purchases).mockResolvedValue([]);
+    vi.mocked(organizerApi.myEvents).mockResolvedValue([event]);
+    await mount(h(AdPackagesPanel));
+    expect(button("Tạm hết chỗ — chưa thể mua").disabled).toBe(true);
+  });
 });

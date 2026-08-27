@@ -860,7 +860,16 @@ export const OrganizerEventsPage: React.FC<{
       {activeSection === "analytics" ? (
         <OrganizerBusinessAnalytics />
       ) : activeSection === "ads" ? (
-        <AdPackagesPanel />
+        <AdPackagesPanel
+          activeTab={
+            new URLSearchParams(location.search).get("adTab") === "campaigns"
+              ? "campaigns"
+              : "discover"
+          }
+          onTabChange={(tab) =>
+            navigate(`/organizer/events?section=ads&adTab=${tab}`, { replace: true })
+          }
+        />
       ) : activeSection === "events" ? (
         <div className="space-y-6">
           {/* The server-backed 006 console: events → overview/editor → showtimes → tiers. */}

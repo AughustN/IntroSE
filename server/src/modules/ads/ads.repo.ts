@@ -5,7 +5,12 @@ import type {
   AdPackage,
   AdPlacement,
   AdPurchase,
+  AdAvailability,
+  AdMetric,
 } from "@shared/ads/types.js";
+import { AD_POLICY } from "@shared/ads/types.js";
+import { playableTrailer } from "@shared/ads/trailer.js";
+import { AD_CAPACITY, AD_LOCK, unavailable } from "./ads.policy.js";
 import { type Db, pool, withTransaction } from "../../db/pool.js";
 import { err } from "../../http.js";
 import { UPCOMING_SHOWTIME, VISIBLE_JOIN, VISIBLE_WHERE } from "../catalog/visibility.js";
@@ -28,8 +33,23 @@ import { UPCOMING_SHOWTIME, VISIBLE_JOIN, VISIBLE_WHERE } from "../catalog/visib
  */
 
 /** A campaign is rendering right now. Written once here so every read agrees on what "live" means. */
-const LIVE = `p.status = 'active' AND p.starts_at <= now() AND p.ends_at > now()`;
-const PROMOTABLE = `${VISIBLE_WHERE} AND EXISTS (SELECT 1 FROM showtimes s WHERE ${UPCOMING_SHOWTIME})`;
+export const LIVE = `p.status = 'active' AND p.starts_at <= now() AND p.ends_at > now()`;
+export const PROMOTABLE = `${VISIBLE_WHERE} AND EXISTS (SELECT 1 FROM showtimes s WHERE ${UPCOMING_SHOWTIME})`;
+
+export async function availability(db: Db = pool): Promise<AdAvailability[]> {
+  const { rows } = await db.query<{ placement: AdPlacement; reserved: number; legacy: boolean }>(
+    `SELECT slot AS placement, count(*)::int AS reserved,
+       bool_or(p.delivery_policy = 'legacy') AS legacy
+     FROM ad_purchases p CROSS JOIN LATERAL unnest(p.placements) slot
+     WHERE p.status = 'active' AND p.ends_at > now() GROUP BY slot`,
+  );
+  return (Object.keys(AD_CAPACITY) as AdPlacement[]).map((placement) => ({
+    placement,
+    limit: AD_CAPACITY[placement],
+    reserved: rows.find((r) => r.placement === placement)?.reserved ?? 0,
+    legacy: rows.find((r) => r.placement === placement)?.legacy ?? false,
+  }));
+}
 
 export async function listPackages(db: Db = pool): Promise<AdPackage[]> {
   const { rows } = await db.query<{
@@ -47,6 +67,7 @@ export async function listPackages(db: Db = pool): Promise<AdPackage[]> {
       WHERE is_active
       ORDER BY display_order, id`,
   );
+  const slots = await availability(db);
   return rows.map((row) => ({
     id: row.id,
     code: row.code,
@@ -55,6 +76,7 @@ export async function listPackages(db: Db = pool): Promise<AdPackage[]> {
     price: Number(row.price),
     durationDays: row.duration_days,
     placements: row.placements,
+    availability: slots.filter((s) => row.placements.includes(s.placement)),
   }));
 }
 
@@ -73,6 +95,9 @@ interface PurchaseRow {
   created_at: Date;
   live: boolean;
   serving: boolean;
+  delivery_policy: AdPurchase["policy"];
+  metrics: AdMetric[];
+  compensated_seconds: number;
 }
 
 const toPurchase = (row: PurchaseRow): AdPurchase => ({
@@ -90,13 +115,19 @@ const toPurchase = (row: PurchaseRow): AdPurchase => ({
   createdAt: row.created_at.toISOString(),
   live: row.live,
   serving: row.serving,
+  policy: row.delivery_policy,
+  metrics: row.metrics ?? [],
+  compensatedSeconds: row.compensated_seconds,
 });
 
 const PURCHASE_SELECT = `
   SELECT p.id, p.event_id, e.title AS event_title, e.slug AS event_slug,
          k.code AS package_code, k.name_vi AS package_name,
          p.price_amount::text AS price, p.placements, p.status,
-         p.starts_at, p.ends_at, p.created_at,
+         p.starts_at, p.ends_at, p.created_at, p.delivery_policy, p.compensated_seconds,
+         (SELECT COALESCE(json_agg(json_build_object('placement', a.placement,
+           'impressions', a.impressions, 'clicks', a.clicks, 'plays', a.plays)), '[]'::json)
+          FROM ad_delivery_stats a WHERE a.purchase_id = p.id) AS metrics,
          (${LIVE}) AS live, (${LIVE} AND ${PROMOTABLE}) AS serving
     FROM ad_purchases p
     JOIN events e ON e.id = p.event_id
@@ -127,14 +158,22 @@ export async function purchase(input: {
   organizerId: number;
   eventId: number;
   packageId: number;
+  acceptedPolicy?: typeof AD_POLICY;
 }): Promise<AdPurchase> {
+  if (input.acceptedPolicy !== AD_POLICY)
+    throw err.conflict(
+      "ad_terms_changed",
+      "Vui lòng đọc và xác nhận điều khoản luân phiên mới trước khi mua.",
+    );
   const id = await withTransaction(async (client) => {
+    // All admission and extension writers use this lock, before checking capacity or debiting.
+    await client.query(`SELECT pg_advisory_xact_lock($1)`, [AD_LOCK]);
     const pkg = (
       await client.query<{
         id: number;
         price: string;
         duration_days: number;
-        placements: string[];
+        placements: AdPlacement[];
       }>(
         `SELECT id, price_amount::text AS price, duration_days, placements
            FROM ad_packages WHERE id = $1 AND is_active`,
@@ -142,23 +181,49 @@ export async function purchase(input: {
       )
     ).rows[0];
     if (!pkg) throw err.notFound("ad_package_not_found", "Gói quảng cáo không còn được bán.");
+    const slots = (await availability(client)).filter((s) => pkg.placements.includes(s.placement));
+    if (unavailable(slots))
+      throw err.conflict(
+        "ad_capacity_full",
+        "Vị trí quảng cáo đã đầy hoặc đang phục vụ hợp đồng cũ. Ví chưa bị trừ tiền; vui lòng chọn gói khác hoặc quay lại sau.",
+      );
 
     // The event must be the organizer's, and it must be one the public can actually reach — an ad
     // for a draft or a suspended organizer's event is a slot the landing page would refuse to
     // render, sold anyway.
     const event = (
-      await client.query<{ owned: boolean; visible: boolean }>(
-        `SELECT (e.organizer_id = $2) AS owned, (${PROMOTABLE}) AS visible
+      await client.query<{
+        owned: boolean;
+        visible: boolean;
+        trailer_url: string | null;
+        covers: boolean;
+      }>(
+        `SELECT (e.organizer_id = $2) AS owned, (${PROMOTABLE}) AS visible, e.trailer_url,
+           EXISTS (SELECT 1 FROM showtimes s WHERE ${UPCOMING_SHOWTIME}
+             AND s.starts_at > now() + ($3::int * interval '1 day')) AS covers
            FROM events e ${VISIBLE_JOIN}
           WHERE e.id = $1
           FOR UPDATE OF e, o`,
-        [input.eventId, input.organizerId],
+        [input.eventId, input.organizerId, pkg.duration_days],
       )
     ).rows[0];
     if (!event) throw err.notFound("event_not_found", "Không tìm thấy sự kiện.");
     if (!event.owned) throw err.forbidden("not_owner", "Sự kiện này không thuộc về bạn.");
     if (!event.visible)
-      throw err.conflict("event_not_promotable", "Chỉ quảng cáo được sự kiện đã duyệt, đang mở bán và còn suất chưa diễn.");
+      throw err.conflict(
+        "event_not_promotable",
+        "Chỉ quảng cáo được sự kiện đã duyệt, đang mở bán và còn suất chưa diễn.",
+      );
+    if (!event.covers)
+      throw err.conflict(
+        "ad_window_too_long",
+        "Suất diễn cuối phải sau ngày kết thúc quảng cáo. Hãy chọn gói ngắn hơn.",
+      );
+    if (pkg.placements.includes("hero_trailer") && !playableTrailer(event.trailer_url))
+      throw err.conflict(
+        "ad_trailer_required",
+        "Gói này cần trailer video hợp lệ. Hãy tải trailer lên sự kiện trước.",
+      );
 
     /*
      * A campaign that is still running blocks a second one; an expired one does not.
@@ -200,8 +265,8 @@ export async function purchase(input: {
     const created = (
       await client.query<{ id: number }>(
         `INSERT INTO ad_purchases
-           (organizer_id, event_id, package_id, purchased_by, price_amount, placements, starts_at, ends_at)
-         VALUES ($1, $2, $3, $4, $5, $6, now(), now() + ($7::int * interval '1 day'))
+           (organizer_id, event_id, package_id, purchased_by, price_amount, placements, starts_at, ends_at, delivery_policy)
+         VALUES ($1, $2, $3, $4, $5, $6, now(), now() + ($7::int * interval '1 day'), 'fair_v1')
          RETURNING id`,
         [
           input.organizerId,
@@ -214,6 +279,16 @@ export async function purchase(input: {
         ],
       )
     ).rows[0]!;
+
+    // Start at the active floor: no catch-up debt for campaigns that joined later.
+    await client.query(
+      `INSERT INTO ad_delivery_stats (purchase_id, placement, turns)
+      SELECT $1, slot, COALESCE((SELECT min(a.turns) FROM ad_delivery_stats a
+        JOIN ad_purchases p ON p.id = a.purchase_id
+        WHERE a.placement = slot AND ${LIVE}), 0)
+      FROM unnest($2::text[]) slot`,
+      [created.id, pkg.placements],
+    );
 
     const balanceAfter = wallet.balance_amount - price;
     await client.query(`UPDATE wallets SET balance_amount = $2 WHERE id = $1`, [
@@ -246,7 +321,7 @@ export async function activePlacements(db: Db = pool): Promise<ActiveAdPlacement
        FROM ad_purchases p
        JOIN events e ON e.id = p.event_id
        ${VISIBLE_JOIN}
-      WHERE ${LIVE} AND ${PROMOTABLE}
+      WHERE ${LIVE} AND ${PROMOTABLE} AND p.delivery_policy = 'legacy'
       ORDER BY p.created_at DESC`,
   );
   return rows.map((row) => ({ eventId: row.event_id, slug: row.slug, placements: row.placements }));
@@ -274,7 +349,8 @@ export async function analytics(db: Db = pool): Promise<AdAnalytics> {
   const [window, previous, live, byWeek, byPackage, campaigns] = await Promise.all([
     adRevenueBetween("now() - interval '30 days'", "now()", db),
     adRevenueBetween("now() - interval '60 days'", "now() - interval '30 days'", db),
-    db.query<{ count: number }>(`SELECT count(*)::int AS count FROM ad_purchases p WHERE ${LIVE}`),
+    db.query<{ count: number }>(`SELECT count(*)::int AS count FROM ad_purchases p
+      JOIN events e ON e.id = p.event_id ${VISIBLE_JOIN} WHERE ${LIVE} AND ${PROMOTABLE}`),
     /*
      * A row per week including the quiet ones, for the same reason the ticket chart keeps its empty
      * days: a series drawn only from periods with sales spaces a dead month like a busy one.
@@ -328,10 +404,12 @@ export async function analytics(db: Db = pool): Promise<AdAnalytics> {
       starts_at: Date;
       ends_at: Date;
       live: boolean;
+      delivery_policy: AdCampaignRow["policy"];
+      compensated_seconds: number;
     }>(
       `SELECT p.id, e.title AS event_title, org.display_name AS organizer,
               k.name_vi AS package_name, p.price_amount::text AS price, p.placements, p.status,
-              p.starts_at, p.ends_at, (${LIVE}) AS live
+              p.starts_at, p.ends_at, (${LIVE}) AS live, p.delivery_policy, p.compensated_seconds
          FROM ad_purchases p
          JOIN events e ON e.id = p.event_id
          JOIN organizers org ON org.id = p.organizer_id
@@ -369,6 +447,8 @@ export async function analytics(db: Db = pool): Promise<AdAnalytics> {
       startsAt: row.starts_at.toISOString(),
       endsAt: row.ends_at.toISOString(),
       live: row.live,
+      policy: row.delivery_policy,
+      compensatedSeconds: row.compensated_seconds,
     })),
   };
 }

@@ -31,6 +31,7 @@ import {
   walletTransactions,
 } from "./analytics.repo.js";
 import { analytics as adAnalytics } from "../ads/ads.repo.js";
+import { compensate } from "../ads/ads.delivery.js";
 import { eventReports, eventTarget, reportDetail } from "./reports.repo.js";
 import { organizerDetail } from "./admin.repo.js";
 import { attendees, attendeeShowtimes, checkIn, toCsv } from "../checkin/checkin.service.js";
@@ -349,6 +350,26 @@ adminRouter.get(
   }),
 );
 /** Advertising sales — the platform's other income, reported apart from the ticket commission. */
+const adCompensationBody = z
+  .object({
+    purchaseId: z.number().int().positive(),
+    incidentId: z.string().trim().min(3).max(100),
+    from: z.string().datetime({ offset: true }),
+    to: z.string().datetime({ offset: true }),
+    reason: z.string().trim().min(10).max(1000),
+  })
+  .strict();
+adminRouter.post(
+  "/ads/compensations",
+  validate(adCompensationBody),
+  asyncH(async (req, res) => {
+    await compensate({
+      ...(req.body as z.infer<typeof adCompensationBody>),
+      adminId: req.auth!.userId,
+    });
+    res.status(204).end();
+  }),
+);
 adminRouter.get(
   "/ads",
   asyncH(async (_req, res) => {

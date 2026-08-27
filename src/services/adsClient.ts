@@ -3,7 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { ActiveAdPlacement, AdPackage, AdPurchase } from "@shared/ads/types.js";
+import {
+  AD_POLICY,
+  type ActiveAdPlacement,
+  type AdPackage,
+  type AdPurchase,
+  type AdFeed,
+  type AdMetricKind,
+} from "@shared/ads/types.js";
 import { withAuthRetry } from "./authClient";
 import { apiUrl } from "./api";
 
@@ -41,6 +48,20 @@ async function authed<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const adsClient = {
+  delivery: async (signal?: AbortSignal) =>
+    parse<AdFeed>(
+      await fetch(apiUrl("/api/ads/delivery"), { method: "POST", credentials: "include", signal }),
+    ),
+  metric: async (token: string, kind: AdMetricKind) => {
+    const response = await fetch(apiUrl("/api/ads/metrics"), {
+      method: "POST",
+      credentials: "include",
+      keepalive: true,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, kind }),
+    });
+    if (!response.ok) throw new Error("ad_metric_failed");
+  },
   /** The price list. Public — deciding whether to promote should not require signing in first. */
   packages: () => open<AdPackage[]>("/api/ads/packages"),
   /** What the landing page may render right now. */
@@ -50,6 +71,6 @@ export const adsClient = {
   buy: (eventId: number, packageId: number) =>
     authed<AdPurchase>("/api/organizer/ads/purchases", {
       method: "POST",
-      body: JSON.stringify({ eventId, packageId }),
+      body: JSON.stringify({ eventId, packageId, acceptedPolicy: AD_POLICY }),
     }),
 };

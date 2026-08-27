@@ -17,13 +17,7 @@ import { Play } from "lucide-react";
  * anything else counts as "no trailer" — which is honest, and renders as nothing rather than as a
  * player that cannot work. Adding YouTube support later means an `<iframe>`, not a longer regex.
  */
-export function playableTrailer(url: string | null | undefined): string | null {
-  const value = url?.trim();
-  if (!value || !/^https?:\/\//i.test(value)) return null;
-  const isFile = /\.(mp4|webm|ogv|ogg|mov|m4v)(\?|#|$)/i.test(value);
-  const isCloudinaryVideo = /res\.cloudinary\.com\/.+\/video\/upload\//i.test(value);
-  return isFile || isCloudinaryVideo ? value : null;
-}
+export { playableTrailer } from "@shared/ads/trailer.js";
 
 /**
  * The trailer, behind its own poster until somebody asks for it.
