@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ManageShowtime, MyEvent } from "../../services/catalogClient";
-import { flowSteps, stepProgress } from "./flowSteps";
+import { fixItStage, flowSteps, stepProgress } from "./flowSteps";
 
 // The property every case here circles: a step is `done` only when the SERVER gate that governs it
 // would actually pass. Optimism in this table is how an organizer ends up at a 409.
@@ -107,6 +107,17 @@ describe("steps report the gate, not a guess", () => {
     const step = byId(flowSteps(event(), [draft]), "chart-ready");
     expect(step.state).toBe("blocked");
     expect(step.code).toBe("layout_not_published");
+  });
+
+  it("never calls a chart that does not exist a draft", () => {
+    // A venue with no layout row has `layoutStatus: null`. Saying "đang là bản nháp" there sent the
+    // organizer to the designer to publish a chart nobody had drawn, and named a refusal
+    // (`layout_not_published`) the server would never reach — step 4 stops the request first.
+    const none = showtime({ layoutId: null, layoutStatus: null, sections: [], tiers: [tier()] });
+    const step = byId(flowSteps(event(), [none]), "chart-ready");
+    expect(step.state).toBe("todo");
+    expect(step.reason).not.toContain("bản nháp");
+    expect(step.code).toBeUndefined();
   });
 
   it("holds later steps at todo rather than blocked while showtimes load", () => {
@@ -408,14 +419,14 @@ describe("two venues in the same unready state", () => {
 describe("stepProgress — the strip's headline", () => {
   const readyGa = () => showtime({ tiers: [tier()] });
 
-  it("counts blocked steps as progress and names the first open one", () => {
+  it("counts only completed steps and names the first blocked one", () => {
     // A brand-new seated event: draft done, and the FIRST gate it can fail — an empty showtime list —
     // is already blocked, while every step the server cannot judge yet stays `todo`. Counting only
     // `done` here would ignore the blocked tally; the strip's arithmetic is judged steps, not green.
     const steps = flowSteps(event({ eventType: "seated" }), []);
     const { doneCount, active } = stepProgress(steps);
 
-    expect(doneCount).toBe(2);
+    expect(doneCount).toBe(1);
     expect(active?.id).toBe("showtime");
     expect(active?.state).toBe("blocked");
     expect(active?.action).toBe("showtimes");
@@ -440,5 +451,49 @@ describe("stepProgress — the strip's headline", () => {
     expect(doneCount).toBe(steps.length);
     expect(active?.id).toBe("submit");
     expect(active?.label).toBe("Đang bán");
+  });
+});
+
+describe("workflow readiness regression", () => {
+  it("accepts an applied zone-only chart even after its source returns to draft", () => {
+    const steps = flowSteps(event(), [
+      showtime({
+        sections: [],
+        bookableSeats: 0,
+        zoneCapacity: 500,
+        hasSeatMap: true,
+        layoutStatus: "draft",
+        tiers: [tier({ capacity: 500, categoryId: 9 })],
+        categories: [{ id: 9, name: "Đứng", color: "#fff", seatCount: 0, hasInventory: true }],
+      }),
+    ]);
+    for (const id of ["chart", "chart-ready", "apply", "tiers"])
+      expect(byId(steps, id).state).toBe("done");
+    expect(byId(steps, "submit").label).toBe("Gửi duyệt");
+    expect(byId(steps, "submit").state).toBe("blocked");
+  });
+  it("does not count a cancelled future showtime or missing active tiers as ready", () => {
+    expect(byId(flowSteps(event(), [showtime({ status: "cancelled" })]), "showtime").state).toBe(
+      "blocked",
+    );
+    const steps = flowSteps(event(), [
+      showtime({ hasSeatMap: true, bookableSeats: 12, tiers: [] }),
+    ]);
+    expect(byId(steps, "submit").state).toBe("todo");
+  });
+});
+
+describe("fixItStage (final-page fix-it routing, C1)", () => {
+  it("sends showtimes and tiers to the shared stage 3", () => {
+    expect(fixItStage("showtimes", 4)).toBe(3);
+    expect(fixItStage("tiers", 4)).toBe(3);
+  });
+  it("sends chart and apply to the seated map stage", () => {
+    expect(fixItStage("chart", 4)).toBe(4);
+    expect(fixItStage("apply", 4)).toBe(4);
+  });
+  it("has stage 3 for everything when the event has no chart stage", () => {
+    for (const action of ["showtimes", "tiers", "chart", "apply"] as const)
+      expect(fixItStage(action, null)).toBe(3);
   });
 });

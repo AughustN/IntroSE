@@ -1,5 +1,6 @@
 // Public catalog data layer plus authed organizer/admin calls.
 import type { ChartDocument } from "@/shared/catalog/seatmap-document";
+import type { OrganizerLimits } from "@/shared/catalog/limits";
 import type { ConcessionItem } from "../../shared/types/fnb";
 import type { ApiErrorBody } from "./apiError";
 import type {
@@ -11,6 +12,7 @@ import type {
 } from "../../shared/catalog/types";
 import type {
   ApplyPreview,
+  ApplySource,
   Layout,
   LayoutTable,
   LayoutFloorPlan,
@@ -101,6 +103,7 @@ export type EventStatus = "draft" | "on_sale" | "finished" | "cancelled";
 export type EventModeration = "pending_review" | "approved" | "flagged" | "removed";
 
 export interface MyEvent {
+  trailerUrl?: string | null;
   id: number;
   slug: string;
   title: string;
@@ -142,6 +145,13 @@ export interface MyVenue {
   city: string;
   rawAddress: string;
   guide: string | null;
+  /**
+   * Something already points at this venue — a showtime, or a chart drawn for it.
+   *
+   * The layout picker collapses venues that look identical, and a row already in use must survive
+   * that: it is a write target, not a duplicate typed by accident.
+   */
+  inUse: boolean;
 }
 export interface QueueItem {
   id: number;
@@ -172,13 +182,21 @@ export interface Section {
   seatCount: number;
 }
 export interface ManageShowtime {
+  status?: "on_sale" | "finished" | "cancelled";
   id: number;
   startsAt: string;
   venueId: number;
   venueName: string;
   hasSeatMap: boolean;
-  /** How many bookable seats this showtime actually has — 0 until the layout is applied. */
+  /** Physical seat rows on this showtime. 0 for a chart made entirely of capacity zones. */
   bookableSeats: number;
+  /**
+   * Standing capacity generated from the chart's zones, summed across its tiers.
+   *
+   * Reported beside `bookableSeats` rather than folded into it: a chart may hold both, and calling a
+   * standing floor "ghế" is its own untruth.
+   */
+  zoneCapacity: number;
   tiers: {
     id: number;
     label: string;
@@ -191,8 +209,27 @@ export interface ManageShowtime {
     archived: boolean;
   }[];
   sections: Section[];
-  /** The chart this showtime binds to: the one it generated from, else the venue's default. */
+  /** The chart this showtime binds to: the one it generated from, else a DISPLAY default. */
   layoutId: number | null;
+  /**
+   * Every chart this showtime may actually be bound to — published, not archived, not a template.
+   *
+   * The apply call names its chart now instead of letting the server fall back to the venue's oldest,
+   * so the screen has to offer the real set rather than a single guess.
+   */
+  assignableLayouts: {
+    id: number;
+    name: string;
+    seatCount: number;
+    /** THIS chart's price classes. The picker and the pricing controls read the same object. */
+    categories: {
+      id: number;
+      name: string;
+      color: string;
+      seatCount: number;
+      hasInventory: boolean;
+    }[];
+  }[];
   layoutStatus: "draft" | "ready" | "archived" | null;
   /** That chart's price classes — what a tier is bound TO. */
   categories: {
@@ -211,17 +248,21 @@ export interface ManageShowtime {
 }
 
 export const organizerApi = {
+  limits: () => authed<OrganizerLimits>("/organizer/limits"),
   myEvents: () => authed<MyEvent[]>("/organizer/events"),
   showtimesManage: (eventId: number) =>
     authed<ManageShowtime[]>(`/organizer/events/${eventId}/showtimes-manage`),
   venueSections: (venueId: number) => authed<Section[]>(`/organizer/venues/${venueId}/sections`),
-  createSection: (venueId: number, name: string) =>
+  /** `layoutId` is required: quick tools write into ONE named chart, never the venue's oldest. */
+  createSection: (venueId: number, layoutId: number, name: string) =>
     authed<{ id: number }>(`/organizer/venues/${venueId}/sections`, {
       method: "POST",
-      body: { name },
+      body: { layoutId, name },
     }),
-  addSeats: (venueId: number, b: { sectionId: number; rowLabel: string; count: number }) =>
-    authed<{ count: number }>(`/organizer/venues/${venueId}/seats`, { method: "POST", body: b }),
+  addSeats: (
+    venueId: number,
+    b: { layoutId: number; sectionId: number; rowLabel: string; count: number },
+  ) => authed<{ count: number }>(`/organizer/venues/${venueId}/seats`, { method: "POST", body: b }),
   /** Bind a published chart to a showtime. Which class costs what is already recorded on the tiers,
    *  so all this call names is the chart. */
   generateSeatMap: (showtimeId: number, layoutId: number) =>
@@ -229,13 +270,29 @@ export const organizerApi = {
       method: "POST",
       body: { layoutId },
     }),
+  /**
+   * Price every class and bind the chart in ONE request.
+   *
+   * Replaces a PATCH-per-tier loop followed by a generate: that sequence could half-commit, could
+   * bind one tier to two classes without refusing, and dropped the moderation answer the tier writes
+   * return. `returnedToReview` comes back here so the console can say what actually happened.
+   */
+  applyChart: (
+    showtimeId: number,
+    b: { layoutId: number; mappings: { categoryId: number; tierId: number }[] },
+  ) =>
+    authed<{ seats: number; zoneCapacity: number; returnedToReview: boolean }>(
+      `/organizer/showtimes/${showtimeId}/apply-chart`,
+      { method: "POST", body: b },
+    ),
   createEvent: (b: {
     title: string;
     categoryCode: string;
     description: string;
     eventType: "general_admission" | "seated";
     imageUrl?: string | null;
-  }) => authed<{ id: number; slug: string }>("/organizer/events", { method: "POST", body: b }),
+    venue?: { name: string; city: string; rawAddress: string };
+  }) => authed<{ id: number; slug: string; venueId?: number }>("/organizer/events", { method: "POST", body: b }),
   publish: (id: number) =>
     authed<{ ok: true }>(`/organizer/events/${id}/publish`, { method: "POST" }),
   unpublish: (id: number) =>
@@ -280,7 +337,7 @@ export const organizerApi = {
       tiers: { label: string; price: number; totalQuantity?: number | null }[];
     },
   ) =>
-    authed<{ id: number }>(`/organizer/events/${eventId}/showtimes`, { method: "POST", body: b }),
+    authed<{ id: number; returnedToReview: boolean }>(`/organizer/events/${eventId}/showtimes`, { method: "POST", body: b }),
 
   // Check-in (US6). `lookup` reads a QR without mutating it; `checkIn` flips an unused ticket to
   // checked_in, or returns `already: true` on a rescan of a ticket admitted earlier.
@@ -351,7 +408,15 @@ export const layoutApi = {
   save: (id: number, body: SaveLayoutRequest) =>
     authed<Layout>(`/organizer/layouts/${id}`, { method: "PUT", body }),
   remove: (id: number) => authed<void>(`/organizer/layouts/${id}`, { method: "DELETE" }),
-  publish: (id: number) => authed<Layout>(`/organizer/layouts/${id}/publish`, { method: "POST" }),
+  /**
+   * @param expectedVersion the version the editor was showing. The server refuses `stale_version`
+   * when another tab has saved since, rather than publishing a document nobody validated.
+   */
+  publish: (id: number, expectedVersion?: number) =>
+    authed<Layout>(`/organizer/layouts/${id}/publish`, {
+      method: "POST",
+      body: { expectedVersion },
+    }),
   clone: (id: number, b: { targetVenueId: number; name: string }) =>
     authed<Layout>(`/organizer/layouts/${id}/clone`, { method: "POST", body: b }),
 
@@ -381,6 +446,25 @@ export const layoutApi = {
     authed<LayoutTable>(`/organizer/layouts/${layoutId}/tables`, { method: "POST", body }),
   updateTable: (tableId: number, body: Record<string, unknown>) =>
     authed<LayoutTable>(`/organizer/tables/${tableId}`, { method: "PATCH", body }),
+  /**
+   * A gesture that lands on SEVERAL tables, as one request.
+   *
+   * One request per table meant a refusal on the third — its seats are sold — left the first two
+   * committed, and the editor went on describing a layout the database no longer had.
+   */
+  updateTables: (
+    layoutId: number,
+    updates: { tableId: number; patch: Record<string, unknown> }[],
+  ) =>
+    authed<{ tables: LayoutTable[] }>(`/organizer/layouts/${layoutId}/tables`, {
+      method: "PATCH",
+      body: { updates },
+    }),
+  deleteTables: (layoutId: number, tableIds: number[]) =>
+    authed<{ ok: true }>(`/organizer/layouts/${layoutId}/tables`, {
+      method: "DELETE",
+      body: { tableIds },
+    }),
   deleteTable: (tableId: number) =>
     authed<{ ok: true }>(`/organizer/tables/${tableId}`, { method: "DELETE" }),
 
@@ -467,10 +551,11 @@ export const layoutApi = {
       method: "POST",
       body: { dryRun: true },
     }),
-  reapply: (showtimeId: number) =>
+  /** `source` comes from the preview and is required: the server refuses a confirm without it. */
+  reapply: (showtimeId: number, source: ApplySource) =>
     authed<ApplyPreview>(`/organizer/showtimes/${showtimeId}/seat-map/reapply`, {
       method: "POST",
-      body: { dryRun: false },
+      body: { dryRun: false, source },
     }),
   blockSeats: (showtimeId: number, showtimeSeatIds: number[], blocked: boolean) =>
     authed<{ changed: unknown[] }>(`/organizer/showtimes/${showtimeId}/seats/block`, {

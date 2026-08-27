@@ -168,7 +168,7 @@ export default function OrganizerConcessionsTab({ eventId }: { eventId: number }
               </span>
               <span
                 className={`font-mono text-[10px] ${
-                  item.state === "listed" ? "text-la-co" : "text-cam-dat"
+                  item.state === "listed" ? "text-la-co-ink" : "text-cam-dat-ink"
                 }`}
               >
                 {item.state === "listed" ? "Đang bán" : "Ngừng bán"}
@@ -183,7 +183,7 @@ export default function OrganizerConcessionsTab({ eventId }: { eventId: number }
                 <button
                   onClick={() => remove(item)}
                   disabled={busy}
-                  className={`${ghost} border-burgundy text-burgundy`}
+                className={`${ghost} border-burgundy text-burgundy-ink`}
                 >
                   Xoá
                 </button>
@@ -243,7 +243,7 @@ export default function OrganizerConcessionsTab({ eventId }: { eventId: number }
         </div>
       )}
 
-      {refusal && <p className="mt-3 font-mono text-[11px] text-burgundy">{refusal}</p>}
+      {refusal && <p className="mt-3 font-mono text-[11px] text-burgundy-ink">{refusal}</p>}
     </div>
   );
 }

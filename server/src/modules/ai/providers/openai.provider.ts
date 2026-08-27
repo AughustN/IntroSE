@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AI_REQUEST_TIMEOUT_MS, config } from '../../../config.js';
+import { AI_REQUEST_TIMEOUT_MS, config, MAX_TIERS_PER_SHOWTIME } from '../../../config.js';
 import type {
   AIProvider,
   ChatCompletion,
@@ -72,6 +72,7 @@ const LISTING_SYSTEM = [
   'You are an event-listing assistant.',
   'Return JSON exactly matching {"title":"string","description":"string","tags":["string"],"ticketPriceSuggestions":[{"name":"Early Bird","price":150000}]}.',
   'ticketPriceSuggestions MUST be an array of objects with both name and integer price, never an array of numbers.',
+  `Suggest only as many ticket tiers as the event needs, up to ${MAX_TIERS_PER_SHOWTIME}.`,
   'Prices are VND integers. Suggestions are editable drafts, not factual claims. Write Vietnamese.',
 ].join(' ');
 
@@ -104,7 +105,7 @@ const priceSuggestionSchema = z
       z.number().int().nonnegative(),
     ]),
   )
-  .max(4)
+  .max(MAX_TIERS_PER_SHOWTIME)
   .transform((suggestions) =>
     suggestions.map((suggestion, index) =>
       typeof suggestion === 'number'

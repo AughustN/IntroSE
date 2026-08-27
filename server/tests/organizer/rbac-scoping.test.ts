@@ -151,6 +151,7 @@ describe('Organizer Workspace Server-Side RBAC & Data Scoping Audit [SEC-04]', (
     await request(app)
       .post(`/api/organizer/events/${evA.body.id}/cancel`)
       .set(bearer(orgB.token))
+      .send({ reason: "Kiểm tra quyền hủy sự kiện" })
       .expect(403);
   });
 });

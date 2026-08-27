@@ -54,12 +54,24 @@ export default function ShowtimeMapPanel({
   onDone,
 }: {
   showtimeId: number;
-  tiers: { id: number; label: string; price: number }[];
+  /**
+   * Every tier of the showtime, archived ones INCLUDED.
+   *
+   * A seat sold under a retired class still has to name that class, so the list cannot be pre-filtered
+   * by the caller. `archived` is what lets this panel show them and offer only the live ones.
+   */
+  tiers: { id: number; label: string; price: number; archived: boolean }[];
   onDone?: () => void;
 }) {
   const [map, setMap] = useState<ShowtimeMap | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [preview, setPreview] = useState<ApplyPreview | null>(null);
+  /*
+   * Zones the re-apply would actually change. `zones` reports every zone the source layout draws so
+   * the server can judge all of them, but a zone whose quantity already matches is not an edit and
+   * listing it would bury the one the organizer resized.
+   */
+  const zoneEdits = (preview?.zones ?? []).filter((z) => z.from !== z.to);
   const [tierId, setTierId] = useState<number | "">("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -333,7 +345,9 @@ export default function ShowtimeMapPanel({
         </div>
       )}
       {notice && (
-        <div className="border-2 border-beige-kem bg-la-co p-3 text-xs text-on-tint">{notice}</div>
+        <div className="border-2 border-la-co/55 bg-la-co/20 p-3 text-xs text-la-co-ink">
+          {notice}
+        </div>
       )}
 
       {map && seats.length > 0 && (
@@ -504,10 +518,18 @@ export default function ShowtimeMapPanel({
         */}
         <Select
           value={tierId === "" ? "" : String(tierId)}
-          options={tiers.map((t) => ({
-            value: String(t.id),
-            label: `${t.label} — ${t.price.toLocaleString("vi-VN")}đ`,
-          }))}
+          /*
+           * Archived tiers are supplied on purpose — a seat sold under a retired class still has to
+           * show which class that was — but they are not CHOICES. Offering one got the organizer a
+           * `tier_archived` refusal from `apply.ts` for picking something the screen had presented
+           * as available.
+           */
+          options={tiers
+            .filter((t) => !t.archived)
+            .map((t) => ({
+              value: String(t.id),
+              label: `${t.label} — ${t.price.toLocaleString("vi-VN")}đ`,
+            }))}
           placeholder="Hạng vé"
           onChange={(v) => setTierId(Number(v) || "")}
           triggerClassName="h-9 border-2 border-beige-kem bg-surface-2 px-2 text-xs"
@@ -537,10 +559,21 @@ export default function ShowtimeMapPanel({
         </button>
         <button
           className={primary}
-          disabled={busy || !preview?.wouldSucceed}
+          disabled={busy || !preview?.wouldSucceed || !preview.source}
           onClick={() =>
             run(async () => {
-              await layoutApi.reapply(showtimeId);
+              // The preview's own `source`, echoed back — the server refuses anything else, so the
+              // button can only ever confirm what is on screen (0035 finding 5).
+              if (!preview?.source) return;
+              try {
+                await layoutApi.reapply(showtimeId, preview.source);
+              } catch (e) {
+                // A refused confirm invalidates what is on screen: the source it described has moved,
+                // so the only correct next step is another preview. Leaving the stale one visible
+                // would let the organizer press the button again against the same dead token.
+                setPreview(null);
+                throw e;
+              }
               setPreview(null);
               setSelected(new Set());
               setNotice("Đã áp dụng lại bố cục cho suất chiếu này.");
@@ -556,12 +589,23 @@ export default function ShowtimeMapPanel({
       {preview && (
         <div className="border-2 border-beige-kem/40 p-3">
           <p className="font-mono text-[11px] text-beige-kem/60">
-            {preview.changes.length} thay đổi · {preview.refusals.length} bị từ chối
+            {preview.changes.length} thay đổi
+            {/* A resized capacity zone changes no seat row, so it has to be counted separately or
+                the organizer reads "0 thay đổi" for the edit they just drew (0035 finding 1). */}
+            {zoneEdits.length > 0 && ` · ${zoneEdits.length} khu sức chứa`} ·{" "}
+            {preview.refusals.length} bị từ chối
           </p>
           <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-[11px] text-beige-kem/80">
             {preview.changes.map((c, i) => (
               <li key={`c${i}`}>
                 <span className="font-bold">{KIND_LABEL[c.kind] ?? c.kind}</span> — {c.seatLabel}
+              </li>
+            ))}
+            {zoneEdits.map((z, i) => (
+              <li key={`z${i}`} className={z.blocked ? "text-on-tint" : undefined}>
+                <span className="font-bold">Sức chứa</span> — {z.categoryName}:{" "}
+                {z.from ?? "chưa đặt"} → {z.to}
+                {z.blocked && ` (đã bán hoặc giữ ${z.taken}, không thể giảm xuống ${z.to})`}
               </li>
             ))}
             {preview.refusals.map((r, i) => (
@@ -572,7 +616,7 @@ export default function ShowtimeMapPanel({
           </ul>
           {!preview.wouldSucceed && (
             <p className="mt-2 text-[11px] text-beige-kem/60">
-              Không thể áp dụng khi còn ghế bị từ chối — sơ đồ sẽ được giữ nguyên.
+              Không thể áp dụng khi còn ghế hoặc khu sức chứa bị từ chối — sơ đồ sẽ được giữ nguyên.
             </p>
           )}
         </div>
@@ -580,9 +624,10 @@ export default function ShowtimeMapPanel({
 
       <p className="text-[11px] leading-4 text-beige-kem/45">
         Bấm hoặc kéo khoanh vùng để chọn ghế · Shift+bấm để chọn thêm · giữ Ctrl (hoặc ⌘) và kéo để
-        di chuyển khung nhìn · lăn chuột để phóng to. Ghế đã bán chỉ đổi được vị trí hiển thị; ghế
-        đang được khách giữ thì không đổi được gì cho tới khi lượt giữ hết hạn. Mọi thay đổi bị từ
-        chối sẽ giữ nguyên toàn bộ sơ đồ.
+        di chuyển khung nhìn · lăn chuột để phóng to. Khi suất chưa mở bán, có thể gán hạng vé và áp
+        dụng lại bố cục; ghế đã bán hoặc đang được khách giữ thì không đụng được. Một khi suất đã mở
+        bán, sơ đồ bị khoá — chỉ còn khoá/mở khoá từng ghế (FR-027b). Mọi thay đổi bị từ chối sẽ giữ
+        nguyên toàn bộ sơ đồ.
       </p>
     </div>
   );

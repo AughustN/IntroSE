@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MyEvent, MyVenue, organizerApi } from "../../services/catalogClient";
 import EventEditor from "./EventEditor";
 import EventList from "./EventList";
@@ -41,6 +41,7 @@ export default function OrganizerConsole({
   const [venues, setVenues] = useState<MyVenue[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const request = useRef(0);
 
   // A different row (or the list itself) starts reading again — never mid-edit. Adjusted during
   // render against the previous value, the same URL-sync pattern OrganizerEventsPage uses.
@@ -51,24 +52,27 @@ export default function OrganizerConsole({
   }
 
   const load = useCallback(async () => {
+    const current = ++request.current;
     setLoadError(null);
-    setEvents(null);
     try {
       const [ev, vn] = await Promise.all([organizerApi.myEvents(), organizerApi.myVenues()]);
+      if (current !== request.current) return;
       setEvents(ev);
       setVenues(vn);
     } catch (e) {
-      // Never leave stale data presented as current (FR-040).
-      setEvents(null);
+      if (current !== request.current) return;
       setLoadError((e as Error).message);
     }
   }, []);
 
   useEffect(() => {
     void load();
+    return () => {
+      request.current++;
+    };
   }, [load, reloadKey]);
 
-  if (loadError) return <ErrorRetry message={loadError} onRetry={load} />;
+  if (loadError && events === null) return <ErrorRetry message={loadError} onRetry={load} />;
   if (events === null) return <Loading label="Đang tải sự kiện của bạn…" />;
 
   const selected =
@@ -76,24 +80,35 @@ export default function OrganizerConsole({
 
   if (selected) {
     // Reading first, editing on demand: the overview is the default face of an open event.
-    return editing ? (
-      <EventEditor
-        event={selected}
-        venues={venues}
-        onBack={() => setEditing(false)}
-        onRefresh={load}
-        onOpenSeatMap={onOpenSeatMap}
-      />
-    ) : (
-      <EventOverview
-        event={selected}
-        onEdit={() => setEditing(true)}
-        onBack={() => onSelectEvent(null)}
-      />
+    return (
+      <>
+        {loadError && (
+          <ErrorRetry message={`Chưa cập nhật được dữ liệu: ${loadError}`} onRetry={load} />
+        )}
+        {editing ? (
+          <EventEditor
+            key={selected.id}
+            event={selected}
+            venues={venues}
+            onBack={() => setEditing(false)}
+            onRefresh={load}
+            onOpenSeatMap={onOpenSeatMap}
+          />
+        ) : (
+          <EventOverview
+            event={selected}
+            onEdit={() => setEditing(true)}
+            onBack={() => onSelectEvent(null)}
+          />
+        )}
+      </>
     );
   }
 
   return (
-    <EventList events={events} onOpen={(e) => onSelectEvent(e.id)} onCreate={onCreateRequested} />
+    <>
+      {loadError && <ErrorRetry message={loadError} onRetry={load} />}
+      <EventList events={events} onOpen={(e) => onSelectEvent(e.id)} onCreate={onCreateRequested} />
+    </>
   );
 }

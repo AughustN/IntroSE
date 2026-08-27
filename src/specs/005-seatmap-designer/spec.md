@@ -30,7 +30,9 @@ moderation (002); the hold algorithm itself (003)."
   what *future* generations produce, until the organizer deliberately re-applies the layout to a chosen
   showtime — and that re-apply first shows what it would change, then runs the FR-028 inventory rules.
   A live reference was rejected: one tidy-up of a venue layout would silently reshape a show already on
-  sale, and its refusals would come from a showtime the organizer was not thinking about.
+  sale, and its refusals would come from a showtime the organizer was not thinking about. (Once a
+  showtime is on sale, even this explicit re-apply — and every map edit — is refused outright per the
+  on-sale immutability rule, FR-027b.)
 
 - Q: Is an uploaded floor plan reachable by anyone holding its URL, or only by people the server checks?
   → A: **Public CDN delivery through the canonical Cloudinary media pipeline.** The buyer-visibility toggle
@@ -263,45 +265,44 @@ page scroll.
 
 ---
 
-### User Story 3 - Correct a live map without breaking inventory (Priority: P1)
+### User Story 3 - Correct a map before sale; freeze it after on-sale (Priority: P1)
 
-An organizer notices a mistake in a map that is already on sale — a seat in the wrong place, a row that
-should not exist — and fixes it, either directly on that showtime's map or by correcting the source
-layout and re-applying it to that one showtime. The system allows every change that is safe and refuses,
-with a specific reason, exactly those that would take a seat away from someone who already holds or
-bought it.
+An organizer notices a mistake — a seat in the wrong place, a row that should not exist — and fixes it while
+the showtime is still **not on sale**, either directly on that showtime's map or by correcting the source
+layout and re-applying it to that one showtime. While nothing has sold, the system allows every safe change.
+But the moment the showtime goes **on sale**, the map is frozen (FR-027b): only blocking/unblocking an
+individual seat (FR-033) remains, and a mistake found after on-sale is resolved by cancelling/refunding the
+affected showtime, not by editing the map.
 
 **Why this priority**: Today a map can be generated once and never corrected (`409 seat_map_exists`),
 which is the blocker organizers hit first and the reason UC-21 A2 and A4 were left open. Ship this with
-US1 or the authoring tool is write-once and no better than what exists.
+US1 or the authoring tool is write-once and no better than what exists. The on-sale freeze is the
+inventory-safety half: money already moved against the map must never be contradicted by silently
+reshaping seats.
 
-**Independent Test**: Generate a seat map for a showtime, sell one seat, have a second user hold another,
-leave a third available. Then move all three, retier all three, and delete all three, asserting: the
-available seat accepts every change; the sold seat accepts only the position change; the held seat is
-refused with a reason naming the live hold.
+**Independent Test**: Generate a seat map for a showtime that is not yet on sale; move, retier and delete
+seats, asserting each is evaluated seat by seat and applied. Then put the showtime on sale and assert that
+every subsequent move/relabel/retier/delete/re-apply is refused with a reason naming the on-sale state,
+while blocking/unblocking an available seat still succeeds and a sold seat cannot be blocked.
 
 **Acceptance Scenarios**:
 
-1. **Given** a showtime that already has a generated seat map, **When** the organizer edits that map,
-   **Then** the edit is evaluated seat by seat and applied — it is never refused wholesale just because
-   a map exists.
-2. **Given** an organizer who has changed the source layout, **When** they re-apply it to one chosen
-   showtime, **Then** they first see exactly what would change, and nothing runs until they confirm;
-   other showtimes generated from the same layout are unaffected.
-3. **Given** a seat that is `available` (or `blocked`), **When** the organizer moves, relabels, retiers,
-   reassigns, or deletes it, **Then** the change succeeds.
-4. **Given** a seat that is `sold`, **When** the organizer changes only its position or rotation,
-   **Then** the change succeeds — the buyer's ticket still points at the same seat.
-5. **Given** a seat that is `sold`, **When** the organizer tries to delete it, change its label or
-   section, or move it to a different ticket tier, **Then** the change is refused with a reason naming
-   the sale, and no part of the submitted edit is silently dropped.
-6. **Given** a seat under a live hold from feature 003, **When** the organizer tries to change it in any
-   way, **Then** the change is refused with a reason naming the active hold and telling the organizer it
-   can be retried once the hold lapses; the buyer's hold is never cancelled to make room for the edit.
-7. **Given** an edit that touches both a permitted and a refused seat, **When** it is submitted, **Then**
-   the whole edit is rejected and the map is left exactly as it was — no partial application.
-8. **Given** a refused edit, **When** the organizer reads the response, **Then** it names which seats
-   were refused and why, so they can adjust rather than guess.
+1. **Given** a showtime that has a generated seat map and is not yet on sale, **When** the organizer edits
+   that map, **Then** the edit is evaluated seat by seat and applied — it is never refused wholesale just
+   because a map exists.
+2. **Given** an organizer who has changed the source layout of a not-yet-on-sale showtime, **When** they
+   re-apply it to one chosen showtime, **Then** they first see exactly what would change, and nothing runs
+   until they confirm; other showtimes generated from the same layout are unaffected.
+3. **Given** a showtime that is on sale, **When** the organizer tries to move, relabel, re-section, retier,
+   or delete any seat, **Then** the change is refused with a reason naming the on-sale state — the map is
+   immutable (FR-027b).
+4. **Given** a showtime that is on sale, **When** the organizer tries to re-apply the source layout,
+   **Then** it is refused the same way — re-apply is a form of map edit and is subject to the same freeze.
+5. **Given** a showtime that is on sale, **When** the organizer blocks or unblocks an `available` seat,
+   **Then** the change succeeds (FR-033); **and when** the seat is `sold` or under a live hold, **Then** it
+   is refused with a reason naming that — a block never takes a seat away from someone who owns or holds it.
+6. **Given** a refused edit — whether from the on-sale freeze or a seat-level rule — **When** the organizer
+   reads the response, **Then** it names the reason, so they can adjust rather than guess.
 
 ---
 
@@ -643,8 +644,10 @@ three times and confirm each object disappears in one step, in reverse order.
 - **A layout edited after a showtime already generated from it**: the showtime's map is untouched — it
   is a snapshot. The edit reaches that showtime only when the organizer re-applies the layout to it, and
   then under the US3 inventory rules. Showtimes that are `finished` or `cancelled` are never re-appliable.
-- **Re-apply that would delete a sold seat**: refused whole, like any other edit (FR-029); the preview
-  shows the conflict before anything runs, so the organizer is never surprised by the refusal.
+- **Re-apply to an on-sale showtime**: refused outright, naming the on-sale state (FR-027b) — per-seat
+  evaluation (FR-028/FR-029) is never reached. Sold seats exist only once a showtime is on sale, so a
+  re-apply that "would delete a sold seat" cannot arise: before on-sale there is nothing sold, and after
+  on-sale the whole re-apply is already frozen out.
 - **Re-apply of a layout that has drifted far from the showtime's map**: still one confirmation on one
   preview — there is no partial or seat-by-seat re-apply.
 - **A seat's hold expires between the refusal and a retry**: the retried edit now succeeds — the check is
@@ -807,19 +810,33 @@ three times and confirm each object disappears in one step, in reverse order.
 
 **Map lifecycle & inventory safety**
 
-- **FR-027**: System MUST allow editing a showtime's **already-generated** seat map, replacing today's
-  blanket refusal; the edit MUST be evaluated **per affected seat** against that showtime's live
-  inventory. Editing the **source layout** MUST always be permitted and MUST never be gated on any
-  showtime's inventory, because the layout no longer drives a generated map (FR-005).
-- **FR-027a**: Organizers MUST be able to **re-apply** a layout to one chosen showtime that already has a
-  generated map. Re-apply MUST first present **what it would change** (seats added, moved, relabelled,
-  retiered, removed) and MUST run only on confirmation, under the same per-seat rules as FR-028. Re-apply
-  MUST target one showtime at a time — a layout edit MUST NEVER reach a generated map implicitly.
-- **FR-028**: Per-seat rules — a seat that is `available` or `blocked` MAY be freely moved, relabelled,
-  re-sectioned, retiered, or deleted; a seat that is **`sold`** MAY have only its **position and
-  rotation** changed and MUST NOT be deleted, relabelled, re-sectioned, or moved to a different ticket
-  tier; a seat under a **live hold** from feature 003 MUST be refused **any** change, with a reason
-  naming the hold. A held seat MUST NEVER be released to permit an organizer's edit.
+- **FR-027**: While the showtime is **not yet on sale**, the system MUST allow editing its
+  **already-generated** seat map, replacing the blanket refusal; such an edit MUST be evaluated **per
+  affected seat** against that showtime's live inventory (FR-028). Editing the **source layout** MUST
+  always be permitted and MUST never be gated on any showtime's inventory, because the layout no longer
+  drives a generated map (FR-005).
+- **FR-027a**: While the showtime is **not yet on sale**, organizers MUST be able to **re-apply** a layout
+  to one chosen showtime that already has a generated map. Re-apply MUST first present **what it would
+  change** (seats added, moved, relabelled, retiered, removed) and MUST run only on confirmation, under the
+  same per-seat rules as FR-028. Re-apply MUST target one showtime at a time — a layout edit MUST NEVER
+  reach a generated map implicitly.
+- **FR-027b — on-sale immutability** (decision 2026-08-27): Once a showtime is **on sale**, its generated
+  seat map MUST be **immutable**. Moving, relabelling, re-sectioning, retiering, deleting a seat,
+  re-applying a layout (FR-027a), or otherwise reshaping or repricing the map MUST all be **refused**, with
+  a reason naming the on-sale state. The ONE live change that MUST remain permitted after on-sale is
+  **blocking/unblocking an individual seat** (FR-033), and that change MUST itself be refused on a `sold` or
+  `held` seat. Rationale: once money has moved against a map, reshaping or repricing it would contradict
+  tickets already issued; a mistake found after on-sale MUST be resolved by cancelling/refunding the
+  affected showtime (UC-25), not by editing the map. This supersedes the per-seat live-correction policy
+  this spec previously drafted for `sold`/`held` seats in FR-028.
+- **FR-028**: Per-seat inventory rules, applied to the seat-map edits the system permits
+  (FR-027/FR-027a, i.e. before on-sale) and kept as guards on every write path: a seat that is `available`
+  or `blocked` MAY be freely moved, relabelled, re-sectioned, retiered, or deleted; a seat that is
+  **`sold`** MAY have only its **position and rotation** changed and MUST NOT be deleted, relabelled,
+  re-sectioned, or moved to a different ticket tier; a seat under a **live hold** from feature 003 MUST be
+  refused **any** change, with a reason naming the hold. A held seat MUST NEVER be released to permit an
+  organizer's edit. (Because on-sale freezes the whole map per FR-027b, by the time a seat is sold or held
+  the map edit is already refused wholesale; these rules additionally protect the block/unblock path.)
 - **FR-029**: An edit containing any refused seat MUST be rejected **whole** — the map MUST NOT be left
   partially applied — and the refusal MUST identify which seats were refused and why.
 
@@ -849,7 +866,9 @@ three times and confirm each object disappears in one step, in reverse order.
   the existing live seat channel, within the same bound feature 003 already meets. A block or unblock is
   carried as the seat's new **status**; a tier change is carried as the seat's new **tier label and
   price** on that same per-seat entry. No new socket event is introduced, and no geometry is ever
-  broadcast (FR-041).
+  broadcast (FR-041). (A tier change is itself refused once the showtime is on sale — FR-027b — so that
+  half of the broadcast applies to pre-on-sale changes; block/unblock remains available, and broadcast,
+  at all times.)
 
 **Reuse**
 

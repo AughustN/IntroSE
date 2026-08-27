@@ -627,7 +627,7 @@ export default function SeatLayout({
                     </label>
                   )}
                   {bestNotice && (
-                    <p className="w-full font-meta text-meta text-cam-dat">{bestNotice}</p>
+                    <p className="w-full font-meta text-meta text-cam-dat-ink">{bestNotice}</p>
                   )}
                 </div>
 

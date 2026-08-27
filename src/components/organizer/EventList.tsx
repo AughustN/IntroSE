@@ -103,7 +103,22 @@ const FILTERS: { value: StatusFilter; label: string }[] = [
  * the filter and the row badge below so the two can never disagree about which events qualify.
  */
 function isFinished(ev: MyEvent): boolean {
-  return ev.status !== "cancelled" && ev.status !== "draft" && ev.nextShowtimeAt !== null && !ev.hasUpcoming;
+  return (
+    ev.status !== "cancelled" &&
+    ev.status !== "draft" &&
+    ev.nextShowtimeAt !== null &&
+    !ev.hasUpcoming
+  );
+}
+
+function eventDateParts(value: string | null): { day: string; month: string } | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return {
+    day: new Intl.DateTimeFormat("vi-VN", { day: "2-digit" }).format(date),
+    month: new Intl.DateTimeFormat("vi-VN", { month: "short" }).format(date).replace(".", ""),
+  };
 }
 
 function matchesFilter(ev: MyEvent, filter: StatusFilter): boolean {
@@ -116,7 +131,9 @@ function matchesFilter(ev: MyEvent, filter: StatusFilter): boolean {
     // `hasUpcoming` is what keeps a finished run (status still `on_sale`, nothing ever flips it)
     // from counting as live just because nobody has gone back and cancelled it.
     case "live":
-      return !cancelled && ev.moderation === "approved" && ev.status === "on_sale" && ev.hasUpcoming;
+      return (
+        !cancelled && ev.moderation === "approved" && ev.status === "on_sale" && ev.hasUpcoming
+      );
     // `moderation` alone is not enough — see `DRAFT_BADGE` — an untouched draft carries the same
     // `pending_review` default an actually-submitted event does, and this filter means the latter.
     case "pending_review":
@@ -292,7 +309,7 @@ export default function EventList({
           const cancelled = ev.status === "cancelled";
           const finished = isFinished(ev);
           const badge = cancelled
-            ? { cls: "text-beige-kem border-burgundy/60 bg-burgundy/25", text: "Đã hủy" }
+            ? { cls: "text-white border-burgundy/60 bg-burgundy/25", text: "Đã hủy" }
             : ev.status === "draft"
               ? DRAFT_BADGE
               : finished
@@ -300,28 +317,57 @@ export default function EventList({
                 : (BADGE[ev.moderation] ?? { cls: "", text: ev.moderation });
           const isLive =
             !cancelled && ev.moderation === "approved" && ev.status === "on_sale" && ev.hasUpcoming;
+          const date = eventDateParts(ev.nextShowtimeAt);
           return (
             <button
               key={ev.id}
               onClick={() => onOpen(ev)}
-              className="w-full border-2 border-beige-kem p-4 text-left transition hover:border-burgundy"
+              className="w-full rounded-2xl border-2 border-beige-kem/25 bg-surface-2 p-4 text-left shadow-sm transition-[border-color,background-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-burgundy/70 hover:bg-bubblegum/10 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-burgundy focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1 sm:p-5"
             >
-              <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-                {/* The title alone on the left — scanning a page of these reads titles first, not
-                    a wall of same-weight text an organizer has to parse line by line. */}
+              <div className="grid gap-4 md:grid-cols-[5.5rem_minmax(0,1fr)_12rem] md:items-center md:gap-5">
+                {/* A stable date tile makes a long list scannable before the title is even read. */}
+                <div className="flex items-center gap-3 md:block md:border-r md:border-beige-kem/20 md:pr-5">
+                  <div className="grid h-14 w-14 shrink-0 place-items-center rounded-xl border-2 border-burgundy/30 bg-burgundy/10 text-burgundy-ink md:h-16 md:w-16">
+                    {date ? (
+                      <span className="text-center leading-none">
+                        <span className="block font-mono text-2xl font-black tabular-nums">
+                          {date.day}
+                        </span>
+                        <span className="mt-1 block font-mono text-[10px] font-bold uppercase tracking-wide">
+                          {date.month}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="font-mono text-xs font-bold">—</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* The middle column carries the event identity and supporting context. */}
                 <div className="min-w-0">
                   <span className="block break-words text-lg font-bold leading-snug text-beige-kem sm:text-xl">
                     {ev.title}
                   </span>
+                  {ev.nextShowtimeAt && (
+                    <p className="mt-2 font-mono text-xs text-ink-soft">
+                      {formatShowtimeAt(ev.nextShowtimeAt)}
+                      {ev.venueName ? ` · ${ev.venueName}` : ""}
+                    </p>
+                  )}
+                  <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t border-beige-kem/20 pt-3">
+                    <span className="font-mono text-xs tabular-nums text-ink-soft">
+                      {ev.totalCapacity > 0
+                        ? `${ev.soldTickets.toLocaleString("vi-VN")}/${ev.totalCapacity.toLocaleString("vi-VN")} vé`
+                        : "Chưa có hạng vé"}
+                    </span>
+                    {ev.reviewNote && (
+                      <span className="text-xs text-burgundy-ink">{ev.reviewNote}</span>
+                    )}
+                  </div>
                 </div>
 
-                {/*
-                  Where the event stands, moved to the right and led with the badge rather than
-                  buried under the title in the same small mono as everything else — status is the
-                  first thing an organizer scanning this list is trying to answer, so it gets the
-                  corner a reader's eye lands on right after the title.
-                */}
-                <div className="flex shrink-0 flex-col items-end gap-1">
+                {/* Status and money form a consistent scan target on the right. */}
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-beige-kem/20 pt-3 md:flex-col md:items-end md:border-t-0 md:pt-0">
                   <span
                     className={`inline-flex items-center gap-1.5 border px-2.5 py-1 font-mono text-meta font-bold leading-none ${badge.cls}`}
                   >
@@ -335,72 +381,34 @@ export default function EventList({
                     is asking about a run that is already over.
                   */}
                   {!finished && (
-                    <span className="font-mono text-xs text-beige-kem/45">
+                    <span className="font-mono text-xs text-ink-soft">
                       {isLive ? "Đang hiển thị công khai" : "Chưa hiển thị công khai"}
                     </span>
                   )}
+                  <span className="font-mono text-lg font-black tabular-nums text-burgundy-ink sm:text-xl">
+                    {formatVnd(ev.totalRevenueVnd)}
+                  </span>
                 </div>
               </div>
-
-              {/*
-                WHEN and WHERE. Rendered only when there is a showtime to name — an event created but
-                not yet scheduled prints no line at all rather than a row of dashes, because a
-                placeholder costs the same vertical space as the answer while carrying none of it.
-              */}
-              {ev.nextShowtimeAt && (
-                <p className="mt-2 font-mono text-xs text-beige-kem/60">
-                  {formatShowtimeAt(ev.nextShowtimeAt)}
-                  {ev.venueName ? ` · ${ev.venueName}` : ""}
-                </p>
-              )}
-
-              {/*
-                HOW IT IS SELLING — the question the organizer opened this page with. Sold-over-capacity
-                rather than sold alone: 12 tickets means nothing without knowing whether the room holds
-                20 or 2,000. Ruled off and given its own row, with revenue set apart from the ticket
-                count beside it — bigger, bolder, and in the one accent colour this console spends on
-                money — because "how much did this make" is the number an organizer actually opens the
-                list to check, and it used to sit in the same small grey mono as everything above it.
-
-                Capacity of 0 means no tier has been created yet, so there is nothing to be a fraction
-                OF; that case shows the revenue alone rather than the "0/0" that reads like a sold-out
-                room of no seats.
-              */}
-              <div className="mt-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-t border-beige-kem/20 pt-3">
-                <span className="font-mono text-xs tabular-nums text-beige-kem/70">
-                  {ev.totalCapacity > 0
-                    ? `${ev.soldTickets.toLocaleString("vi-VN")}/${ev.totalCapacity.toLocaleString("vi-VN")} vé`
-                    : "Chưa có hạng vé"}
-                </span>
-                <span className="font-mono text-lg font-black tabular-nums text-burgundy-ink sm:text-xl">
-                  {formatVnd(ev.totalRevenueVnd)}
-                </span>
-              </div>
-
-              {ev.reviewNote && <p className="mt-2 text-xs text-burgundy">{ev.reviewNote}</p>}
             </button>
           );
         })
       )}
 
-      {/*
-        The pager, shown only when more than one page exists. Numbered buttons rather than a bare
-        arrow pair: an organizer hunting for an event from three weeks ago navigates by memory of
-        position, and a page NUMBER says where they are without counting presses.
-      */}
+      {/* Match the public event catalogue pager: ruled off, borderless, and set in the page meta type. */}
       {pageCount > 1 && (
         <nav
           aria-label="Phân trang sự kiện"
-          className="flex items-center justify-center gap-1 pt-2"
+          className="mt-14 flex flex-wrap items-center justify-center gap-x-2 gap-y-2 border-t border-beige-kem/25 pt-6"
         >
           <button
             type="button"
             aria-label="Trang trước"
             disabled={page === 1}
             onClick={() => goToPage(page - 1)}
-            className="border-2 border-beige-kem/30 px-3 py-1.5 text-xs font-bold text-beige-kem/70 transition-colors hover:border-beige-kem/60 hover:text-beige-kem disabled:opacity-30"
+            className="label-eyebrow px-2 py-1 text-ink-soft transition hover:text-beige-kem disabled:cursor-not-allowed disabled:text-ink-soft/40"
           >
-            ‹
+            ‹ Trước
           </button>
           {Array.from({ length: pageCount }, (_, i) => i + 1).map((p) => (
             <button
@@ -408,10 +416,10 @@ export default function EventList({
               type="button"
               aria-current={p === page ? "page" : undefined}
               onClick={() => goToPage(p)}
-              className={`min-w-9 border-2 px-3 py-1.5 text-xs font-bold tabular-nums transition-colors ${
+              className={`min-w-8 px-2 py-1 font-meta text-meta tabular-nums transition ${
                 p === page
-                  ? "border-burgundy bg-burgundy/15 text-beige-kem"
-                  : "border-beige-kem/25 text-beige-kem/55 hover:border-beige-kem/60 hover:text-beige-kem"
+                  ? "border-b-2 border-burgundy font-bold text-beige-kem"
+                  : "text-ink-soft hover:text-beige-kem"
               }`}
             >
               {p}
@@ -422,9 +430,9 @@ export default function EventList({
             aria-label="Trang sau"
             disabled={page === pageCount}
             onClick={() => goToPage(page + 1)}
-            className="border-2 border-beige-kem/30 px-3 py-1.5 text-xs font-bold text-beige-kem/70 transition-colors hover:border-beige-kem/60 hover:text-beige-kem disabled:opacity-30"
+            className="label-eyebrow px-2 py-1 text-ink-soft transition hover:text-beige-kem disabled:cursor-not-allowed disabled:text-ink-soft/40"
           >
-            ›
+            Sau ›
           </button>
         </nav>
       )}

@@ -5,14 +5,16 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { LayoutSummary } from "../../shared/catalog/seatmap";
-import { ManageShowtime, layoutApi, organizerApi, studioApi } from "../services/catalogClient";
+import { ManageShowtime, layoutApi, organizerApi } from "../services/catalogClient";
 import { Empty, ErrorRetry, Loading } from "./organizer/states";
 import ChartEditor from "./seatmap/ChartEditor";
 import ShowtimeMapPanel from "./seatmap/ShowtimeMapPanel";
 import Select from "./Select";
 
-const input =
-  "h-10 w-full rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-body text-beige-kem outline-none focus:border-burgundy";
+/* Shared form styles for the seat-map builder controls. */
+const inputBase =
+  "h-10 rounded-lg border-2 border-beige-kem bg-surface-2 px-3 text-body text-beige-kem outline-none focus:border-burgundy";
+const input = `${inputBase} w-full`;
 const btn =
   "bg-burgundy px-3 py-2 text-eyebrow font-black text-white transition hover:brightness-95 disabled:opacity-50";
 const ghost =
@@ -54,8 +56,35 @@ export default function SeatMapBuilder({
    * the right one.
    */
   const [editing, setEditing] = useState<{ layoutId: number; venueId: number } | null>(null);
-  /** Which venue has its quick-tools drawer open. Per venue, so two venues cannot share one form. */
-  const [tools, setTools] = useState<number | null>(null);
+  /*
+   * WHICH chart each showtime is being applied from, when its venue has more than one.
+   *
+   * Apply used to send `st.layoutId`, a value the SERVER chose: the chart the showtime had already
+   * generated from, or — for one that had not — the venue's oldest chart, filtered by nothing. So an
+   * organizer could open chart B in the editor, publish it, come back, and bind chart A, with the
+   * price classes on screen belonging to A while they believed they were applying B. The choice is
+   * the organizer's now, and `assignableLayouts` is the set the server will actually accept.
+   */
+  const [chosenLayout, setChosenLayout] = useState<Record<number, number>>({});
+  /**
+   * The chart this showtime will actually be bound to — as an OBJECT, not an id (0035 finding 3).
+   *
+   * Everything the panel shows for an unbound showtime hangs off this: the readiness copy, the picker
+   * value, and the price classes to fill in. Reading `st.categories` and `st.layoutStatus` beside a
+   * picker that changed only an id is what let chart B be submitted with chart A's class ids.
+   *
+   * A stale selection — a chart archived or unpublished in another tab since this list loaded — falls
+   * back rather than sticking, because `chosenLayout` is keyed by showtime and nothing else clears it.
+   */
+  const layoutFor = (st: ManageShowtime): ManageShowtime["assignableLayouts"][number] | null => {
+    const pick = st.assignableLayouts.find((l) => l.id === chosenLayout[st.id]);
+    return (
+      pick ??
+      st.assignableLayouts.find((l) => l.id === st.layoutId) ??
+      st.assignableLayouts[0] ??
+      null
+    );
+  };
   /** A venue with several charts asks which one to open before the editor mounts. */
   const [choosing, setChoosing] = useState<{
     venueId: number;
@@ -77,13 +106,13 @@ export default function SeatMapBuilder({
     void reload();
   }, [reload]);
 
-  const run = async (fn: () => Promise<void>, ok: string) => {
+  const run = async (fn: () => Promise<void>, ok?: string) => {
     setErr(null);
     setNotice(null);
     setBusy(true);
     try {
       await fn();
-      setNotice(ok);
+      if (ok) setNotice(ok);
       await reload();
     } catch (e) {
       setErr((e as Error).message);
@@ -104,9 +133,15 @@ export default function SeatMapBuilder({
     setNotice(null);
     setBusy(true);
     try {
-      const { layouts } = await layoutApi.list(venueId);
+      const { layouts: allLayouts } = await layoutApi.list(venueId);
+      const layouts = allLayouts.filter(
+        (layout) => layout.status !== "archived" && !layout.isTemplate,
+      );
       if (layouts.length === 0) {
-        setEditing({ layoutId: (await layoutApi.create(venueId, "Sơ đồ mặc định")).id, venueId });
+        let name = "Sơ đồ mặc định";
+        for (let suffix = 2; allLayouts.some((layout) => layout.name === name); suffix++)
+          name = `Sơ đồ mặc định ${suffix}`;
+        setEditing({ layoutId: (await layoutApi.create(venueId, name)).id, venueId });
       } else if (layouts.length === 1) {
         setEditing({ layoutId: layouts[0].id, venueId });
       } else {
@@ -129,22 +164,46 @@ export default function SeatMapBuilder({
    * the server at all, so a generated map came back with nothing priced.
    */
   const applyToShowtime = (st: ManageShowtime) => {
-    if (st.layoutId === null) {
-      setErr("Suất này chưa có sơ đồ để áp dụng.");
+    const chart = layoutFor(st);
+    if (chart === null) {
+      setErr("Địa điểm này chưa có sơ đồ nào đã phát hành để áp dụng.");
       return;
     }
-    const withSeats = st.categories.filter((c) => c.seatCount > 0);
-    const chosen = withSeats.map((c) => ({ categoryId: c.id, tierId: map[`${st.id}:${c.id}`] }));
-    if (chosen.some((m) => !m.tierId)) {
-      setErr("Mỗi hạng vé có ghế phải chọn một mức giá.");
+    // `hasInventory`, not `seatCount`: a capacity ZONE holds inventory with no seat rows, so the
+    // seat count reads zero while the apply gate still demands a price for it — the console showed
+    // the chart ready and the server refused `category_without_tier`. One predicate, the server's.
+    //
+    // From the CHOSEN chart, not from `st.categories`: those two differ the moment the picker is used.
+    const stocked = chart.categories.filter((c) => c.hasInventory);
+    const mappings = stocked.map((c) => ({ categoryId: c.id, tierId: map[`${st.id}:${c.id}`] }));
+    if (mappings.some((m) => !m.tierId)) {
+      setErr("Mỗi hạng ghế có vé phải chọn một mức giá.");
+      return;
+    }
+    // Refused here as well as on the server: a tier holds ONE class, so two classes pointing at the
+    // same tier silently kept whichever was written last.
+    const tierIds = mappings.map((m) => m.tierId);
+    if (new Set(tierIds).size !== tierIds.length) {
+      setErr("Mỗi mức giá chỉ được chọn cho một hạng ghế.");
       return;
     }
     void run(async () => {
-      for (const { categoryId, tierId } of chosen) {
-        await studioApi.updateTier(tierId, { categoryId });
-      }
-      await organizerApi.generateSeatMap(st.id, st.layoutId as number);
-    }, "Đã áp dụng sơ đồ — ghế đã sẵn sàng để bán.");
+      const { returnedToReview, seats, zoneCapacity } = await organizerApi.applyChart(st.id, {
+        layoutId: chart.id,
+        mappings: mappings as { categoryId: number; tierId: number }[],
+      });
+      // The moderation answer the tier writes produce, said out loud instead of discarded.
+      // What was actually generated, in the units it was generated in.
+      const made =
+        [seats > 0 ? `${seats} ghế` : null, zoneCapacity > 0 ? `${zoneCapacity} chỗ đứng` : null]
+          .filter(Boolean)
+          .join(" + ") || "sơ đồ";
+      setNotice(
+        returnedToReview
+          ? `Đã áp dụng ${made}. Vì đổi hạng ghế của vé, sự kiện quay lại chờ duyệt trước khi bán tiếp.`
+          : `Đã áp dụng ${made}. Vé chỉ mở bán khi sự kiện được duyệt và đang đăng bán.`,
+      );
+    });
   };
 
   if (editing !== null) {
@@ -242,12 +301,6 @@ export default function SeatMapBuilder({
                 </div>
                 <div className="flex gap-2">
                   <button
-                    className={ghost}
-                    onClick={() => setTools(tools === venueId ? null : venueId)}
-                  >
-                    Công cụ nhanh
-                  </button>
-                  <button
                     className={btn}
                     disabled={busy}
                     onClick={() => void openEditor(venueId, venue.name)}
@@ -294,10 +347,6 @@ export default function SeatMapBuilder({
                 </p>
               )}
 
-              {tools === venueId && (
-                <QuickTools venueId={venueId} showtime={venue.showtimes[0]} run={run} />
-              )}
-
               {/* ---- step 2: apply to each showtime ---- */}
               <div className="mt-4 space-y-3 border-t border-beige-kem/25 pt-4">
                 {venue.showtimes.map((st) => (
@@ -313,7 +362,18 @@ export default function SeatMapBuilder({
                             : "border-beige-kem/25 bg-beige-kem/5 text-ink-soft"
                         }`}
                       >
-                        {st.hasSeatMap ? `${st.bookableSeats} ghế đang bán` : "Chưa áp dụng sơ đồ"}
+                        {/* `bookableSeats` counts the map's SELLABLE seats — every status except
+                            `blocked`, and only on tiers still live (an archived tier is history, not
+                            inventory). It names the SIZE of what this showtime sells, not what is still
+                            buyable this moment; zones are shown beside it, not added into it. */}
+                        {!st.hasSeatMap
+                          ? "Chưa áp dụng sơ đồ"
+                          : [
+                              st.bookableSeats > 0 ? `${st.bookableSeats} ghế` : null,
+                              st.zoneCapacity > 0 ? `${st.zoneCapacity} chỗ đứng` : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" + ") || "Đã áp dụng sơ đồ"}
                       </span>
                     </div>
 
@@ -323,22 +383,47 @@ export default function SeatMapBuilder({
                         tiers={st.tiers}
                         onDone={() => void reload()}
                       />
-                    ) : st.categories.filter((c) => c.seatCount > 0).length === 0 ? (
+                    ) : /* Readiness is now the CHOSEN chart's own (0035 finding 3): `assignableLayouts` only ever
+           contains published charts, so an empty list IS "nothing ready", and a draft sitting at the
+           top of the venue no longer hides a published chart beside it. */
+                    st.assignableLayouts.length === 0 ? (
                       <p className="text-eyebrow text-ink-soft">
-                        Chưa có ghế để áp dụng — hoàn tất bước 1 trước.
+                        {st.layoutStatus === null
+                          ? "Chưa có ghế để áp dụng — hoàn tất bước 1 trước."
+                          : "Sơ đồ đang là bản nháp. Mở trình thiết kế và bấm “Phát hành” trước khi áp dụng cho suất diễn."}
                       </p>
-                    ) : st.layoutStatus !== "ready" ? (
+                    ) : (layoutFor(st)?.categories.filter((c) => c.hasInventory).length ?? 0) ===
+                      0 ? (
                       <p className="text-eyebrow text-ink-soft">
-                        Sơ đồ đang là bản nháp. Mở trình thiết kế và bấm “Phát hành” trước khi áp
-                        dụng cho suất diễn.
+                        Sơ đồ này chưa có ghế hay khu sức chứa nào để áp dụng.
                       </p>
                     ) : (
                       <div className="space-y-2">
+                        {/* Only when there is a real choice — one chart needs no picker. */}
+                        {st.assignableLayouts.length > 1 && (
+                          <label className="block">
+                            <span className="mb-1 block font-meta text-eyebrow text-beige-kem/70">
+                              Áp dụng sơ đồ
+                            </span>
+                            <Select
+                              triggerClassName={input}
+                              placeholder="Chọn sơ đồ"
+                              value={String(layoutFor(st)?.id ?? "")}
+                              onChange={(v) =>
+                                setChosenLayout((m) => ({ ...m, [st.id]: Number(v) }))
+                              }
+                              options={st.assignableLayouts.map((l) => ({
+                                value: String(l.id),
+                                label: `${l.name} · ${l.seatCount} ghế`,
+                              }))}
+                            />
+                          </label>
+                        )}
                         <p className="font-meta text-meta text-ink-soft">
                           Đặt giá cho từng hạng vé, rồi áp dụng:
                         </p>
-                        {st.categories
-                          .filter((c) => c.seatCount > 0)
+                        {(layoutFor(st)?.categories ?? [])
+                          .filter((c) => c.hasInventory)
                           .map((c) => (
                             <div key={c.id} className="flex items-center gap-3">
                               <span
@@ -348,8 +433,10 @@ export default function SeatMapBuilder({
                               />
                               <span className="w-36 shrink-0 text-body">
                                 {c.name}{" "}
+                                {/* A capacity ZONE has inventory and no seat rows, so "0 ghế" was
+                                    a lie about the one class that most needed explaining. */}
                                 <span className="font-meta text-meta text-beige-kem/40">
-                                  ({c.seatCount} ghế)
+                                  ({c.seatCount > 0 ? `${c.seatCount} ghế` : "khu sức chứa"})
                                 </span>
                               </span>
                               <Select
@@ -383,95 +470,6 @@ export default function SeatMapBuilder({
             </div>
           );
         })}
-      </div>
-    </div>
-  );
-}
-
-/**
- * The Section/Row/Count generator that predates the canvas (feature 002). Kept as a fast way to seed
- * a block of seats, but demoted behind a drawer: having it sit level with the canvas made it look
- * like a second, competing way to build a map.
- *
- * Its form state lives HERE, per venue — as one shared set of fields on the parent it leaked between
- * cards, so typing a row label under one venue changed what another would submit.
- */
-function QuickTools({
-  venueId,
-  showtime,
-  run,
-}: {
-  venueId: number;
-  showtime: ManageShowtime;
-  run: (fn: () => Promise<void>, ok: string) => Promise<void>;
-}) {
-  const [secName, setSecName] = useState("");
-  const [seatSection, setSeatSection] = useState<number | "">("");
-  const [seatRow, setSeatRow] = useState("A");
-  const [seatCount, setSeatCount] = useState("10");
-
-  return (
-    <div className="mt-3 space-y-2 rounded-xl border-2 border-dashed border-beige-kem/40 p-3">
-      <p className="font-meta text-meta text-ink-soft">
-        Tạo nhanh một dãy ghế. Vị trí sẽ xếp theo lưới — tinh chỉnh bằng trình thiết kế.
-      </p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <div className="flex gap-2">
-          <input
-            value={secName}
-            onChange={(e) => setSecName(e.target.value)}
-            placeholder="Tên khu vực (VD Khu A)"
-            className={input}
-          />
-          <button
-            className={ghost}
-            onClick={() =>
-              secName &&
-              run(async () => {
-                await organizerApi.createSection(venueId, secName);
-                setSecName("");
-              }, "Đã thêm khu vực.")
-            }
-          >
-            Thêm khu
-          </button>
-        </div>
-        <div className="flex gap-2">
-          <Select
-            triggerClassName={input}
-            placeholder="Khu vực"
-            value={String(seatSection)}
-            onChange={(v) => setSeatSection(Number(v) || "")}
-            options={showtime.sections.map((s) => ({ value: String(s.id), label: s.name }))}
-          />
-          <input
-            value={seatRow}
-            onChange={(e) => setSeatRow(e.target.value)}
-            placeholder="Hàng"
-            className={`${input} w-16`}
-          />
-          <input
-            value={seatCount}
-            onChange={(e) => setSeatCount(e.target.value)}
-            placeholder="SL"
-            className={`${input} w-16`}
-          />
-          <button
-            className={ghost}
-            onClick={() =>
-              seatSection &&
-              run(async () => {
-                await organizerApi.addSeats(venueId, {
-                  sectionId: Number(seatSection),
-                  rowLabel: seatRow,
-                  count: Number(seatCount),
-                });
-              }, "Đã thêm ghế.")
-            }
-          >
-            Thêm ghế
-          </button>
-        </div>
       </div>
     </div>
   );

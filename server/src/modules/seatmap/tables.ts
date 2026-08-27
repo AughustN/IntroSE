@@ -9,7 +9,7 @@ import {
   TABLE_MIN_SEATS,
 } from "../../config.js";
 import { pool, withTransaction } from "../../db/pool.js";
-import { defaultCategoryId, forgetDocument } from "./layouts.repo.js";
+import { assertInLayout, defaultCategoryId, geometryWritten } from "./layouts.repo.js";
 import { err, HttpError } from "../../http.js";
 
 /**
@@ -96,6 +96,33 @@ async function assertNoCommittedSeats(client: pg.PoolClient, tableId: number): P
       GROUP BY ss.status`,
     [tableId],
   );
+  /*
+   * Any generated inventory at all, checked AFTER the sold/held message so the sharper one wins.
+   *
+   * Every table mutation rewrites the table's seats — `writeSeats` deletes them and inserts fresh
+   * ones, and deletion drops them outright. `showtime_seats.seat_id REFERENCES seats(id)` has no
+   * `ON DELETE`, so once a showtime has generated inventory from this table, moving it, rotating it,
+   * aligning it or deleting it hit the foreign key and came back a bare 500 `internal_error`. Only
+   * SOLD and HELD seats were checked, so a chart with nothing sold yet failed the hardest of all:
+   * the organizer got no reason at all.
+   *
+   * Same refusal the layout save path gives for the same constraint (`layouts.service.ts`,
+   * `seat_in_use`), so the contract says one thing about one rule.
+   */
+  const { rows: bound } = await client.query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM showtime_seats ss
+       JOIN seats s ON s.id = ss.seat_id
+      WHERE s.table_id = $1`,
+    [tableId],
+  );
+  if (rows.length === 0 && Number(bound[0].n) > 0)
+    throw new HttpError(
+      409,
+      "seat_in_use",
+      `Suất diễn đã tạo ${bound[0].n} vé từ bàn này, nên không thể đổi hoặc xoá nó. Hãy huỷ hoặc sửa suất diễn đó trước.`,
+      { seats: Number(bound[0].n) },
+    );
+
   if (rows.length === 0) return;
 
   // A sold seat is the harder stop, so report it first when both are present.
@@ -166,8 +193,9 @@ async function writeSeats(
   // A table imparts its category to its seats, exactly as it imparts its section (FR-049).
   const categoryId = t.categoryId ?? (await defaultCategoryId(layoutId, client));
   // Any table mutation rewrites seats outside the document, so the document no longer describes the
-  // layout. The next read adopts a fresh one from the rows.
-  await forgetDocument(layoutId, client);
+  // layout: the next read adopts a fresh one from the rows, and the chart falls out of `ready` the
+  // same way a document save would (0035 finding 4).
+  await geometryWritten(layoutId, client);
   const spots = distributeSeats(t);
   for (const [i, spot] of spots.entries()) {
     await client.query(
@@ -192,6 +220,13 @@ export async function createTable(layoutId: number, input: TableInput): Promise<
         `Mỗi sơ đồ chỉ có tối đa ${LAYOUT_MAX_TABLES} bàn.`,
       );
     }
+    // The section and price class come from the request body; nothing but this says they belong to
+    // the chart being written (0035 finding 7).
+    await assertInLayout(
+      layoutId,
+      { sections: [input.sectionId], categories: [input.categoryId] },
+      client,
+    );
     await assertNameFree(client, layoutId, input.sectionId, input.name);
     await assertSeatBudget(client, layoutId, input.seatCount);
 
@@ -224,8 +259,9 @@ export async function createTable(layoutId: number, input: TableInput): Promise<
 export async function updateTable(
   tableId: number,
   patch: Partial<TableInput>,
+  reuse?: pg.PoolClient,
 ): Promise<LayoutTable> {
-  return withTransaction(async (client) => {
+  const run = async (client: pg.PoolClient) => {
     const { rows } = await client.query<{
       layout_id: number;
       section_id: number | null;
@@ -265,6 +301,12 @@ export async function updateTable(
     // Every field of a table moves, relabels or removes its seats, so any change at all is gated on
     // inventory. Refused whole — nothing below this line runs (FR-051).
     await assertNoCommittedSeats(client, tableId);
+    // A PATCH may move the table into another section or class — both must be this chart's own.
+    await assertInLayout(
+      cur.layout_id,
+      { sections: [next.sectionId], categories: [next.categoryId] },
+      client,
+    );
     await assertNameFree(client, cur.layout_id, next.sectionId, next.name, tableId);
     if (next.seatCount > cur.seat_count) {
       await assertSeatBudget(client, cur.layout_id, next.seatCount - cur.seat_count);
@@ -293,11 +335,12 @@ export async function updateTable(
     );
     await writeSeats(client, cur.layout_id, tableId, next);
     return { id: tableId, ...next };
-  });
+  };
+  return reuse ? run(reuse) : withTransaction(run);
 }
 
-export async function deleteTable(tableId: number): Promise<void> {
-  await withTransaction(async (client) => {
+export async function deleteTable(tableId: number, reuse?: pg.PoolClient): Promise<void> {
+  const run = async (client: pg.PoolClient) => {
     const { rows } = await client.query(`SELECT 1 FROM layout_tables WHERE id = $1 FOR UPDATE`, [
       tableId,
     ]);
@@ -311,7 +354,50 @@ export async function deleteTable(tableId: number): Promise<void> {
     await client.query(`DELETE FROM seats WHERE table_id = $1`, [tableId]);
     await client.query(`DELETE FROM layout_tables WHERE id = $1`, [tableId]);
     // Seats went away outside the document, so it no longer describes the layout.
-    if (owner[0]) await forgetDocument(owner[0].layout_id, client);
+    if (owner[0]) await geometryWritten(owner[0].layout_id, client);
+  };
+  if (reuse) await run(reuse);
+  else await withTransaction(run);
+}
+
+/**
+ * Several tables, ONE commit.
+ *
+ * The editor sends a gesture that lands on a selection: dragging four tables, rotating them,
+ * aligning them, deleting them. That went out as one request per table — `Promise.all` for the
+ * moves, a sequential loop for the deletes — so a refusal on the third (its seats are sold, FR-051)
+ * left the first two committed. The editor reported the error and kept a document describing a
+ * layout the database no longer had.
+ *
+ * Batching them under one transaction makes the gesture atomic: every table moves, or none does.
+ */
+/** Every id names a table of THIS layout — the batch's ownership check, done once up front. */
+export async function assertTablesInLayout(
+  tableIds: readonly number[],
+  layoutId: number,
+): Promise<void> {
+  if (tableIds.length === 0) return;
+  const { rows } = await pool.query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM layout_tables WHERE layout_id = $1 AND id = ANY($2::bigint[])`,
+    [layoutId, [...new Set(tableIds)]],
+  );
+  if (Number(rows[0].n) !== new Set(tableIds).size)
+    throw err.badRequest("validation_failed", "Có bàn không thuộc sơ đồ này.");
+}
+
+export async function updateTables(
+  items: readonly { tableId: number; patch: Partial<TableInput> }[],
+): Promise<LayoutTable[]> {
+  return withTransaction(async (client) => {
+    const out: LayoutTable[] = [];
+    for (const it of items) out.push(await updateTable(it.tableId, it.patch, client));
+    return out;
+  });
+}
+
+export async function deleteTables(tableIds: readonly number[]): Promise<void> {
+  await withTransaction(async (client) => {
+    for (const id of tableIds) await deleteTable(id, client);
   });
 }
 

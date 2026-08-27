@@ -25,6 +25,7 @@ export interface ShowtimeContext {
   starts_at: Date;
   status: string;
   event_type: "general_admission" | "seated";
+  event_status: string;
   owner_user_id: number;
   started: boolean;
 }
@@ -35,7 +36,7 @@ export async function showtimeContext(
 ): Promise<ShowtimeContext | null> {
   const { rows } = await db.query<ShowtimeContext>(
     `SELECT s.id, s.event_id, s.venue_id, s.starts_at, s.status,
-            e.event_type, o.user_id AS owner_user_id,
+            e.event_type, e.status AS event_status, o.user_id AS owner_user_id,
             (s.starts_at <= now()) AS started
        FROM showtimes s
        JOIN events e ON e.id = s.event_id
@@ -66,7 +67,9 @@ async function showtimeInventory(
 
 /** A showtime that has run, finished, or been cancelled is history — nothing here may rewrite it. */
 function assertEditableWindow(ctx: ShowtimeContext): void {
-  if (ctx.status === "cancelled" || ctx.status === "finished") {
+  if (
+    [ctx.status, ctx.event_status].some((status) => status === "cancelled" || status === "finished")
+  ) {
     throw err.conflict(
       "showtime_started",
       "Suất chiếu đã kết thúc hoặc đã huỷ, không thể chỉnh sửa.",
@@ -75,6 +78,16 @@ function assertEditableWindow(ctx: ShowtimeContext): void {
   if (ctx.started) {
     throw err.conflict("showtime_started", "Suất chiếu đã bắt đầu, không thể chỉnh sửa.");
   }
+}
+
+/**
+ * Ownership re-asserted on the row the write is about to touch. The route resolves it once as a fast
+ * 403/404, but the authoritative check rides inside the same transaction (and the same FOR UPDATE
+ * lock) as the mutation, so the right to make the change and the change itself can never disagree.
+ */
+function assertOwned(ctx: ShowtimeContext, actorUserId: number, isAdmin: boolean): void {
+  if (ctx.owner_user_id !== actorUserId && !isAdmin)
+    throw err.forbidden("not_owner", "Bạn không sở hữu tài nguyên này.");
 }
 
 export interface UpdateShowtimeInput {
@@ -86,6 +99,7 @@ export interface UpdateShowtimeInput {
 
 export async function updateShowtime(
   actorUserId: number,
+  isAdmin: boolean,
   ctx: ShowtimeContext,
   input: UpdateShowtimeInput,
 ): Promise<ShowtimeMutationResult> {
@@ -101,6 +115,11 @@ export async function updateShowtime(
   }
 
   return withTransaction(async (client) => {
+    await client.query(`SELECT id FROM showtimes WHERE id=$1 FOR UPDATE`, [ctx.id]);
+    const current = await showtimeContext(ctx.id, client);
+    if (!current) throw err.notFound("not_found", "Không tìm thấy suất chiếu.");
+    assertOwned(current, actorUserId, isAdmin);
+    assertEditableWindow(current);
     const changed: string[] = [];
     if (input.startsAt !== undefined) changed.push("showtime.startsAt");
 
@@ -131,11 +150,17 @@ export async function updateShowtime(
 
 export async function deleteShowtime(
   actorUserId: number,
+  isAdmin: boolean,
   ctx: ShowtimeContext,
 ): Promise<ShowtimeMutationResult> {
   assertEditableWindow(ctx);
 
   return withTransaction(async (client) => {
+    await client.query(`SELECT id FROM showtimes WHERE id=$1 FOR UPDATE`, [ctx.id]);
+    const current = await showtimeContext(ctx.id, client);
+    if (!current) throw err.notFound("not_found", "Không tìm thấy suất chiếu.");
+    assertOwned(current, actorUserId, isAdmin);
+    assertEditableWindow(current);
     const inv = await showtimeInventory(ctx.id, client);
 
     // Voiding tickets with refunds is UC-25 (cancel event), which is out of scope for this feature.
@@ -173,9 +198,9 @@ export async function deleteShowtime(
       "showtime.remove",
     ]);
     return {
-      showtimeId: ctx.id,
-      startsAt: ctx.starts_at.toISOString(),
-      venueId: ctx.venue_id,
+      showtimeId: current.id,
+      startsAt: current.starts_at.toISOString(),
+      venueId: current.venue_id,
       returnedToReview,
     };
   });

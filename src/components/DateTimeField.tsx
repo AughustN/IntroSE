@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useMemo, useRef, useState } from "react";
-import { CalendarDays } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { useDismiss } from "../hooks/useDismiss";
 import Select from "./Select";
 
@@ -50,12 +50,44 @@ function parse(value: string): Parts | null {
 
 const format = (p: Parts) => `${p.y}-${pad(p.m + 1)}-${pad(p.d)}T${pad(p.hh)}:${pad(p.mm)}`;
 
-/** What the reader sees: day first, as Vietnamese dates are written. */
-const display = (p: Parts) => `${pad(p.d)}/${pad(p.m + 1)}/${p.y} · ${pad(p.hh)}:${pad(p.mm)}`;
+/** Accept the same day-first format shown in the field, with an optional time. */
+function parseManual(value: string): Parts | null {
+  const match = /^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})(?:\s+(\d{1,2}):(\d{2}))?$/.exec(
+    value.trim(),
+  );
+  if (!match) return null;
+  const y = Number(match[3]);
+  const m = Number(match[2]) - 1;
+  const d = Number(match[1]);
+  const hh = match[4] === undefined ? 19 : Number(match[4]);
+  const mm = match[5] === undefined ? 0 : Number(match[5]);
+  const check = new Date(y, m, d, hh, mm);
+  if (
+    check.getFullYear() !== y ||
+    check.getMonth() !== m ||
+    check.getDate() !== d ||
+    check.getHours() !== hh ||
+    check.getMinutes() !== mm
+  ) {
+    return null;
+  }
+  return { y, m, d, hh, mm };
+}
+
+type SegmentKey = "d" | "m" | "y" | "hh" | "mm";
+type ManualSegments = Record<SegmentKey, string>;
+
+const segmentsFromParts = (p: Parts | null): ManualSegments => ({
+  d: p ? pad(p.d) : "",
+  m: p ? pad(p.m + 1) : "",
+  y: p ? String(p.y) : "",
+  hh: p ? pad(p.hh) : "",
+  mm: p ? pad(p.mm) : "",
+});
 
 const HOURS = Array.from({ length: 24 }, (_, h) => ({ value: pad(h), label: pad(h) }));
-/** Five-minute steps: a showtime is not scheduled to the minute, and 60 rows is a scroll. */
-const MINUTES = Array.from({ length: 12 }, (_, i) => ({ value: pad(i * 5), label: pad(i * 5) }));
+/** Calendar and manual entry accept exactly the same minutes. */
+const MINUTES = Array.from({ length: 60 }, (_, i) => ({ value: pad(i), label: pad(i) }));
 
 export default function DateTimeField({
   value,
@@ -63,6 +95,7 @@ export default function DateTimeField({
   className,
   disabled = false,
   placeholder = "Chọn ngày giờ",
+  ariaLabel,
 }: {
   /** `YYYY-MM-DDTHH:mm`, or empty. */
   value: string;
@@ -70,17 +103,37 @@ export default function DateTimeField({
   className?: string;
   disabled?: boolean;
   placeholder?: string;
+  /** Required when the surrounding form does not render a visible field label. */
+  ariaLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
+  /**
+   * A calendar interaction is a small form, not an immediate server mutation. Keeping an open
+   * panel's value locally lets a reader choose day, month, year and time before "Xong" commits
+   * one coherent datetime to the caller.
+   */
+  const [draft, setDraft] = useState(value);
   const ref = useRef<HTMLDivElement>(null);
   useDismiss(ref, open, () => setOpen(false));
 
-  const parsed = useMemo(() => parse(value), [value]);
+  const committed = useMemo(() => parse(value), [value]);
+  const [manual, setManual] = useState<ManualSegments>(() => segmentsFromParts(committed));
+  const [manualError, setManualError] = useState<string | null>(null);
+  const manualRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const parsed = useMemo(() => parse(open ? draft : value), [draft, open, value]);
   const now = new Date();
+
+  // An external refresh (for example, a server-confirmed showtime edit) becomes the next draft.
+  useEffect(() => {
+    if (!open && !manualError) {
+      setDraft(value);
+      setManual(segmentsFromParts(committed));
+    }
+  }, [committed, open, value, manualError]);
 
   /** The month on screen. Follows the value when there is one, otherwise opens on this month. */
   const [view, setView] = useState(() =>
-    parsed ? { y: parsed.y, m: parsed.m } : { y: now.getFullYear(), m: now.getMonth() },
+    committed ? { y: committed.y, m: committed.m } : { y: now.getFullYear(), m: now.getMonth() },
   );
 
   const daysInMonth = new Date(view.y, view.m + 1, 0).getDate();
@@ -100,45 +153,172 @@ export default function DateTimeField({
    */
   const pickDay = (d: number) => {
     const base = parsed ?? { y: view.y, m: view.m, d, hh: 19, mm: 0 };
-    onChange(format({ ...base, y: view.y, m: view.m, d }));
+    setDraft(format({ ...base, y: view.y, m: view.m, d }));
   };
 
   const setTime = (part: "hh" | "mm", raw: string) => {
-    const base = parsed ?? { y: view.y, m: view.m, d: now.getDate(), hh: 19, mm: 0 };
-    onChange(format({ ...base, [part]: Number(raw) }));
+    const base = parsed ?? {
+      y: view.y,
+      m: view.m,
+      d: Math.min(now.getDate(), daysInMonth),
+      hh: 19,
+      mm: 0,
+    };
+    setDraft(format({ ...base, [part]: Number(raw) }));
+  };
+
+  const openPanel = () => {
+    const seed = parse(value);
+    setDraft(value);
+    if (seed) setView({ y: seed.y, m: seed.m });
+    setOpen(true);
+  };
+
+  const commitManual = () => {
+    const complete = Object.values(manual).every((segment) => segment.length > 0);
+    const next = complete
+      ? parseManual(`${manual.d}/${manual.m}/${manual.y} ${manual.hh}:${manual.mm}`)
+      : null;
+    if (!next) {
+      setManualError("Nhập đủ ngày, tháng, năm, giờ và phút hợp lệ.");
+      onChange("");
+      return;
+    }
+    setManualError(null);
+    const nextValue = format(next);
+    setDraft(nextValue);
+    setManual(segmentsFromParts(next));
+    onChange(nextValue);
+  };
+
+  const updateManual = (key: SegmentKey, raw: string) => {
+    const maxLength = key === "y" ? 4 : 2;
+    const nextValue = raw.replace(/\D/g, "").slice(0, maxLength);
+    setManual((current) => ({ ...current, [key]: nextValue }));
+    if (nextValue.length === maxLength) {
+      const index = ["d", "m", "y", "hh", "mm"].indexOf(key);
+      manualRefs.current[index + 1]?.focus();
+    }
+  };
+
+  const handleSegmentKeyDown = (e: KeyboardEvent<HTMLInputElement>, index: number) => {
+    if (e.key === "Backspace" && e.currentTarget.value === "" && index > 0) {
+      manualRefs.current[index - 1]?.focus();
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitManual();
+    }
+  };
+
+  const blurSegment = (e: React.FocusEvent<HTMLInputElement>) => {
+    // Focus moves synchronously, before React commits the final digit. Do not commit between parts.
+    if (manualRefs.current.some((input) => input === e.relatedTarget)) return;
+    commitManual();
+  };
+
+  const commit = () => {
+    if (parsed) {
+      setManualError(null);
+      onChange(format(parsed));
+    }
+    setOpen(false);
   };
 
   return (
     <div ref={ref} className="relative flex min-w-0 flex-col">
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        className={`flex min-w-0 w-full items-center justify-between gap-2 text-left text-beige-kem transition disabled:cursor-not-allowed disabled:opacity-50 ${className ?? ""}`}
+      <div
+        className={`flex min-w-0 items-center gap-2 focus-within:border-burgundy ${className ?? ""}`}
       >
-        <span className={parsed ? "truncate" : "truncate text-ink-soft"}>
-          {parsed ? display(parsed) : placeholder}
-        </span>
-        <CalendarDays aria-hidden="true" className="h-4 w-4 shrink-0 text-ink-soft" />
-      </button>
+        <div className="flex min-w-0 flex-1 items-center justify-start gap-0.5 font-sans text-xs text-beige-kem">
+          {(["d", "m", "y"] as const).map((key, index) => (
+            <span key={key} className="flex items-center gap-0.5">
+              <input
+                ref={(el) => {
+                  manualRefs.current[index] = el;
+                }}
+                type="text"
+                inputMode="numeric"
+                aria-invalid={Boolean(manualError)}
+                value={manual[key]}
+                disabled={disabled}
+                onChange={(e) => updateManual(key, e.target.value)}
+                onBlur={blurSegment}
+                onFocus={(e) => e.currentTarget.select()}
+                onKeyDown={(e) => handleSegmentKeyDown(e, index)}
+                placeholder={key === "d" ? "DD" : key === "m" ? "MM" : "YYYY"}
+                aria-label={`${ariaLabel ?? placeholder} — ${key === "d" ? "ngày" : key === "m" ? "tháng" : "năm"}`}
+                className={`${key === "y" ? "w-12" : "w-7"} bg-transparent px-0.5 text-left font-sans outline-none placeholder:text-ink-soft/70`}
+              />
+              {index < 2 && <span aria-hidden>/</span>}
+            </span>
+          ))}
+          {(["hh", "mm"] as const).map((key, offset) => (
+            <span key={key} className={`flex items-center gap-0.5 ${offset === 0 ? "ml-1" : ""}`}>
+              <input
+                ref={(el) => {
+                  manualRefs.current[offset + 3] = el;
+                }}
+                type="text"
+                inputMode="numeric"
+                aria-invalid={Boolean(manualError)}
+                value={manual[key]}
+                disabled={disabled}
+                onChange={(e) => updateManual(key, e.target.value)}
+                onBlur={blurSegment}
+                onFocus={(e) => e.currentTarget.select()}
+                onKeyDown={(e) => handleSegmentKeyDown(e, offset + 3)}
+                placeholder={key === "hh" ? "HH" : "mm"}
+                aria-label={`${ariaLabel ?? placeholder} — ${key === "hh" ? "giờ" : "phút"}`}
+                className="w-7 bg-transparent px-0.5 text-left font-sans outline-none placeholder:text-ink-soft/70"
+              />
+              {offset === 0 && <span aria-hidden>:</span>}
+            </span>
+          ))}
+        </div>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => (open ? setOpen(false) : openPanel())}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-label={open ? "Đóng lịch" : "Mở lịch chọn ngày giờ"}
+          className="grid shrink-0 place-items-center text-ink-soft transition hover:text-beige-kem disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <CalendarDays aria-hidden="true" className="h-4 w-4 shrink-0 text-ink-soft" />
+        </button>
+      </div>
 
+      {manualError && (
+        <p role="alert" className="mt-1 text-xs text-burgundy-ink">
+          {manualError}
+        </p>
+      )}
       <div
         data-open={open}
         inert={!open}
-        className="menu-panel absolute left-0 top-[calc(100%+8px)] z-30 w-max min-w-full"
+        role="dialog"
+        aria-label={ariaLabel ?? "Chọn ngày và giờ"}
+        className="menu-panel absolute left-0 top-[calc(100%+8px)] z-30 w-[21rem] max-w-[calc(100vw-2rem)]"
       >
         <div>
-          <div className="ticket-corners bg-surface-2 p-3">
-            <div className="flex items-center justify-between gap-2">
+          <div className="ticket-corners bg-surface-2 pb-3">
+            {/* Same calendar binding as the Admin date picker: this is a TixHub control, not a
+                browser popup wearing a different border. */}
+            <div className="flex h-5 items-center justify-around bg-burgundy px-4">
+              {Array.from({ length: 6 }, (_, i) => (
+                <span key={i} className="h-1.5 w-1.5 bg-surface-2" />
+              ))}
+            </div>
+
+            <div className="mt-3 flex items-center justify-between px-4">
               <button
                 type="button"
                 onClick={() => step(-1)}
                 aria-label="Tháng trước"
-                className="px-2 py-1 text-beige-kem transition hover:bg-bubblegum/30"
+                className="grid h-7 w-7 place-items-center text-beige-kem transition hover:bg-bubblegum/40"
               >
-                ‹
+                <ChevronLeft className="h-4 w-4" />
               </button>
               <span className="label-eyebrow text-beige-kem">
                 Th{view.m + 1} · {view.y}
@@ -147,17 +327,17 @@ export default function DateTimeField({
                 type="button"
                 onClick={() => step(1)}
                 aria-label="Tháng sau"
-                className="px-2 py-1 text-beige-kem transition hover:bg-bubblegum/30"
+                className="grid h-7 w-7 place-items-center text-beige-kem transition hover:bg-bubblegum/40"
               >
-                ›
+                <ChevronRight className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="mt-2 grid grid-cols-7 gap-px">
+            <div className="mt-3 grid grid-cols-7 gap-y-0.5 px-4">
               {WEEKDAYS.map((w) => (
                 <span
                   key={w}
-                  className="grid h-7 place-items-center font-meta text-eyebrow text-ink-soft"
+                  className="grid h-6 place-items-center font-meta text-eyebrow text-ink-soft"
                 >
                   {w}
                 </span>
@@ -175,7 +355,7 @@ export default function DateTimeField({
                     type="button"
                     aria-pressed={picked}
                     onClick={() => pickDay(day)}
-                    className={`grid h-8 w-9 place-items-center font-meta text-body transition ${
+                    className={`grid h-9 place-items-center font-meta text-body transition ${
                       picked
                         ? "bg-burgundy font-bold text-white"
                         : "text-beige-kem hover:bg-bubblegum/40"
@@ -192,13 +372,15 @@ export default function DateTimeField({
               moment, and splitting it across two fields is what makes somebody set the date, save,
               and discover the hour is still midnight.
             */}
-            <div className="mt-3 flex items-end gap-2 border-t border-beige-kem/20 pt-3">
+            <div className="mt-3 flex items-end gap-2 border-t border-beige-kem/20 px-4 pt-3">
               <span className="label-eyebrow pb-2 text-ink-soft">Giờ</span>
               <div className="w-20">
                 <Select
                   value={pad(parsed?.hh ?? 19)}
                   options={HOURS}
                   onChange={(v) => setTime("hh", v)}
+                  placeholder="Giờ"
+                  menuPlacement="up"
                   triggerClassName="h-9 w-full border-2 border-beige-kem/40 bg-surface-2 px-2 text-xs"
                 />
               </div>
@@ -208,12 +390,14 @@ export default function DateTimeField({
                   value={pad(parsed?.mm ?? 0)}
                   options={MINUTES}
                   onChange={(v) => setTime("mm", v)}
+                  placeholder="Phút"
+                  menuPlacement="up"
                   triggerClassName="h-9 w-full border-2 border-beige-kem/40 bg-surface-2 px-2 text-xs"
                 />
               </div>
               <button
                 type="button"
-                onClick={() => setOpen(false)}
+                onClick={commit}
                 className="ml-auto bg-burgundy px-3 py-1.5 text-xs font-black text-white transition hover:brightness-95"
               >
                 Xong

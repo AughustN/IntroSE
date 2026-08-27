@@ -844,6 +844,33 @@ export default function ChartEditor({
     return () => window.clearTimeout(t);
   }, [draft, dirty, layout]);
 
+  /*
+   * Park the recovery copy IMMEDIATELY on unmount, closing the debounce window.
+   *
+   * `beforeunload` covers a tab close and a reload, and `closeGuarded` covers this editor's own
+   * close button. Neither covers browser Back or an in-app route change: those unmount the editor
+   * without a prompt, and the last 800ms of work — everything since the debounce last fired — went
+   * with it. Parking on the way out means Back costs the organizer a reopen, not their edits.
+   *
+   * Through a ref because an unmount cleanup with an empty dependency list would otherwise close
+   * over the FIRST render's draft. The ref is refreshed every render, so it holds the last one.
+   */
+  const parkNow = useRef<() => void>(() => {});
+  useEffect(() => {
+    parkNow.current = () => {
+      if (!layout || !dirty) return;
+      try {
+        window.localStorage.setItem(
+          draftKey(layout.id),
+          JSON.stringify({ baseVersion: layout.version, savedAt: Date.now(), document: draft }),
+        );
+      } catch {
+        /* best-effort: a full or disabled store must not break an unmount */
+      }
+    };
+  });
+  useEffect(() => () => parkNow.current(), []);
+
   useEffect(() => {
     const up = () => setOnline(true);
     const down = () => setOnline(false);
@@ -1419,8 +1446,8 @@ export default function ChartEditor({
    * id already real the server's stitched copy is what we sent, so declining to adopt it changes
    * nothing except that `reset` is not called and the undo stack survives.
    */
-  const persist = async (doc: ChartDocument, quiet = false): Promise<boolean> => {
-    if (!layout) return false;
+  const persist = async (doc: ChartDocument, quiet = false): Promise<Layout | null> => {
+    if (!layout) return null;
     setBusy(true);
     setError(null);
     try {
@@ -1446,11 +1473,20 @@ export default function ChartEditor({
         setSelected(new Set());
         setStatus("Đã lưu bản nháp.");
       }
-      return true;
+      /*
+       * The SAVED layout, not a boolean.
+       *
+       * `setLayout(saved)` does not change the `layout` this render closed over, so a caller that
+       * awaited a boolean and then read `layout.version` was reading the version from BEFORE the
+       * save. Publishing did exactly that: it saved, then presented the pre-save version to a check
+       * that had just been given a row one version newer, and the organizer was told their own save
+       * was somebody else's edit.
+       */
+      return saved;
     } catch (e) {
       setError((e as Error).message);
       setSaveRefused(true);
-      return false;
+      return null;
     } finally {
       setBusy(false);
     }
@@ -1531,11 +1567,13 @@ export default function ChartEditor({
    */
   const publish = async () => {
     if (!layout) return;
-    if (dirty && !(await persist(draft))) return;
+    // The row as it stands AFTER any save this click performed — the version the gate will compare.
+    const current = dirty ? await persist(draft) : layout;
+    if (!current) return;
     setBusy(true);
     setError(null);
     try {
-      const published = await layoutApi.publish(layout.id);
+      const published = await layoutApi.publish(current.id, current.version);
       setLayout(published);
       setStatus("Đã phát hành sơ đồ.");
     } catch (e) {
@@ -1549,14 +1587,26 @@ export default function ChartEditor({
    * Re-read after an operation the server owns.
    *
    * Tables and standing areas generate their seats server-side, so those endpoints null the stored
-   * document (`forgetDocument`) and the next read adopts a fresh one from the rows. Taking the server's
+   * document (`geometryWritten`) and the next read adopts a fresh one from the rows. Taking the server's
    * document back is therefore mandatory here, not an optimisation — keeping the local one would leave
    * the editor describing a chart the database no longer has.
    *
-   * It also means unsaved block edits are lost, so it asks first.
+   * It also means unsaved block edits are lost — so they are SAVED first, and the operation is
+   * abandoned if that save is refused.
+   *
+   * The comment here used to say it "asks first" and nothing did: `fn()` ran, the fresh server
+   * document replaced the local draft, and `forgetStoredDraft` removed the recovery copy in the same
+   * breath. Moving a block and then adding a table lost the move with no prompt and no way back.
+   *
+   * Saving rather than asking, because the two are not equivalent here: the endpoints behind this
+   * null the stored document, so keeping the local one is not an option the organizer could take
+   * even if offered it. Persisting first makes the work survive the adoption instead.
    */
-  const serverOp = async (fn: () => Promise<unknown>, done: string) => {
+  const serverOp = async (fn: () => Promise<unknown>, done: string, alreadySaved = false) => {
     if (!layout) return;
+    // `alreadySaved`: `tableOp` has already persisted the document half of the gesture, and it holds
+    // the CURRENT one. Saving again here would write this render's stale `draft` over it.
+    if (!alreadySaved && dirty && !(await persist(draft))) return;
     setBusy(true);
     setError(null);
     try {
@@ -1571,6 +1621,24 @@ export default function ChartEditor({
       setStatus(done);
     } catch (e) {
       setError((e as Error).message);
+      /*
+       * Re-read after a refusal, rather than carry on with a document the server may not share.
+       *
+       * A table gesture is two halves: the blocks are saved through `tableOp` first, then the tables
+       * are written. A refusal on the second half — a table whose seats are sold — leaves the first
+       * half committed, so the local document is neither what was sent nor what the database holds.
+       * The old catch reported the message and left the editor in exactly that state.
+       */
+      try {
+        const fresh = await layoutApi.get(layout.id);
+        setLayout(fresh);
+        const doc = fresh.document ?? emptyDocument();
+        setServerJson(JSON.stringify(doc));
+        reset(doc);
+        setSelected(new Set());
+      } catch {
+        /* the refusal above is the message worth showing; a failed re-read must not replace it */
+      }
     } finally {
       setBusy(false);
     }
@@ -1592,7 +1660,7 @@ export default function ChartEditor({
     if (JSON.stringify(keep) !== serverJson) {
       if (!(await persist(keep))) return;
     }
-    await serverOp(fn, done);
+    await serverOp(fn, done, true);
   };
 
   /** How near the first point a click has to land to close the outline, in layout units. */
@@ -1677,6 +1745,41 @@ export default function ChartEditor({
     );
   };
 
+  /*
+   * Browser Back, which `beforeunload` cannot reach.
+   *
+   * `beforeunload` covers a tab close and a reload; this editor's own close button goes through
+   * `closeGuarded`. Neither covers Back, which unmounts the editor with no prompt at all.
+   *
+   * A sentinel history entry is the only mechanism available: the app runs on `BrowserRouter`, not a
+   * data router, so `useBlocker` throws here. Back consumes the sentinel, the handler puts it
+   * straight back — so the editor stays mounted — and then asks with the same dialog the close
+   * button uses, rather than the platform's. Confirming runs `onClose`, which is what Back meant.
+   *
+   * The cleanup removes the sentinel only while it is still the entry underfoot. Popping one that
+   * something else has already navigated past would take the reader somewhere they never asked for,
+   * which is a worse failure than the one this guards.
+   */
+  const closeGuardedRef = useRef(closeGuarded);
+  useEffect(() => {
+    closeGuardedRef.current = closeGuarded;
+  });
+  useEffect(() => {
+    if (!dirty) return;
+    const MARK = "tixhubChartGuard";
+    window.history.pushState({ [MARK]: true }, "");
+    const onPop = () => {
+      window.history.pushState({ [MARK]: true }, "");
+      closeGuardedRef.current();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      const st = window.history.state as Record<string, unknown> | null;
+      if (st && st[MARK] === true) window.history.back();
+    };
+  }, [dirty]);
+
   /** Split a selection into the tables (which the server owns) and everything else. */
   const partition = (keys: Set<string>) => {
     const blocks = draft.blocks.filter((b) => keys.has(b.key));
@@ -1694,14 +1797,17 @@ export default function ChartEditor({
     const { tables, others } = partition(selected);
     const next = others.size > 0 ? moveBlocks(draft, others, dx, dy, grid) : draft;
     if (others.size > 0) op(() => next);
-    if (tables.length === 0) return;
+    if (tables.length === 0 || !layout) return;
     void tableOp(
       next,
       () =>
-        Promise.all(
+        // One request, one transaction: every table moves or none does. Sent per table, a refusal
+        // on the third (its seats are sold) left the first two moved and the editor stale.
+        layoutApi.updateTables(
+          layout.id,
           // `movedPosition` is the same arithmetic `moveBlocks` applies, so a table dragged alongside
           // a block lands on the same grid step rather than a snap away from it.
-          tables.map((t) => layoutApi.updateTable(t.tableId, movedPosition(t, dx, dy, grid))),
+          tables.map((t) => ({ tableId: t.tableId, patch: movedPosition(t, dx, dy, grid) })),
         ),
       tables.length > 1 ? "Đã dời các bàn." : `Đã dời ${tables[0].title}.`,
     );
@@ -1711,16 +1817,16 @@ export default function ChartEditor({
     const { tables, others } = partition(selected);
     const next = others.size > 0 ? rotateBlocks(draft, others, degrees) : draft;
     if (others.size > 0) op(() => next);
-    if (tables.length === 0) return;
+    if (tables.length === 0 || !layout) return;
     void tableOp(
       next,
       () =>
-        Promise.all(
-          tables.map((t) =>
-            layoutApi.updateTable(t.tableId, {
-              rotation: (((t.rotation + degrees) % 360) + 360) % 360,
-            }),
-          ),
+        layoutApi.updateTables(
+          layout.id,
+          tables.map((t) => ({
+            tableId: t.tableId,
+            patch: { rotation: (((t.rotation + degrees) % 360) + 360) % 360 },
+          })),
         ),
       "Đã xoay bàn.",
     );
@@ -1765,7 +1871,7 @@ export default function ChartEditor({
     // labels back. Two commits would leave an undo that restored the rows under the wrong letters.
     const next = others.size > 0 ? repack(removeBlocks(draft, others)) : draft;
     if (others.size > 0) op(() => next);
-    if (tables.length === 0) {
+    if (tables.length === 0 || !layout) {
       if (others.size > 0) setSelected(new Set());
       return;
     }
@@ -1773,9 +1879,9 @@ export default function ChartEditor({
     // held (FR-051/FR-052) — that refusal is the whole reason this cannot be a document edit.
     void tableOp(
       next,
-      async () => {
-        for (const t of tables) await layoutApi.deleteTable(t.tableId);
-      },
+      // All-or-nothing: a table whose seats are sold refuses (FR-051/FR-052), and the sequential
+      // loop this replaces would already have deleted the ones before it.
+      () => layoutApi.deleteTables(layout.id, tables.map((t) => t.tableId)),
       tables.length > 1 ? "Đã xoá các bàn." : `Đã xoá ${tables[0].title}.`,
     );
   };
@@ -1785,12 +1891,13 @@ export default function ChartEditor({
     const box = selectionBounds(draft, selected);
     const next = alignBlocks(draft, selected, edge);
     if (others.size > 0) op(() => next);
-    if (tables.length === 0 || !box || selected.size < 2) return;
+    if (tables.length === 0 || !box || selected.size < 2 || !layout) return;
     void tableOp(
       next,
       () =>
-        Promise.all(
-          tables.map((t) => layoutApi.updateTable(t.tableId, alignedPosition(box, t, edge))),
+        layoutApi.updateTables(
+          layout.id,
+          tables.map((t) => ({ tableId: t.tableId, patch: alignedPosition(box, t, edge) })),
         ),
       "Đã canh hàng.",
     );
@@ -2362,7 +2469,26 @@ export default function ChartEditor({
     // — which is to say empty.
   }, [draft, draft.blocks, selected, clipboard, grid, layout, drawing, op, commit, undo, redo]);
 
-  if (error && !layout) return <p className="p-6 text-sm text-on-tint">{error}</p>;
+  /*
+   * A chart that would not open is a dead end without this button.
+   *
+   * The editor is full-screen and owns the viewport, so a deep link to a chart that was deleted or
+   * belongs to someone else left the organizer looking at one line of raw error text with no control
+   * on the page at all — the only exit was the browser's Back.
+   */
+  if (error && !layout)
+    return (
+      <div className="space-y-4 p-6">
+        <p className="text-sm text-on-tint">{error}</p>
+        <button
+          type="button"
+          onClick={onClose}
+          className="border-2 border-beige-kem px-4 py-2 text-xs font-bold text-beige-kem transition hover:border-burgundy"
+        >
+          ← Quay lại thư viện sơ đồ
+        </button>
+      </div>
+    );
   if (!layout) return <p className="p-6 font-mono text-xs text-beige-kem/70">Đang tải sơ đồ…</p>;
 
   const seats = seatCount(draft);
@@ -3861,7 +3987,7 @@ export default function ChartEditor({
               <button
                 type="button"
                 onClick={applyDelete}
-                className="mt-3 w-full border-2 border-burgundy-ink px-3 py-1.5 text-xs font-bold text-burgundy-ink transition hover:bg-bubblegum hover:text-on-tint"
+                className="seatmap-delete-action mt-3 w-full border-2 px-3 py-1.5 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-40"
                 title="Xoá (Delete)"
               >
                 Xoá khối

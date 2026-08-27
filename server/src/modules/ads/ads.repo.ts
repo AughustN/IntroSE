@@ -8,7 +8,7 @@ import type {
 } from "@shared/ads/types.js";
 import { type Db, pool, withTransaction } from "../../db/pool.js";
 import { err } from "../../http.js";
-import { VISIBLE_JOIN, VISIBLE_WHERE } from "../catalog/visibility.js";
+import { UPCOMING_SHOWTIME, VISIBLE_JOIN, VISIBLE_WHERE } from "../catalog/visibility.js";
 
 /*
  * Advertising packages (0033_ads.sql).
@@ -29,6 +29,7 @@ import { VISIBLE_JOIN, VISIBLE_WHERE } from "../catalog/visibility.js";
 
 /** A campaign is rendering right now. Written once here so every read agrees on what "live" means. */
 const LIVE = `p.status = 'active' AND p.starts_at <= now() AND p.ends_at > now()`;
+const PROMOTABLE = `${VISIBLE_WHERE} AND EXISTS (SELECT 1 FROM showtimes s WHERE ${UPCOMING_SHOWTIME})`;
 
 export async function listPackages(db: Db = pool): Promise<AdPackage[]> {
   const { rows } = await db.query<{
@@ -71,6 +72,7 @@ interface PurchaseRow {
   ends_at: Date;
   created_at: Date;
   live: boolean;
+  serving: boolean;
 }
 
 const toPurchase = (row: PurchaseRow): AdPurchase => ({
@@ -87,6 +89,7 @@ const toPurchase = (row: PurchaseRow): AdPurchase => ({
   endsAt: row.ends_at.toISOString(),
   createdAt: row.created_at.toISOString(),
   live: row.live,
+  serving: row.serving,
 });
 
 const PURCHASE_SELECT = `
@@ -94,9 +97,10 @@ const PURCHASE_SELECT = `
          k.code AS package_code, k.name_vi AS package_name,
          p.price_amount::text AS price, p.placements, p.status,
          p.starts_at, p.ends_at, p.created_at,
-         (${LIVE}) AS live
+         (${LIVE}) AS live, (${LIVE} AND ${PROMOTABLE}) AS serving
     FROM ad_purchases p
     JOIN events e ON e.id = p.event_id
+    ${VISIBLE_JOIN}
     JOIN ad_packages k ON k.id = p.package_id`;
 
 /** Every campaign this organizer has bought, newest first. */
@@ -144,7 +148,7 @@ export async function purchase(input: {
     // render, sold anyway.
     const event = (
       await client.query<{ owned: boolean; visible: boolean }>(
-        `SELECT (e.organizer_id = $2) AS owned, (${VISIBLE_WHERE}) AS visible
+        `SELECT (e.organizer_id = $2) AS owned, (${PROMOTABLE}) AS visible
            FROM events e ${VISIBLE_JOIN}
           WHERE e.id = $1
           FOR UPDATE OF e, o`,
@@ -154,7 +158,7 @@ export async function purchase(input: {
     if (!event) throw err.notFound("event_not_found", "Không tìm thấy sự kiện.");
     if (!event.owned) throw err.forbidden("not_owner", "Sự kiện này không thuộc về bạn.");
     if (!event.visible)
-      throw err.conflict("event_not_promotable", "Chỉ quảng cáo được sự kiện đang mở bán.");
+      throw err.conflict("event_not_promotable", "Chỉ quảng cáo được sự kiện đã duyệt, đang mở bán và còn suất chưa diễn.");
 
     /*
      * A campaign that is still running blocks a second one; an expired one does not.
@@ -242,7 +246,7 @@ export async function activePlacements(db: Db = pool): Promise<ActiveAdPlacement
        FROM ad_purchases p
        JOIN events e ON e.id = p.event_id
        ${VISIBLE_JOIN}
-      WHERE ${LIVE} AND ${VISIBLE_WHERE}
+      WHERE ${LIVE} AND ${PROMOTABLE}
       ORDER BY p.created_at DESC`,
   );
   return rows.map((row) => ({ eventId: row.event_id, slug: row.slug, placements: row.placements }));

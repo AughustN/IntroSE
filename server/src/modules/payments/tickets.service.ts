@@ -136,15 +136,22 @@ export async function settleEventCancellation(
     [eventId],
   );
   for (const ticket of tickets.rows) await refundTicket(db, ticket);
-  const refundedConcessions = await refundConcessionOrders(db, eventId);
-  await updateOrderRefundStatus(db, [...new Set(tickets.rows.map((ticket) => ticket.order_id))]);
+  const { total: refundedConcessions, orderIds: concessionOrderIds } = await refundConcessionOrders(
+    db,
+    eventId,
+  );
+  // Settle BOTH kinds of order that moved money here. The ticket set alone misses an order whose
+  // tickets were all already used or voided by the time the event was cancelled — its snack money
+  // still went back, so its payment_status must be re-decided from the tickets that survive.
+  await updateOrderRefundStatus(db, [
+    ...new Set([...tickets.rows.map((ticket) => ticket.order_id), ...concessionOrderIds]),
+  ]);
   await closeWaitlistsForEvent(db, eventId, "cancelled");
   await queueEventNotification(db, eventId, "event_cancelled", body, "cancellation");
   return {
     refundedTickets: tickets.rowCount ?? 0,
     refundedAmount:
-      tickets.rows.reduce((sum, ticket) => sum + ticket.refundable_amount, 0) +
-      refundedConcessions,
+      tickets.rows.reduce((sum, ticket) => sum + ticket.refundable_amount, 0) + refundedConcessions,
   };
 }
 
@@ -161,7 +168,10 @@ export async function settleEventCancellation(
  * Double-payment is structurally impossible rather than merely guarded: this runs inside the
  * transaction holding the event row's lock, and a second run returns before reaching here.
  */
-async function refundConcessionOrders(db: Db, eventId: number): Promise<number> {
+async function refundConcessionOrders(
+  db: Db,
+  eventId: number,
+): Promise<{ total: number; orderIds: number[] }> {
   const orders = await db.query<{ order_id: string; user_id: number; amount: string }>(
     `SELECT o.id AS order_id, o.user_id,
             SUM(oc.quantity * oc.unit_price_amount)::bigint AS amount
@@ -210,7 +220,7 @@ async function refundConcessionOrders(db: Db, eventId: number): Promise<number> 
       [settledOrderIds],
     );
   }
-  return total;
+  return { total, orderIds: settledOrderIds };
 }
 
 /**
@@ -339,7 +349,10 @@ export async function checkInTicket(
   );
   if (!rows.length) {
     // Lost the race — the other scanner flipped it first. Re-read and treat as a benign rescan.
-    return { ticket: await readScannableTicket(code, organizerUserId, db) ?? existing, already: true };
+    return {
+      ticket: (await readScannableTicket(code, organizerUserId, db)) ?? existing,
+      already: true,
+    };
   }
   return {
     ticket: { ...existing, status: "checked_in" },

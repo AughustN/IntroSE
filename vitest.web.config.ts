@@ -14,6 +14,8 @@ import { defineConfig } from "vitest/config";
  * milliseconds. Run with `npm run test:web`.
  */
 export default defineConfig({
+  // Component render tests use the same automatic JSX runtime as the web app.
+  esbuild: { jsx: "automatic" },
   resolve: {
     alias: [
       // Mirrors tsconfig.web.json's paths, so a test imports what the app imports.

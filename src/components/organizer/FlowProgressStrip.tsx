@@ -42,11 +42,11 @@ export default function FlowProgressStrip({
       {active && (
         <span className="min-w-0 flex-1 font-meta text-meta text-beige-kem/80">
           {allDone ? (
-            <span className="text-la-co">{active.label}</span>
+            <span className="text-la-co-ink">{active.label}</span>
           ) : (
             <>
               <span className="font-bold text-beige-kem">{active.label}</span>
-              {active.reason && <span className="text-beige-kem/60"> — {active.reason}</span>}
+              {active.reason && <span className="text-beige-kem/70"> — {active.reason}</span>}
             </>
           )}
         </span>
@@ -56,7 +56,7 @@ export default function FlowProgressStrip({
         <button
           type="button"
           onClick={() => onAction(active.action!)}
-          className="shrink-0 font-meta text-meta font-bold text-burgundy-ink underline underline-offset-2 transition hover:text-burgundy"
+          className="shrink-0 font-meta text-meta font-bold text-burgundy-ink underline underline-offset-2 transition hover:text-burgundy-ink"
         >
           {ACTION_LABEL[active.action]} →
         </button>

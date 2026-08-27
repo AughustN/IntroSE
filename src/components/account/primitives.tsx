@@ -67,11 +67,13 @@ export function InfoCard({
   title,
   action,
   tone = "normal",
+  titleClassName,
   children,
 }: {
   title: string;
   action?: ReactNode;
   tone?: "normal" | "danger";
+  titleClassName?: string;
   children: ReactNode;
 }) {
   return (
@@ -81,7 +83,9 @@ export function InfoCard({
       }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-beige-kem/25 pb-4">
-        <h3 className="font-display text-title-s font-bold text-ink-soft">{title}</h3>
+        <h3 className={`font-display text-title-s font-bold ${titleClassName ?? "text-ink-soft"}`}>
+          {title}
+        </h3>
         {action}
       </div>
       <div className="pt-5">{children}</div>

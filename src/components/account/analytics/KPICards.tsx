@@ -54,18 +54,18 @@ export function KPICards({ overview }: Props) {
           </h3>
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
             {grossRevenuePct >= 0 ? (
-              <span className="inline-flex items-center gap-1 bg-la-co/20 px-2 py-0.5 font-bold text-la-co">
+              <span className="inline-flex items-center gap-1 bg-la-co/20 px-2 py-0.5 font-bold text-la-co-ink">
                 <TrendingUp className="h-3.5 w-3.5" /> +{grossRevenuePct}%
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 bg-cam-dat/20 px-2 py-0.5 font-bold text-cam-dat">
+              <span className="inline-flex items-center gap-1 bg-cam-dat/20 px-2 py-0.5 font-bold text-cam-dat-ink">
                 <TrendingDown className="h-3.5 w-3.5" /> {grossRevenuePct}%
               </span>
             )}
             <span className="text-beige-kem/60 font-medium">so với kỳ trước</span>
           </div>
           <div className="mt-3 border-t border-beige-kem/10 pt-2 text-[11px] text-beige-kem/60">
-            Thực nhận: <strong className="text-la-co">{formatVND(net_revenue_vnd)}</strong>
+            Thực nhận: <strong className="text-la-co-ink">{formatVND(net_revenue_vnd)}</strong>
           </div>
         </div>
       </div>
@@ -87,18 +87,18 @@ export function KPICards({ overview }: Props) {
           </h3>
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
             {ticketsSoldPct >= 0 ? (
-              <span className="inline-flex items-center gap-1 bg-la-co/20 px-2 py-0.5 font-bold text-la-co">
+              <span className="inline-flex items-center gap-1 bg-la-co/20 px-2 py-0.5 font-bold text-la-co-ink">
                 <TrendingUp className="h-3.5 w-3.5" /> +{ticketsSoldPct}%
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 bg-cam-dat/20 px-2 py-0.5 font-bold text-cam-dat">
+              <span className="inline-flex items-center gap-1 bg-cam-dat/20 px-2 py-0.5 font-bold text-cam-dat-ink">
                 <TrendingDown className="h-3.5 w-3.5" /> {ticketsSoldPct}%
               </span>
             )}
             <span className="text-beige-kem/60 font-medium">so với kỳ trước</span>
           </div>
           <div className="mt-3 border-t border-beige-kem/10 pt-2 text-[11px] text-beige-kem/60">
-            Tỷ lệ lấp đầy: <strong className="text-cam-dat">{capacity_fill_rate}%</strong>
+            Tỷ lệ lấp đầy: <strong className="text-cam-dat-ink">{capacity_fill_rate}%</strong>
           </div>
         </div>
       </div>
@@ -109,7 +109,7 @@ export function KPICards({ overview }: Props) {
           <span className="text-eyebrow font-bold uppercase tracking-wider text-beige-kem/70">
             Sự kiện hoạt động
           </span>
-          <div className="bg-cam-dat/20 p-2.5 text-cam-dat transition group-hover:scale-105">
+          <div className="bg-cam-dat/20 p-2.5 text-cam-dat-ink transition group-hover:scale-105">
             <Calendar className="h-5 w-5" />
           </div>
         </div>
@@ -119,7 +119,7 @@ export function KPICards({ overview }: Props) {
             <span className="text-lg font-bold text-beige-kem/70">đang mở bán</span>
           </h3>
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
-            <span className="inline-flex items-center gap-1 bg-la-co/20 px-2 py-0.5 font-bold text-la-co">
+            <span className="inline-flex items-center gap-1 bg-la-co/20 px-2 py-0.5 font-bold text-la-co-ink">
               <TrendingUp className="h-3.5 w-3.5" /> Đã đăng
             </span>
             <span className="text-beige-kem/60 font-medium">
@@ -129,7 +129,7 @@ export function KPICards({ overview }: Props) {
           <div className="mt-3 flex items-center justify-between border-t border-beige-kem/10 pt-2 text-[11px] text-beige-kem/60">
             <span>
               Chờ duyệt:{" "}
-              <strong className="text-cam-dat">{event_counts_by_status.pending_approval}</strong>
+              <strong className="text-cam-dat-ink">{event_counts_by_status.pending_approval}</strong>
             </span>
             <span>
               Nháp: <strong className="text-beige-kem/90">{event_counts_by_status.draft}</strong>
@@ -154,18 +154,18 @@ export function KPICards({ overview }: Props) {
           </h3>
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
             {netRevenuePct >= 0 ? (
-              <span className="inline-flex items-center gap-1 bg-la-co/20 px-2 py-0.5 font-bold text-la-co">
+              <span className="inline-flex items-center gap-1 bg-la-co/20 px-2 py-0.5 font-bold text-la-co-ink">
                 <TrendingUp className="h-3.5 w-3.5" /> +{netRevenuePct}%
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 bg-cam-dat/20 px-2 py-0.5 font-bold text-cam-dat">
+              <span className="inline-flex items-center gap-1 bg-cam-dat/20 px-2 py-0.5 font-bold text-cam-dat-ink">
                 <TrendingDown className="h-3.5 w-3.5" /> {netRevenuePct}%
               </span>
             )}
             <span className="text-beige-kem/60 font-medium">so với kỳ trước</span>
           </div>
           <div className="mt-3 border-t border-beige-kem/10 pt-2 text-[11px] text-beige-kem/60">
-            Đã trừ <strong className="text-cam-dat">{formatVND(total_refund_amount_vnd)}</strong>{" "}
+            Đã trừ <strong className="text-cam-dat-ink">{formatVND(total_refund_amount_vnd)}</strong>{" "}
             tiền hoàn vé
           </div>
         </div>

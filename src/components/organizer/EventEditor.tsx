@@ -20,6 +20,7 @@ import AiListingPanel from "./AiListingPanel";
 import { CancelEventModal } from "./CancelEventModal";
 import CheckInPanel from "./CheckInPanel";
 import EventPreviewOverlay from "./EventPreviewOverlay";
+import EventMediaEditor from "./EventMediaEditor";
 import EventFlowRail from "./EventFlowRail";
 import FlowProgressStrip from "./FlowProgressStrip";
 import { flowSteps, type FlowStep } from "./flowSteps";
@@ -100,7 +101,7 @@ export default function EventEditor({
   const onSale = event.status === "on_sale";
   /** Terminal. The server spells it with two Ls (`events.status = 'cancelled'`); match it exactly
    *  rather than adding a third spelling to a codebase that already carries two. */
-  const cancelled = event.status === "cancelled";
+  const cancelled = event.status === "cancelled" || event.status === "finished";
 
   const [cancelOpen, setCancelOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -344,14 +345,21 @@ export default function EventEditor({
     else showtimesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  if (cancelled) return <div className="space-y-4">
+    <button type="button" onClick={onBack} className={ghost}>← Quay lại sự kiện</button>
+    <h2 className="font-display text-2xl">{event.title}</h2>
+    <p className="text-ink-soft">Sự kiện đã kết thúc hoặc đã hủy. Dữ liệu được giữ để đối soát, không thể chỉnh sửa hay đăng bán lại.</p>
+  </div>;
+
   return (
     <div className="min-w-0 space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         {/* Borderless, like the booking flow's back link (`BookingHeader`) — an arrow and a label
             rather than a boxed button, since this is navigation, not an action taken on the page. */}
         <button
+          type="button"
           onClick={onBack}
-          className="flex items-center gap-2 text-xs font-bold text-beige-kem/70 transition-colors hover:text-beige-kem"
+          className="inline-flex min-h-10 items-center gap-2 px-2 text-sm font-bold text-ink-soft transition-colors hover:text-beige-kem focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-burgundy focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
         >
           <ArrowLeft aria-hidden className="h-3.5 w-3.5" />
           Danh sách sự kiện
@@ -373,7 +381,7 @@ export default function EventEditor({
                 Ngừng bán
               </button>
             ) : (
-              <button onClick={submitForReview} disabled={busy} className={btn}>
+              <button onClick={submitForReview} disabled={busy || ["flagged", "removed"].includes(event.moderation)} className={btn}>
                 Gửi duyệt
               </button>
             ))}
@@ -381,7 +389,7 @@ export default function EventEditor({
             <button
               onClick={() => setCancelOpen(true)}
               disabled={busy}
-              className={`${ghost} border-burgundy text-burgundy`}
+              className={`${ghost} border-burgundy text-burgundy-ink`}
             >
               Hủy sự kiện
             </button>
@@ -419,6 +427,7 @@ export default function EventEditor({
           compartments inside a box").
         */}
         <div className="min-w-0 space-y-5 lg:order-2">
+          {!cancelled && <EventMediaEditor event={event} onSaved={onRefresh} />}
           <div className="min-w-0 bg-surface-2 p-5">
             <h3 className="mb-3 break-words font-display text-2xl font-bold">{event.title}</h3>
 
@@ -484,20 +493,44 @@ export default function EventEditor({
               </fieldset>
             )}
 
-            <label className="mt-3 flex items-center gap-2 cursor-pointer select-none">
+            {/*
+              A setting whose consequence lands on the BUYER, not on this form, so it states that
+              consequence instead of naming the feature.
+
+              It was a bare checkbox reading "Phòng Chờ Vé Hot - Bảo Vệ Chống Bot" — a compressed
+              product name that says what the feature is called and nothing about what ticking it
+              does. What it actually does is put every buyer through a queue and a CAPTCHA before
+              they may hold a seat, which is a material change to the purchase flow and the kind of
+              thing an organizer should not have to discover from support tickets.
+
+              The description hangs under the title rather than beside the tick so the second and
+              third lines stay on the title's left edge instead of wrapping under the checkbox.
+            */}
+            <label className="mt-4 flex cursor-pointer select-none items-start gap-3">
               <input
                 type="checkbox"
                 checked={isHighDemand}
                 onChange={(e) => setIsHighDemand(e.target.checked)}
-                className="h-4 w-4 rounded border-beige-kem/60 accent-burgundy"
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-beige-kem/60 accent-burgundy"
               />
-              <span className="font-mono text-xs text-beige-kem">
-                🛡️ Phòng Chờ Vé Hot - Bảo Vệ Chống Bot
+              <span className="min-w-0">
+                <span className="block font-mono text-xs font-bold text-beige-kem">
+                  Phòng chờ vé hot
+                </span>
+                <span className="mt-1 block font-mono text-[11px] leading-4 text-beige-kem/70">
+                  Người mua phải xếp hàng và qua bước kiểm tra chống bot trước khi được chọn ghế.
+                  Dành cho sự kiện dự kiến cháy vé trong vài phút.
+                </span>
+                {isHighDemand && (
+                  <span className="mt-1 block font-mono text-[11px] leading-4 text-cam-dat-ink">
+                    Đang bật — người mua vào chọn ghế theo lượt, khoảng 300 người mỗi phút.
+                  </span>
+                )}
               </span>
             </label>
 
             {isLive && changedFields().length > 0 && isMaterialEdit(changedFields()) && (
-              <p className="mt-3 font-mono text-[11px] text-cam-dat">
+              <p className="mt-3 font-mono text-[11px] text-cam-dat-ink">
                 Thay đổi này cần duyệt lại: sự kiện sẽ tạm ẩn khỏi trang công khai cho đến khi được
                 duyệt.
               </p>
@@ -505,13 +538,13 @@ export default function EventEditor({
 
             <button
               onClick={save}
-              disabled={busy || changedFields().length === 0}
+              disabled={cancelled || busy || changedFields().length === 0}
               className={`${btn} mt-4`}
             >
               Lưu thay đổi
             </button>
 
-            {notice && <p className="mt-3 font-mono text-[11px] text-la-co">{notice}</p>}
+            {notice && <p className="mt-3 font-mono text-[11px] text-la-co-ink">{notice}</p>}
             <Refusal message={refusal} />
           </div>
 
@@ -604,7 +637,7 @@ export default function EventEditor({
                   </button>
 
                   {venueNotice && (
-                    <p className="mt-3 font-mono text-[11px] text-la-co">{venueNotice}</p>
+                    <p className="mt-3 font-mono text-[11px] text-la-co-ink">{venueNotice}</p>
                   )}
                   <Refusal message={venueRefusal} />
                 </>
@@ -625,6 +658,7 @@ export default function EventEditor({
             <ShowtimeList
               eventId={event.id}
               venues={venues}
+              preferredVenueId={event.venueId ?? undefined}
               onChanged={() => {
                 onRefresh();
                 // The rail reads showtimes, tiers and the chart binding — all of which this list edits.

@@ -317,17 +317,24 @@ describe("the snapshot isolates showtimes from layout edits (FR-005, SC-005a)", 
       .expect(200);
     expect(preview.body.wouldSucceed).toBe(true);
     expect(preview.body.changes.length).toBeGreaterThan(0);
+    // The token the confirm must echo back (0035 finding 5).
+    expect(preview.body.source).toMatchObject({ layoutId: expect.any(Number) });
     const untouched = await pool.query(
       `SELECT pos_x FROM showtime_seats WHERE showtime_id = $1 ORDER BY id`,
       [m.showtime],
     );
     expect(untouched.rows).toEqual(before.rows);
 
-    // Only the explicit re-apply moves it.
+    // Only the explicit re-apply moves it — and only when it names the preview it is confirming.
     await request(app)
       .post(`/api/organizer/showtimes/${m.showtime}/seat-map/reapply`)
       .set(o.h)
       .send({ dryRun: false })
+      .expect(400);
+    await request(app)
+      .post(`/api/organizer/showtimes/${m.showtime}/seat-map/reapply`)
+      .set(o.h)
+      .send({ dryRun: false, source: preview.body.source })
       .expect(200);
     const applied = await pool.query(
       `SELECT pos_x FROM showtime_seats WHERE showtime_id = $1 ORDER BY id`,

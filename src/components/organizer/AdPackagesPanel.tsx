@@ -12,9 +12,8 @@ import {
   type AdPurchase,
 } from "@shared/ads/types.js";
 import { adsClient } from "../../services/adsClient";
-import { getOrganizerEvents } from "../../services/organizerClient";
+import { organizerApi, type MyEvent } from "../../services/catalogClient";
 import { formatVnd } from "../../services/currency";
-import type { OrganizerEventStatus, OrganizerPortfolioSummary } from "../../types";
 import Select from "../Select";
 
 /**
@@ -46,14 +45,14 @@ const PLACEMENT_ICON: Record<AdPlacement, typeof Flame> = {
  * covers the organizer being approved. This filter exists so the dropdown does not offer a draft it
  * knows the purchase would be refused for.
  */
-const PROMOTABLE: ReadonlySet<OrganizerEventStatus> = new Set<OrganizerEventStatus>(["published"]);
 
 const day = (iso: string) => new Date(iso).toLocaleDateString("vi-VN");
 
 export default function AdPackagesPanel() {
   const [packages, setPackages] = useState<AdPackage[]>([]);
   const [purchases, setPurchases] = useState<AdPurchase[]>([]);
-  const [events, setEvents] = useState<OrganizerPortfolioSummary[]>([]);
+  const [events, setEvents] = useState<MyEvent[]>([]);
+  const [retryKey, setRetryKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -70,12 +69,12 @@ export default function AdPackagesPanel() {
    * unmount, and the purchase path does not.
    */
   const fetchAll = () =>
-    Promise.all([adsClient.packages(), adsClient.purchases(), getOrganizerEvents()]);
+    Promise.all([adsClient.packages(), adsClient.purchases(), organizerApi.myEvents()]);
 
   const apply = ([list, mine, portfolio]: Awaited<ReturnType<typeof fetchAll>>) => {
     setPackages(list);
     setPurchases(mine);
-    setEvents(portfolio.data);
+    setEvents(portfolio);
     setError(null);
   };
 
@@ -98,14 +97,18 @@ export default function AdPackagesPanel() {
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [retryKey]);
 
   // An event with a campaign STILL RUNNING cannot buy a second one, so it is not offered: the
   // server refuses it either way, and a dropdown listing a choice it will reject wastes the click.
   // Keyed on `live`, not on `status` — a finished campaign leaves the event free to advertise again.
   const promoted = new Set(purchases.filter((row) => row.live).map((row) => row.eventId));
   const choices = events.filter(
-    (event) => PROMOTABLE.has(event.status) && !promoted.has(Number(event.eventId)),
+    (event) =>
+      event.status === "on_sale" &&
+      event.moderation === "approved" &&
+      event.hasUpcoming &&
+      !promoted.has(event.id),
   );
 
   /** The upgrade-sheet's one highlighted plan: the priciest package, recomputed only when they load. */
@@ -118,15 +121,22 @@ export default function AdPackagesPanel() {
   );
 
   const buy = async () => {
-    if (!choosing || !eventId) return;
+    if (!choosing || !eventId || busy) return;
     setBusy(true);
     setError(null);
     try {
-      await adsClient.buy(Number(eventId), choosing.id);
-      setNotice(`Đã mua ${choosing.name}. Sự kiện của bạn sẽ lên trang chủ ngay bây giờ.`);
+      const purchase = await adsClient.buy(Number(eventId), choosing.id);
+      setPurchases((rows) => [purchase, ...rows.filter((row) => row.id !== purchase.id)]);
+      setNotice(`Đã mua ${choosing.name}. Chiến dịch chạy theo thời hạn hiển thị bên dưới.`);
       setChoosing(null);
       setEventId("");
-      apply(await fetchAll());
+      try {
+        apply(await fetchAll());
+      } catch {
+        setError(
+          "Đã thanh toán thành công, nhưng chưa tải được dữ liệu mới. Hãy tải lại danh sách; không cần thanh toán lần nữa.",
+        );
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Không mua được gói này.");
     } finally {
@@ -146,7 +156,7 @@ export default function AdPackagesPanel() {
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-3">
-        <Megaphone className="mt-1 h-5 w-5 shrink-0 text-burgundy" />
+        <Megaphone className="mt-1 h-5 w-5 shrink-0 text-burgundy-ink" />
         <div>
           <h2 className="font-display text-lg font-black text-beige-kem">Gói quảng cáo</h2>
           <p className="mt-1 text-sm text-ink-soft">
@@ -156,9 +166,20 @@ export default function AdPackagesPanel() {
       </div>
 
       {error && (
-        <p className="border border-burgundy/50 bg-burgundy/10 px-4 py-3 text-sm text-beige-kem">
-          {error}
-        </p>
+        <div
+          role="alert"
+          className="space-y-2 border border-burgundy/50 bg-burgundy/10 px-4 py-3 text-sm text-beige-kem"
+        >
+          <p>{error}</p>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setRetryKey((k) => k + 1)}
+            className="border border-current px-3 py-2 font-bold"
+          >
+            Tải lại danh sách
+          </button>
+        </div>
       )}
       {notice && (
         <p className="border border-la-co/60 bg-la-co/10 px-4 py-3 text-sm text-beige-kem">
@@ -173,7 +194,7 @@ export default function AdPackagesPanel() {
           return (
             <div
               key={pkg.id}
-              className={`flex flex-col rounded-2xl border-2 p-6 transition ${
+              className={`flex flex-col border p-6 transition ${
                 recommended
                   ? "border-burgundy bg-burgundy/5 shadow-lg shadow-burgundy/25"
                   : "border-beige-kem/25 bg-surface-2 hover:border-beige-kem/60"
@@ -184,12 +205,12 @@ export default function AdPackagesPanel() {
                 look here". The old olive pill sat on an olive-tinted card and vanished into it.
               */}
               {recommended && (
-                <span className="mb-3 w-fit rounded-full bg-burgundy px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-widest text-white shadow-md shadow-burgundy/30">
+                <span className="mb-3 w-fit bg-burgundy px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-widest text-white shadow-md shadow-burgundy/30">
                   Phổ biến nhất
                 </span>
               )}
 
-              <h3 className="font-display text-base font-black text-beige-kem">{pkg.name}</h3>
+              <h3 className="font-display text-lg font-black text-beige-kem">{pkg.name}</h3>
 
               {/*
                 The ChatGPT-sheet hierarchy: the price is the loudest line, its duration rides
@@ -208,15 +229,16 @@ export default function AdPackagesPanel() {
 
               <button
                 type="button"
+                disabled={busy}
                 onClick={() => {
                   setChoosing(pkg);
                   setEventId("");
                   setNotice(null);
                 }}
-                className={`mt-5 w-full rounded-xl px-4 py-2.5 text-xs font-bold transition ${
+                className={`mt-5 w-full px-4 py-2.5 text-xs font-bold transition ${
                   recommended
                     ? "bg-burgundy text-white hover:brightness-110"
-                    : "border-2 border-burgundy/70 text-burgundy hover:bg-burgundy hover:text-white"
+                    : "border-2 border-burgundy/70 text-burgundy-ink hover:bg-burgundy hover:text-white"
                 }`}
               >
                 Chọn gói này
@@ -227,13 +249,13 @@ export default function AdPackagesPanel() {
                 {pkg.placements.map((slot) => {
                   const Icon = PLACEMENT_ICON[slot];
                   return (
-                    <li key={slot} className="flex items-start gap-2 text-xs text-beige-kem">
+                    <li key={slot} className="flex items-start gap-2 text-sm text-beige-kem">
                       <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-la-co" />
                       <span>{AD_PLACEMENT_LABELS[slot]}</span>
                     </li>
                   );
                 })}
-                <li className="flex items-start gap-2 text-xs text-beige-kem">
+                <li className="flex items-start gap-2 text-sm text-beige-kem">
                   <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-la-co" />
                   <span>Hiển thị trong {pkg.durationDays} ngày</span>
                 </li>
@@ -245,7 +267,7 @@ export default function AdPackagesPanel() {
 
       {choosing && (
         <div className="space-y-3 border-2 border-beige-kem/40 bg-surface-2 p-5">
-          <h3 className="font-display text-sm font-black text-beige-kem">
+          <h3 className="font-display text-lg font-black text-beige-kem">
             Chọn sự kiện cho {choosing.name}
           </h3>
           {choices.length === 0 ? (
@@ -257,7 +279,11 @@ export default function AdPackagesPanel() {
               <div className="min-w-[16rem]">
                 <Select
                   value={eventId}
-                  options={choices.map((event) => ({ value: event.eventId, label: event.title }))}
+                  options={choices.map((event) => ({
+                    value: String(event.id),
+                    label: event.title,
+                  }))}
+                  disabled={busy}
                   placeholder="— Chọn sự kiện —"
                   onChange={setEventId}
                   triggerClassName="w-full border-2 border-beige-kem/30 bg-xanh-pho px-3 py-2 text-xs"
@@ -274,6 +300,7 @@ export default function AdPackagesPanel() {
               <button
                 type="button"
                 onClick={() => setChoosing(null)}
+                disabled={busy}
                 className="text-xs font-bold text-ink-soft transition hover:text-beige-kem"
               >
                 Huỷ
@@ -284,7 +311,11 @@ export default function AdPackagesPanel() {
       )}
 
       <div className="space-y-3">
-        <h3 className="font-display text-sm font-black text-beige-kem">Chiến dịch của bạn</h3>
+        <h3 className="font-display text-lg font-black text-beige-kem">Chiến dịch của bạn</h3>
+        <p className="text-xs leading-relaxed text-ink-soft">
+          Quảng cáo chỉ hiển thị khi sự kiện đã duyệt, đang mở bán và còn suất chưa diễn. Khi sự
+          kiện bị ẩn hoặc chờ duyệt lại, thời hạn gói vẫn tiếp tục tính.
+        </p>
         {purchases.length === 0 ? (
           <p className="text-xs text-ink-soft">Bạn chưa mua gói quảng cáo nào.</p>
         ) : (
@@ -315,7 +346,13 @@ export default function AdPackagesPanel() {
                           : "border border-beige-kem/30 text-ink-soft"
                     }`}
                   >
-                    {row.status === "cancelled" ? "Đã huỷ" : row.live ? "Đang chạy" : "Đã kết thúc"}
+                    {row.status === "cancelled"
+                      ? "Đã huỷ"
+                      : row.live
+                        ? row.serving
+                          ? "Đang hiển thị"
+                          : "Tạm dừng hiển thị"
+                        : "Đã kết thúc"}
                   </span>
                 </div>
               </div>

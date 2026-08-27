@@ -74,10 +74,10 @@ const OPENERS = [
  * who asks something answerable and one who closes the panel.
  */
 const CAPABILITIES = [
-  { icon: "🎟️", title: "Tìm sự kiện", detail: "theo thể loại, ngày, thành phố hoặc mức giá" },
-  { icon: "🎬", title: "Phim đang & sắp chiếu", detail: "lịch chiếu và rạp gần bạn" },
-  { icon: "💺", title: "Cách đặt vé", detail: "chọn ghế, giữ chỗ, thanh toán" },
-  { icon: "↩️", title: "Đổi trả & hoàn vé", detail: "điều kiện và thời hạn" },
+  { title: "Tìm sự kiện", detail: "theo thể loại, ngày, thành phố hoặc mức giá" },
+  { title: "Phim đang & sắp chiếu", detail: "lịch chiếu và rạp gần bạn" },
+  { title: "Cách đặt vé", detail: "chọn ghế, giữ chỗ, thanh toán" },
+  { title: "Đổi trả & hoàn vé", detail: "điều kiện và thời hạn" },
 ] as const;
 
 export default function AIChatPanel({ signedIn, onOpenEvent }: AIChatPanelProps) {
@@ -297,14 +297,12 @@ export default function AIChatPanel({ signedIn, onOpenEvent }: AIChatPanelProps)
                     </p>
                     <ul className="mt-2 space-y-1.5">
                       {CAPABILITIES.map((c) => (
-                        <li key={c.title} className="flex gap-2">
-                          <span aria-hidden="true" className="shrink-0 leading-5">
-                            {c.icon}
-                          </span>
-                          <p className="font-ui text-eyebrow leading-5 text-beige-kem/85">
-                            <strong className="font-bold text-beige-kem">{c.title}</strong>{" "}
-                            {c.detail}
-                          </p>
+                        <li
+                          key={c.title}
+                          className="font-ui text-eyebrow leading-5 text-beige-kem/85"
+                        >
+                          <strong className="font-bold text-beige-kem">{c.title}</strong>{" "}
+                          {c.detail}
                         </li>
                       ))}
                     </ul>

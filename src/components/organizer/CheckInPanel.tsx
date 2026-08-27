@@ -319,7 +319,7 @@ export default function CheckInPanel({
       {(okCount > 0 || failCount > 0) && (
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-3 text-xs font-bold">
-            <span className="border border-la-co/40 bg-la-co/20 px-2.5 py-0.5 text-la-co">
+            <span className="border border-la-co/40 bg-la-co/20 px-2.5 py-0.5 text-la-co-ink">
               ✓ {okCount} vé
             </span>
             <span className="border border-burgundy/40 bg-burgundy/20 px-2.5 py-0.5 text-burgundy-ink">
@@ -335,13 +335,13 @@ export default function CheckInPanel({
                 key={entry.id}
                 className={`text-[11px] font-medium ${
                   entry.kind === "ok"
-                    ? "text-la-co"
+                    ? "text-la-co-ink"
                     : entry.kind === "warning"
-                      ? "text-cam-dat"
+                      ? "text-cam-dat-ink"
                       : "text-burgundy-ink"
                 }`}
               >
-                {entry.kind === "ok" ? "✓" : entry.kind === "warning" ? "⚠️" : "✕"} {entry.text}
+                {entry.kind === "ok" ? "✓" : entry.kind === "warning" ? "⚠" : "✕"} {entry.text}
               </li>
             ))}
           </ul>
@@ -366,10 +366,10 @@ export default function CheckInPanel({
             <span
               className={`shrink-0 px-2.5 py-0.5 text-[11px] font-bold ${
                 ticketResult.status === "checked_in"
-                  ? "border border-la-co/40 bg-la-co/20 text-la-co"
+                  ? "border border-la-co/40 bg-la-co/20 text-la-co-ink"
                   : ticketResult.status === "void"
                     ? "border border-burgundy/40 bg-burgundy/20 text-burgundy-ink"
-                    : "border border-cam-dat/40 bg-cam-dat/20 text-cam-dat"
+                    : "border border-cam-dat/40 bg-cam-dat/20 text-cam-dat-ink"
               }`}
             >
               {ticketResult.status === "checked_in"
@@ -424,8 +424,8 @@ export default function CheckInPanel({
             <span
               className={`shrink-0 px-2.5 py-0.5 text-[11px] font-bold ${
                 concessionResult.already
-                  ? "border border-cam-dat/40 bg-cam-dat/20 text-cam-dat"
-                  : "border border-la-co/40 bg-la-co/20 text-la-co"
+                  ? "border border-cam-dat/40 bg-cam-dat/20 text-cam-dat-ink"
+                  : "border border-la-co/40 bg-la-co/20 text-la-co-ink"
               }`}
             >
               {concessionResult.already ? "Đã nhận bắp nước (quét lại)" : "Đã nhận thành công"}

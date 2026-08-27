@@ -1,5 +1,12 @@
+import { createHash } from 'node:crypto';
 import type pg from 'pg';
-import type { ApplyChange, ApplyPreview, ApplyRefusal } from '@shared/catalog/seatmap.js';
+import type {
+  ApplyChange,
+  ApplyPreview,
+  ApplyRefusal,
+  ApplySource,
+  ZoneCapacityChange,
+} from '@shared/catalog/seatmap.js';
 import { clampCoord, normaliseRotation } from '@shared/catalog/seatmap-validate.js';
 import { type Db, pool, withTransaction } from '../../db/pool.js';
 import { err } from '../../http.js';
@@ -227,8 +234,160 @@ export function classify(desired: DesiredSeat[], current: CurrentSeat[]): ApplyP
 }
 
 /** Preview only — writes nothing (FR-027a). Advisory: re-classified under lock on confirm. */
-export async function preview(showtimeId: number, desired: DesiredSeat[]): Promise<ApplyPreview> {
-  return classify(desired, await readCurrent(showtimeId, pool));
+export async function preview(
+  showtimeId: number,
+  desired: DesiredSeat[],
+  sourceLayoutId?: number | null,
+): Promise<ApplyPreview> {
+  const outcome = classify(desired, await readCurrent(showtimeId, pool));
+  if (sourceLayoutId == null) return outcome;
+  // The re-apply path only. A zone change produces no seat change, so without this the preview
+  // reported "nothing to do" for the one edit the organizer had just drawn (0035 finding 1).
+  const zones = await zonePlan(showtimeId, sourceLayoutId, pool);
+  const { rows } = await pool.query<{ version: number }>(
+    `SELECT version FROM venue_layouts WHERE id = $1`,
+    [sourceLayoutId],
+  );
+  return {
+    ...outcome,
+    zones,
+    // What the confirm must echo back, so it can prove it is confirming THIS (0035 finding 5).
+    source: {
+      layoutId: sourceLayoutId,
+      layoutVersion: rows[0]?.version ?? 0,
+      digest: desiredDigest(desired, zones),
+    },
+    wouldSucceed: outcome.wouldSucceed && zones.every((z) => !z.blocked),
+  };
+}
+
+/**
+ * A stable fingerprint of everything the organizer was shown.
+ *
+ * Only the fields that can change what the apply DOES go in, in a canonical order, so the digest is
+ * reproducible from either side of the two requests and is not disturbed by row ordering. The version
+ * alone would not be enough: a tier repriced or a class archived changes the desired state without
+ * touching the chart at all.
+ */
+export function desiredDigest(desired: DesiredSeat[], zones: ZoneCapacityChange[]): string {
+  const seats = desired
+    .map((d) =>
+      [
+        d.seatId,
+        d.showtimeSeatId ?? '',
+        d.rowLabel,
+        d.seatNumber,
+        d.sectionName ?? '',
+        d.ticketTierId,
+        clampCoord(d.x),
+        clampCoord(d.y),
+        normaliseRotation(d.rotation),
+      ].join('\u0001'),
+    )
+    .sort();
+  const zoneLines = zones.map((z) => `${z.categoryId}\u0001${z.to}`).sort();
+  return createHash('sha256')
+    .update([...seats, '\u0002', ...zoneLines].join('\n'))
+    .digest('hex')
+    .slice(0, 32);
+}
+
+/**
+ * The confirm is confirming the preview the organizer actually read (0035 finding 5).
+ *
+ * Taken under `FOR UPDATE` on the source chart, so nothing can edit it between this check and the
+ * writes below — which is what makes the check a guarantee rather than a hopeful glance. The lock is
+ * meaningful only because every geometry write now bumps `version` (finding 4); before that a table
+ * moved through its own endpoint left the version untouched and this would have waved it through.
+ *
+ * The digest is checked as well as the version because the desired state also depends on things that
+ * are not the chart: archive a tier or reprice a class and the version never moves.
+ */
+async function assertPreviewFresh(
+  showtimeId: number,
+  expected: ApplySource,
+  desired: DesiredSeat[],
+  client: pg.PoolClient,
+): Promise<void> {
+  const stale = (): never => {
+    throw err.refused(
+      409,
+      "stale_preview",
+      "Sơ đồ nguồn đã thay đổi kể từ lúc bạn xem trước. Hãy xem trước lại rồi áp dụng.",
+      { refusals: [] },
+    );
+  };
+
+  const { rows } = await client.query<{ version: number }>(
+    `SELECT version FROM venue_layouts WHERE id = $1 FOR UPDATE`,
+    [expected.layoutId],
+  );
+  if (rows.length === 0 || rows[0].version !== expected.layoutVersion) stale();
+
+  const zones = await zonePlan(showtimeId, expected.layoutId, client);
+  if (desiredDigest(desired, zones) !== expected.digest) stale();
+}
+
+/**
+ * Every id in the request belongs to THIS showtime (0035 finding 7).
+ *
+ * `showtime_seats` carries three independent foreign keys — showtime, seat, tier — and nothing in the
+ * schema ties the second and third to the first. The route authorises the SHOWTIME and then trusted
+ * whatever ids the body named, so an organizer calling the API directly could bind their showtime to
+ * another showtime's tier (corrupting both maps' price and inventory accounting) or to a physical seat
+ * from a chart this showtime is not bound to.
+ *
+ * Both checks in one round trip, inside the write transaction and under the locks `apply` has already
+ * taken, so a tier archived or a seat detached between the check and the write cannot slip through.
+ */
+async function assertReferencesInScope(
+  showtimeId: number,
+  desired: DesiredSeat[],
+  client: pg.PoolClient,
+): Promise<void> {
+  if (desired.length === 0) return;
+  const seatIds = [...new Set(desired.map((d) => d.seatId))];
+  const tierIds = [...new Set(desired.map((d) => d.ticketTierId))];
+
+  const { rows } = await client.query<{ bad_seats: string; bad_tiers: string }>(
+    /*
+     * A seat is in scope when it comes from a layout THIS showtime's map is made of: the chart it is
+     * bound to, or — for a showtime that never recorded one — the chart its existing rows came from.
+     *
+     * The second arm is not a loophole, it is the same question asked of older data. `showtimes.
+     * layout_id` is only set by the paths that generate through a chart; a map assembled another way
+     * has rows and a null binding, and a rule that read the binding alone would refuse every edit to
+     * it while still admitting exactly the foreign seats this check exists to stop.
+     */
+    `WITH scope AS (
+       SELECT layout_id FROM showtimes WHERE id = $1 AND layout_id IS NOT NULL
+       UNION
+       SELECT se.layout_id FROM showtime_seats ss JOIN seats se ON se.id = ss.seat_id
+        WHERE ss.showtime_id = $1
+     )
+     SELECT
+       (SELECT count(*) FROM unnest($2::bigint[]) AS want(id)
+         WHERE NOT EXISTS (
+           SELECT 1 FROM seats se
+            WHERE se.id = want.id AND se.layout_id IN (SELECT layout_id FROM scope)))::bigint
+         AS bad_seats,
+       (SELECT count(*) FROM unnest($3::bigint[]) AS want(id)
+         WHERE NOT EXISTS (
+           SELECT 1 FROM ticket_tiers t
+            WHERE t.id = want.id AND t.showtime_id = $1 AND t.archived_at IS NULL))::bigint AS bad_tiers`,
+    [showtimeId, seatIds, tierIds],
+  );
+
+  if (Number(rows[0].bad_seats) > 0)
+    throw err.badRequest(
+      "validation_failed",
+      "Yêu cầu tham chiếu tới ghế không thuộc sơ đồ của suất chiếu này.",
+    );
+  if (Number(rows[0].bad_tiers) > 0)
+    throw err.badRequest(
+      "validation_failed",
+      "Yêu cầu tham chiếu tới loại vé không thuộc suất chiếu này.",
+    );
 }
 
 /**
@@ -244,19 +403,34 @@ export async function preview(showtimeId: number, desired: DesiredSeat[]): Promi
 export async function apply(
   showtimeId: number,
   desired: DesiredSeat[],
-  opts: { refreshLayoutId?: number | null } = {},
+  opts: { refreshLayoutId?: number | null; expectSource?: ApplySource } = {},
 ): Promise<ApplyPreview> {
   return withTransaction(async (client) => {
     // Lock first, then read: whatever we classify cannot move underneath us.
     await client.query(`SELECT id FROM showtime_seats WHERE showtime_id = $1 FOR UPDATE`, [showtimeId]);
     await assertNotOnSale(client, showtimeId);
+    if (opts.expectSource)
+      await assertPreviewFresh(showtimeId, opts.expectSource, desired, client);
+    await assertReferencesInScope(showtimeId, desired, client);
     const current = await readCurrent(showtimeId, client);
     const outcome = classify(desired, current);
+    /*
+     * Zone inventory is judged BEFORE any seat write, alongside the per-seat refusals, so a zone
+     * shrunk below what is already sold rejects the whole apply exactly the way a sold seat does
+     * (FR-029) rather than throwing halfway through (0035 finding 1).
+     */
+    const zones =
+      opts.refreshLayoutId != null ? await zonePlan(showtimeId, opts.refreshLayoutId, client) : [];
+    if (zones.length > 0) {
+      outcome.zones = zones;
+      outcome.wouldSucceed = outcome.wouldSucceed && zones.every((z) => !z.blocked);
+    }
     if (!outcome.wouldSucceed) return outcome; // caller turns this into 409; the txn wrote nothing
 
     const byId = new Map(current.map((c) => [c.id, c]));
     const bySeatId = new Map(current.map((c) => [c.seat_id, c]));
     const keptIds = new Set<number>();
+    const matched = new Set<number>();
 
     /*
      * Sorted in memory, written in two statements — NOT one statement per seat.
@@ -272,9 +446,14 @@ export async function apply(
      * eight parameters, not eight per seat.
      *
      * Ordering is not lost by grouping the two kinds: updates address existing rows by primary key
-     * and are independent of each other, and a desired line can never be an insert on a seat another
-     * line updates — `resolveCurrent` falls back to the physical seat, so both lines resolve to the
-     * same existing row and both classify as updates.
+     * and are independent of each other.
+     *
+     * `matched` mirrors `classify` exactly. Without it this loop resolved two lines naming one seat to
+     * the same row and pushed that row into the batch UPDATE twice, where `unnest` leaves the winner
+     * unspecified — while the preview had already called the second line an addition. The route now
+     * refuses duplicates outright, so this is belt and braces for `desiredFromLayout` and for any
+     * future caller: preview and write must classify identically or the preview is a lie (0035
+     * finding 7).
      */
     const up = {
       id: [] as number[],
@@ -301,7 +480,8 @@ export async function apply(
       // Same resolution classify used, so the writes land exactly where the preview said they
       // would — including a line that names an existing physical seat without its row id.
       const c = resolveCurrent(d, byId, bySeatId);
-      if (c) {
+      if (c && !matched.has(c.id)) {
+        matched.add(c.id);
         keptIds.add(c.id);
         up.id.push(c.id);
         up.x.push(clampCoord(d.x));
@@ -370,6 +550,8 @@ export async function apply(
     // Same transaction as the seat writes: seats and their decoration can never disagree about
     // which layout they describe, even if this process dies mid-apply.
     if (opts.refreshLayoutId != null) {
+      await refreshSeatSnapshot(showtimeId, opts.refreshLayoutId, client);
+      await writeZonePlan(showtimeId, zones, client);
       await refreshSnapshot(showtimeId, opts.refreshLayoutId, client);
     }
 
@@ -393,50 +575,219 @@ export async function desiredFromLayout(
   const layoutId = head.rows[0]?.layout_id ?? null;
   if (layoutId === null) return null;
 
+  await assertOneTierPerCategory(showtimeId, db);
+
   const { rows } = await db.query<{
     seat_id: number;
     showtime_seat_id: number | null;
     row_label: string;
     seat_number: number;
     section_name: string | null;
+    category_name: string | null;
     pos_x: number;
     pos_y: number;
     rotation: number;
     ticket_tier_id: number | null;
   }>(
     `SELECT se.id AS seat_id, ss.id AS showtime_seat_id, se.row_label, se.seat_number,
-            sec.name AS section_name, se.pos_x, se.pos_y, se.rotation,
-            COALESCE(ss.ticket_tier_id, tier.id) AS ticket_tier_id
+            sec.name AS section_name, cat.name AS category_name,
+            se.pos_x, se.pos_y, se.rotation,
+            -- The seat's own CLASS decides its price, exactly as it does at initial generation
+            -- (catalog.write.ts). This used to read COALESCE(ss.ticket_tier_id, cheapest), which
+            -- meant a seat moved from Standard into VIP kept its Standard price forever and a
+            -- brand-new VIP seat was born at the cheapest price on the showtime (0035 finding 1).
+            -- The existing row is the fallback, not the answer: a seat whose class was unpriced or
+            -- deleted keeps what it is selling at rather than losing its tier mid-flight.
+            COALESCE(tier.id, ss.ticket_tier_id) AS ticket_tier_id
        FROM seats se
        LEFT JOIN sections sec ON sec.id = se.section_id
+       LEFT JOIN layout_categories cat ON cat.id = se.category_id
        LEFT JOIN showtime_seats ss ON ss.seat_id = se.id AND ss.showtime_id = $1
-       -- A brand-new seat needs a tier: fall back to the cheapest tier of this showtime, which the
-       -- organizer can then change by marquee (FR-034) rather than being blocked here.
        LEFT JOIN LATERAL (
          -- Archived filtered here for the same reason every other tier read filters it (see
          -- catalog.write.ts and layouts.repo.ts): a retired class is not a price a new seat may be
          -- bound to.
          SELECT id FROM ticket_tiers
-          WHERE showtime_id = $1 AND archived_at IS NULL ORDER BY price_amount LIMIT 1
+          WHERE showtime_id = $1 AND archived_at IS NULL AND category_id = se.category_id
        ) AS tier ON true
       -- An archived seat has left the chart; re-applying must not resurrect it as new inventory.
       WHERE se.layout_id = $2 AND se.archived_at IS NULL`,
     [showtimeId, layoutId],
   );
 
-  return rows
-    .filter((r) => r.ticket_tier_id !== null)
-    .map((r) => ({
-      showtimeSeatId: r.showtime_seat_id,
-      seatId: r.seat_id,
-      rowLabel: r.row_label,
-      seatNumber: r.seat_number,
-      sectionName: r.section_name,
-      ticketTierId: r.ticket_tier_id as number,
-      x: r.pos_x,
-      y: r.pos_y,
-      rotation: r.rotation,
-    }));
+  /*
+   * A seat with neither a priced class nor an existing row would be dropped silently, and a dropped
+   * desired line reads as a REMOVAL — so an unpriced new class would delete inventory instead of
+   * adding it. Name it instead. The re-apply route validates the source layout first, so this is
+   * normally unreachable; it is the backstop for the class that was priced when the chart was
+   * validated and archived before the confirm landed.
+   */
+  const unpriced = rows.filter((r) => r.ticket_tier_id === null);
+  if (unpriced.length > 0) {
+    const classes = [...new Set(unpriced.map((r) => r.category_name ?? "không có hạng ghế"))];
+    throw err.refused(
+      422,
+      "category_without_tier",
+      `Chưa đặt giá cho hạng ghế: ${classes.join(", ")}. Hãy đặt giá rồi áp dụng lại.`,
+      { refusals: [] },
+    );
+  }
+
+  return rows.map((r) => ({
+    showtimeSeatId: r.showtime_seat_id,
+    seatId: r.seat_id,
+    rowLabel: r.row_label,
+    seatNumber: r.seat_number,
+    sectionName: r.section_name,
+    ticketTierId: r.ticket_tier_id as number,
+    x: r.pos_x,
+    y: r.pos_y,
+    rotation: r.rotation,
+  }));
+}
+
+/**
+ * One active tier per price class, or the re-apply has no single answer for what a seat costs.
+ *
+ * `LEFT JOIN LATERAL … WHERE category_id = se.category_id` returns a ROW PER MATCH, so two active
+ * tiers naming one class would silently duplicate every seat of it — each duplicate then classified
+ * as an addition on the second pass. Refusing is the honest outcome: the organizer has two prices for
+ * one class and only they can say which is meant (0035 finding 1).
+ */
+async function assertOneTierPerCategory(showtimeId: number, db: Db): Promise<void> {
+  const { rows } = await db.query<{ name: string | null }>(
+    `SELECT c.name
+       FROM ticket_tiers t
+       LEFT JOIN layout_categories c ON c.id = t.category_id
+      WHERE t.showtime_id = $1 AND t.archived_at IS NULL AND t.category_id IS NOT NULL
+      GROUP BY t.category_id, c.name
+     HAVING count(*) > 1`,
+    [showtimeId],
+  );
+  if (rows.length > 0)
+    throw err.refused(
+      409,
+      "category_tier_ambiguous",
+      `Hạng ghế ${rows.map((r) => `"${r.name ?? "?"}"`).join(", ")} đang có nhiều hơn một loại vé đang bán. Hãy gộp hoặc lưu trữ bớt trước khi áp dụng lại.`,
+      { refusals: [] },
+    );
+}
+
+/**
+ * Capacity-zone inventory the source layout describes, against what the showtime is selling.
+ *
+ * Shared by the preview and the write so they can never disagree, and by initial generation so a
+ * zone's quantity is computed in exactly one place. Summed per class because one class may be drawn
+ * as several zones (two standing wings at the same price).
+ */
+export async function zonePlan(
+  showtimeId: number,
+  layoutId: number,
+  db: Db = pool,
+): Promise<ZoneCapacityChange[]> {
+  const { rows } = await db.query<{
+    category_id: number;
+    category_name: string;
+    to_capacity: string;
+    from_capacity: string | null;
+    taken: string;
+  }>(
+    `SELECT e.category_id, c.name AS category_name,
+            sum(e.capacity)::bigint AS to_capacity,
+            max(t.total_quantity) AS from_capacity,
+            COALESCE(max(t.sold_quantity + t.reserved_quantity), 0)::bigint AS taken
+       FROM layout_elements e
+       JOIN layout_categories c ON c.id = e.category_id
+       -- INNER, so an unpriced zone class produces no plan line at all — the same skip the old
+       -- inline loop made, and the apply gate refuses that class before it can reach here anyway.
+       JOIN ticket_tiers t ON t.category_id = e.category_id
+                          AND t.showtime_id = $1 AND t.archived_at IS NULL
+      WHERE e.layout_id = $2 AND e.kind = 'area' AND e.capacity IS NOT NULL
+      GROUP BY e.category_id, c.name
+      ORDER BY c.name`,
+    [showtimeId, layoutId],
+  );
+
+  return rows.map((r) => {
+    const to = Number(r.to_capacity);
+    const taken = Number(r.taken);
+    return {
+      categoryId: r.category_id,
+      categoryName: r.category_name,
+      from: r.from_capacity === null ? null : Number(r.from_capacity),
+      to,
+      taken,
+      blocked: to < taken,
+    };
+  });
+}
+
+/**
+ * Write the zone quantities `zonePlan` computed. Caller has already refused any blocked plan.
+ *
+ * Locks each tier row before writing it, so the sold/held count the plan was judged against cannot
+ * move between the judgement and the write.
+ */
+export async function writeZonePlan(
+  showtimeId: number,
+  plan: ZoneCapacityChange[],
+  client: pg.PoolClient,
+): Promise<number> {
+  let total = 0;
+  for (const zone of plan) {
+    // By class ID, never by name: two charts may name a class the same thing, and the tier a
+    // showtime carries is not guaranteed to belong to the chart being applied.
+    const { rows } = await client.query<{ id: number; taken: string }>(
+      `SELECT t.id, (t.sold_quantity + t.reserved_quantity)::bigint AS taken
+         FROM ticket_tiers t
+        WHERE t.showtime_id = $1 AND t.archived_at IS NULL AND t.category_id = $2
+        FOR UPDATE`,
+      [showtimeId, zone.categoryId],
+    );
+    const tier = rows[0];
+    if (!tier) continue;
+    const taken = Number(tier.taken);
+    if (zone.to < taken)
+      throw err.conflict(
+        "zone_capacity_below_sold",
+        `Khu "${zone.categoryName}" chỉ còn ${zone.to} chỗ nhưng đã bán hoặc giữ ${taken}.`,
+      );
+    await client.query(`UPDATE ticket_tiers SET total_quantity = $2 WHERE id = $1`, [
+      tier.id,
+      zone.to,
+    ]);
+    total += zone.to;
+  }
+  return total;
+}
+
+/**
+ * Re-copy the decoration a SEAT carries onto the showtime's own rows (0035 finding 1).
+ *
+ * `showtime_seats` snapshots more than position and price: `category_name` is what the buyer's legend
+ * reads, and `is_accessible` / `table_id` / `table_booking_mode` are what makes a seat a wheelchair
+ * space or one chair of a bookable table. Initial generation copies all four; the re-apply write loop
+ * carries only the seven columns a `DesiredSeat` names, so every one of them went stale — a seat moved
+ * into VIP was repriced and still labelled Standard to the buyer.
+ *
+ * Driven straight off `seats`, in the same transaction as the seat writes, so it cannot describe a
+ * different revision of the chart than the rows beside it.
+ */
+export async function refreshSeatSnapshot(
+  showtimeId: number,
+  layoutId: number,
+  db: Db,
+): Promise<void> {
+  await db.query(
+    `UPDATE showtime_seats ss
+        SET category_name = (SELECT c.name FROM layout_categories c WHERE c.id = se.category_id),
+            is_accessible = se.is_accessible,
+            table_id = se.table_id,
+            table_booking_mode = (SELECT t.booking_mode FROM layout_tables t WHERE t.id = se.table_id)
+       FROM seats se
+      WHERE se.id = ss.seat_id AND ss.showtime_id = $1 AND se.layout_id = $2`,
+    [showtimeId, layoutId],
+  );
 }
 
 /** Refresh the decoration half of the snapshot from the source layout (FR-005, T046). */

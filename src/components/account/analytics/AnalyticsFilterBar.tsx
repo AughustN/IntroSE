@@ -109,7 +109,7 @@ export function AnalyticsFilterBar({
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
           <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-beige-kem/70">
-            <Filter className="h-4 w-4 text-cam-dat" /> Sự kiện:
+            <Filter className="h-4 w-4 text-cam-dat-ink" /> Sự kiện:
           </span>
           {/*
             The shared dropdown. A native `<select>` hands its option list to the operating system,

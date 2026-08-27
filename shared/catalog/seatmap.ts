@@ -353,6 +353,14 @@ export interface LayoutLibraryEntry extends LayoutSummary {
   /** Showtimes that are neither finished nor cancelled and still point at this chart. */
   usageCount: number;
   /**
+   * EVERY showtime that names this chart, finished ones included.
+   *
+   * Separate from `usageCount` because the two answer different questions and the database only
+   * enforces one of them: archiving asks "can it still sell?", deletion asks "will the foreign keys
+   * let the row go?". `showtimes.layout_id` has no `ON DELETE`, so any row at all is a refusal.
+   */
+  boundCount: number;
+  /**
    * Whether this chart has ever been published — which is what separates the two very different
    * things `status: "draft"` was covering.
    *
@@ -486,14 +494,56 @@ export interface ApplyRefusal {
   message: string;
 }
 
+/**
+ * Inventory a capacity ZONE holds, which a re-apply rewrites and which no `ApplyChange` can describe.
+ *
+ * A zone (0027) sells by count, not by seat row, so resizing one changes `ticket_tiers.total_quantity`
+ * and produces no seat change at all. The preview used to report "0 changes" for exactly the edit the
+ * organizer had just drawn, and the apply then never wrote the new quantity either (0035 finding 1).
+ */
+export interface ZoneCapacityChange {
+  categoryId: number;
+  categoryName: string;
+  /** Quantity currently on sale; null when the class has never been stocked. */
+  from: number | null;
+  to: number;
+  /** Sold + held. `to` below this is unsellable, so the whole apply refuses. */
+  taken: number;
+  blocked: boolean;
+}
+
+/**
+ * Identifies the exact source state a preview was computed from, so the confirm can prove it is
+ * confirming THAT preview (0035 finding 5).
+ *
+ * Preview and confirm are two requests, and the server used to rebuild the desired state from
+ * scratch on each — so a chart edited in another tab in between produced additions and removals the
+ * organizer had approved a button for but never seen. The confirm now carries this back and the
+ * server refuses if either half has moved: `layoutVersion` catches an edit to the source chart,
+ * `digest` catches everything else the desired state depends on (a tier repriced, a class archived).
+ */
+export interface ApplySource {
+  layoutId: number;
+  layoutVersion: number;
+  digest: string;
+}
+
 export interface ApplyPreview {
   changes: ApplyChange[];
   refusals: ApplyRefusal[];
+  /** Zone inventory this apply would rewrite. Absent on direct seat edits, which touch no zone. */
+  zones?: ZoneCapacityChange[];
+  /** Present on a re-apply preview; echo it back on the confirm. */
+  source?: ApplySource;
   wouldSucceed: boolean;
 }
 
 /** Error codes this feature adds. */
 export type SeatMapErrorCode =
+  /** The source chart moved between the preview and the confirm — preview again (0035 finding 5). */
+  | "stale_preview"
+  /** Two active tiers price one class, so a re-apply has no single answer for what a seat costs. */
+  | "category_tier_ambiguous"
   | "layout_name_taken"
   /**
    * Two seats in one section share a row label and number.

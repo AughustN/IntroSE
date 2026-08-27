@@ -304,3 +304,79 @@ describe("venues & seat-map generation (US5)", () => {
       .expect(201);
   });
 });
+
+/**
+ * One venue per real place.
+ *
+ * The create-event wizard posts three free-text fields and used to mint a row every time, so every
+ * event held at the same hall made another twin — 216 of the live branch's 515 venues. `dedupedVenues`
+ * hides them in the picker; this stops them being made.
+ */
+describe("creating a venue that already exists reuses it", () => {
+  const at = (o: { h: Record<string, string> }, body: Record<string, unknown>) =>
+    request(app).post("/api/organizer/venues").set(o.h).send(body).expect(201);
+
+  it("returns the same id for the same place, however it was typed", async () => {
+    const o = await organizer();
+    const name = `Nhà hát ${Date.now()}${Math.random()}`.replace(".", "");
+    const first = (await at(o, { name, city: "Hà Nội", rawAddress: "240 Đường 3 Tháng 2" })).body.id;
+
+    // Same place: extra spaces, different case, padding. All of it is how a person retypes an
+    // address, and none of it makes it a different building.
+    const again = (
+      await at(o, {
+        name: `  ${name.toUpperCase()}  `,
+        city: " hà nội ",
+        rawAddress: "240   Đường 3 Tháng 2 ",
+      })
+    ).body;
+
+    expect(again.id, "the second create returns the original row").toBe(first);
+    const { rows } = await pool.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM venues WHERE created_by = $1`,
+      [o.userId],
+    );
+    expect(rows[0].n, "and no second row was written").toBe("1");
+  });
+
+  it("still creates a second row for a different address at the same name", async () => {
+    const o = await organizer();
+    const name = `Rạp ${Date.now()}${Math.random()}`.replace(".", "");
+    const a = (await at(o, { name, city: "Hà Nội", rawAddress: "1 Phố A" })).body.id;
+    const b = (await at(o, { name, city: "Hà Nội", rawAddress: "2 Phố B" })).body.id;
+
+    // Two real places that happen to share a name — collapsing these would hide a genuine choice.
+    expect(b).not.toBe(a);
+  });
+
+  it("never hands one organizer's venue to another", async () => {
+    const mine = await organizer();
+    const theirs = await organizer();
+    const body = { name: `Sân ${Date.now()}`, city: "Hà Nội", rawAddress: "cùng một chỗ" };
+
+    const a = (await at(mine, body)).body.id;
+    const b = (await at(theirs, body)).body.id;
+
+    // A venue carries an owner and an edit permission; sharing the row would share those too.
+    expect(b).not.toBe(a);
+  });
+
+  it("fills in a guide the stored row is missing, and never overwrites one it has", async () => {
+    const o = await organizer();
+    const body = { name: `Hội trường ${Date.now()}`, city: "Hà Nội", rawAddress: "số 5" };
+    const id = (await at(o, body)).body.id;
+
+    await at(o, { ...body, guide: "Cổng B, gửi xe tầng hầm" });
+    let { rows } = await pool.query<{ guide: string | null }>(
+      `SELECT guide FROM venues WHERE id = $1`,
+      [id],
+    );
+    expect(rows[0].guide, "a guide typed later is not thrown away").toBe("Cổng B, gửi xe tầng hầm");
+
+    await at(o, { ...body, guide: "Cổng A" });
+    ({ rows } = await pool.query(`SELECT guide FROM venues WHERE id = $1`, [id]));
+    expect(rows[0].guide, "but reuse never overwrites what is stored").toBe(
+      "Cổng B, gửi xe tầng hầm",
+    );
+  });
+});

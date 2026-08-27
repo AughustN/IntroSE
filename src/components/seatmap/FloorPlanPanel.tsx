@@ -101,7 +101,11 @@ export default function FloorPlanPanel({
             tuỳ chọn trên đang tắt — tuỳ chọn chỉ quyết định việc hiển thị trên sơ đồ.
           </p>
 
-          <button className={`${btn} mt-3`} disabled={busy} onClick={() => setConfirmRemove(true)}>
+          <button
+            className={`${btn} seatmap-delete-action mt-3`}
+            disabled={busy}
+            onClick={() => setConfirmRemove(true)}
+          >
             Xoá bản vẽ
           </button>
         </>

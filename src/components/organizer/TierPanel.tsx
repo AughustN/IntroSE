@@ -5,10 +5,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { ManagedTier } from "@/shared/catalog/types";
+import { DEFAULT_MAX_TIERS_PER_SHOWTIME } from "@/shared/catalog/limits";
 import { studioApi } from "../../services/catalogClient";
 import { Empty, ErrorRetry, Loading, Refusal, dong } from "./states";
-
-const MAX_ACTIVE_TIERS = 4;
 
 const input =
   "h-10 min-w-0 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
@@ -37,6 +36,7 @@ export default function TierPanel({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [maxTiers, setMaxTiers] = useState(DEFAULT_MAX_TIERS_PER_SHOWTIME);
 
   const [newLabel, setNewLabel] = useState("");
   const [newPrice, setNewPrice] = useState("");
@@ -49,6 +49,7 @@ export default function TierPanel({
       const res = await studioApi.tiers(showtimeId);
       setTiers(res.tiers);
       setEventType(res.eventType);
+      setMaxTiers(res.maxTiersPerShowtime);
     } catch (e) {
       setLoadError((e as Error).message);
     }
@@ -102,7 +103,7 @@ export default function TierPanel({
     <div className="space-y-3">
       <div className="flex flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between">
         <h4 className="font-display text-sm font-bold">
-          Hạng vé ({active.length}/{MAX_ACTIVE_TIERS} đang bán)
+          Hạng vé ({active.length}/{maxTiers} đang bán)
         </h4>
         {seated && (
           <span className="font-mono text-[10px] text-beige-kem/50">Sức chứa lấy từ sơ đồ ghế</span>
@@ -118,7 +119,14 @@ export default function TierPanel({
       {tiers.length > 0 && (
         <div className="divide-y divide-beige-kem/20 border border-beige-kem/25">
           {tiers.map((t) => (
-            <TierRow key={t.id} tier={t} seated={seated} busy={busy} run={run} />
+            <TierRow
+              key={t.id}
+              tier={t}
+              seated={seated}
+              busy={busy}
+              atLimit={active.length >= maxTiers}
+              run={run}
+            />
           ))}
         </div>
       )}
@@ -156,16 +164,16 @@ export default function TierPanel({
           )}
           <button
             onClick={add}
-            disabled={busy || active.length >= MAX_ACTIVE_TIERS}
+            disabled={busy || active.length >= maxTiers}
             className={btn}
           >
             Thêm
           </button>
         </div>
-        {active.length >= MAX_ACTIVE_TIERS && (
+        {active.length >= maxTiers && (
           <p className="mt-2 font-mono text-[11px] text-beige-kem/50">
-            Đã đạt tối đa {MAX_ACTIVE_TIERS} hạng vé đang bán. Hãy lưu trữ một hạng để thêm hạng
-            mới.
+            Đã đạt tối đa {maxTiers} hạng vé đang bán. Hãy lưu trữ hoặc xoá một hạng trước khi
+            thêm hay khôi phục hạng khác.
           </p>
         )}
       </div>
@@ -179,11 +187,13 @@ function TierRow({
   tier,
   seated,
   busy,
+  atLimit,
   run,
 }: {
   tier: ManagedTier;
   seated: boolean;
   busy: boolean;
+  atLimit: boolean;
   run: (fn: () => Promise<{ returnedToReview: boolean }>) => Promise<boolean>;
 }) {
   const [label, setLabel] = useState(tier.label);
@@ -233,7 +243,8 @@ function TierRow({
           {tier.archived ? (
             <button
               onClick={() => run(() => studioApi.restoreTier(tier.id))}
-              disabled={busy}
+              disabled={busy || atLimit}
+              title={atLimit ? "Đã đạt giới hạn hạng vé đang bán." : undefined}
               className={ghost}
             >
               Khôi phục
@@ -256,7 +267,7 @@ function TierRow({
       </div>
 
       <p className="mt-2 font-mono text-[11px] text-beige-kem/60">
-        {tier.archived && <span className="mr-2 text-cam-dat">Đã lưu trữ · không còn bán</span>}
+        {tier.archived && <span className="mr-2 text-cam-dat-ink">Đã lưu trữ · không còn bán</span>}
         Đã bán {tier.sold} · Đang giữ {tier.held} ·{" "}
         {tier.remaining === null ? "Không giới hạn" : `Còn ${tier.remaining}`} · Giá{" "}
         {dong(tier.price)}
@@ -269,7 +280,7 @@ function TierRow({
         so an organizer sends the event for review with a price nobody can ever pay.
       */}
       {!tier.archived && seated && tier.sold === 0 && tier.held === 0 && tier.remaining === 0 && (
-        <p className="mt-1 font-mono text-[11px] text-cam-dat">
+        <p className="mt-1 font-mono text-[11px] text-cam-dat-ink">
           ⚠ Chưa có ghế nào trong sơ đồ được gán hạng này — hạng vé sẽ không bán được vé nào cho
           đến khi bạn gán ghế trong trình thiết kế sơ đồ.
         </p>

@@ -25,6 +25,7 @@
  * duplicate to collapse.
  */
 import { pool } from "./pool.js";
+import { pathToFileURL } from "node:url";
 
 /** The entities this importer left behind. Not a general HTML decoder — it does not need to be. */
 const ENTITIES: Record<string, string> = {
@@ -282,7 +283,10 @@ async function main(): Promise<void> {
   await pool.end();
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+// Importing the pure cleaners in a unit test must never launch a database repair.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

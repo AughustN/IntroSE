@@ -230,7 +230,7 @@ export default function CategoryPanel({
                 <button className={btn} disabled={selectedCount === 0} onClick={() => onAssign(id)}>
                   Gán {selectedCount > 0 ? (selectedLabel ?? `${selectedCount} ghế`) : "phần chọn"}
                 </button>
-                <button className={btn} onClick={() => onRemove(id)}>
+                <button className={`${btn} seatmap-delete-action`} onClick={() => onRemove(id)}>
                   Xoá hạng ghế
                 </button>
               </div>

@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { DEFAULT_MAX_TIERS_PER_SHOWTIME } from "@shared/catalog/limits.js";
 
 /** Fail-fast env loading + validation (task T004).
  *  REQUIRED: DATABASE_URL, JWT_SECRET, AUTH_EVENT_HASH_KEY.
@@ -306,8 +307,11 @@ export const SEAT_SIZE_MIN_PCT = ms("SEAT_SIZE_MIN_PCT", 50);
 export const SEAT_SIZE_MAX_PCT = ms("SEAT_SIZE_MAX_PCT", 200);
 
 // ---- Organizer event studio (feature 006). Settings with defaults, not constants (UC-36).
-/** A showtime carries at most this many ACTIVE tiers — the layout rule established in 002 (FR-002). */
-export const MAX_TIERS_PER_SHOWTIME = ms("MAX_TIERS_PER_SHOWTIME", 4);
+/** Active tiers only; the effective limit is also served to organizer forms. */
+export const MAX_TIERS_PER_SHOWTIME = ms("MAX_TIERS_PER_SHOWTIME", DEFAULT_MAX_TIERS_PER_SHOWTIME);
+if (!Number.isSafeInteger(MAX_TIERS_PER_SHOWTIME)) {
+  throw new Error("MAX_TIERS_PER_SHOWTIME must be a positive integer.");
+}
 
 // AI listing assistant (UC-22). The assistant is assistive and non-blocking: every one of these
 // bounds degrades it, none of them can fail a request the organizer needs (Principle III).

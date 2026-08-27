@@ -282,7 +282,7 @@ export default function OrganizerPreview({
                       &ldquo;{appeal.reason}&rdquo;
                     </p>
                     {appeal.reviewNote && (
-                      <p className="font-meta text-eyebrow text-cam-dat">
+                      <p className="font-meta text-eyebrow text-cam-dat-ink">
                         Phản hồi của Admin: {appeal.reviewNote}
                       </p>
                     )}

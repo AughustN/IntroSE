@@ -1189,3 +1189,65 @@ select:focus-visible {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-burgundy);
 }
+
+/* Destructive seat-map actions stay outlined in light mode and filled in dark mode for contrast. */
+.seatmap-delete-action {
+  border-color: var(--color-burgundy-ink);
+  color: var(--color-burgundy-ink);
+  background-color: transparent;
+}
+
+.seatmap-delete-action:hover {
+  color: var(--color-on-tint);
+  background-color: var(--color-bubblegum);
+}
+
+:root[data-theme="dark"] .seatmap-delete-action {
+  border-color: var(--color-burgundy);
+  color: #fff;
+  background-color: var(--color-burgundy);
+}
+
+:root[data-theme="dark"] .seatmap-delete-action:hover {
+  color: #fff;
+  background-color: var(--color-burgundy);
+  filter: brightness(1.1);
+}
+
+/* The library delete action is a menu row, so it keeps its transparent surface. */
+.seatmap-library-delete-action {
+  color: var(--color-burgundy-ink);
+}
+
+.seatmap-library-delete-action:hover {
+  color: var(--color-on-tint);
+  background-color: var(--color-bubblegum);
+}
+
+:root[data-theme="dark"] .seatmap-library-delete-action {
+  color: var(--color-bubblegum);
+}
+
+:root[data-theme="dark"] .seatmap-library-delete-action:hover {
+  color: var(--color-bubblegum);
+  background-color: color-mix(in srgb, var(--color-burgundy) 35%, transparent);
+}
+
+/* Archiving is reversible, so it uses an amber caution treatment rather than delete red. */
+.seatmap-archive-action {
+  color: var(--color-cam-dat-ink);
+}
+
+.seatmap-archive-action:hover {
+  color: var(--color-cam-dat-ink);
+  background-color: color-mix(in srgb, var(--color-cam-dat) 16%, transparent);
+}
+
+:root[data-theme="dark"] .seatmap-archive-action {
+  color: var(--color-cam-dat);
+}
+
+:root[data-theme="dark"] .seatmap-archive-action:hover {
+  color: var(--color-cam-dat);
+  background-color: color-mix(in srgb, var(--color-cam-dat) 18%, transparent);
+}

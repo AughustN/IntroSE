@@ -12,7 +12,7 @@ import {
   type ValidationIssue,
 } from "@shared/catalog/seatmap-validate.js";
 import { LAYOUT_MAX_ELEMENTS, LAYOUT_MAX_SEATS, VENUE_MAX_LAYOUTS } from "../../config.js";
-import { pool } from "../../db/pool.js";
+import { type Db, pool, withTransaction } from "../../db/pool.js";
 import { err } from "../../http.js";
 import * as repo from "./layouts.repo.js";
 import { type ChartAction, assertChartAccess } from "./permissions.js";
@@ -272,9 +272,19 @@ export async function archive(req: Request, layoutId: number, archived: boolean)
 
 export async function deleteLayout(req: Request, layoutId: number): Promise<void> {
   await assertLayoutOwner(req, layoutId);
-  // A live map's source stays inspectable and re-appliable (FR-006).
-  if (await repo.layoutInUse(layoutId)) {
-    throw err.conflict("layout_in_use", "Một suất chiếu đang dùng sơ đồ này, không thể xoá.");
+  /*
+   * Deletion obeys the FOREIGN KEYS, not the sale calendar.
+   *
+   * `layoutInUse` — which this used to call — lets go of finished and cancelled showtimes, so the
+   * library offered "Xoá" the moment a run was over. But `showtimes.layout_id` has no `ON DELETE`,
+   * and the seats about to cascade away are still named by `showtime_seats.seat_id`, so Postgres
+   * refused with a raw foreign-key error. Archiving is what that chart actually wants.
+   */
+  if (await repo.layoutEverBound(layoutId)) {
+    throw err.conflict(
+      "layout_in_use",
+      "Sơ đồ này đã từng áp dụng cho một suất chiếu nên không xoá được — hãy lưu trữ nó.",
+    );
   }
   // Recorded BEFORE the delete: afterwards there is no row to name, and this is the single action
   // whose evidence cannot be recovered from the data itself.
@@ -292,8 +302,9 @@ export async function deleteLayout(req: Request, layoutId: number): Promise<void
 export async function validate(
   layoutId: number,
   categoriesWithTier?: number[],
+  db: Db = pool,
 ): Promise<ValidationIssue[]> {
-  const layout = await repo.getLayout(layoutId);
+  const layout = await repo.getLayout(layoutId, db);
   if (!layout) throw err.notFound("not_found", "Không tìm thấy sơ đồ.");
   return validateLayout({
     seats: layout.seats.map((s) => ({
@@ -357,12 +368,37 @@ export async function validateForShowtime(
   );
 }
 
-export async function publish(req: Request, layoutId: number) {
+/**
+ * @param expectedVersion the version the organizer was looking at when they pressed Publish.
+ *
+ * Validating and flipping the status were two separate statements with nothing holding the row
+ * between them, so a second tab could save a NEW — and invalid — version in the gap and this call
+ * would still mark the row ready, having judged a document that no longer existed. The chart went on
+ * sale carrying edits nobody validated.
+ *
+ * Both halves now run under `FOR UPDATE`, and the caller states which version it judged. The version
+ * check is what makes the lock meaningful: a lock alone would serialise the two publishes and then
+ * cheerfully publish the loser's stale verdict.
+ */
+export async function publish(req: Request, layoutId: number, expectedVersion?: number) {
   await assertLayoutOwner(req, layoutId);
-  const issues = await validate(layoutId);
-  // Only the BLOCKING ones refuse. A warning describes something the organizer should know about the
-  // chart they are publishing, not a reason to stop them publishing it (see `ValidationIssue`).
-  const blocking = blockingIssues(issues);
+  const blocking = await withTransaction(async (client) => {
+    const { rows } = await client.query<{ version: number }>(
+      `SELECT version FROM venue_layouts WHERE id = $1 FOR UPDATE`,
+      [layoutId],
+    );
+    if (!rows[0]) throw err.notFound("not_found", "Không tìm thấy sơ đồ.");
+    if (expectedVersion !== undefined && rows[0].version !== expectedVersion)
+      throw err.conflict(
+        "stale_version",
+        "Sơ đồ đã được sửa ở nơi khác kể từ lần bạn xem. Hãy tải lại rồi phát hành lại.",
+      );
+    // Only the BLOCKING ones refuse. A warning describes something the organizer should know about
+    // the chart they are publishing, not a reason to stop them (see `ValidationIssue`).
+    const found = blockingIssues(await validate(layoutId, undefined, client));
+    if (found.length === 0) await repo.setLayoutStatus(layoutId, "ready", client);
+    return found;
+  });
   if (blocking.length > 0) {
     // Carries the issue list so the organizer sees what to fix, not a generic failure (FR-031).
     // Audited as a refusal too: a chart that repeatedly fails the gate is a support question, and
@@ -379,7 +415,6 @@ export async function publish(req: Request, layoutId: number) {
       issues: blocking,
     });
   }
-  await repo.setLayoutStatus(layoutId, "ready");
   const layout = await repo.getLayout(layoutId);
   // Publishing is the moment the organizer declares the chart finished, so it is the checkpoint worth
   // being able to come back to. Recorded AFTER the gate, so history holds only publishable charts, and

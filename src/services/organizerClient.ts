@@ -720,9 +720,6 @@ export async function createDraftEvent(
   if (!input.title || input.title.trim().length < 3) {
     throw new Error("VALIDATION_ERROR: Tên sự kiện phải từ 3 ký tự trở lên.");
   }
-  if (!input.bannerUrl || input.bannerUrl.trim() === "") {
-    throw new Error("VALIDATION_ERROR: Hình ảnh sự kiện (Picture) là bắt buộc.");
-  }
   if (!input.venueName || !input.venueAddress) {
     throw new Error("VALIDATION_ERROR: Vui lòng nhập địa điểm và địa chỉ sự kiện.");
   }
@@ -732,14 +729,14 @@ export async function createDraftEvent(
     categoryCode: input.category || "music",
     description: input.description.trim(),
     eventType: input.eventType ?? "seated",
-    imageUrl: input.bannerUrl.trim(),
+    imageUrl: input.bannerUrl.trim() || null,
+    venue: {
+      name: input.venueName.trim(),
+      city: input.city,
+      rawAddress: input.venueAddress.trim(),
+    },
   });
-  const venue = await organizerApi.createVenue({
-    name: input.venueName.trim(),
-    city: input.city,
-    rawAddress: input.venueAddress.trim(),
-  });
-  return { eventId: event.id, venueId: venue.id };
+  return { eventId: event.id, venueId: event.venueId! };
 }
 
 /**

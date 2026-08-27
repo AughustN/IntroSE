@@ -8,7 +8,7 @@ import { validate } from "../../middleware/validate.js";
 import { draftListing } from "./ai/listing.service.js";
 import multer from "multer";
 import { uploadEventBanner, uploadEventTrailer, deleteEventTrailer } from "../media/eventMedia.js";
-import { deleteEvent, updateEvent } from "./events.service.js";
+import { deleteEvent, updateEvent, updateEventMedia } from "./events.service.js";
 import {
   deleteShowtime,
   showtimeContext,
@@ -123,7 +123,7 @@ const updateEventSchema = z
     ageRestriction: z.enum(["all", "13+", "16+", "18+"]).optional(),
     categoryCode: z.string().trim().min(1).optional(),
     isHighDemand: z.boolean().optional(),
-    releasePhase: z.enum(['now_showing', 'upcoming']).optional(),
+    releasePhase: z.enum(["now_showing", "upcoming"]).optional(),
     is_high_demand: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "empty" });
@@ -182,7 +182,7 @@ studioRouter.patch(
   asyncH(async (req, res) => {
     const ctx = await ownedShowtime(req);
     const body = req.body as z.infer<typeof updateShowtimeSchema>;
-    res.json(await updateShowtime(req.auth!.userId, ctx, body));
+    res.json(await updateShowtime(req.auth!.userId, req.auth!.user.isAdmin, ctx, body));
   }),
 );
 
@@ -190,7 +190,7 @@ studioRouter.delete(
   "/showtimes/:id",
   asyncH(async (req, res) => {
     const ctx = await ownedShowtime(req);
-    res.json(await deleteShowtime(req.auth!.userId, ctx));
+    res.json(await deleteShowtime(req.auth!.userId, req.auth!.user.isAdmin, ctx));
   }),
 );
 
@@ -255,12 +255,14 @@ studioRouter.post(
   asyncH(async (req, res) => {
     const eventId = await ownedEvent(req);
     if (!req.file?.buffer) throw err.badRequest("validation_failed", "Thiếu tệp hình ảnh banner.");
-    const bannerUrl = await uploadEventBanner(eventId, req.file.buffer);
-    await pool.query(`UPDATE events SET image_url = $1, updated_at = now() WHERE id = $2`, [
-      bannerUrl,
+    const file = req.file.buffer;
+    const { url, returnedToReview } = await updateEventMedia(
+      req.auth!.userId,
       eventId,
-    ]);
-    res.json({ bannerUrl, imageUrl: bannerUrl });
+      "image_url",
+      () => uploadEventBanner(eventId, file),
+    );
+    res.json({ bannerUrl: url, imageUrl: url, returnedToReview });
   }),
 );
 
@@ -270,12 +272,14 @@ studioRouter.post(
   asyncH(async (req, res) => {
     const eventId = await ownedEvent(req);
     if (!req.file?.buffer) throw err.badRequest("validation_failed", "Thiếu tệp video trailer.");
-    const trailerUrl = await uploadEventTrailer(eventId, req.file.buffer);
-    await pool.query(`UPDATE events SET trailer_url = $1, updated_at = now() WHERE id = $2`, [
-      trailerUrl,
+    const file = req.file.buffer;
+    const { url, returnedToReview } = await updateEventMedia(
+      req.auth!.userId,
       eventId,
-    ]);
-    res.json({ trailerUrl });
+      "trailer_url",
+      () => uploadEventTrailer(eventId, file),
+    );
+    res.json({ trailerUrl: url, returnedToReview });
   }),
 );
 
@@ -283,10 +287,10 @@ studioRouter.delete(
   "/events/:id/trailer",
   asyncH(async (req, res) => {
     const eventId = await ownedEvent(req);
-    await deleteEventTrailer(eventId);
-    await pool.query(`UPDATE events SET trailer_url = NULL, updated_at = now() WHERE id = $1`, [
-      eventId,
-    ]);
-    res.json({ trailerUrl: null });
+    const result = await updateEventMedia(req.auth!.userId, eventId, "trailer_url", async () => {
+      await deleteEventTrailer(eventId);
+      return null;
+    });
+    res.json({ trailerUrl: null, returnedToReview: result.returnedToReview });
   }),
 );

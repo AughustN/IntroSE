@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Armchair, ArrowLeft, BarChart3, Calendar, Megaphone } from "lucide-react";
 import AdPackagesPanel from "../../components/organizer/AdPackagesPanel";
 import OrganizerConsole from "../../components/organizer/OrganizerConsole";
 import EventFlowRail from "../../components/organizer/EventFlowRail";
 import ShowtimeList from "../../components/organizer/ShowtimeList";
 import SeatMapBuilder from "../../components/SeatMapBuilder";
-import { flowSteps } from "../../components/organizer/flowSteps";
+import { flowSteps, fixItStage } from "../../components/organizer/flowSteps";
 import {
+  layoutApi,
   organizerApi,
   type ManageShowtime,
   type MyEvent,
@@ -35,19 +36,25 @@ import {
 } from "./createEventDraft";
 import Select from "../../components/Select";
 import Combobox from "../../components/Combobox";
+import { dedupedVenues } from "../../components/seatmap/venueOptions";
 import { PROVINCE_NAMES } from "@/shared/catalog/provinces";
 
 const UPCOMING_HINT = "Thêm ít nhất một suất chiếu sắp diễn trước khi tiếp tục.";
 
 /** Future-dated showtimes only — the same definition of "upcoming" the publish rail uses. */
 const upcomingOf = (rows: ManageShowtime[]) =>
-  rows.filter((st) => new Date(st.startsAt).getTime() > Date.now());
+  rows.filter(
+    (st) =>
+      new Date(st.startsAt).getTime() > Date.now() &&
+      !["cancelled", "finished"].includes(st.status ?? ""),
+  );
 
 export const OrganizerEventsPage: React.FC<{
   /** From `/organizer/events/:id` — which event the console should open at, if the URL names one. */
   openEventId?: number | null;
 }> = ({ openEventId = null }) => {
   const navigate = useNavigate();
+  const location = useLocation();
 
   // Top-Level Workspace Section:"analytics"(Thống kê kinh doanh),"events"(Quản lý sự kiện) or
   //"ads"(Gói quảng cáo).
@@ -64,38 +71,29 @@ export const OrganizerEventsPage: React.FC<{
   // Read once, here, so the initial render and a Back press cannot disagree about which section the
   // URL names. Anything unrecognised falls back to"analytics", which is the section with no param.
   const sectionFromUrl = (): Section => {
-    if (typeof window === "undefined") return "analytics";
-    const value = new URLSearchParams(window.location.search).get("section");
+    const value = new URLSearchParams(location.search).get("section");
     return value === "events" || value === "ads" || value === "create" ? value : "analytics";
   };
 
   // A URL that names an event is asking for the events section, whatever `?section=` says (a deep
   // link to `/organizer/events/7` carries no query at all, and would otherwise open on analytics
   // with the console it just asked for nowhere on screen).
-  const [activeSection, setActiveSection] = useState<Section>(() =>
-    openEventId !== null ? "events" : sectionFromUrl(),
-  );
-
-  useEffect(() => {
-    const handlePopState = () => setActiveSection(sectionFromUrl());
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
+  const activeSection: Section = openEventId !== null ? "events" : sectionFromUrl();
 
   const handleSectionSwitch = (section: Section) => {
-    setActiveSection(section);
     // Entering the create page always starts a FRESH wizard: a previous session's draft pipeline
     // (its event id, its loaded showtimes) must not leak into it.
     if (section === "create") {
+      if (created) clearCreateForm();
+      setUploadError(null);
       setCreateStep(0);
       setCreated(null);
       setWizardEvent(null);
       setWizardRows(null);
       setSetupVenues(null);
     }
-    const url = new URL(window.location.href);
-    url.searchParams.set("section", section);
-    window.history.replaceState(null, "", url.toString());
+    if (activeSection === "create" && !created && !recoverable && dirty) saveDraft(draftNow);
+    navigate(`/organizer/events?section=${section}`);
   };
 
   // The server-backed console (feature 006) owns the event list and its drill-down — event →
@@ -105,7 +103,7 @@ export const OrganizerEventsPage: React.FC<{
   // Which event is open in the console (level 2+), or null for the list. Seeded from the URL so
   // `/organizer/events/:id` is a real deep link — that address used to render a separate, superseded
   // event screen, and this is what replaced it rather than dropping the link on the floor.
-  const [selectedEventId, setSelectedEventId] = useState<number | null>(openEventId);
+  const selectedEventId = openEventId;
 
   /*
    * A later navigation to a different `/organizer/events/:id` has to move the console too.
@@ -118,11 +116,6 @@ export const OrganizerEventsPage: React.FC<{
    * Only a non-null id follows the URL. Returning to the bare list is the console's own business
    * (its Back button sets null), and mirroring that here would slam it shut again on every render.
    */
-  const [urlEventSeen, setUrlEventSeen] = useState<number | null>(openEventId);
-  if (openEventId !== null && openEventId !== urlEventSeen) {
-    setUrlEventSeen(openEventId);
-    setSelectedEventId(openEventId);
-  }
 
   /**
    * The other direction: opening or closing an event moves the address bar to match.
@@ -132,8 +125,7 @@ export const OrganizerEventsPage: React.FC<{
    * instead of doing two different things.
    */
   const setUrlEvent = (id: number | null) => {
-    const next = id === null ? "/organizer/events" : `/organizer/events/${id}`;
-    if (window.location.pathname !== next) window.history.pushState(null, "", next);
+    navigate(id === null ? "/organizer/events?section=events" : `/organizer/events/${id}`);
   };
   /** Bumped after a create (or a seat-map apply) so the console refetches. */
   const [reloadKey, setReloadKey] = useState(0);
@@ -164,9 +156,28 @@ export const OrganizerEventsPage: React.FC<{
     eventType: "seated" | "general_admission";
   } | null>(null);
   const [setupVenues, setSetupVenues] = useState<MyVenue[] | null>(null);
+  /**
+   * The organizer's existing venues, offered on wizard page 2 (0035 follow-up).
+   *
+   * Separate from `setupVenues`, which only loads AFTER the draft exists — page 2 needs the list
+   * BEFORE anything is created, which is the whole point: the wizard had nothing but three free-text
+   * fields, so the only way to hold an event at a place you had used before was to retype it, and
+   * retyping it is what made 216 of the live branch's 515 venues duplicates.
+   */
+  const [knownVenues, setKnownVenues] = useState<MyVenue[] | null>(null);
+  /**
+   * Which known venue the three fields currently describe, or "" for text the organizer typed.
+   *
+   * The picker would otherwise sit on its placeholder after filling the fields, which reads as "the
+   * click did nothing". It is cleared the moment any of the three is edited, because edited text is
+   * a different place — and `createVenue` will correctly make one.
+   */
+  const [pickedVenue, setPickedVenue] = useState("");
   const [wizardEvent, setWizardEvent] = useState<MyEvent | null>(null);
   const [wizardRows, setWizardRows] = useState<ManageShowtime[] | null>(null);
   const [publishing, setPublishing] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [setupError, setSetupError] = useState<string | null>(null);
 
   /*
    * The create form is a WIZARD of pages, not one long scroll.
@@ -283,10 +294,14 @@ export const OrganizerEventsPage: React.FC<{
 
   // Debounced so typing does not hit storage on every keystroke.
   useEffect(() => {
+    if (activeSection !== "create" || recoverable || created) return;
     const id = window.setTimeout(() => saveDraft(draftNow), 500);
     return () => window.clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    activeSection,
+    recoverable,
+    created,
     createTitle,
     createDescription,
     createCategory,
@@ -330,7 +345,7 @@ export const OrganizerEventsPage: React.FC<{
       const res = await aiClient.eventAssistant({
         brief: aiBrief.trim(),
         category: createCategory,
-        eventType: "general_admission",
+        eventType: createEventType,
       });
       setAiSuggestion(res.suggestion);
       showToast("success", "AI đã tạo gợi ý tiêu đề & mô tả thành công!");
@@ -373,6 +388,31 @@ export const OrganizerEventsPage: React.FC<{
     setStagedTrailerFile(null);
     setCreateVenueName("");
     setCreateVenueAddress("");
+    setPickedVenue("");
+  };
+
+  const finishMediaUploads = async (eventId: number) => {
+    setIsCreating(true);
+    setUploadError(null);
+    try {
+      if (stagedBannerFile) {
+        await uploadEventBannerFile(eventId, stagedBannerFile);
+        setStagedBannerFile(null);
+      }
+      if (stagedTrailerFile) {
+        await uploadEventTrailerFile(eventId, stagedTrailerFile);
+        setStagedTrailerFile(null);
+      }
+      clearCreateForm();
+      setReloadKey((k) => k + 1);
+      showToast("success", "Đã lưu bản nháp. Tiếp tục thêm suất chiếu và hạng vé.");
+    } catch (error) {
+      setUploadError(
+        `Bản nháp đã được lưu, nhưng tải tệp chưa hoàn tất: ${(error as Error).message}`,
+      );
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   /**
@@ -411,21 +451,15 @@ export const OrganizerEventsPage: React.FC<{
         description: createDescription.trim() || createTitle,
         category: createCategory,
         eventType: createEventType,
-        bannerUrl:
-          createPictureUrl || "https://res.cloudinary.com/tixhub/image/upload/placeholder.webp",
+        bannerUrl: createPictureUrl,
         venueName: createVenueName,
         venueAddress: createVenueAddress,
         city: createCity,
       });
 
-      if (stagedBannerFile) await uploadEventBannerFile(draft.eventId, stagedBannerFile);
-      if (stagedTrailerFile) await uploadEventTrailerFile(draft.eventId, stagedTrailerFile);
-
-      showToast("success", "Đã tạo bản nháp. Tiếp tục: thêm suất chiếu và hạng vé.");
       // The server row is the draft now; the local copy has done its job.
       clearDraft();
       setRecoverable(null);
-      clearCreateForm();
 
       if (createEventType === "seated") {
         // Stay on THIS page: the draft was the entry fee, and stages 4–6 (showtimes → chart →
@@ -439,6 +473,7 @@ export const OrganizerEventsPage: React.FC<{
         });
       }
       setCreateStep(3);
+      await finishMediaUploads(draft.eventId);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       showToast("error", (err as Error).message || "Tạo sự kiện thất bại.");
@@ -449,6 +484,20 @@ export const OrganizerEventsPage: React.FC<{
 
   /** The three pages of the wizard, in the order the organizer meets them. */
   const CREATE_STEP_LABELS = ["Thông tin chung", "Hình ảnh & địa điểm", "Mô tả"] as const;
+
+  /**
+   * The earliest page the wizard can still SHOW, which is not always page one.
+   *
+   * The three create-form pages live inside `{!created && <form>…</form>}`; the setup pages that
+   * follow live inside `{created && <div>…</div>}`. The two are mutually exclusive, so the moment the
+   * draft exists pages 0–2 have no renderer at all. `retreatCreateStep` clamped to 0 regardless, so
+   * "Quay lại" from the showtime page set a step nothing could draw: the card went blank, with the
+   * form's own state still in memory but nothing left mounted to show it.
+   *
+   * Once the draft is on the server those pages are finished — its title, image and venue are edited
+   * from the event editor now, which is where "Lưu & về quản lý" leads.
+   */
+  const minCreateStep = created ? CREATE_STEP_LABELS.length : 0;
 
   /** Forward through the wizard, gate-checking THIS page before the next one shows. */
   const advanceCreateStep = () => {
@@ -475,13 +524,17 @@ export const OrganizerEventsPage: React.FC<{
       setStepError(UPCOMING_HINT);
       return;
     }
+    // The chart stage deliberately carries NO gate here: the final page is a checklist that reads
+    // the very gates the publish button enforces, and its fix-it links land back on the stage that
+    // owns each missing piece. Forcing the designer open before the checklist would be a hard gate
+    // one level too early — reaching the summary is not committing it.
     setCreateStep((s) => Math.min(s + 1, wizardSteps.length - 1));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const retreatCreateStep = () => {
     setStepError(null);
-    setCreateStep((s) => Math.max(s - 1, 0));
+    setCreateStep((s) => Math.max(s - 1, minCreateStep));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -492,28 +545,41 @@ export const OrganizerEventsPage: React.FC<{
    * no unstable identity drags it into re-running every render.
    */
   const refreshSetup = () => {
-    if (!created) return;
-    organizerApi
-      .showtimesManage(created.eventId)
-      .then(setWizardRows)
-      .catch(() => setWizardRows(null));
+    setReloadKey((k) => k + 1);
   };
+
+  useEffect(() => {
+    if (activeSection !== "create") return;
+    let alive = true;
+    // Failure is not an error state here: the picker is a convenience, and a first-time organizer has
+    // nothing to pick anyway. An empty list simply hides it and the free-text fields stand alone.
+    organizerApi
+      .myVenues()
+      .then((v) => alive && setKnownVenues(v))
+      .catch(() => alive && setKnownVenues([]));
+    return () => {
+      alive = false;
+    };
+  }, [activeSection]);
 
   useEffect(() => {
     if (!created) return;
     let alive = true;
-    organizerApi
-      .showtimesManage(created.eventId)
-      .then((r) => alive && setWizardRows(r))
-      .catch(() => alive && setWizardRows(null));
-    organizerApi
-      .myVenues()
-      .then((v) => alive && setSetupVenues(v))
-      .catch(() => alive && setSetupVenues([]));
-    organizerApi
-      .myEvents()
-      .then((list) => alive && setWizardEvent(list.find((e) => e.id === created.eventId) ?? null))
-      .catch(() => alive && setWizardEvent(null));
+    setSetupError(null);
+    Promise.all([
+      organizerApi.showtimesManage(created.eventId),
+      organizerApi.myVenues(),
+      organizerApi.myEvents(),
+    ])
+      .then(([rows, venues, events]) => {
+        if (!alive) return;
+        const event = events.find((e) => e.id === created.eventId);
+        if (!event) throw new Error("Không tìm thấy bản nháp sự kiện.");
+        setWizardRows(rows);
+        setSetupVenues(venues);
+        setWizardEvent(event);
+      })
+      .catch((e) => alive && setSetupError((e as Error).message));
     return () => {
       alive = false;
     };
@@ -532,7 +598,12 @@ export const OrganizerEventsPage: React.FC<{
   const setupSteps = wizardEvent ? flowSteps(wizardEvent, wizardRows) : [];
   const submitStep = setupSteps.find((s) => s.id === "submit") ?? null;
   /** Ready = every earlier gate passed AND this event has not been sent already. */
-  const canSubmitForReview = submitStep?.state === "blocked" && submitStep.label === "Gửi duyệt";
+  const canSubmitForReview =
+    !uploadError &&
+    !setupError &&
+    !isCreating &&
+    submitStep?.state === "blocked" &&
+    submitStep.label === "Gửi duyệt";
   /** Where the last page sits for the CURRENT event type — seated carries the extra chart page. */
   const chartStageIndex = created?.eventType === "seated" ? 4 : null;
   const finishStageIndex = created ? 3 + (created.eventType === "seated" ? 2 : 1) : 5;
@@ -561,24 +632,27 @@ export const OrganizerEventsPage: React.FC<{
    */
   const transport = (
     <div className="sticky bottom-0 -mx-6 flex flex-wrap items-center justify-end gap-3 border-t border-beige-kem/20 bg-surface-2 px-6 pb-1 pt-4 sm:-mx-8 sm:px-8">
-      {stepError && <p className="mr-auto text-[11px] font-semibold text-burgundy">{stepError}</p>}
+      {stepError && (
+        <p className="mr-auto text-[11px] font-semibold text-burgundy-ink">{stepError}</p>
+      )}
       <button
         type="button"
         onClick={() => handleSectionSwitch("events")}
         disabled={isCreating || publishing}
-        className="px-5 py-2.5 bg-surface-2 hover:bg-beige-kem/10 text-beige-kem font-semibold transition-colors border border-beige-kem/30 disabled:opacity-50"
+        className="inline-flex min-h-11 items-center justify-center border-2 border-beige-kem/35 bg-surface-2 px-6 text-sm font-bold text-beige-kem transition-colors hover:bg-beige-kem/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-burgundy focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {/* Past page three nothing is discarded — the draft lives on the server; this just leaves. */}
         {created ? "Lưu & về quản lý" : "Hủy"}
       </button>
-      {createStep > 0 && (
+      {createStep > minCreateStep && (
         <button
           type="button"
           onClick={retreatCreateStep}
           disabled={isCreating || publishing}
-          className="px-5 py-2.5 bg-surface-2 hover:bg-beige-kem/10 text-beige-kem font-semibold transition-colors border border-beige-kem/30 disabled:opacity-50"
+          className="inline-flex min-h-11 items-center gap-2 px-3 text-sm font-bold text-ink-soft transition-colors hover:text-beige-kem focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-burgundy focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          ← Quay lại
+          <ArrowLeft aria-hidden className="h-4 w-4" />
+          Quay lại
         </button>
       )}
       {createStep < wizardSteps.length - 1 ? (
@@ -586,7 +660,7 @@ export const OrganizerEventsPage: React.FC<{
           type="button"
           onClick={advanceCreateStep}
           disabled={isCreating || publishing}
-          className="px-6 py-2.5 bg-burgundy hover:brightness-110 text-white font-bold transition-all disabled:opacity-50"
+          className="inline-flex min-h-11 items-center justify-center border-2 border-burgundy bg-burgundy px-6 text-sm font-bold text-white transition-all hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-burgundy focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Tiếp tục →
         </button>
@@ -594,7 +668,7 @@ export const OrganizerEventsPage: React.FC<{
         <button
           type="submit"
           disabled={isCreating}
-          className="px-6 py-2.5 bg-burgundy hover:brightness-110 text-white font-bold transition-all disabled:opacity-50 flex items-center gap-2"
+          className="inline-flex min-h-11 items-center justify-center gap-2 border-2 border-burgundy bg-burgundy px-6 text-sm font-bold text-white transition-all hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-burgundy focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isCreating ? (
             <>
@@ -618,7 +692,7 @@ export const OrganizerEventsPage: React.FC<{
               ? undefined
               : "Hoàn tất các bước còn thiếu (xem danh sách bên trên) trước khi gửi duyệt."
           }
-          className="px-6 py-2.5 bg-burgundy hover:brightness-110 text-white font-bold transition-all disabled:opacity-50 flex items-center gap-2"
+          className="inline-flex min-h-11 items-center justify-center gap-2 border-2 border-burgundy bg-burgundy px-6 text-sm font-bold text-white transition-all hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-burgundy focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {publishing ? (
             <>
@@ -718,7 +792,7 @@ export const OrganizerEventsPage: React.FC<{
               },
               { label: "Sự kiện đang mở bán", value: liveEventCount ?? "—", shortValue: null },
             ].map((k) => (
-              <div key={k.label} className="bg-surface-2 p-4">
+              <div key={k.label} className="border-2 border-beige-kem/25 bg-surface-2 p-4">
                 <dt className="font-meta text-meta uppercase tracking-widest text-ink-soft">
                   {k.label}
                 </dt>
@@ -770,7 +844,7 @@ export const OrganizerEventsPage: React.FC<{
                     active
                       ? "border-burgundy text-beige-kem"
                       : "border-transparent text-ink-soft hover:text-beige-kem"
-                  } ${key === "ads" ? "hidden sm:flex" : ""}`}
+                  }`}
                 >
                   <Icon className="h-4 w-4" />
                   <span className="hidden sm:inline">{label}</span>
@@ -793,7 +867,6 @@ export const OrganizerEventsPage: React.FC<{
             <OrganizerConsole
               selectedEventId={selectedEventId}
               onSelectEvent={(id) => {
-                setSelectedEventId(id);
                 // Keep the address bar honest, the way the chart editor does: opening an event is a
                 // place you can link to, and Back out of, not a state hidden inside the page.
                 setUrlEvent(id);
@@ -815,7 +888,7 @@ export const OrganizerEventsPage: React.FC<{
               type="button"
               onClick={() => handleSectionSwitch("events")}
               disabled={isCreating}
-              className="flex items-center gap-2 text-xs font-bold text-beige-kem/70 transition-colors hover:text-beige-kem disabled:opacity-50"
+              className="inline-flex min-h-10 items-center gap-2 px-2 text-sm font-bold text-ink-soft transition-colors hover:text-beige-kem focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-burgundy focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {/* Borderless, matching `EventEditor`'s back link: an arrow and a label, because this
                   is navigation and not an action taken on the page. */}
@@ -891,7 +964,7 @@ export const OrganizerEventsPage: React.FC<{
                           aria-current={createStep === i ? "step" : undefined}
                           className={`grid h-6 w-6 place-items-center rounded-full border-2 font-bold ${
                             i < createStep
-                              ? "border-la-co bg-la-co text-on-tint"
+                              ? "border-la-co/55 bg-la-co/20 text-la-co-ink"
                               : createStep === i
                                 ? "border-burgundy bg-burgundy/15 text-beige-kem"
                                 : "border-beige-kem/25 text-beige-kem/45"
@@ -1009,7 +1082,7 @@ export const OrganizerEventsPage: React.FC<{
                         id="create-media"
                         className="scroll-mt-24 space-y-4 border border-beige-kem/25 bg-xanh-pho p-4"
                       >
-                        <h3 className="font-meta text-xs font-bold uppercase tracking-wider text-burgundy">
+                        <h3 className="font-meta text-xs font-bold uppercase tracking-wider text-burgundy-ink">
                           Hình ảnh & video
                         </h3>
                         <Refusal message={mediaRefusal} />
@@ -1053,6 +1126,40 @@ export const OrganizerEventsPage: React.FC<{
                         </div>
                       </div>
 
+                      {/*
+                        Pick a place used before, or type a new one.
+
+                        Filling the three fields IS the whole mechanism — no venue id is threaded
+                        through the submit. `createVenue` is lookup-or-create, so unchanged text
+                        resolves back to the very row that was picked, and text the organizer then
+                        edits is a different place and correctly becomes a new one. That keeps one
+                        rule on the server instead of two that drift.
+                      */}
+                      {(knownVenues?.length ?? 0) > 0 && (
+                        <div>
+                          <label className="block font-meta text-beige-kem font-semibold mb-1">
+                            Địa điểm đã dùng
+                          </label>
+                          <Select
+                            triggerClassName="w-full border border-beige-kem/30 bg-xanh-pho p-3"
+                            placeholder="Chọn để điền sẵn, hoặc nhập mới bên dưới"
+                            value={pickedVenue}
+                            onChange={(v) => {
+                              const picked = knownVenues?.find((x) => String(x.id) === v);
+                              if (!picked) return;
+                              setPickedVenue(v);
+                              setCreateVenueName(picked.name);
+                              setCreateCity(picked.city);
+                              setCreateVenueAddress(picked.rawAddress ?? "");
+                            }}
+                            options={dedupedVenues(knownVenues ?? []).map((o) => ({
+                              value: String(o.id),
+                              label: o.label,
+                            }))}
+                          />
+                        </div>
+                      )}
+
                       {/* Venue and city stay side by side — the short, related pair NN/g exempts from the
                     single-column rule, and splitting them would only make the form taller. */}
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -1063,7 +1170,10 @@ export const OrganizerEventsPage: React.FC<{
                           <input
                             type="text"
                             value={createVenueName}
-                            onChange={(e) => setCreateVenueName(e.target.value)}
+                            onChange={(e) => {
+                              setCreateVenueName(e.target.value);
+                              setPickedVenue("");
+                            }}
                             placeholder="Vd: Nhà hát Hòa Bình"
                             required
                             className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none"
@@ -1086,7 +1196,10 @@ export const OrganizerEventsPage: React.FC<{
                           <Combobox
                             value={createCity}
                             options={PROVINCE_NAMES}
-                            onChange={setCreateCity}
+                            onChange={(v) => {
+                              setCreateCity(v);
+                              setPickedVenue("");
+                            }}
                             allowCustom
                             placeholder="Nhập hoặc chọn tỉnh/thành"
                             className="w-full border border-beige-kem/30 bg-xanh-pho p-3"
@@ -1102,7 +1215,10 @@ export const OrganizerEventsPage: React.FC<{
                         <input
                           type="text"
                           value={createVenueAddress}
-                          onChange={(e) => setCreateVenueAddress(e.target.value)}
+                          onChange={(e) => {
+                            setCreateVenueAddress(e.target.value);
+                            setPickedVenue("");
+                          }}
                           placeholder="Vd: 240 3 Tháng 2, Phường 12, Quận 10"
                           required
                           className="w-full bg-xanh-pho border border-beige-kem/30 focus:border-burgundy p-3 text-beige-kem outline-none"
@@ -1117,7 +1233,7 @@ export const OrganizerEventsPage: React.FC<{
                       {/* AI Assistant for Recommended Description */}
                       <div className="bg-surface-2 p-4 border border-beige-kem/30 space-y-3">
                         <div className="flex items-center justify-between">
-                          <h3 className="font-meta text-xs font-bold text-burgundy uppercase tracking-wider">
+                          <h3 className="font-meta text-xs font-bold text-burgundy-ink uppercase tracking-wider">
                             AI Trợ Lý Viết Mô Tả Sự Kiện
                           </h3>
                           <span className="text-[10px] font-semibold text-white bg-burgundy px-2 py-0.5">
@@ -1160,7 +1276,7 @@ export const OrganizerEventsPage: React.FC<{
                         {aiSuggestion && (
                           <div className="mt-3 p-3.5 bg-xanh-pho border border-beige-kem/30 space-y-2 text-xs">
                             <div className="flex items-center justify-between border-b border-beige-kem/20 pb-2">
-                              <span className="font-bold text-burgundy">Gợi Ý Từ AI:</span>
+                              <span className="font-bold text-burgundy-ink">Gợi Ý Từ AI:</span>
                               <button
                                 type="button"
                                 onClick={applyAiSuggestion}
@@ -1215,6 +1331,36 @@ export const OrganizerEventsPage: React.FC<{
               */}
               {created && (
                 <div className="space-y-5 text-xs">
+                  {uploadError && (
+                    <div
+                      role="alert"
+                      className="space-y-2 border border-burgundy p-3 text-burgundy-ink"
+                    >
+                      <p>
+                        {uploadError} Hãy tải lại tệp vào bản nháp này, không cần tạo sự kiện mới.
+                      </p>
+                      <button
+                        type="button"
+                        disabled={isCreating}
+                        onClick={() => void finishMediaUploads(created.eventId)}
+                        className="border border-current px-3 py-2 font-bold"
+                      >
+                        Thử tải tệp lại
+                      </button>
+                    </div>
+                  )}
+                  {setupError && (
+                    <div role="alert" className="space-y-2 text-burgundy-ink">
+                      <p>Không tải được dữ liệu mới: {setupError}</p>
+                      <button
+                        type="button"
+                        onClick={refreshSetup}
+                        className="border border-current px-3 py-2 font-bold"
+                      >
+                        Thử tải lại
+                      </button>
+                    </div>
+                  )}
                   {/* ── Trang 4 · Suất chiếu & hạng vé ── */}
                   {createStep === 3 && (
                     <div className="space-y-3">
@@ -1251,26 +1397,28 @@ export const OrganizerEventsPage: React.FC<{
                             <span className="font-semibold text-beige-kem">{st.venueName}</span>
                             <span
                               className={`px-2 py-0.5 font-mono text-[10px] ${
-                                st.hasSeatMap && st.bookableSeats > 0
+                                st.hasSeatMap && (st.bookableSeats > 0 || st.zoneCapacity > 0)
                                   ? "bg-la-co/25 text-beige-kem"
                                   : "border border-beige-kem/30 text-ink-soft"
                               }`}
                             >
-                              {st.hasSeatMap && st.bookableSeats > 0
-                                ? `Đã áp dụng · ${st.bookableSeats} ghế`
+                              {st.hasSeatMap && (st.bookableSeats > 0 || st.zoneCapacity > 0)
+                                ? `Đã áp dụng · ${st.bookableSeats} ghế · ${st.zoneCapacity} chỗ đứng`
                                 : "Chưa áp dụng sơ đồ"}
                             </span>
                           </li>
                         ))}
                       </ul>
-                      <button
-                        type="button"
-                        onClick={() => setSeatMapEventId(created.eventId)}
-                        disabled={publishing}
-                        className="w-full bg-burgundy px-4 py-2.5 text-xs font-bold text-white transition hover:brightness-110 disabled:opacity-50 sm:w-auto"
-                      >
-                        Mở trình thiết kế sơ đồ
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSeatMapEventId(created.eventId)}
+                          disabled={publishing}
+                          className="bg-burgundy px-4 py-2.5 text-xs font-bold text-white transition hover:brightness-110 disabled:opacity-50"
+                        >
+                          Mở trình thiết kế sơ đồ
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -1287,9 +1435,7 @@ export const OrganizerEventsPage: React.FC<{
                           steps={setupSteps}
                           onAction={(action) => {
                             if (action === "submit") return;
-                            setCreateStep(
-                              action === "showtimes" || !chartStageIndex ? 3 : chartStageIndex,
-                            );
+                            setCreateStep(fixItStage(action, chartStageIndex));
                           }}
                         />
                       ) : (

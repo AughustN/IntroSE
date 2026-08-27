@@ -88,7 +88,7 @@ All in `server/src/config.ts` with defaults; none is hard-coded (UC-36).
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `MAX_TIERS_PER_SHOWTIME` | 4 | the layout rule from 002, now counted over **active** tiers |
+| `MAX_TIERS_PER_SHOWTIME` | 20 | maximum **active** tiers per showtime; creation, add and restore share it, and organizer forms read the effective value from the API |
 | `AI_RATE_LIMIT` / `AI_RATE_WINDOW_MS` | 10 / 1 h | SEC-08 |
 | `AI_TIMEOUT_MS` | 8000 | PERF-05 hard timeout → fallback |
 | `AI_CACHE_TTL_MS` | 24 h | SCAL-02 |

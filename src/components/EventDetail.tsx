@@ -122,7 +122,6 @@ interface Slot {
 const WAITLIST_CUTOFF_HOURS = 24;
 
 const MAX_PER_TIER = 10;
-const MAX_TIERS = 4;
 
 /** The day strip's column headers. Monday-first, matching `weekDays`. */
 const WEEKDAY_LABELS = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"] as const;
@@ -174,12 +173,8 @@ export default function EventDetail({
    */
   const [showtimeTiers, setShowtimeTiers] = useState<TicketTier[] | null>(null);
 
-  // An event carries at most 4 ticket tiers (enforced server-side); slice defensively so a bad
-  // payload can never break the even 1–4 column layout below.
-  const tiers = useMemo(
-    () => (showtimeTiers ?? event.ticketTiers).slice(0, MAX_TIERS),
-    [showtimeTiers, event.ticketTiers],
-  );
+  // Display every available tier. The server limits active tiers per showtime, not per event.
+  const tiers = showtimeTiers ?? event.ticketTiers;
   const slots = useMemo<Slot[]>(() => {
     if (showtimes.length > 0) {
       return showtimes.map((s) => ({
@@ -795,7 +790,6 @@ export default function EventDetail({
 
           {event.isHighDemand && (
             <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-950/60 border border-indigo-500/40 text-indigo-300 text-xs font-semibold">
-              <span className="text-sm">🛡️</span>
               <span>Sự kiện mở bán vé Hot — Tự động xếp hàng qua Phòng chờ ảo (Anti-Bot)</span>
             </div>
           )}

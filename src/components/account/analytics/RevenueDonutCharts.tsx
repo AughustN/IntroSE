@@ -33,7 +33,7 @@ export function RevenueDonutCharts({ breakdowns }: Props) {
           <h5 className="text-xs font-bold uppercase tracking-wider text-beige-kem/80">
             Theo Hạng Vé
           </h5>
-          <span className="text-[11px] font-bold text-la-co">{by_tier.length} hạng vé</span>
+          <span className="text-[11px] font-bold text-la-co-ink">{by_tier.length} hạng vé</span>
         </div>
 
         <div className="h-44 w-full">
@@ -96,7 +96,7 @@ export function RevenueDonutCharts({ breakdowns }: Props) {
           <h5 className="text-xs font-bold uppercase tracking-wider text-beige-kem/80">
             Theo Thể Loại
           </h5>
-          <span className="text-[11px] font-bold text-cam-dat">{by_category.length} thể loại</span>
+          <span className="text-[11px] font-bold text-cam-dat-ink">{by_category.length} thể loại</span>
         </div>
 
         <div className="h-44 w-full">

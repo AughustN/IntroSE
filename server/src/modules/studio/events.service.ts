@@ -3,6 +3,7 @@ import { pool, withTransaction } from "../../db/pool.js";
 import { err, HttpError } from "../../http.js";
 import { applyOrganizerEdit, wasEverApproved } from "./moderation-guard.js";
 import { clearLapsedReservationItems } from "./reservations.cleanup.js";
+import { lockEditableEvent } from "./event-lifecycle.js";
 
 /**
  * Event-level editing and deletion (feature 006, UC-23 + FR-020).
@@ -22,7 +23,7 @@ export interface UpdateEventInput {
   isHighDemand?: boolean;
   is_high_demand?: boolean;
   /** Cinema's two landing tabs (0038). Meaningless outside the `movie` category. */
-  releasePhase?: 'now_showing' | 'upcoming';
+  releasePhase?: "now_showing" | "upcoming";
 }
 
 export async function updateEvent(
@@ -37,14 +38,19 @@ export async function updateEvent(
     if (rows.length === 0) throw err.badRequest("validation_failed", "Danh mục không hợp lệ.");
   }
 
-  const isHighDemandProvided = input.isHighDemand !== undefined || input.is_high_demand !== undefined;
+  const isHighDemandProvided =
+    input.isHighDemand !== undefined || input.is_high_demand !== undefined;
   const isHighDemandValue = input.isHighDemand ?? input.is_high_demand ?? false;
 
-  if (input.releasePhase !== undefined && !['now_showing', 'upcoming'].includes(input.releasePhase)) {
-    throw err.badRequest('validation_failed', 'Trạng thái phát hành không hợp lệ.');
+  if (
+    input.releasePhase !== undefined &&
+    !["now_showing", "upcoming"].includes(input.releasePhase)
+  ) {
+    throw err.badRequest("validation_failed", "Trạng thái phát hành không hợp lệ.");
   }
 
   return withTransaction(async (client) => {
+    await lockEditableEvent(client, eventId);
     const { rows: current } = await client.query<{
       title: string;
       description: string;
@@ -53,7 +59,7 @@ export async function updateEvent(
       age_restriction: string;
       category_code: string;
       is_high_demand: boolean;
-      release_phase: 'now_showing' | 'upcoming';
+      release_phase: "now_showing" | "upcoming";
     }>(
       `SELECT e.title, e.description, e.image_url, e.refund_policy, e.age_restriction, ec.code AS category_code,
               COALESCE(e.is_high_demand, false) AS is_high_demand, e.release_phase
@@ -67,12 +73,18 @@ export async function updateEvent(
 
     const changed: string[] = [];
     if (input.title !== undefined && input.title !== cur.title) changed.push("event.title");
-    if (input.description !== undefined && input.description !== cur.description) changed.push("event.description");
-    if (input.imageUrl !== undefined && input.imageUrl !== cur.image_url) changed.push("event.image");
-    if (input.refundPolicy !== undefined && input.refundPolicy !== cur.refund_policy) changed.push("event.refundPolicy");
-    if (input.ageRestriction !== undefined && input.ageRestriction !== cur.age_restriction) changed.push("event.ageRestriction");
-    if (input.categoryCode !== undefined && input.categoryCode !== cur.category_code) changed.push("event.category");
-    if (isHighDemandProvided && isHighDemandValue !== cur.is_high_demand) changed.push("event.isHighDemand");
+    if (input.description !== undefined && input.description !== cur.description)
+      changed.push("event.description");
+    if (input.imageUrl !== undefined && input.imageUrl !== cur.image_url)
+      changed.push("event.image");
+    if (input.refundPolicy !== undefined && input.refundPolicy !== cur.refund_policy)
+      changed.push("event.refundPolicy");
+    if (input.ageRestriction !== undefined && input.ageRestriction !== cur.age_restriction)
+      changed.push("event.ageRestriction");
+    if (input.categoryCode !== undefined && input.categoryCode !== cur.category_code)
+      changed.push("event.category");
+    if (isHighDemandProvided && isHighDemandValue !== cur.is_high_demand)
+      changed.push("event.isHighDemand");
     // Which tab a film sits under is a listing detail, like the drop flag beside it: it changes
     // nothing a buyer has already paid for, so it is not a material edit and does not send an
     // approved event back for review.
@@ -132,6 +144,27 @@ export async function updateEvent(
       moderation: after[0].moderation_status,
       returnedToReview,
     };
+  });
+}
+
+/** Media changes have the same lifecycle and re-review rules as text edits. */
+export async function updateEventMedia(
+  actorUserId: number,
+  eventId: number,
+  field: "image_url" | "trailer_url",
+  upload: () => Promise<string | null>,
+) {
+  return withTransaction(async (client) => {
+    await lockEditableEvent(client, eventId);
+    const url = await upload();
+    await client.query(`UPDATE events SET ${field} = $2, updated_at = now() WHERE id = $1`, [
+      eventId,
+      url,
+    ]);
+    const result = await applyOrganizerEdit(client, eventId, actorUserId, [
+      field === "image_url" ? "event.image" : "event.trailer",
+    ]);
+    return { url, ...result };
   });
 }
 

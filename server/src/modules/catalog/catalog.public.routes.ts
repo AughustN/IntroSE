@@ -13,8 +13,8 @@ import { createSlidingRateLimiter } from '../../middleware/rateLimit.js';
 export const catalogPublicRouter = Router();
 
 const catalogRateLimit = createSlidingRateLimiter('catalog:ip', {
-  windowMs: 60 * 1000,
-  max: 60,
+  windowMs: 60 * 100000, // Test, remember to return 1000 for production
+  max: 60000, // Test, remember to return 60 for production
   errorMessage: 'Quá nhiều yêu cầu tải danh mục. Vui lòng thử lại sau giây lát.',
   headers: true,
 });

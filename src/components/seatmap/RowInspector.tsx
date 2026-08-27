@@ -126,7 +126,7 @@ export default function RowInspector({
         <button
           onClick={onDelete}
           disabled={!canEdit}
-          className={`${btn} mt-1 w-full border-burgundy-ink text-burgundy-ink hover:border-burgundy-ink`}
+          className={`${btn} seatmap-delete-action mt-1 w-full`}
           title="Xoá hàng này — các hàng khác giữ nguyên nhãn"
         >
           Xoá hàng

@@ -10,10 +10,12 @@ import { pool, withTransaction } from "../../db/pool.js";
 import { err, HttpError } from "../../http.js";
 import { applyOrganizerEdit } from "./moderation-guard.js";
 import { clearLapsedReservationItems } from "./reservations.cleanup.js";
+import { assertEditableShowtime } from "./event-lifecycle.js";
 import {
   activeTierCount,
   listTiers,
   lockTier,
+  lockTierLimit,
   showtimeEventType,
   tierCommitted,
   tierContext,
@@ -84,6 +86,7 @@ export async function listManagedTiers(
   ]);
   return {
     eventType,
+    maxTiersPerShowtime: MAX_TIERS_PER_SHOWTIME,
     tiers: rows.map((r) =>
       toManagedTier(r, inv.get(r.id) ?? { sold: 0, held: 0, remaining: null }),
     ),
@@ -115,6 +118,8 @@ export async function addTier(
   }
 
   return withTransaction(async (client) => {
+    await lockTierLimit(client, showtimeId);
+    await assertEditableShowtime(client, showtimeId);
     const active = await activeTierCount(showtimeId, client);
     if (active >= MAX_TIERS_PER_SHOWTIME) {
       throw err.conflict(
@@ -175,6 +180,7 @@ export async function updateTier(
     // the numbers that were true at commit time (R-3).
     const locked = await lockTier(client, ctx.id);
     if (!locked) throw err.notFound("not_found", "Không tìm thấy hạng vé.");
+    await assertEditableShowtime(client, ctx.showtime_id);
 
     const changed: string[] = [];
     if (input.label !== undefined) changed.push("tier.label");
@@ -253,8 +259,10 @@ export async function removeTier(
   }
 
   return withTransaction(async (client) => {
+    await lockTierLimit(client, ctx.showtime_id);
     const locked = await lockTier(client, ctx.id);
     if (!locked) throw err.notFound("not_found", "Không tìm thấy hạng vé.");
+    await assertEditableShowtime(client, ctx.showtime_id);
 
     const { sold, held } = await tierCommitted(locked, ctx.event_type, client);
 
@@ -313,16 +321,19 @@ export async function removeTier(
   });
 }
 
-/** Archiving is a shelf, not a delete: the four-active-tier limit is re-checked on the way back. */
+/** Archiving is a shelf, not a delete: the active-tier limit is re-checked on the way back. */
 export async function restoreTier(
   actorUserId: number,
   ctx: TierContext,
 ): Promise<TierMutationResult> {
-  if (ctx.archived_at === null) {
-    throw err.conflict("tier_not_archived", "Hạng vé này đang bán, không cần khôi phục.");
-  }
-
   return withTransaction(async (client) => {
+    await lockTierLimit(client, ctx.showtime_id);
+    const tier = await lockTier(client, ctx.id);
+    if (!tier) throw err.notFound("not_found", "Không tìm thấy hạng vé.");
+    await assertEditableShowtime(client, ctx.showtime_id);
+    if (tier.archived_at === null) {
+      throw err.conflict("tier_not_archived", "Hạng vé này đang bán, không cần khôi phục.");
+    }
     const active = await activeTierCount(ctx.showtime_id, client);
     if (active >= MAX_TIERS_PER_SHOWTIME) {
       throw err.conflict(

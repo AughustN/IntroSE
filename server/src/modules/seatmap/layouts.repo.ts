@@ -17,6 +17,7 @@ import { clampCoord, normaliseRotation } from "@shared/catalog/seatmap-validate.
 import { buildTierLegend, CATEGORY_COLORS } from "@shared/catalog/tier-palette.js";
 import { LAYOUT_SPACE, SEAT_DIAMETER } from "../../config.js";
 import { type Db, pool, withTransaction } from "../../db/pool.js";
+import { err } from "../../http.js";
 
 // Layout reads and the versioned full-document save (research R-5).
 //
@@ -87,6 +88,7 @@ export async function listAllLayouts(userId: number, db: Db = pool): Promise<Lay
     is_template: boolean;
     seat_count: string;
     usage_count: string;
+    bound_count: string;
     updated_at: Date;
     has_published: boolean;
     thumbnail: { x: number; y: number; w: number; h: number; kind: string }[] | null;
@@ -101,6 +103,10 @@ export async function listAllLayouts(userId: number, db: Db = pool): Promise<Lay
             (SELECT count(*) FROM seats s WHERE s.layout_id = l.id) AS seat_count,
             (SELECT count(*) FROM showtimes st
               WHERE st.layout_id = l.id AND st.status NOT IN ('finished', 'cancelled')) AS usage_count,
+            -- EVERY showtime that names this chart, finished ones included. usage_count answers
+            -- "can it still sell?"; this answers "can the row be removed at all?" -- and those are
+            -- not the same question, because showtimes.layout_id has no ON DELETE behaviour.
+            (SELECT count(*) FROM showtimes st WHERE st.layout_id = l.id) AS bound_count,
             EXISTS (SELECT 1 FROM layout_revisions r WHERE r.layout_id = l.id) AS has_published,
             (SELECT jsonb_agg(t.box)
                FROM (
@@ -127,6 +133,7 @@ export async function listAllLayouts(userId: number, db: Db = pool): Promise<Lay
     isTemplate: r.is_template,
     seatCount: Number(r.seat_count),
     usageCount: Number(r.usage_count),
+    boundCount: Number(r.bound_count),
     updatedAt: r.updated_at.toISOString(),
     hasPublishedVersion: r.has_published,
     thumbnail: r.thumbnail ?? [],
@@ -506,6 +513,26 @@ export async function deleteLayout(layoutId: number, db: Db = pool): Promise<voi
 
 /** A layout any non-finished, non-cancelled showtime generated a map from may not be deleted, so a
  *  live map's source stays inspectable and re-appliable (FR-006). */
+/**
+ * Any showtime at all names this chart — the predicate DELETION has to obey.
+ *
+ * `layoutInUse` excludes finished and cancelled showtimes, which is right for archiving: an old chart
+ * whose shows have all played is exactly what archiving is for. It is wrong for deletion.
+ * `showtimes.layout_id REFERENCES venue_layouts(id)` was added with no `ON DELETE` clause (0007, the
+ * ALTER at the end), so it defaults to NO ACTION and a finished showtime blocks the delete just as
+ * hard as a live one. `showtime_seats.seat_id REFERENCES seats(id)` says the same about the seats
+ * that would cascade away underneath it.
+ *
+ * So the UI offered "Xoá" on any chart whose shows were over and Postgres answered with a foreign
+ * key error. One predicate per question, and each matches what the database will actually do.
+ */
+export async function layoutEverBound(layoutId: number, db: Db = pool): Promise<boolean> {
+  const { rows } = await db.query(`SELECT 1 FROM showtimes WHERE layout_id = $1 LIMIT 1`, [
+    layoutId,
+  ]);
+  return rows.length > 0;
+}
+
 export async function layoutInUse(layoutId: number, db: Db = pool): Promise<boolean> {
   const { rows } = await db.query(
     `SELECT 1 FROM showtimes WHERE layout_id = $1 AND status NOT IN ('finished', 'cancelled') LIMIT 1`,
@@ -1010,6 +1037,20 @@ export async function saveLayout(
      */
     const tableIdByBlockKey = new Map<string, number>();
     if (projected && body.document) {
+      /*
+       * A positive `tableId` is adopted as-is, so it has to be this chart's own table (0035 finding 7).
+       * Unchecked, a saved document could claim another organizer's table and every seat the block
+       * projects would then be written against it.
+       */
+      await assertInLayout(
+        layoutId,
+        {
+          tables: body.document.blocks.map((b) =>
+            b.kind === "table" && typeof b.tableId === "number" && b.tableId > 0 ? b.tableId : null,
+          ),
+        },
+        client,
+      );
       for (const b of body.document.blocks) {
         if (b.kind !== "table") continue;
         if (typeof b.tableId === "number" && b.tableId > 0) {
@@ -1271,8 +1312,22 @@ export async function saveLayout(
               .filter((id): id is number => typeof id === "number" && id > 0)
               .map((id) => [id, id]),
           ),
-          // Seat ids are already real after `stitchSeatIds`, so map each to itself.
-          seats: new Map(keptSeats.map((id) => [id, id])),
+          /*
+           * Identity for the seats `stitchSeatIds` has already made real, PLUS the placeholder →
+           * real mapping for the pointers it does not touch.
+           *
+           * `stitchSeatIds` rewrites a seat's OWN `seatId`, which is why identity was enough for it.
+           * `companionSeatId` is a second reference to a seat and is left holding the document's
+           * placeholder — absent from an identity map built out of real ids, so `via` fell through to
+           * `mint()` and the stored document came back naming a seat that exists nowhere. The rows
+           * were right the whole time (`resolveCompanion` above uses this same map), so nothing was
+           * mispaired in the database; but the EDITOR validates the document, and a chart that had
+           * just been created from a starter opened refusing to publish.
+           */
+          seats: new Map<number, number>([
+            ...keptSeats.map((id) => [id, id] as const),
+            ...docIdToRealId,
+          ]),
         },
         () => (temp -= 1),
       );
@@ -1836,7 +1891,65 @@ export async function getShowtimeMap(showtimeId: number, db: Db = pool): Promise
 }
 
 /**
- * Forget the authoring document for this layout.
+ * Every section, price class and table a write names really belongs to the layout being written
+ * (0035 finding 7).
+ *
+ * `sections.layout_id`, `layout_categories.layout_id` and `layout_tables.layout_id` are all plain
+ * foreign keys to their own tables — nothing in the schema says the section a table is placed in has
+ * to live in the same chart as the table. The endpoints authorise the LAYOUT and then took the rest of
+ * the body on trust, so a request could place a table into another organizer's section, or reprice a
+ * block with a class the chart does not own, and the database would accept it happily.
+ *
+ * Nulls are dropped, not refused: every one of these references is optional and null means "none".
+ * Ids are de-duplicated so a body naming one section twice is not reported as a missing one.
+ */
+export async function assertInLayout(
+  layoutId: number,
+  refs: {
+    sections?: readonly (number | null | undefined)[];
+    categories?: readonly (number | null | undefined)[];
+    tables?: readonly (number | null | undefined)[];
+  },
+  db: Db = pool,
+): Promise<void> {
+  const checks: [string, string, number[]][] = [
+    ["sections", "khu vực", [...new Set((refs.sections ?? []).filter((v) => typeof v === "number"))]],
+    [
+      "layout_categories",
+      "hạng ghế",
+      [...new Set((refs.categories ?? []).filter((v) => typeof v === "number"))],
+    ],
+    ["layout_tables", "bàn", [...new Set((refs.tables ?? []).filter((v) => typeof v === "number"))]],
+  ];
+
+  for (const [table, noun, ids] of checks) {
+    if (ids.length === 0) continue;
+    const { rows } = await db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM ${table} WHERE layout_id = $1 AND id = ANY($2::bigint[])`,
+      [layoutId, ids],
+    );
+    if (Number(rows[0].n) !== ids.length)
+      throw err.badRequest("validation_failed", `Có ${noun} không thuộc sơ đồ này.`);
+  }
+}
+
+/**
+ * The ONE lifecycle transition every server-owned geometry write goes through (0035 finding 4).
+ *
+ * A geometry change is a geometry change whichever door it came through, so this does exactly what
+ * `saveLayout` does for a document save: forgets the document, bumps the version, stamps `updated_at`,
+ * and returns a published chart to `draft`. It used to only null the document, and each half that was
+ * missing was a real hole — an unvalidated table could stay `ready` and assignable, `updated_at` lied
+ * about when the chart last changed, and a second editor tab held a version the server still accepted,
+ * so its next save overwrote the table write with a document that never knew about it.
+ *
+ * The demotion is gated on a revision EXISTING, for the same reason `quickToolWroteRows` gates it:
+ * `defaultLayoutId` mints a venue's first chart as `ready` so the venue-level helper paths can generate
+ * a map with no publish step. A chart nobody ever published has no published version to fall out of,
+ * and demoting it turns those paths into `layout_not_published`.
+ *
+ * Callers pass their transaction client, so the lifecycle flip and the rows it describes commit or
+ * roll back together — a refused table write must not leave the chart demoted.
  *
  * Called by the write paths that change seat geometry WITHOUT going through the document — placing or
  * moving a table (tables.ts), creating or re-shaping a standing area (standing.ts). Those own their
@@ -1852,8 +1965,20 @@ export async function getShowtimeMap(showtimeId: number, db: Db = pool): Promise
  * knew it was "6 × 18, rows lettered A-ascending" becomes a plain group of seats. That is the correct
  * trade — the alternative is keeping an arc radius that no longer describes where the seats are.
  */
-export async function forgetDocument(layoutId: number, db: Db = pool): Promise<void> {
-  await db.query(`UPDATE venue_layouts SET document = NULL WHERE id = $1`, [layoutId]);
+export async function geometryWritten(layoutId: number, db: Db = pool): Promise<Layout | null> {
+  await db.query(
+    `UPDATE venue_layouts
+        SET document = NULL, version = version + 1, updated_at = now()
+      WHERE id = $1`,
+    [layoutId],
+  );
+  await db.query(
+    `UPDATE venue_layouts SET status = 'draft'
+      WHERE id = $1 AND status = 'ready'
+        AND EXISTS (SELECT 1 FROM layout_revisions r WHERE r.layout_id = $1)`,
+    [layoutId],
+  );
+  return getLayout(layoutId, db);
 }
 
 /**

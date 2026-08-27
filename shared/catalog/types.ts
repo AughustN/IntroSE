@@ -341,6 +341,7 @@ export interface TierRemovalResult extends MutationModeration {
 
 export interface ManagedTierList {
   eventType: EventType;
+  maxTiersPerShowtime: number;
   tiers: ManagedTier[];
 }
 

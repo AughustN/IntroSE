@@ -43,6 +43,8 @@ export interface AdPurchase {
   createdAt: string;
   /** Running right now: active, started, and not yet finished. Computed by the server. */
   live: boolean;
+  /** Actually eligible for display; a paid window continues while its event is hidden. */
+  serving: boolean;
 }
 
 export interface AdPurchaseInput {

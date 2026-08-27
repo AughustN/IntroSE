@@ -57,20 +57,34 @@ export interface FlowStep {
 /**
  * The strip's headline, as pure arithmetic over the steps.
  *
- * `doneCount` counts `blocked` as progress too: a blocked step is one the server has judged, and a
- * fresh draft's only unfinished step IS its draft — counting only `done` would print 0/0 when the
- * organizer has already past the first gate they could fail. `active` is the step the organizer is
+ * `doneCount` counts only completed gates. A refusal is not completed work. `active` is the step the organizer is
  * being asked to deal with now — the first one not `done` — or the last step when all have passed
  * (submit), so the strip never goes silent on a finished chain.
  */
 export function stepProgress(steps: FlowStep[]): { doneCount: number; active: FlowStep | null } {
-  const doneCount = steps.filter((s) => s.state !== "todo").length;
+  const doneCount = steps.filter((s) => s.state === "done").length;
   const active = steps.find((s) => s.state !== "done") ?? steps[steps.length - 1] ?? null;
   return { doneCount, active };
 }
 
 const upcoming = (rows: ManageShowtime[]) =>
-  rows.filter((s) => new Date(s.startsAt).getTime() > Date.now());
+  rows.filter(
+    (s) =>
+      new Date(s.startsAt).getTime() > Date.now() &&
+      !["cancelled", "finished"].includes(s.status ?? ""),
+  );
+
+const appliedInventory = (s: ManageShowtime) =>
+  s.hasSeatMap && (s.bookableSeats > 0 || s.zoneCapacity > 0);
+const hasChartInventory = (s: ManageShowtime) =>
+  s.layoutId !== null &&
+  (s.sections.some((sec) => sec.seatCount > 0) || s.categories.some((c) => c.hasInventory));
+const chartRank = (s: ManageShowtime) => {
+  // Applied inventory is a snapshot: later source edits do not undo this show's setup.
+  if (appliedInventory(s)) return 3;
+  if (!hasChartInventory(s)) return 0;
+  return s.layoutStatus === "ready" ? 2 : 1;
+};
 
 /**
  * The candidate showtime FURTHEST from being sellable, or the first if they all are.
@@ -86,14 +100,10 @@ const upcoming = (rows: ManageShowtime[]) =>
  */
 const worstChart = (candidates: ManageShowtime[]): ManageShowtime | null => {
   if (candidates.length === 0) return null;
-  const rank = (s: ManageShowtime) => {
-    const drawn = s.sections.reduce((n, sec) => n + sec.seatCount, 0);
-    if (s.layoutId === null || drawn === 0) return 0; // no chart drawn
-    if (s.layoutStatus !== "ready") return 1; // drawn but not published
-    if (!s.hasSeatMap || s.bookableSeats === 0) return 2; // published but not applied here
-    return 3; // fully sellable
-  };
-  return candidates.reduce((worst, s) => (rank(s) < rank(worst) ? s : worst), candidates[0]);
+  return candidates.reduce(
+    (worst, s) => (chartRank(s) < chartRank(worst) ? s : worst),
+    candidates[0],
+  );
 };
 
 /**
@@ -105,13 +115,7 @@ const worstChart = (candidates: ManageShowtime[]): ManageShowtime | null => {
  */
 const venuesAtWorstRank = (candidates: ManageShowtime[], worst: ManageShowtime | null): string => {
   if (!worst) return "";
-  const rankOf = (s: ManageShowtime) => {
-    const drawn = s.sections.reduce((n, sec) => n + sec.seatCount, 0);
-    if (s.layoutId === null || drawn === 0) return 0;
-    if (s.layoutStatus !== "ready") return 1;
-    if (!s.hasSeatMap || s.bookableSeats === 0) return 2;
-    return 3;
-  };
+  const rankOf = chartRank;
   const target = rankOf(worst);
   const names = [
     ...new Set(candidates.filter((s) => rankOf(s) === target).map((s) => s.venueName)),
@@ -159,7 +163,7 @@ export function flowSteps(event: MyEvent, rows: ManageShowtime[] | null): FlowSt
    * history counts: all of its showtimes are evidence.
    */
   const submitted = event.status === "on_sale";
-  const basis = submitted ? list : up;
+  const basis = submitted && up.length === 0 ? list.filter((s) => s.status !== "cancelled") : up;
 
   // ---- 1. the draft itself
   const drafted = event.title.trim().length > 0;
@@ -224,8 +228,7 @@ export function flowSteps(event: MyEvent, rows: ManageShowtime[] | null): FlowSt
   //
   // Drawn seats, not merely a chart row: `createLayout` mints an empty one the moment the designer
   // opens, so "a chart exists" would go green before a single seat had been placed.
-  const drawn = st ? st.sections.reduce((n, s) => n + s.seatCount, 0) : 0;
-  const hasChart = !!st && st.layoutId !== null && drawn > 0;
+  const hasChart = !!st && (appliedInventory(st) || hasChartInventory(st));
   steps.push({
     id: "chart",
     n: 4,
@@ -233,7 +236,7 @@ export function flowSteps(event: MyEvent, rows: ManageShowtime[] | null): FlowSt
     state: !loaded || !st ? "todo" : hasChart ? "done" : "blocked",
     reason: hasChart
       ? undefined
-      : `Địa điểm “${where}” chưa có ghế nào được vẽ. Mở trình thiết kế và dựng sơ đồ.`,
+      : `Địa điểm “${where}” chưa có ghế hoặc khu đứng. Mở trình thiết kế và dựng sơ đồ.`,
     action: "chart",
   });
 
@@ -241,16 +244,25 @@ export function flowSteps(event: MyEvent, rows: ManageShowtime[] | null): FlowSt
   //
   // `organizer.routes.ts` refuses `layout_not_published` unless the chart is `ready`. A draft is a
   // work in progress; binding one would sell seats the organizer is still moving.
-  const chartReady = !!st && st.layoutStatus === "ready";
+  const chartReady = !!st && (appliedInventory(st) || st.layoutStatus === "ready");
   steps.push({
     id: "chart-ready",
     n: 5,
     label: "Phát hành sơ đồ",
     state: !loaded || !hasChart ? "todo" : chartReady ? "done" : "blocked",
+    // Only a chart that EXISTS can be a draft. `layoutStatus` is null for a venue with no layout
+    // row at all, so the single `chartReady` ternary announced "đang là bản nháp" about a chart
+    // nobody had drawn — the rail told an organizer to go and publish something that was not there,
+    // which is the same confident-about-an-unseen-chart failure the note above step 6 warns of.
+    // While step 4 is still outstanding this step is `todo`, and it says what it is waiting for.
     reason: chartReady
       ? undefined
-      : `Sơ đồ của “${where}” đang là bản nháp. Mở trình thiết kế và bấm “Phát hành” để khoá bản dùng để bán.`,
-    code: chartReady ? undefined : "layout_not_published",
+      : hasChart
+        ? `Sơ đồ của “${where}” đang là bản nháp. Mở trình thiết kế và bấm “Phát hành” để khoá bản dùng để bán.`
+        : `Chưa có sơ đồ để phát hành. Dựng sơ đồ cho “${where}” ở bước 4 trước.`,
+    // The contract code belongs to the refusal this step actually mirrors. With no chart drawn the
+    // server never reaches `layout_not_published` — step 4 is the gate that stops the request.
+    code: chartReady || !hasChart ? undefined : "layout_not_published",
     action: "chart",
   });
 
@@ -264,7 +276,7 @@ export function flowSteps(event: MyEvent, rows: ManageShowtime[] | null): FlowSt
         (c) => c.hasInventory && !st.tiers.some((t) => !t.archived && t.categoryId === c.id),
       )
     : [];
-  const applied = !!st && st.hasSeatMap && st.bookableSeats > 0;
+  const applied = !!st && appliedInventory(st);
   steps.push({
     id: "apply",
     n: 6,
@@ -279,7 +291,7 @@ export function flowSteps(event: MyEvent, rows: ManageShowtime[] | null): FlowSt
     action: "apply",
   });
 
-  steps.push(submitStep(7, event, loaded, applied));
+  steps.push(submitStep(7, event, loaded, applied && tiersDone));
   return loaded ? steps : untilLoaded(steps);
 }
 
@@ -304,7 +316,7 @@ function submitStep(n: number, event: MyEvent, loaded: boolean, ready: boolean):
    * inviting the organizer to submit a show whose tickets had already been refunded. `EventList`
    * badges cancelled correctly, so the console contradicted itself across two screens.
    */
-  const base = { id: "submit" as const, n, action: "submit" as const };
+  const base = { id: "submit" as const, n };
 
   if (event.status === "cancelled") {
     return {
@@ -324,7 +336,7 @@ function submitStep(n: number, event: MyEvent, loaded: boolean, ready: boolean):
       state: "blocked",
       reason:
         event.reviewNote ??
-        "Quản trị viên đã gỡ hoặc gắn cờ sự kiện này. Sửa nội dung rồi gửi lại.",
+        "Quản trị viên đã gỡ hoặc gắn cờ sự kiện này. Hãy liên hệ quản trị viên để được xem xét lại.",
     };
   }
 
@@ -332,6 +344,7 @@ function submitStep(n: number, event: MyEvent, loaded: boolean, ready: boolean):
   const live = submitted && event.moderation === "approved";
   return {
     ...base,
+    action: ready && !submitted ? "submit" : undefined,
     label: live ? "Đang bán" : submitted ? "Chờ duyệt" : "Gửi duyệt",
     // Submission is checked BEFORE readiness, not after. Readiness is a precondition for sending an
     // event, not a description of one that already went: an on-sale event whose last showtime has
@@ -346,4 +359,17 @@ function submitStep(n: number, event: MyEvent, loaded: boolean, ready: boolean):
           ? "Hoàn tất các bước ở trên trước khi gửi duyệt."
           : "Đủ điều kiện — gửi để quản trị viên phê duyệt và hiển thị công khai.",
   };
+}
+
+/**
+ * Which wizard stage the final page's fix-it link opens for the missing piece it names.
+ *
+ * Showtimes and the tiers INSIDE them are one stage — 3 — and routing "tiers" anywhere else lands
+ * on a page with no tier editor. Chart and apply belong to the seated map's stage; a
+ * general-admission event has no such stage, so everything short of submit goes to 3 there.
+ * The page owns the earlier `submit` bail-out; this answers only "which stage".
+ */
+export function fixItStage(action: FlowAction, chartStageIndex: number | null): number {
+  if (action === "showtimes" || action === "tiers" || chartStageIndex === null) return 3;
+  return chartStageIndex;
 }

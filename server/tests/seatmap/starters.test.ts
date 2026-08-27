@@ -129,6 +129,39 @@ describe("built-in starters survive a real save", () => {
         expect(target, "companion points at a real seat").toBeDefined();
         expect(target!.isAccessible, "companion points at the wheelchair seat").toBe(true);
       }
+
+      /*
+       * ...and so does the pointer in the stored DOCUMENT, which is a separate fact.
+       *
+       * The rows above are written by `resolveCompanion`, which remaps placeholder → real. The
+       * document is written by `remapDocument`, whose seat map was identity-only — correct for a
+       * seat's OWN id, which `stitchSeatIds` has already made real, and wrong for a pointer it never
+       * touched. `via` mints a fresh placeholder for anything its map does not answer, so the
+       * companion came back naming a seat that exists nowhere.
+       *
+       * It matters because the EDITOR validates the document, not the rows: a chart correct in the
+       * database opened reading "Ghế đi kèm đang trỏ tới một ghế không có trong sơ đồ" and refused to
+       * publish. Asserting the rows alone cannot see it.
+       */
+      const reread = (
+        await request(app).get(`/api/organizer/layouts/${layout.id}`).set(o.h).expect(200)
+      ).body;
+      const docSeatIds = new Set<number>(
+        reread.document.blocks.flatMap((b: { seats?: { seatId: number }[] }) =>
+          (b.seats ?? []).map((s) => s.seatId),
+        ),
+      );
+      const docPairs = reread.document.blocks.flatMap(
+        (b: { seats?: { seatId: number; companionSeatId?: number }[] }) =>
+          (b.seats ?? []).filter((s) => s.companionSeatId !== undefined),
+      );
+      expect(docPairs).toHaveLength(accessible.length);
+      for (const c of docPairs) {
+        expect(
+          docSeatIds.has(c.companionSeatId as number),
+          `document companion ${c.companionSeatId} names a seat in the document`,
+        ).toBe(true);
+      }
     },
   );
 });

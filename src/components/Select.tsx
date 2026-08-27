@@ -42,6 +42,8 @@ interface SelectProps {
   selectedValues?: string[];
   /** The trigger's text when `selectedValues` is empty. Multi-select only. */
   emptyLabel?: string;
+  /** Open upward when the control sits near the bottom of a containing popup. */
+  menuPlacement?: "down" | "up";
   /**
    * Inert, and visibly so.
    *
@@ -80,6 +82,7 @@ export default function Select({
   placeholder,
   selectedValues,
   emptyLabel,
+  menuPlacement = "down",
   disabled = false,
 }: SelectProps) {
   const [open, setOpen] = useState(false);
@@ -161,7 +164,9 @@ export default function Select({
       <div
         data-open={open}
         inert={!open}
-        className="menu-panel absolute left-0 top-[calc(100%+8px)] z-30 w-max min-w-full max-w-[min(92vw,32rem)]"
+        className={`menu-panel absolute left-0 z-30 w-max min-w-full max-w-[min(92vw,32rem)] ${
+          menuPlacement === "up" ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]"
+        }`}
       >
         <div>
           <ul

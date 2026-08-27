@@ -89,7 +89,7 @@ export default function EventPreviewOverlay({
         <div className="flex items-center justify-between border-b border-beige-kem/25 bg-cam-dat/15 px-5 py-3">
           <p
             id="preview-title"
-            className="font-meta text-eyebrow font-bold uppercase tracking-widest text-cam-dat"
+            className="font-meta text-eyebrow font-bold uppercase tracking-widest text-cam-dat-ink"
           >
             Xem trước — chưa hiển thị công khai
           </p>
@@ -114,7 +114,7 @@ export default function EventPreviewOverlay({
             ) : (
               <div
                 className="flex aspect-[16/9] w-full items-center justify-center gap-2.5 border border-beige-kem/20"
-                style={{ background: "#f0e3d0" }}
+                style={{ background: "var(--color-surface-2)" }}
               >
                 <Image className="h-[30px] w-[30px] text-ink-soft" />
                 <span className="font-meta text-meta text-ink-soft">Ảnh bìa sự kiện 16:9</span>
@@ -143,7 +143,7 @@ export default function EventPreviewOverlay({
                   {detail.description}
                 </p>
               ) : (
-                <p className="mt-1 font-meta text-meta text-cam-dat">
+                <p className="mt-1 font-meta text-meta text-cam-dat-ink">
                   Chưa có mô tả — khách sẽ thấy phần này trống.
                 </p>
               )}
@@ -166,7 +166,7 @@ export default function EventPreviewOverlay({
                   ))}
                 </ul>
               ) : (
-                <p className="mt-1 font-meta text-meta text-cam-dat">
+                <p className="mt-1 font-meta text-meta text-cam-dat-ink">
                   Chưa có hạng vé — khách chưa mua được gì.
                 </p>
               )}

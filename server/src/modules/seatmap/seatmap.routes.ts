@@ -16,7 +16,15 @@ import {
 import { blockingIssues } from "@shared/catalog/seatmap-validate.js";
 import { ImageRejected, deleteFloorPlan, processFloorPlan, saveFloorPlan } from "./floorplan.js";
 import { uploadRateLimit, withUploadSlot } from "./upload.throttle.js";
-import { createTable, deleteTable, tableLayoutId, updateTable } from "./tables.js";
+import {
+  assertTablesInLayout,
+  createTable,
+  deleteTable,
+  deleteTables,
+  tableLayoutId,
+  updateTable,
+  updateTables,
+} from "./tables.js";
 import { createStandingArea, reshapeStandingArea } from "./standing.js";
 import { documentSchema } from "./document.schema.js";
 import { err } from "../../http.js";
@@ -149,6 +157,26 @@ const tableSchema = z.object({
 const updateTableSchema = tableSchema
   .partial()
   .refine((v) => Object.keys(v).length > 0, { message: "empty" });
+
+/**
+ * A gesture that lands on SEVERAL tables, sent as one request.
+ *
+ * One request per table let a refusal on the third leave the first two committed, with the editor
+ * holding a document the database no longer matched.
+ */
+const batchTablesSchema = z.object({
+  updates: z
+    .array(z.object({ tableId: z.number().int(), patch: updateTableSchema }))
+    .min(1)
+    .max(200),
+});
+
+const deleteTablesSchema = z.object({
+  tableIds: z.array(z.number().int()).min(1).max(200),
+});
+
+/** The version the caller judged. Optional so an older client still publishes, just unguarded. */
+const publishSchema = z.object({ expectedVersion: z.number().int().min(1).optional() });
 
 const createLayoutSchema = z.object({ name: z.string().trim().min(1).max(80) });
 
@@ -356,8 +384,10 @@ seatmapRouter.post(
 
 seatmapRouter.post(
   "/layouts/:id/publish",
+  validateBody(publishSchema),
   asyncH(async (req, res) => {
-    res.json(await service.publish(req, Number(req.params.id)));
+    const b = req.body as z.infer<typeof publishSchema>;
+    res.json(await service.publish(req, Number(req.params.id), b.expectedVersion));
   }),
 );
 
@@ -583,8 +613,49 @@ const showtimeSeatEditSchema = z.object({
   rotation,
 });
 
-const editMapSchema = z.object({ seats: z.array(showtimeSeatEditSchema).max(LAYOUT_MAX_SEATS) });
-const reapplySchema = z.object({ dryRun: z.boolean() });
+/*
+ * Two lines may not name one seat (0035 finding 7).
+ *
+ * `classify` treats the second line as an addition, whose INSERT then no-ops on the unique
+ * (showtime_id, seat_id) constraint — but the WRITE loop resolves it to the same existing row and
+ * pushes that row into the batch UPDATE twice, where Postgres picks a winner arbitrarily. Preview
+ * and write disagreed, so the only honest answer is to refuse the request.
+ */
+const noDuplicateSeats = (
+  seats: z.infer<typeof showtimeSeatEditSchema>[],
+  ctx: z.RefinementCtx,
+): void => {
+  const seen = { seat: new Set<number>(), row: new Set<number>() };
+  for (const s of seats) {
+    if (seen.seat.has(s.seatId) || (s.showtimeSeatId !== null && seen.row.has(s.showtimeSeatId))) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Một ghế chỉ được xuất hiện một lần trong cùng một yêu cầu.",
+      });
+      return;
+    }
+    seen.seat.add(s.seatId);
+    if (s.showtimeSeatId !== null) seen.row.add(s.showtimeSeatId);
+  }
+};
+
+const editMapSchema = z.object({
+  seats: z.array(showtimeSeatEditSchema).max(LAYOUT_MAX_SEATS).superRefine(noDuplicateSeats),
+});
+const reapplySchema = z.object({
+  dryRun: z.boolean(),
+  /**
+   * The preview being confirmed (0035 finding 5). Required on a confirm: without it the server would
+   * be applying a state the organizer never saw, which is exactly the divergence this closes.
+   */
+  source: z
+    .object({
+      layoutId: z.number().int(),
+      layoutVersion: z.number().int(),
+      digest: z.string().min(1).max(64),
+    })
+    .optional(),
+});
 const blockSchema = z.object({
   showtimeSeatIds: z.array(z.number().int()).min(1).max(LAYOUT_MAX_SEATS),
   blocked: z.boolean(),
@@ -662,14 +733,30 @@ seatmapRouter.post(
       }
     }
 
-    const { dryRun } = req.body as z.infer<typeof reapplySchema>;
+    const { dryRun, source } = req.body as z.infer<typeof reapplySchema>;
     if (dryRun) {
-      // Advisory: re-classified inside the transaction on confirm, so a sale or hold landing in
-      // between refuses the apply rather than being overwritten (research R-6).
-      res.json(await apply.preview(showtimeId, desired));
+      // Advisory about the SEATS: re-classified inside the transaction on confirm, so a sale or hold
+      // landing in between refuses the apply rather than being overwritten (research R-6). The
+      // `source` it returns is not advisory — the confirm must echo it back.
+      res.json(await apply.preview(showtimeId, desired, layoutId));
       return;
     }
-    const outcome = await apply.apply(showtimeId, desired, { refreshLayoutId: layoutId });
+    if (!source)
+      throw err.badRequest(
+        "validation_failed",
+        "Hãy xem trước thay đổi trước khi áp dụng lại.",
+      );
+    if (source.layoutId !== layoutId)
+      throw err.refused(
+        409,
+        "stale_preview",
+        "Suất chiếu đã đổi sang sơ đồ khác kể từ lúc bạn xem trước. Hãy xem trước lại rồi áp dụng.",
+        { refusals: [] },
+      );
+    const outcome = await apply.apply(showtimeId, desired, {
+      refreshLayoutId: layoutId,
+      expectSource: source,
+    });
     if (!outcome.wouldSucceed) refuse(outcome);
     // Decoration and background came across inside apply's transaction — the snapshot is the whole
     // layout (FR-005, T046), refreshed atomically with the seat writes it describes.
@@ -766,6 +853,35 @@ seatmapRouter.patch(
     if (layoutId === null) throw err.notFound("not_found", "Không tìm thấy bàn.");
     await service.assertLayoutOwner(req, layoutId, "design");
     res.json(await updateTable(tableId, req.body as z.infer<typeof updateTableSchema>));
+  }),
+);
+
+seatmapRouter.patch(
+  "/layouts/:id/tables",
+  validateBody(batchTablesSchema),
+  asyncH(async (req, res) => {
+    const layoutId = Number(req.params.id);
+    await service.assertLayoutOwner(req, layoutId, "design");
+    const b = req.body as z.infer<typeof batchTablesSchema>;
+    await assertTablesInLayout(
+      b.updates.map((u) => u.tableId),
+      layoutId,
+    );
+    const tables = await updateTables(b.updates);
+    res.json({ tables, layout: await repo.getLayout(layoutId) });
+  }),
+);
+
+seatmapRouter.delete(
+  "/layouts/:id/tables",
+  validateBody(deleteTablesSchema),
+  asyncH(async (req, res) => {
+    const layoutId = Number(req.params.id);
+    await service.assertLayoutOwner(req, layoutId, "design");
+    const b = req.body as z.infer<typeof deleteTablesSchema>;
+    await assertTablesInLayout(b.tableIds, layoutId);
+    await deleteTables(b.tableIds);
+    res.json({ ok: true, layout: await repo.getLayout(layoutId) });
   }),
 );
 

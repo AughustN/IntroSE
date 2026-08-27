@@ -67,7 +67,7 @@ export function RecentTransactionsTable({ transactions }: Props) {
                     <td className="py-2.5 pr-3 text-right tabular-nums">
                       {formatVND(tx.amount_vnd)}
                       {tx.refund_amount_vnd > 0 && (
-                        <span className="block text-[10px] text-cam-dat font-medium">
+                        <span className="block text-[10px] text-cam-dat-ink font-medium">
                           (Hoàn {formatVND(tx.refund_amount_vnd)})
                         </span>
                       )}
@@ -77,7 +77,7 @@ export function RecentTransactionsTable({ transactions }: Props) {
                     </td>
                     <td className="py-2.5 text-right whitespace-nowrap">
                       {isRefunded ? (
-                        <span className="inline-flex items-center gap-1 bg-cam-dat/20 px-2 py-0.5 font-bold text-cam-dat text-[10px]">
+                        <span className="inline-flex items-center gap-1 bg-cam-dat/20 px-2 py-0.5 font-bold text-cam-dat-ink text-[10px]">
                           <RefreshCw className="h-3 w-3" /> Đã hoàn tiền
                         </span>
                       ) : isCanceled ? (
@@ -85,7 +85,7 @@ export function RecentTransactionsTable({ transactions }: Props) {
                           <XCircle className="h-3 w-3" /> Đã hủy
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 bg-la-co/20 px-2 py-0.5 font-bold text-la-co text-[10px]">
+                        <span className="inline-flex items-center gap-1 bg-la-co/20 px-2 py-0.5 font-bold text-la-co-ink text-[10px]">
                           <CheckCircle2 className="h-3 w-3" /> Thành công
                         </span>
                       )}

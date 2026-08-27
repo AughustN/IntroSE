@@ -68,7 +68,7 @@ export default function EventOverview({
    * on the LIST, whose badges filled with the saturated hue instead of a tint of it.
    */
   const badge = cancelled
-    ? { cls: "border-burgundy/60 bg-burgundy/25 text-beige-kem", text: "Đã hủy" }
+    ? { cls: "border-burgundy/60 bg-burgundy/15 text-burgundy-ink", text: "Đã hủy" }
     : event.status === "finished"
       ? { cls: "border-beige-kem/30 text-ink-soft", text: "Đã kết thúc" }
       : event.status === "draft"
@@ -78,14 +78,14 @@ export default function EventOverview({
             mark: "○",
           }
         : event.moderation === "approved"
-          ? { cls: "border-la-co/60 bg-la-co/25 text-beige-kem", text: "Đang bán" }
+          ? { cls: "border-la-co/55 bg-la-co/20 text-la-co-ink", text: "Đang bán" }
           : event.moderation === "pending_review"
             ? {
-                cls: "border-cam-dat/60 bg-cam-dat/20 text-beige-kem",
+                cls: "border-cam-dat/60 bg-cam-dat/20 text-cam-dat-ink",
                 text: "Chờ duyệt",
                 mark: "◐",
               }
-            : { cls: "border-burgundy/50 bg-burgundy/10 text-beige-kem", text: "Bị gỡ" };
+            : { cls: "border-bubblegum bg-bubblegum/70 text-on-tint", text: "Bị gỡ" };
 
   return (
     <div className="space-y-4">
@@ -95,7 +95,7 @@ export default function EventOverview({
         <button
           type="button"
           onClick={onBack}
-          className="flex items-center gap-2 text-xs font-bold text-beige-kem/70 transition-colors hover:text-beige-kem"
+          className="inline-flex min-h-10 items-center gap-2 px-2 text-sm font-bold text-ink-soft transition-colors hover:text-beige-kem focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-burgundy focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
         >
           <ArrowLeft aria-hidden className="h-3.5 w-3.5" />
           Danh sách sự kiện
@@ -103,8 +103,8 @@ export default function EventOverview({
         <button
           type="button"
           onClick={onEdit}
-          disabled={cancelled}
-          title={cancelled ? "Sự kiện đã hủy không thể chỉnh sửa." : undefined}
+          disabled={cancelled || event.status === "finished"}
+          title={cancelled || event.status === "finished" ? "Sự kiện đã đóng không thể chỉnh sửa." : undefined}
           className="inline-flex items-center gap-1.5 bg-burgundy px-3 py-1.5 text-xs font-bold text-white transition hover:brightness-110 disabled:opacity-40"
         >
           <Pencil aria-hidden className="h-3.5 w-3.5" />
@@ -248,7 +248,7 @@ export default function EventOverview({
             </>
           )}
 
-          {event.reviewNote && <p className="text-sm text-burgundy">{event.reviewNote}</p>}
+          {event.reviewNote && <p className="text-sm text-burgundy-ink">{event.reviewNote}</p>}
         </div>
       </article>
     </div>

@@ -91,7 +91,11 @@ export default function ReferenceChartPanel({
             onCommit={(patch) => void align(patch)}
           />
 
-          <button className={`${btn} mt-3`} disabled={busy} onClick={() => setConfirmRemove(true)}>
+          <button
+            className={`${btn} seatmap-delete-action mt-3`}
+            disabled={busy}
+            onClick={() => setConfirmRemove(true)}
+          >
             Xoá bản vẽ tham chiếu
           </button>
         </>

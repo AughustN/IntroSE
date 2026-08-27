@@ -57,7 +57,17 @@ export async function lockTier(client: pg.PoolClient, tierId: number): Promise<T
   return rows[0] ?? null;
 }
 
-/** Active tiers only — archived ones do not consume one of the four slots (FR-002, FR-006). */
+/** Serialize operations that increase the active-tier count for ONE showtime. */
+export async function lockTierLimit(client: pg.PoolClient, showtimeId: number): Promise<void> {
+  // A dedicated transaction lock avoids adding a showtime↔tier row-lock ordering dependency to
+  // holds, chart application and deletion. Both add and restore must take it before counting.
+  await client.query(
+    `SELECT pg_advisory_xact_lock(hashtext('studio:active-tier-limit'), $1::int)`,
+    [showtimeId],
+  );
+}
+
+/** Active tiers only — archived ones do not consume a slot (FR-002, FR-006). */
 export async function activeTierCount(showtimeId: number, db: Db = pool): Promise<number> {
   const { rows } = await db.query<{ n: number }>(
     `SELECT count(*)::int AS n FROM ticket_tiers WHERE showtime_id = $1 AND archived_at IS NULL`,

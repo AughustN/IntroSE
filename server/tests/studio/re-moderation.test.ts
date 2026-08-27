@@ -123,20 +123,14 @@ const CASES: Case[] = [
         .expect(200),
   },
   {
-    name: "showtime relocate",
+    name: "showtime create (venue stays bound to the event)",
     material: true,
     run: async (s) => {
-      const elsewhere = (
-        await pool.query(
-          `INSERT INTO venues (created_by, name, city, raw_address) VALUES ($1, 'Nơi khác', 'HN', 'X') RETURNING id`,
-          [s.userId],
-        )
-      ).rows[0].id;
       return api()
-        .patch(`/api/organizer/showtimes/${s.showtimeId}`)
+        .post(`/api/organizer/events/${s.eventId}/showtimes`)
         .set(auth(s.token))
-        .send({ venueId: elsewhere })
-        .expect(200);
+        .send({ venueId: s.venueId, startsAt: iso(9 * 86_400_000), tiers: [{ label: "Vé mới", price: 100000 }] })
+        .expect(201);
     },
   },
   {

@@ -101,6 +101,7 @@ export function OrganizerBusinessAnalytics() {
   return (
     <InfoCard
       title="Báo cáo kinh doanh"
+      titleClassName="text-burgundy-ink"
       action={
         <button
           type="button"
@@ -157,7 +158,7 @@ export function OrganizerBusinessAnalytics() {
               </div>
 
               <div className="flex items-center gap-3 border border-beige-kem/30 bg-xanh-pho px-4 py-3 backdrop-blur">
-                <div className="bg-cam-dat/20 p-2.5 text-cam-dat">
+                <div className="bg-cam-dat/20 p-2.5 text-cam-dat-ink">
                   <TrendingUp className="h-5 w-5" />
                 </div>
                 <div>
@@ -224,29 +225,29 @@ export function OrganizerBusinessAnalytics() {
                 </p>
               }
             >
-            {/* Main Content Grid: 2 Columns */}
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-              {/* Left Column (Wide): Main Sales Analytics Chart, Upcoming Events Gauge, Recent Activity Feed */}
-              <div className="space-y-6 lg:col-span-7 xl:col-span-8">
-                {/* Sales Analytics Chart Card */}
-                <TimeSeriesChart data={dashboardData.time_series} />
+              {/* Main Content Grid: 2 Columns */}
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+                {/* Left Column (Wide): Main Sales Analytics Chart, Upcoming Events Gauge, Recent Activity Feed */}
+                <div className="space-y-6 lg:col-span-7 xl:col-span-8">
+                  {/* Sales Analytics Chart Card */}
+                  <TimeSeriesChart data={dashboardData.time_series} />
 
-                {/* Soonest Event Capacity Gauge Card */}
-                <CapacityGauge capacityData={dashboardData.soonest_event_capacity} />
+                  {/* Soonest Event Capacity Gauge Card */}
+                  <CapacityGauge capacityData={dashboardData.soonest_event_capacity} />
 
-                {/* Recent Activity Audit Feed Card */}
-                <RecentTransactionsTable transactions={dashboardData.recent_transactions} />
+                  {/* Recent Activity Audit Feed Card */}
+                  <RecentTransactionsTable transactions={dashboardData.recent_transactions} />
+                </div>
+
+                {/* Right Column (Side Panels): Donut Breakdown Side Panel & Top Events Ranked List */}
+                <div className="space-y-6 lg:col-span-5 xl:col-span-4">
+                  {/* Conversion Rate / Breakdown Donut Side Panel */}
+                  <RevenueDonutCharts breakdowns={dashboardData.breakdowns} />
+
+                  {/* Top Events Ranked List Side Panel */}
+                  <TopEventsChart data={dashboardData.top_events} />
+                </div>
               </div>
-
-              {/* Right Column (Side Panels): Donut Breakdown Side Panel & Top Events Ranked List */}
-              <div className="space-y-6 lg:col-span-5 xl:col-span-4">
-                {/* Conversion Rate / Breakdown Donut Side Panel */}
-                <RevenueDonutCharts breakdowns={dashboardData.breakdowns} />
-
-                {/* Top Events Ranked List Side Panel */}
-                <TopEventsChart data={dashboardData.top_events} />
-              </div>
-            </div>
             </Suspense>
           </div>
         )}

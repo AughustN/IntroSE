@@ -14,7 +14,7 @@
  */
 
 import { pointInPolygon } from "@shared/catalog/seatmap-validate.js";
-import { defaultCategoryId, forgetDocument } from "./layouts.repo.js";
+import { assertInLayout, defaultCategoryId, geometryWritten } from "./layouts.repo.js";
 import type { ShapePoint } from "@shared/catalog/seatmap.js";
 import {
   LAYOUT_MAX_SEATS,
@@ -78,6 +78,9 @@ export async function createStandingArea(
   }
 
   return withTransaction(async (client) => {
+    // The section arrives in the request body and nothing else ties it to this chart (0035 finding 7).
+    await assertInLayout(layoutId, { sections: [input.sectionId] }, client);
+
     // Two overlapping areas cannot share space honestly: whichever reshaped second would claim the
     // seats the first generated, because ownership is decided by polygon containment. Refused at
     // creation with a bounding-box test — cheap, and conservative in the safe direction (it may
@@ -178,7 +181,7 @@ export async function createStandingArea(
 
     // Standing positions are generated here, not from the document, so the document no longer
     // describes this layout. The next read adopts a fresh one from the rows.
-    await forgetDocument(layoutId, client);
+    await geometryWritten(layoutId, client);
     return res.rowCount ?? 0;
   });
 }
@@ -320,7 +323,7 @@ export async function reshapeStandingArea(
       ],
     );
 
-    await forgetDocument(layoutId, client);
+    await geometryWritten(layoutId, client);
     return res.rowCount ?? 0;
   });
 }

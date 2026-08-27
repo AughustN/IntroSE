@@ -16,6 +16,7 @@ import type { CanvasBlock, CanvasSeat } from "./SeatCanvas";
 import { CHANGE_LABEL, compareDocuments, type DocumentDiff } from "./compare";
 import ConfirmDialog, { type ConfirmRequest } from "../ConfirmDialog";
 import Select from "../Select";
+import { freeLayoutName } from "./freeLayoutName";
 import { dedupedVenues } from "./venueOptions";
 
 /**
@@ -620,7 +621,10 @@ export default function SeatMapLibrary({
     const all = rows ?? [];
     return {
       active: all.filter((l) => l.status !== "archived" && !l.isTemplate).length,
-      archived: all.filter((l) => l.status === "archived").length,
+      // `&& !l.isTemplate`, matching the collection this badge counts: the Archived tab excludes
+      // archived TEMPLATES (they live under Templates), so a badge that counted them promised rows
+      // the tab would not show.
+      archived: all.filter((l) => l.status === "archived" && !l.isTemplate).length,
       templates: all.filter((l) => l.isTemplate).length,
     };
   }, [rows]);
@@ -653,11 +657,18 @@ export default function SeatMapLibrary({
     void run(() => layoutApi.saveAsTemplate(l.id, name.trim()));
   };
 
+  /** The venue's existing names, which is all `freeLayoutName` needs to avoid a collision. */
+  const namesAt = (venueId: number) =>
+    (rows ?? []).filter((l) => l.venueId === venueId).map((l) => l.name);
+
   const duplicate = (l: LayoutLibraryEntry) =>
     void run(() =>
       // Into the SAME venue: a chart's coordinates and sections only mean anything against the venue
       // it was drawn for, so copying it elsewhere would need a conversation this button is not.
-      layoutApi.clone(l.id, { targetVenueId: l.venueId, name: `${l.name} (bản sao)` }),
+      layoutApi.clone(l.id, {
+        targetVenueId: l.venueId,
+        name: freeLayoutName(`${l.name} (bản sao)`, namesAt(l.venueId)),
+      }),
     );
 
   /** Open the template flow with its source preselected; the organizer still chooses the venue. */
@@ -795,7 +806,7 @@ export default function SeatMapLibrary({
       const source = (rows ?? []).find((l) => l.id === sourceId);
       const made = await layoutApi.clone(sourceId, {
         targetVenueId: selectedVenueId,
-        name: `${source?.name ?? "Mẫu"} (từ mẫu)`,
+        name: freeLayoutName(`${source?.name ?? "Mẫu"} (từ mẫu)`, namesAt(selectedVenueId)),
       });
       setCreateMode(null);
       onOpen(made.id);
@@ -909,7 +920,7 @@ export default function SeatMapLibrary({
       const source = (rows ?? []).find((l) => l.id === sourceId);
       const made = await layoutApi.clone(sourceId, {
         targetVenueId: selectedVenueId,
-        name: `${source?.name ?? "Sơ đồ"} (bản sao)`,
+        name: freeLayoutName(`${source?.name ?? "Sơ đồ"} (bản sao)`, namesAt(selectedVenueId)),
       });
       setCreateMode(null);
       onOpen(made.id);
@@ -1081,12 +1092,25 @@ export default function SeatMapLibrary({
         </div>
 
         {error && (
-          <p className="border-l-2 border-burgundy bg-bubblegum px-4 py-2 text-eyebrow text-on-tint">
-            {error}
-          </p>
+          <div className="flex flex-wrap items-center gap-3 border-l-2 border-burgundy bg-bubblegum px-4 py-2 text-eyebrow text-on-tint">
+            <span>{error}</span>
+            {/* The FIRST load failing leaves `rows` null forever, so without this the page is an
+                error over a skeleton that never resolves and nothing to press. */}
+            {rows === null && (
+              <button
+                type="button"
+                onClick={() => void reload()}
+                className="border-2 border-on-tint px-2.5 py-1 font-bold text-on-tint transition hover:brightness-110"
+              >
+                Thử lại
+              </button>
+            )}
+          </div>
         )}
 
-        {rows === null && (
+        {/* `&& !error`: a failed load keeps `rows` null, and a skeleton beside the error message
+            promises a list that is not coming. */}
+        {rows === null && !error && (
           <div className="grid items-start gap-4 lg:grid-cols-2" role="status" aria-live="polite">
             <span className="sr-only">Đang tải sơ đồ…</span>
             {[0, 1].map((item) => (
@@ -1333,7 +1357,7 @@ export default function SeatMapLibrary({
                           ? `${l.usageCount} suất chiếu đang dùng sơ đồ này`
                           : "Ẩn khỏi danh sách đang dùng"
                       }
-                      className={destructiveAction}
+                      className="seatmap-archive-action block w-full border-t border-beige-kem/15 px-3 py-2 text-left text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-35"
                     >
                       Lưu trữ
                     </button>
@@ -1349,13 +1373,19 @@ export default function SeatMapLibrary({
                         onConfirm: () => void run(() => layoutApi.remove(l.id)),
                       })
                     }
-                    disabled={busy || l.usageCount > 0}
+                    /*
+                     * `boundCount`, not `usageCount`: the foreign keys do not care whether the show
+                     * has played. `showtimes.layout_id` has no ON DELETE, so ANY showtime that ever
+                     * named this chart refuses the delete — and the button used to light up the
+                     * moment a run finished, then hand the organizer a raw foreign-key error.
+                     */
+                    disabled={busy || l.boundCount > 0}
                     title={
-                      l.usageCount > 0
-                        ? `${l.usageCount} suất chiếu đang dùng sơ đồ này`
+                      l.boundCount > 0
+                        ? `${l.boundCount} suất chiếu đã từng dùng sơ đồ này — hãy lưu trữ thay vì xoá`
                         : "Xoá vĩnh viễn"
                     }
-                    className={`${destructiveAction} border-t-0`}
+                    className={`${destructiveAction} seatmap-library-delete-action border-t-0`}
                   >
                     Xoá
                   </button>
@@ -1450,7 +1480,7 @@ export default function SeatMapLibrary({
                                         className={
                                           diff.result.seatDelta < 0
                                             ? "text-bubblegum"
-                                            : "text-la-co"
+                                            : "text-la-co-ink"
                                         }
                                       >
                                         {diff.result.seatDelta > 0 ? "+" : ""}
@@ -1538,7 +1568,7 @@ export default function SeatMapLibrary({
             </div>
 
             {venues.length === 0 ? (
-              <p className="mt-4 text-body text-cam-dat">
+              <p className="mt-4 text-body text-cam-dat-ink">
                 Bạn chưa có địa điểm nào. Hãy tạo địa điểm (bằng cách tạo một sự kiện) trước khi
                 thiết kế sơ đồ.
               </p>
@@ -1615,7 +1645,7 @@ export default function SeatMapLibrary({
                       triggerClassName="h-10 w-full border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow"
                     />
                     {(rows ?? []).filter((l) => l.isTemplate).length === 0 && (
-                      <p className="mt-2 font-meta text-meta text-cam-dat">
+                      <p className="mt-2 font-meta text-meta text-cam-dat-ink">
                         Chưa có mẫu nào. Mở một sơ đồ, rồi dùng "Lưu thành mẫu" để tạo.
                       </p>
                     )}
@@ -1644,7 +1674,7 @@ export default function SeatMapLibrary({
                       triggerClassName="h-10 w-full border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow"
                     />
                     {(rows ?? []).filter((l) => l.status !== "archived").length === 0 && (
-                      <p className="mt-2 font-meta text-meta text-cam-dat">
+                      <p className="mt-2 font-meta text-meta text-cam-dat-ink">
                         Chưa có sơ đồ nào để nhân bản.
                       </p>
                     )}

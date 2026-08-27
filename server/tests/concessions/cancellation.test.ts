@@ -15,15 +15,24 @@ import * as seed from "../helpers/catalogSeed.js";
  * nothing left to hand over.
  */
 
-/** A visible event with one PAID order (1 ticket + 2 snacks), like the buyer's receipt. */
-async function seedPaidOrder(opts: { ticketPrice?: number; snackPrice?: number } = {}) {
+/** A visible event with one PAID order (N tickets + 2 snacks), like the buyer's receipt. */
+async function seedPaidOrder(
+  opts: {
+    ticketPrice?: number;
+    snackPrice?: number;
+    quantity?: number;
+    /** Showtime offset from now in ms. Defaults to 24h; pass 1h to land inside the door window. */
+    offsetMs?: number;
+  } = {},
+) {
   const organizerUser = await registerUser();
   const organizerId = await makeApprovedOrganizer(organizerUser.userId);
   const venue = await seed.seedVenue(organizerUser.userId);
   const event = await seed.seedEvent({ organizerId });
-  const showtimeId = await seed.seedShowtime(event.id, venue);
+  const showtimeId = await seed.seedShowtime(event.id, venue, opts.offsetMs ?? 86_400_000);
   const ticketPrice = opts.ticketPrice ?? 250_000;
   const tierId = await seed.seedTier(showtimeId, { total: 50, price: ticketPrice });
+  const quantity = opts.quantity ?? 2;
 
   const buyer = await registerUser();
   await pool.query(
@@ -34,7 +43,7 @@ async function seedPaidOrder(opts: { ticketPrice?: number; snackPrice?: number }
   const reservation = await request(app)
     .post("/api/reservations")
     .set(bearer(buyer.token))
-    .send({ showtimeId, ticketTierId: tierId, quantity: 2 })
+    .send({ showtimeId, ticketTierId: tierId, quantity })
     .expect(201);
 
   const snackPrice = opts.snackPrice ?? 50_000;
@@ -52,7 +61,16 @@ async function seedPaidOrder(opts: { ticketPrice?: number; snackPrice?: number }
 
   // Charge was made at these prices; a later menu edit must not move this refund.
   const order = await checkout(buyer.userId, reservation.body.id);
-  return { organizerUser, buyer, eventId: event.id, orderId: order.id, ticketPrice, snackPrice };
+  return {
+    organizerUser,
+    buyer,
+    eventId: event.id,
+    orderId: order.id,
+    order,
+    ticketPrice,
+    snackPrice,
+    quantity,
+  };
 }
 
 const balanceOf = async (userId: number) =>
@@ -139,5 +157,39 @@ describe("event cancellation settles concessions", () => {
       [s.buyer.userId],
     );
     expect(ledger.rows.reduce((sum, r) => sum + Number(r.amount), 0)).toBe(600_000); // unchanged
+  });
+
+  it("settles payment_status for an order whose ticket was already used at the door (E3)", async () => {
+    // Showtime 1h out: check-in opens 6h before the start, yet the show is still upcoming when the
+    // organizer cancels, so the concession refund runs against an order with NO refundable ticket.
+    const s = await seedPaidOrder({ quantity: 1, offsetMs: 3_600_000 });
+    const before = Number(await balanceOf(s.buyer.userId));
+    const barcode = s.order.tickets[0].ticketCode;
+
+    // The buyer already used the ticket at the door — the wallet must not get the ticket back.
+    await request(app)
+      .post("/api/organizer/tickets/check-in")
+      .set(bearer(s.organizerUser.token))
+      .send({ code: barcode })
+      .expect(200);
+
+    const res = await request(app)
+      .post(`/api/organizer/events/${s.eventId}/cancel`)
+      .set(bearer(s.organizerUser.token))
+      .send({ reason: "Hủy sau khi khách đã vào cửa" })
+      .expect(200);
+
+    // The used ticket earns nothing back; only the unredeemed snacks (2×50,000) are paid out.
+    expect(res.body.refundedTickets).toBe(0);
+    expect(Number(await balanceOf(s.buyer.userId)) - before).toBe(100_000);
+
+    // This order never entered the ticket-refund set (it has no unused ticket), yet its snack money
+    // went back — so its payment_status must be re-decided from the tickets that survive, not left
+    // stuck on 'paid'.
+    const order = await pool.query<{ payment_status: string }>(
+      `SELECT payment_status FROM orders WHERE id = $1`,
+      [s.orderId],
+    );
+    expect(order.rows[0].payment_status).toBe("partially_refunded");
   });
 });

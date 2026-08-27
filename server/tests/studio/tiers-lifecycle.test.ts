@@ -33,23 +33,32 @@ describe("ticket tier lifecycle", () => {
     expect(res.body.tier.remaining).toBe(50);
   });
 
-  it("refuses a fifth ACTIVE tier, naming the limit (FR-002, SC-004)", async () => {
+  it("allows the twentieth ACTIVE tier and refuses the twenty-first (FR-002, SC-004)", async () => {
     const s = await makeStudio();
-    for (const label of ["A", "B", "C"]) {
-      await api()
-        .post(`/api/organizer/showtimes/${s.showtimeId}/tiers`)
-        .set(auth(s.token))
-        .send({ label, price: 100_000 })
-        .expect(201);
-    }
+    await pool.query(
+      `INSERT INTO ticket_tiers (showtime_id, label, price_amount, total_quantity)
+       SELECT $1, 'Hạng ' || n, 100000, 100 FROM generate_series(2, 19) AS n`,
+      [s.showtimeId],
+    );
+    await api()
+      .post(`/api/organizer/showtimes/${s.showtimeId}/tiers`)
+      .set(auth(s.token))
+      .send({ label: "Hạng 20", price: 100_000 })
+      .expect(201);
     const res = await api()
       .post(`/api/organizer/showtimes/${s.showtimeId}/tiers`)
       .set(auth(s.token))
-      .send({ label: "Thứ năm", price: 100_000 })
+      .send({ label: "Hạng 21", price: 100_000 })
       .expect(409);
 
     expect(res.body.error).toBe("tier_limit_reached");
-    expect(res.body.message).toContain("4");
+    expect(res.body.message).toContain("20");
+    const listed = await api()
+      .get(`/api/organizer/showtimes/${s.showtimeId}/tiers`)
+      .set(auth(s.token))
+      .expect(200);
+    expect(listed.body.tiers).toHaveLength(20);
+    expect(listed.body.maxTiersPerShowtime).toBe(20);
   });
 
   it("renames and reprices a tier (FR-003)", async () => {
@@ -178,19 +187,22 @@ describe("ticket tier lifecycle", () => {
     expect(res.body.message).toContain("sơ đồ");
   });
 
-  it("restores an archived tier, and refuses the restore at four active tiers (FR-006, SC-004)", async () => {
+  it("excludes archived tiers from the 20-tier limit and rechecks it on restore (FR-006, SC-004)", async () => {
     const s = await makeStudio({ sold: 1 });
     await seedTier(s.showtimeId, { label: "Giữ chỗ" });
     await api().delete(`/api/organizer/tiers/${s.tierId}`).set(auth(s.token)).expect(200);
 
-    // Archived tiers do not consume a slot — proving it by filling all four with new ones.
-    for (const label of ["B", "C", "D"]) {
-      await api()
-        .post(`/api/organizer/showtimes/${s.showtimeId}/tiers`)
-        .set(auth(s.token))
-        .send({ label, price: 90_000 })
-        .expect(201);
-    }
+    // One active + one archived. Fill to 19, then add the twentieth through the API.
+    await pool.query(
+      `INSERT INTO ticket_tiers (showtime_id, label, price_amount, total_quantity)
+       SELECT $1, 'Hạng ' || n, 90000, 100 FROM generate_series(2, 19) AS n`,
+      [s.showtimeId],
+    );
+    const added = await api()
+      .post(`/api/organizer/showtimes/${s.showtimeId}/tiers`)
+      .set(auth(s.token))
+      .send({ label: "Hạng 20", price: 90_000 })
+      .expect(201);
 
     const refused = await api()
       .post(`/api/organizer/tiers/${s.tierId}/restore`)
@@ -200,7 +212,7 @@ describe("ticket tier lifecycle", () => {
     expect((await tierRow(s.tierId)).archived_at).not.toBeNull();
 
     // Free a slot and the same restore now succeeds — archiving is a shelf, not a delete.
-    const victim = (await pool.query(`SELECT id FROM ticket_tiers WHERE label = 'D'`)).rows[0].id;
+    const victim = added.body.tier.id;
     await api().delete(`/api/organizer/tiers/${victim}`).set(auth(s.token)).expect(200);
 
     const ok = await api()
