@@ -1807,9 +1807,12 @@ export async function getShowtimeMap(showtimeId: number, db: Db = pool): Promise
     rotation: number;
     buyer_name: string | null;
     checked_in_at: Date | null;
+    is_accessible: boolean;
+    table_id: number | null;
   }>(
     `SELECT ss.id, ss.row_label, ss.seat_number, ss.section_name, ss.category_name, ss.ticket_tier_id,
             tt.label, tt.price_amount::text AS price, ss.status, ss.pos_x, ss.pos_y, ss.rotation,
+            ss.is_accessible, ss.table_id,
             -- Who the seat was sold under, and when they walked in. The chain is the attendees
             -- export's own (ticket -> order -> reservation_item -> this seat), and it takes the
             -- newest NON-VOID ticket: a void is a refund, which un-names the seat even though the
@@ -1842,7 +1845,15 @@ export async function getShowtimeMap(showtimeId: number, db: Db = pool): Promise
         name: string;
         seatShape: "circle" | "square";
         seatSizeMultiplier: number;
+        floor?: string | null;
       }[];
+      floors?: { name: string; displayOrder: number }[];
+      planUrl?: string | null;
+      planVisibleToBuyers?: boolean;
+      planScale: number;
+      planOffsetX: number;
+      planOffsetY: number;
+      planOpacity: number;
     } | null;
   }>(`SELECT layout_snapshot FROM showtimes WHERE id = $1`, [showtimeId]);
   const snapshot = snap.rows[0]?.layout_snapshot ?? null;
@@ -1866,6 +1877,16 @@ export async function getShowtimeMap(showtimeId: number, db: Db = pool): Promise
     space: { width: LAYOUT_SPACE, height: LAYOUT_SPACE, seatDiameter: SEAT_DIAMETER },
     elements: (snapshot?.elements ?? []) as unknown as ShowtimeMap["elements"],
     tables: snapshot?.tables ?? [],
+    floors: snapshot?.floors ?? [],
+    floorPlan: snapshot?.planUrl && snapshot.planVisibleToBuyers
+      ? {
+          url: snapshot.planUrl,
+          scale: snapshot.planScale,
+          offsetX: snapshot.planOffsetX,
+          offsetY: snapshot.planOffsetY,
+          opacity: snapshot.planOpacity,
+        }
+      : null,
     tierLegend: buildTierLegend(
       tiers.rows.map((t) => ({ id: t.id, label: t.label, price: Number(t.price), color: t.color })),
     ),
@@ -1886,6 +1907,9 @@ export async function getShowtimeMap(showtimeId: number, db: Db = pool): Promise
       sizeMultiplier: r.section_name ? styleOf.get(r.section_name)?.seatSizeMultiplier : undefined,
       buyerName: r.buyer_name ?? null,
       checkedInAt: r.checked_in_at?.toISOString() ?? null,
+      floor: r.section_name ? (styleOf.get(r.section_name)?.floor ?? null) : null,
+      isAccessible: r.is_accessible,
+      tableId: r.table_id,
     })),
   };
 }

@@ -37,6 +37,7 @@ import type { SeatStatus } from "@shared/catalog/types.js";
 import * as apply from "./apply.js";
 import * as repo from "./layouts.repo.js";
 import * as service from "./layouts.service.js";
+import { ownerMapRateLimit } from "./read.throttle.js";
 
 /** Current statuses of the given seats, so a retier broadcast carries a truthful status alongside
  *  the new tier rather than assuming `available`. */
@@ -686,6 +687,7 @@ function refuse(outcome: { refusals: unknown[] }): never {
  */
 seatmapRouter.get(
   "/showtimes/:id/seat-map",
+  ownerMapRateLimit,
   asyncH(async (req, res) => {
     const showtimeId = Number(req.params.id);
     await service.assertShowtimeOwner(req, showtimeId);

@@ -3,13 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft, Pencil } from "lucide-react";
 import type { EventDetail } from "@/shared/catalog/types";
-import type { MyEvent } from "../../services/catalogClient";
+import type { ManageShowtime, MyEvent } from "../../services/catalogClient";
 import { organizerApi } from "../../services/catalogClient";
 import { formatVnd } from "../../services/currency";
 import { formatShowtimeAt } from "../../services/formatDate";
+import EventSalesMap from "./EventSalesMap";
+import { ErrorRetry, Loading } from "./states";
 
 /** `events.age_restriction`'s raw codes (`catalogAdapter.ts` carries the same map), in Vietnamese
  *  rather than the enum an organizer never chose to type. */
@@ -42,16 +44,21 @@ export default function EventOverview({
   const [detail, setDetail] = useState<EventDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchPreview = useCallback(() => {
-    organizerApi
-      .preview(event.id)
-      .then(setDetail)
-      .catch((e) => setError((e as Error).message));
-  }, [event.id]);
-
   useEffect(() => {
-    fetchPreview();
-  }, [fetchPreview]);
+    let active = true;
+    organizerApi.preview(event.id).then(
+      (result) => {
+        if (active) setDetail(result);
+      },
+      (reason: unknown) => {
+        if (active)
+          setError(reason instanceof Error ? reason.message : "Không tải được mô tả sự kiện.");
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [event.id]);
 
   /*
    * Same vocabulary EventList badges with — one status, one word, everywhere.
@@ -104,7 +111,11 @@ export default function EventOverview({
           type="button"
           onClick={onEdit}
           disabled={cancelled || event.status === "finished"}
-          title={cancelled || event.status === "finished" ? "Sự kiện đã đóng không thể chỉnh sửa." : undefined}
+          title={
+            cancelled || event.status === "finished"
+              ? "Sự kiện đã đóng không thể chỉnh sửa."
+              : undefined
+          }
           className="inline-flex items-center gap-1.5 bg-burgundy px-3 py-1.5 text-xs font-bold text-white transition hover:brightness-110 disabled:opacity-40"
         >
           <Pencil aria-hidden className="h-3.5 w-3.5" />
@@ -181,10 +192,17 @@ export default function EventOverview({
             />
           )}
         </div>
+      </article>
 
-        {/* Everything below is about the event rather than the at-a-glance facts above it — the
-            description, then its supporting details, as one column under both. */}
-        <div className="mt-5 space-y-3 border-t border-beige-kem/20 pt-5">
+      {/* Monitoring belongs to the read-only overview, not the editing form. Only one live map
+          mounts, for the selected showtime; the events list never opens background subscriptions. */}
+      {event.eventType === "seated" && <OverviewSalesMap key={event.id} event={event} />}
+
+      <article className="space-y-4 border border-beige-kem/25 bg-surface-2 p-5">
+        <h3 className="font-display text-xl font-bold text-beige-kem">
+          Mô tả &amp; thông tin sự kiện
+        </h3>
+        <div className="space-y-3">
           {error ? (
             <p className="border border-burgundy/50 bg-burgundy/10 px-3 py-2 text-sm text-beige-kem">
               {error}
@@ -253,4 +271,34 @@ export default function EventOverview({
       </article>
     </div>
   );
+}
+
+function OverviewSalesMap({ event }: { event: MyEvent }) {
+  const [rows, setRows] = useState<ManageShowtime[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    organizerApi.showtimesManage(event.id).then(
+      (result) => {
+        if (active) setRows(result);
+      },
+      (reason: unknown) => {
+        if (active)
+          setError(reason instanceof Error ? reason.message : "Không tải được suất diễn.");
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [event.id, attempt]);
+
+  const retry = () => {
+    setError(null);
+    setAttempt((value) => value + 1);
+  };
+  if (error) return <ErrorRetry message={`Chưa tải được sơ đồ vé: ${error}`} onRetry={retry} />;
+  if (rows === null) return <Loading label="Đang tải sơ đồ vé…" />;
+  return <EventSalesMap eventTitle={event.title} showtimes={rows} onRetry={retry} />;
 }

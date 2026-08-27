@@ -16,10 +16,8 @@ interface SlidingEntry {
 const stores = new Map<string, Map<string, SlidingEntry>>();
 
 export function getClientIp(req: Request): string {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') {
-    return forwarded.split(',')[0].trim();
-  }
+  // Express resolves the trusted proxy chain (`trust proxy` in app.ts). The leftmost raw header
+  // can be supplied by a client, so trusting it lets a scraper choose a new budget on every call.
   return req.ip || req.socket.remoteAddress || '127.0.0.1';
 }
 

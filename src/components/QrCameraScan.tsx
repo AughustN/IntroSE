@@ -6,7 +6,6 @@
  * Safari and Firefox).
  */
 
-// @ts-ignore
 import jsQR from "jsqr";
 import { useEffect, useRef, useState } from "react";
 
@@ -21,12 +20,15 @@ export default function QrCameraScan({ onDetect, onError, onClose }: Props) {
   const streamRef = useRef<MediaStream | null>(null);
   const frameRef = useRef<number | null>(null);
   const runningRef = useRef(false);
+  // Permission and video.play() may finish after the organizer closes/navigates away.
+  const startRequestRef = useRef(0);
   // While a ticket is in front of the lens, every frame reads the same code. Only report the next
   // ticket: resume once the held code has disappeared from the frame.
   const heldCodeRef = useRef<string | null>(null);
   const [state, setState] = useState<"idle" | "starting" | "scanning" | "denied">("idle");
 
   const stop = () => {
+    startRequestRef.current++;
     runningRef.current = false;
     heldCodeRef.current = null;
     if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
@@ -40,6 +42,7 @@ export default function QrCameraScan({ onDetect, onError, onClose }: Props) {
   // Stop the camera whenever the component unmounts or the caller closes it.
   useEffect(
     () => () => {
+      startRequestRef.current++;
       runningRef.current = false;
       if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
       streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -86,6 +89,7 @@ export default function QrCameraScan({ onDetect, onError, onClose }: Props) {
   };
 
   const start = async () => {
+    const request = ++startRequestRef.current;
     if (!navigator.mediaDevices?.getUserMedia) {
       setState("denied");
       onError("Trình duyệt không hỗ trợ camera. Dán mã thủ công hoặc dùng máy quét USB.");
@@ -98,6 +102,10 @@ export default function QrCameraScan({ onDetect, onError, onClose }: Props) {
         video: { facingMode: { ideal: "environment" } },
         audio: false,
       });
+      if (request !== startRequestRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       streamRef.current = stream;
 
       // The video element is always mounted, including while the start button is visible.
@@ -108,9 +116,11 @@ export default function QrCameraScan({ onDetect, onError, onClose }: Props) {
       }
       video.srcObject = stream;
       await video.play();
+      if (request !== startRequestRef.current) return;
       setState("scanning");
       beginDetect();
     } catch {
+      if (request !== startRequestRef.current) return;
       stop();
       setState("denied");
       onError(

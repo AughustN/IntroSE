@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useId } from "react";
 import { X, PlayCircle, Image as ImageIcon, AlertCircle } from "lucide-react";
 import { MediaType } from "../../types";
 
@@ -53,6 +53,7 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
   const [isDragOver, setIsDragOver] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputId = useId();
 
   const isVideo = mediaType === "trailer";
   const defaultMaxSize = isVideo ? 50 : mediaType === "avatar" || mediaType === "logo" ? 2 : 5;
@@ -157,7 +158,10 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
     <div className="space-y-1.5">
       {!captionInside && (
         <div className="flex items-center justify-between">
-          <label className="font-meta text-xs font-semibold uppercase tracking-wider text-beige-kem">
+          <label
+            htmlFor={inputId}
+            className="font-meta text-xs font-semibold uppercase tracking-wider text-beige-kem"
+          >
             {label} {required && <span className="text-burgundy">*</span>}
           </label>
           {helpText && <span className="font-meta text-[11px] text-ink-soft">{helpText}</span>}
@@ -182,8 +186,11 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
         } ${disabled ? "opacity-60 cursor-not-allowed" : ""}`}
       >
         <input
+          id={inputId}
+          aria-label={label}
           ref={fileInputRef}
           type="file"
+          onClick={(e) => e.stopPropagation()}
           accept={effectiveAccept}
           onChange={(e) => {
             const files = e.target.files;
@@ -212,7 +219,7 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
             )}
 
             {!disabled && (
-              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
+              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
                 <button
                   type="button"
                   onClick={(e) => {
@@ -241,36 +248,47 @@ export const MediaDropzone: React.FC<MediaDropzoneProps> = ({
             )}
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center gap-2 text-ink-soft">
-            {!captionInside &&
-              (isVideo ? (
-                <PlayCircle className="h-[26px] w-[26px] text-ink-soft" />
-              ) : (
-                <ImageIcon className="h-[26px] w-[26px] text-ink-soft" />
-              ))}
-            <div className="space-y-0.5">
-              <p className="font-meta text-xs font-bold text-beige-kem">
-                {captionInside
-                  ? label
-                  : isVideo
-                    ? "Kéo thả video vào đây hoặc bấm để chọn"
-                    : "Kéo thả ảnh vào đây hoặc bấm để chọn"}
-              </p>
-              {!captionInside && (
-                <p className="font-meta text-[11px] text-ink-soft">
-                  {isVideo ? "MP4, WebM" : "JPG, PNG, WEBP, SVG"} · Tối đa {effectiveMaxSize}MB
+          <>
+            <button
+              type="button"
+              disabled={disabled}
+              aria-label={`Chọn ${label.toLowerCase()}`}
+              className="absolute inset-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-burgundy disabled:cursor-not-allowed"
+            />
+            <div className="flex flex-col items-center justify-center gap-2 text-ink-soft">
+              {!captionInside &&
+                (isVideo ? (
+                  <PlayCircle className="h-[26px] w-[26px] text-ink-soft" />
+                ) : (
+                  <ImageIcon className="h-[26px] w-[26px] text-ink-soft" />
+                ))}
+              <div className="space-y-0.5">
+                <p className="font-meta text-xs font-bold text-beige-kem">
+                  {captionInside
+                    ? label
+                    : isVideo
+                      ? "Kéo thả video vào đây hoặc bấm để chọn"
+                      : "Kéo thả ảnh vào đây hoặc bấm để chọn"}
                 </p>
-              )}
-              {captionInside && helpText && (
-                <p className="font-meta text-[11px] text-ink-soft">{helpText}</p>
-              )}
+                {!captionInside && (
+                  <p className="font-meta text-[11px] text-ink-soft">
+                    {isVideo ? "MP4, WebM" : "JPG, PNG, WEBP, SVG"} · Tối đa {effectiveMaxSize}MB
+                  </p>
+                )}
+                {captionInside && helpText && (
+                  <p className="font-meta text-[11px] text-ink-soft">{helpText}</p>
+                )}
+              </div>
             </div>
-          </div>
+          </>
         )}
       </div>
 
       {errorMessage && (
-        <div className="mt-1 flex items-center gap-1.5 font-meta text-xs text-burgundy">
+        <div
+          role="alert"
+          className="mt-1 flex items-center gap-1.5 font-meta text-xs text-burgundy-ink"
+        >
           <AlertCircle className="w-3.5 h-3.5 shrink-0" />
           <span>{errorMessage}</span>
         </div>

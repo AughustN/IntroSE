@@ -135,7 +135,7 @@ function OverflowMenu({ label, children }: { label: string; children: React.Reac
 }
 
 /**
- * Lifecycle status in the platform's semantic badge vocabulary, not the raw database word.
+ * Lifecycle status in the platform's semantic text vocabulary, not the raw database word.
  *
  * FOUR states from two fields, because `status` alone cannot tell the two kinds of "draft" apart.
  * Saving a published chart demotes it to `draft` — deliberately, so that what is live and what is
@@ -169,23 +169,23 @@ function StatusBadge({
 
   const { style, label, title } = {
     published: {
-      style: "border-la-co/60 bg-la-co/20 text-beige-kem",
+      style: "text-la-co-ink",
       label: "Đang phát hành",
       title: "Bản đang phát hành khớp với bản đang sửa — suất chiếu mới gán được ngay.",
     },
     "published-dirty": {
-      style: "border-cam-dat/70 bg-cam-dat/20 text-cam-dat-ink",
+      style: "text-cam-dat-ink",
       label: "Đang phát hành · có sửa đổi",
       title:
         "Một bản đã phát hành vẫn đang bán, và bản nháp có thay đổi chưa phát hành. Mở trình thiết kế và bấm “Phát hành” để đưa thay đổi lên.",
     },
     draft: {
-      style: "border-beige-kem/40 bg-beige-kem/5 text-beige-kem/80",
+      style: "text-beige-kem/75",
       label: "Bản nháp",
       title: "Chưa từng phát hành — chưa gán được cho suất chiếu nào.",
     },
     archived: {
-      style: "border-beige-kem/25 bg-beige-kem/5 text-beige-kem/60",
+      style: "text-ink-soft",
       label: "Lưu trữ",
       title: "Đã ẩn khỏi danh sách đang dùng. Khôi phục được bất cứ lúc nào.",
     },
@@ -194,7 +194,7 @@ function StatusBadge({
   return (
     <span
       title={title}
-      className={`inline-flex shrink-0 items-center gap-1.5 border px-2.5 py-1 font-meta text-meta font-bold leading-none ${style}`}
+      className={`inline-flex shrink-0 items-center font-meta text-meta font-bold leading-none ${style}`}
     >
       {label}
     </span>
@@ -1638,7 +1638,10 @@ export default function SeatMapLibrary({
                       value={templateSourceId}
                       options={(rows ?? [])
                         .filter((l) => l.isTemplate)
-                        .map((t) => ({ value: String(t.id), label: `${t.name} · ${t.seatCount} ghế` }))}
+                        .map((t) => ({
+                          value: String(t.id),
+                          label: `${t.name} · ${t.seatCount} ghế`,
+                        }))}
                       placeholder="Chọn mẫu"
                       disabled={creating}
                       onChange={setTemplateSourceId}

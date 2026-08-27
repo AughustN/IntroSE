@@ -8,6 +8,7 @@ import { MyEvent, MyVenue, organizerApi } from "../../services/catalogClient";
 import EventEditor from "./EventEditor";
 import EventList from "./EventList";
 import EventOverview from "./EventOverview";
+import CheckInPanel from "./CheckInPanel";
 import { ErrorRetry, Loading } from "./states";
 
 /**
@@ -96,6 +97,7 @@ export default function OrganizerConsole({
           />
         ) : (
           <EventOverview
+            key={selected.id}
             event={selected}
             onEdit={() => setEditing(true)}
             onBack={() => onSelectEvent(null)}
@@ -108,6 +110,11 @@ export default function OrganizerConsole({
   return (
     <>
       {loadError && <ErrorRetry message={loadError} onRetry={load} />}
+      {events.length > 0 && (
+        <div className="mb-5">
+          <CheckInPanel eventTitle="Tất cả sự kiện của bạn" onCheckedIn={load} />
+        </div>
+      )}
       <EventList events={events} onOpen={(e) => onSelectEvent(e.id)} onCreate={onCreateRequested} />
     </>
   );

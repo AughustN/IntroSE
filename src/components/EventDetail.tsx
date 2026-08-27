@@ -94,6 +94,13 @@ const statusLabels: Record<MovieEvent["status"], string> = {
   cancelled: "Đã hủy",
 };
 
+const statusTone: Record<MovieEvent["status"], string> = {
+  available: "text-la-co-ink",
+  sold_out: "text-cam-dat-ink",
+  finished: "text-ink-soft",
+  cancelled: "text-burgundy-ink",
+};
+
 /**
  * One bookable slot. Built from a real showtime when the API has answered, so date and time always
  * belong to the same session — the previous two-grid layout let a visitor combine a date with a
@@ -252,8 +259,14 @@ export default function EventDetail({
         return a.localeCompare(b, "vi");
       });
     return {
-      cities: uniq(slots.map((slot) => slot.city), UNKNOWN_CITY),
-      chains: uniq(byCity.map((slot) => slot.chain), OTHER_VENUES),
+      cities: uniq(
+        slots.map((slot) => slot.city),
+        UNKNOWN_CITY,
+      ),
+      chains: uniq(
+        byCity.map((slot) => slot.chain),
+        OTHER_VENUES,
+      ),
       venues: uniq(byChain.map((slot) => slot.venue)),
     };
   }, [slots, byCity, byChain]);
@@ -780,16 +793,30 @@ export default function EventDetail({
           `3/2` with the blurred fill behind it, the same arrangement the catalog cards use: posters
           arrive in every shape and `object-contain` is the only crop that never cuts a face off.
         */}
-        <div>
-          <h1 className="font-display text-title-l font-black uppercase leading-[1.05] tracking-[0.02em] text-beige-kem">
-            {event.title}
-          </h1>
+        <article className="min-w-0">
+          <div className="border-b border-beige-kem/20 pb-4">
+            <p className="label-eyebrow text-ink-soft">
+              {[event.genre[0], event.ageRating === "P" ? "Mọi lứa tuổi" : event.ageRating]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+            <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-5 gap-y-2">
+              <h1 className="min-w-0 font-display text-title-l font-black leading-[1.05] tracking-[0.01em] text-beige-kem">
+                {event.title}
+              </h1>
+              <span
+                className={`shrink-0 font-meta text-meta font-bold ${statusTone[event.status]}`}
+              >
+                {statusLabels[event.status]}
+              </span>
+            </div>
+          </div>
           {event.originalTitle && (
             <p className="mt-2 font-meta text-lede text-ink-soft">{event.originalTitle}</p>
           )}
 
           {event.isHighDemand && (
-            <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-950/60 border border-indigo-500/40 text-indigo-300 text-xs font-semibold">
+            <div className="mt-3 text-sm font-semibold text-cam-dat-ink">
               <span>Sự kiện mở bán vé Hot — Tự động xếp hàng qua Phòng chờ ảo (Anti-Bot)</span>
             </div>
           )}
@@ -836,7 +863,7 @@ export default function EventDetail({
               />
             </button>
           </figure>
-        </div>
+        </article>
 
         <BookingSection
           step="01"

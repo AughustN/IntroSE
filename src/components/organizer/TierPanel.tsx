@@ -8,6 +8,7 @@ import type { ManagedTier } from "@/shared/catalog/types";
 import { DEFAULT_MAX_TIERS_PER_SHOWTIME } from "@/shared/catalog/limits";
 import { studioApi } from "../../services/catalogClient";
 import { Empty, ErrorRetry, Loading, Refusal, dong } from "./states";
+import { useMutationConfirmation } from "./useMutationConfirmation";
 
 const input =
   "h-10 min-w-0 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
@@ -26,11 +27,14 @@ const ghost =
 export default function TierPanel({
   showtimeId,
   onChanged,
+  isLive = false,
 }: {
   showtimeId: number;
   /** Fired when a write returned the event for review, so the parent can refresh its badge. */
   onChanged: (returnedToReview: boolean) => void;
+  isLive?: boolean;
 }) {
+  const { confirmMutation, dialog } = useMutationConfirmation(isLive);
   const [tiers, setTiers] = useState<ManagedTier[] | null>(null);
   const [eventType, setEventType] = useState<"general_admission" | "seated">("general_admission");
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -42,18 +46,19 @@ export default function TierPanel({
   const [newPrice, setNewPrice] = useState("");
   const [newCapacity, setNewCapacity] = useState("");
 
-  const load = useCallback(async () => {
-    setLoadError(null);
-    setTiers(null);
-    try {
-      const res = await studioApi.tiers(showtimeId);
-      setTiers(res.tiers);
-      setEventType(res.eventType);
-      setMaxTiers(res.maxTiersPerShowtime);
-    } catch (e) {
-      setLoadError((e as Error).message);
-    }
-  }, [showtimeId]);
+  const load = useCallback(
+    () =>
+      studioApi
+        .tiers(showtimeId)
+        .then((res) => {
+          setLoadError(null);
+          setTiers(res.tiers);
+          setEventType(res.eventType);
+          setMaxTiers(res.maxTiersPerShowtime);
+        })
+        .catch((e: unknown) => setLoadError((e as Error).message)),
+    [showtimeId],
+  );
 
   useEffect(() => {
     void load();
@@ -63,10 +68,12 @@ export default function TierPanel({
   const active = (tiers ?? []).filter((t) => !t.archived);
 
   /** Every write funnels through here so a refusal is surfaced, not swallowed, and input survives. */
-  const run = async (fn: () => Promise<{ returnedToReview: boolean }>) => {
+  const run = async (fn: () => Promise<{ returnedToReview: boolean }>, fields: string[]) => {
+    if (busy) return false;
     setBusy(true);
     setRefusal(null);
     try {
+      if (!(await confirmMutation(fields))) return false;
       const res = await fn();
       onChanged(res.returnedToReview);
       await load();
@@ -86,8 +93,9 @@ export default function TierPanel({
       return;
     }
     const capacity = seated || newCapacity === "" ? undefined : Number(newCapacity);
-    const ok = await run(() =>
-      studioApi.addTier(showtimeId, { label: newLabel.trim(), price, capacity }),
+    const ok = await run(
+      () => studioApi.addTier(showtimeId, { label: newLabel.trim(), price, capacity }),
+      ["tier.add"],
     );
     if (ok) {
       setNewLabel("");
@@ -96,11 +104,13 @@ export default function TierPanel({
     }
   };
 
-  if (loadError) return <ErrorRetry message={loadError} onRetry={load} />;
+  if (loadError && tiers === null) return <ErrorRetry message={loadError} onRetry={load} />;
   if (tiers === null) return <Loading label="Đang tải hạng vé…" />;
 
   return (
     <div className="space-y-3">
+      {dialog}
+      {loadError && <ErrorRetry message={loadError} onRetry={load} />}
       <div className="flex flex-col items-start gap-1 sm:flex-row sm:items-center sm:justify-between">
         <h4 className="font-display text-sm font-bold">
           Hạng vé ({active.length}/{maxTiers} đang bán)
@@ -162,18 +172,14 @@ export default function TierPanel({
               className={input}
             />
           )}
-          <button
-            onClick={add}
-            disabled={busy || active.length >= maxTiers}
-            className={btn}
-          >
+          <button onClick={add} disabled={busy || active.length >= maxTiers} className={btn}>
             Thêm
           </button>
         </div>
         {active.length >= maxTiers && (
           <p className="mt-2 font-mono text-[11px] text-beige-kem/50">
-            Đã đạt tối đa {maxTiers} hạng vé đang bán. Hãy lưu trữ hoặc xoá một hạng trước khi
-            thêm hay khôi phục hạng khác.
+            Đã đạt tối đa {maxTiers} hạng vé đang bán. Hãy lưu trữ hoặc xoá một hạng trước khi thêm
+            hay khôi phục hạng khác.
           </p>
         )}
       </div>
@@ -194,7 +200,7 @@ function TierRow({
   seated: boolean;
   busy: boolean;
   atLimit: boolean;
-  run: (fn: () => Promise<{ returnedToReview: boolean }>) => Promise<boolean>;
+  run: (fn: () => Promise<{ returnedToReview: boolean }>, fields: string[]) => Promise<boolean>;
 }) {
   const [label, setLabel] = useState(tier.label);
   const [price, setPrice] = useState(String(tier.price));
@@ -206,13 +212,19 @@ function TierRow({
     capacity !== (tier.capacity === null ? "" : String(tier.capacity));
 
   const save = () =>
-    run(() =>
-      studioApi.updateTier(tier.id, {
-        label: label !== tier.label ? label : undefined,
-        price: price !== String(tier.price) ? Number(price) : undefined,
-        capacity:
-          !seated && capacity !== String(tier.capacity ?? "") ? Number(capacity) : undefined,
-      }),
+    run(
+      () =>
+        studioApi.updateTier(tier.id, {
+          label: label !== tier.label ? label : undefined,
+          price: price !== String(tier.price) ? Number(price) : undefined,
+          capacity:
+            !seated && capacity !== String(tier.capacity ?? "") ? Number(capacity) : undefined,
+        }),
+      [
+        ...(label !== tier.label ? ["tier.label"] : []),
+        ...(price !== String(tier.price) ? ["tier.price"] : []),
+        ...(!seated && capacity !== String(tier.capacity ?? "") ? ["tier.capacity"] : []),
+      ],
     );
 
   return (
@@ -242,7 +254,7 @@ function TierRow({
         <div className="flex flex-wrap gap-2">
           {tier.archived ? (
             <button
-              onClick={() => run(() => studioApi.restoreTier(tier.id))}
+              onClick={() => run(() => studioApi.restoreTier(tier.id), ["tier.restore"])}
               disabled={busy || atLimit}
               title={atLimit ? "Đã đạt giới hạn hạng vé đang bán." : undefined}
               className={ghost}
@@ -255,7 +267,7 @@ function TierRow({
                 Lưu
               </button>
               <button
-                onClick={() => run(() => studioApi.removeTier(tier.id))}
+                onClick={() => run(() => studioApi.removeTier(tier.id), ["tier.remove"])}
                 disabled={busy}
                 className={ghost}
               >
@@ -281,8 +293,8 @@ function TierRow({
       */}
       {!tier.archived && seated && tier.sold === 0 && tier.held === 0 && tier.remaining === 0 && (
         <p className="mt-1 font-mono text-[11px] text-cam-dat-ink">
-          ⚠ Chưa có ghế nào trong sơ đồ được gán hạng này — hạng vé sẽ không bán được vé nào cho
-          đến khi bạn gán ghế trong trình thiết kế sơ đồ.
+          ⚠ Chưa có ghế nào trong sơ đồ được gán hạng này — hạng vé sẽ không bán được vé nào cho đến
+          khi bạn gán ghế trong trình thiết kế sơ đồ.
         </p>
       )}
     </div>

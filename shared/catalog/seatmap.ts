@@ -6,7 +6,7 @@
 
 import type { ChartDocument } from "./seatmap-document.js";
 import type { ValidationIssue } from "./seatmap-validate.js";
-import type { SeatMapTable, SeatMapTierLegendEntry } from "./types.js";
+import type { SeatMapFloorPlan, SeatMapTable, SeatMapTierLegendEntry } from "./types.js";
 
 export type LayoutStatus = "draft" | "ready" | "archived";
 export type SeatType = "single" | "double" | "standing";
@@ -445,6 +445,9 @@ export interface ShowtimeMapSeat {
   /** From the snapshot's per-section style, so the organizer's map is drawn like the buyer's. */
   shape?: "circle" | "square";
   sizeMultiplier?: number;
+  floor?: string | null;
+  isAccessible?: boolean;
+  tableId?: number | null;
   /**
    * Who this seat was sold under, and when they walked in — the organizer's question the status
    * colour alone cannot answer: "whose, and are they here yet?"
@@ -468,11 +471,13 @@ export interface ShowtimeMapSeat {
 export interface ShowtimeMap {
   showtimeId: number;
   seats: ShowtimeMapSeat[];
-  elements: LayoutElement[];
+  elements: (LayoutElement & { floor?: string | null })[];
   tables: SeatMapTable[];
   /** Same cheapest-first colours the buyer sees, so the two never disagree about a price class. */
   tierLegend: SeatMapTierLegendEntry[];
   space: { width: number; height: number; seatDiameter: number };
+  floors?: { name: string; displayOrder: number }[];
+  floorPlan?: SeatMapFloorPlan | null;
 }
 
 // ---- Applying a layout to a showtime (FR-027..FR-029) ----

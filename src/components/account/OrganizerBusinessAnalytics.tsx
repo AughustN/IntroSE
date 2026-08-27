@@ -16,7 +16,7 @@ import { fetchOrganizerAnalytics } from "../../services/organizerAnalyticsClient
 import { KPICards } from "./analytics/KPICards";
 import { AnalyticsFilterBar } from "./analytics/AnalyticsFilterBar";
 import { TopEventsChart } from "./analytics/TopEventsChart";
-import { CapacityGauge } from "./analytics/CapacityGauge";
+import { TicketSalesInsights } from "./analytics/TicketSalesInsights";
 import { RecentTransactionsTable } from "./analytics/RecentTransactionsTable";
 import { InfoCard } from "./primitives";
 
@@ -227,13 +227,15 @@ export function OrganizerBusinessAnalytics() {
             >
               {/* Main Content Grid: 2 Columns */}
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-                {/* Left Column (Wide): Main Sales Analytics Chart, Upcoming Events Gauge, Recent Activity Feed */}
+                {/* Left Column (Wide): Sales Chart, Ticket Insights, Recent Activity Feed */}
                 <div className="space-y-6 lg:col-span-7 xl:col-span-8">
                   {/* Sales Analytics Chart Card */}
                   <TimeSeriesChart data={dashboardData.time_series} />
 
-                  {/* Soonest Event Capacity Gauge Card */}
-                  <CapacityGauge capacityData={dashboardData.soonest_event_capacity} />
+                  <TicketSalesInsights
+                    overview={dashboardData.overview}
+                    timeSeries={dashboardData.time_series}
+                  />
 
                   {/* Recent Activity Audit Feed Card */}
                   <RecentTransactionsTable transactions={dashboardData.recent_transactions} />

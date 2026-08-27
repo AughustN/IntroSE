@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
+import { useGuardedNavigate } from "../../hooks/NavigationGuard";
 import { Armchair, ArrowLeft, BarChart3, Calendar, Megaphone } from "lucide-react";
 import AdPackagesPanel from "../../components/organizer/AdPackagesPanel";
 import OrganizerConsole from "../../components/organizer/OrganizerConsole";
@@ -53,7 +54,7 @@ export const OrganizerEventsPage: React.FC<{
   /** From `/organizer/events/:id` — which event the console should open at, if the URL names one. */
   openEventId?: number | null;
 }> = ({ openEventId = null }) => {
-  const navigate = useNavigate();
+  const navigate = useGuardedNavigate();
   const location = useLocation();
 
   // Top-Level Workspace Section:"analytics"(Thống kê kinh doanh),"events"(Quản lý sự kiện) or

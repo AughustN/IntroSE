@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useRef } from "react";
+import { useId } from "react";
+import { useDialogFocus } from "../hooks/useDialogFocus";
 
 export interface ConfirmRequest {
   title: string;
@@ -17,6 +18,10 @@ export interface ConfirmRequest {
 interface ConfirmDialogProps extends ConfirmRequest {
   onConfirm: () => void;
   onCancel: () => void;
+  busy?: boolean;
+  error?: string | null;
+  onSave?: () => void;
+  saveLabel?: string;
 }
 
 /**
@@ -34,59 +39,80 @@ export default function ConfirmDialog({
   tone,
   onConfirm,
   onCancel,
+  busy = false,
+  error,
+  onSave,
+  saveLabel = "Lưu rồi rời đi",
 }: ConfirmDialogProps) {
-  const cancelRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    cancelRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
+  const id = useId();
+  const dialogRef = useDialogFocus(onCancel, busy);
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-4 sm:items-center"
-      onClick={onCancel}
+      onClick={() => !busy && onCancel()}
       role="presentation"
     >
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         role="alertdialog"
         aria-modal="true"
-        aria-labelledby="confirm-title"
-        aria-describedby="confirm-message"
+        aria-labelledby={`${id}-title`}
+        aria-describedby={`${id}-message`}
+        aria-busy={busy}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md border-2 border-beige-kem bg-xanh-pho p-6"
+        className="max-h-[90dvh] w-full max-w-md overflow-y-auto border-2 border-beige-kem bg-xanh-pho p-6 text-beige-kem"
       >
-        <h2 id="confirm-title" className="font-display text-title-m font-black text-beige-kem">
+        <h2 id={`${id}-title`} className="font-display text-title-m font-black text-beige-kem">
           {title}
         </h2>
         <p
-          id="confirm-message"
+          id={`${id}-message`}
           className="mt-3 whitespace-pre-line text-body leading-6 text-beige-kem/70"
         >
           {message}
         </p>
+        {error && (
+          <p role="alert" className="mt-3 text-sm text-burgundy-ink">
+            {error}
+          </p>
+        )}
 
-        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
           <button
-            ref={cancelRef}
+            type="button"
+            data-dialog-autofocus
+            disabled={busy}
             onClick={onCancel}
-            className="border-2 border-beige-kem px-4 py-2.5 font-meta text-body text-beige-kem/80 transition hover:border-beige-kem/40 hover:text-beige-kem"
+            className="min-h-11 border-2 border-beige-kem px-4 py-2.5 font-meta text-body text-beige-kem/80 transition hover:border-beige-kem/40 hover:text-beige-kem focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
           >
             {cancelLabel}
           </button>
           <button
+            type="button"
+            disabled={busy}
             onClick={onConfirm}
-            className={`px-4 py-2.5 font-meta text-body font-bold text-beige-kem transition ${ tone === "danger"
-                ? "bg-burgundy hover:brightness-95"
-                : "bg-cam-dat hover:brightness-95"
+            className={`min-h-11 px-4 py-2.5 font-meta text-body font-bold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50 ${
+              onSave
+                ? "border-2 border-burgundy text-burgundy-ink hover:bg-burgundy/10"
+                : tone === "danger"
+                  ? "bg-burgundy text-white hover:brightness-95"
+                  : "bg-cam-dat text-on-tint hover:brightness-95"
             }`}
           >
             {confirmLabel}
           </button>
+          {onSave && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onSave}
+              className="min-h-11 bg-burgundy px-4 py-2.5 font-meta text-body font-bold text-white transition hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
+            >
+              {busy ? "Đang lưu…" : saveLabel}
+            </button>
+          )}
         </div>
       </div>
     </div>

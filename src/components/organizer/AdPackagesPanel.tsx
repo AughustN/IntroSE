@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Flame, Loader2, Megaphone, PlayCircle } from "lucide-react";
 import {
   AD_PLACEMENT_LABELS,
@@ -60,6 +60,23 @@ export default function AdPackagesPanel() {
   const [choosing, setChoosing] = useState<AdPackage | null>(null);
   const [eventId, setEventId] = useState("");
   const [busy, setBusy] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const packageTrigger = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (!choosing) return;
+    pickerRef.current?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "instant"
+        : "smooth",
+      block: "center",
+    });
+    pickerRef.current?.focus({ preventScroll: true });
+  }, [choosing]);
+  const closePicker = () => {
+    setChoosing(null);
+    packageTrigger.current?.focus({ preventScroll: true });
+    packageTrigger.current?.scrollIntoView({ block: "nearest" });
+  };
 
   /**
    * Everything the panel shows, fetched together.
@@ -230,7 +247,11 @@ export default function AdPackagesPanel() {
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => {
+                aria-expanded={choosing?.id === pkg.id}
+                aria-controls={choosing?.id === pkg.id ? "ad-event-picker" : undefined}
+                onClick={(e) => {
+                  packageTrigger.current = e.currentTarget;
+                  setError(null);
                   setChoosing(pkg);
                   setEventId("");
                   setNotice(null);
@@ -241,7 +262,7 @@ export default function AdPackagesPanel() {
                     : "border-2 border-burgundy/70 text-burgundy-ink hover:bg-burgundy hover:text-white"
                 }`}
               >
-                Chọn gói này
+                {choosing?.id === pkg.id ? "Đang chọn gói này" : "Chọn gói này"}
               </button>
 
               {/* Benefits BELOW the button, checkmarked — what the plan includes, not why to buy. */}
@@ -266,17 +287,34 @@ export default function AdPackagesPanel() {
       </div>
 
       {choosing && (
-        <div className="space-y-3 border-2 border-beige-kem/40 bg-surface-2 p-5">
-          <h3 className="font-display text-lg font-black text-beige-kem">
+        <div
+          id="ad-event-picker"
+          ref={pickerRef}
+          tabIndex={-1}
+          role="region"
+          aria-labelledby="ad-event-picker-title"
+          className="scroll-mt-24 space-y-3 border-2 border-beige-kem/40 bg-surface-2 p-5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-burgundy"
+        >
+          <h3 id="ad-event-picker-title" className="font-display text-lg font-black text-beige-kem">
             Chọn sự kiện cho {choosing.name}
           </h3>
           {choices.length === 0 ? (
-            <p className="text-xs text-ink-soft">
-              Bạn chưa có sự kiện nào đang mở bán và chưa chạy quảng cáo.
-            </p>
+            <div className="space-y-3">
+              <p className="text-sm text-ink-soft">
+                Chưa có sự kiện phù hợp. Sự kiện cần được duyệt, đang mở bán, còn suất sắp diễn và
+                chưa có chiến dịch còn hạn.
+              </p>
+              <button
+                type="button"
+                onClick={closePicker}
+                className="min-h-11 border border-beige-kem/40 px-4 text-sm font-bold text-ink-soft"
+              >
+                Quay lại chọn gói
+              </button>
+            </div>
           ) : (
             <div className="flex flex-wrap items-center gap-3">
-              <div className="min-w-[16rem]">
+              <div className="w-full min-w-0 sm:w-64">
                 <Select
                   value={eventId}
                   options={choices.map((event) => ({
@@ -299,7 +337,7 @@ export default function AdPackagesPanel() {
               </button>
               <button
                 type="button"
-                onClick={() => setChoosing(null)}
+                onClick={closePicker}
                 disabled={busy}
                 className="text-xs font-bold text-ink-soft transition hover:text-beige-kem"
               >

@@ -3,12 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_MAX_TIERS_PER_SHOWTIME } from "@/shared/catalog/limits";
 import { ManageShowtime, MyVenue, organizerApi, studioApi } from "../../services/catalogClient";
 import DateTimeField from "../DateTimeField";
 import TierPanel from "./TierPanel";
 import { Empty, ErrorRetry, Loading, Refusal } from "./states";
+import { useMutationConfirmation } from "./useMutationConfirmation";
+import type { ConfirmRequest } from "../ConfirmDialog";
+import { formatShowtimeAt } from "../../services/formatDate";
 
 const input =
   "h-10 min-w-0 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
@@ -35,6 +38,7 @@ export default function ShowtimeList({
   venues,
   preferredVenueId,
   onChanged,
+  isLive = false,
 }: {
   eventId: number;
   venues: MyVenue[];
@@ -48,7 +52,10 @@ export default function ShowtimeList({
    */
   preferredVenueId?: number;
   onChanged: (returnedToReview: boolean) => void;
+  isLive?: boolean;
 }) {
+  const { confirmMutation, dialog } = useMutationConfirmation(isLive);
+  const mutationBusy = useRef(false);
   const [showtimes, setShowtimes] = useState<ManageShowtime[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [openTiers, setOpenTiers] = useState<number | null>(null);
@@ -95,10 +102,15 @@ export default function ShowtimeList({
   const run = async (
     showtimeId: number,
     fn: () => Promise<{ returnedToReview: boolean }>,
+    fields: string[],
+    destructive?: ConfirmRequest,
   ): Promise<boolean> => {
+    if (mutationBusy.current) return false;
+    mutationBusy.current = true;
     setBusy(true);
     setRefusal((r) => ({ ...r, [showtimeId]: null }));
     try {
+      if (!(await confirmMutation(fields, destructive))) return false;
       const res = await fn();
       onChanged(res.returnedToReview);
       await load();
@@ -108,11 +120,13 @@ export default function ShowtimeList({
       setRefusal((r) => ({ ...r, [showtimeId]: (e as Error).message }));
       return false;
     } finally {
+      mutationBusy.current = false;
       setBusy(false);
     }
   };
 
   const createShowtime = async () => {
+    if (mutationBusy.current) return;
     setAddError(null);
     // The venue is not a question this form asks — the event answered it at creation (see
     // `lockedVenueId`). Only a date and priced tiers remain to check.
@@ -139,8 +153,10 @@ export default function ShowtimeList({
       setAddError("Mỗi hạng vé cần tên và giá là số nguyên đồng không âm.");
       return;
     }
+    mutationBusy.current = true;
     setBusy(true);
     try {
+      if (!(await confirmMutation(["showtime.add"]))) return;
       const result = await organizerApi.addShowtime(eventId, {
         venueId: Number(lockedVenueId),
         startsAt: new Date(addDate).toISOString(),
@@ -155,6 +171,7 @@ export default function ShowtimeList({
     } catch (e) {
       setAddError((e as Error).message);
     } finally {
+      mutationBusy.current = false;
       setBusy(false);
     }
   };
@@ -274,6 +291,7 @@ export default function ShowtimeList({
   if (showtimes.length === 0) {
     return (
       <div className="space-y-3">
+        {dialog}
         {loadError && <ErrorRetry message={loadError} onRetry={load} />}
         <Empty
           title="Sự kiện chưa có suất chiếu nào."
@@ -286,6 +304,7 @@ export default function ShowtimeList({
 
   return (
     <div className="space-y-3">
+      {dialog}
       {loadError && (
         <ErrorRetry message={`Chưa cập nhật được suất chiếu: ${loadError}`} onRetry={load} />
       )}
@@ -333,8 +352,10 @@ export default function ShowtimeList({
                           return;
                         }
                         setPendingDates((dates) => ({ ...dates, [st.id]: nextValue }));
-                        void run(st.id, () =>
-                          studioApi.updateShowtime(st.id, { startsAt: next.toISOString() }),
+                        void run(
+                          st.id,
+                          () => studioApi.updateShowtime(st.id, { startsAt: next.toISOString() }),
+                          ["showtime.startsAt"],
                         ).then(() =>
                           setPendingDates((dates) => {
                             const { [st.id]: _finished, ...rest } = dates;
@@ -352,7 +373,20 @@ export default function ShowtimeList({
                       {openTiers === st.id ? "Ẩn hạng vé" : "Hạng vé"}
                     </button>
                     <button
-                      onClick={() => void run(st.id, () => studioApi.deleteShowtime(st.id))}
+                      onClick={() =>
+                        void run(
+                          st.id,
+                          () => studioApi.deleteShowtime(st.id),
+                          ["showtime.remove"],
+                          {
+                            title: "Xóa suất chiếu?",
+                            message: `Xóa suất ${formatShowtimeAt(st.startsAt)} tại ${st.venueName}? Các hạng vé và sơ đồ đã áp dụng cho suất này cũng bị xóa. Hành động này không thể hoàn tác; sơ đồ gốc của địa điểm vẫn được giữ.`,
+                            confirmLabel: "Xóa suất chiếu",
+                            cancelLabel: "Giữ lại suất",
+                            tone: "danger",
+                          },
+                        )
+                      }
                       disabled={busy || locked}
                       className={btn}
                     >
@@ -376,6 +410,7 @@ export default function ShowtimeList({
                     <fieldset disabled={historical} className="min-w-0">
                       <TierPanel
                         showtimeId={st.id}
+                        isLive={isLive}
                         onChanged={(review) => {
                           onChanged(review);
                           void load();

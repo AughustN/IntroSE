@@ -4,7 +4,8 @@
  */
 
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
+import { useGuardedNavigate } from "./hooks/NavigationGuard";
 import { SAMPLE_MOVIES } from "./data";
 import { Booking, CheckoutPayload, HoldSession, MovieEvent, Seat } from "./types";
 import AuthModal from "./components/AuthModal";
@@ -498,7 +499,7 @@ export default function App() {
   const [userPhone, setUserPhone] = useState<string | null>(null);
 
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate = useGuardedNavigate();
 
   /**
    * Move to a screen and put it on the address bar, in that order and in one place.

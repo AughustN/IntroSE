@@ -12,6 +12,7 @@ import { getAccessToken } from "./authClient";
 import { API_ORIGIN } from "./api";
 
 let socket: Socket | null = null;
+const roomWatchers = new Map<number, number>();
 
 function connect(): Socket {
   if (socket) return socket;
@@ -27,6 +28,7 @@ function connect(): Socket {
 export function watchShowtime(
   showtimeId: number,
   onUpdate: (update: SeatUpdate) => void,
+  onConnectionChange?: (connected: boolean) => void,
 ): () => void {
   const s = connect();
   const handler = (update: SeatUpdate) => {
@@ -34,15 +36,36 @@ export function watchShowtime(
   };
 
   s.on(SEAT_UPDATE_EVENT, handler);
-  const join = () => s.emit(SEAT_JOIN_EVENT, { showtimeId });
-  join();
+  const count = roomWatchers.get(showtimeId) ?? 0;
+  roomWatchers.set(showtimeId, count + 1);
+  const join = () => {
+    s.emit(SEAT_JOIN_EVENT, { showtimeId });
+    onConnectionChange?.(true);
+  };
+  const disconnected = () => onConnectionChange?.(false);
+  if (s.connected && count === 0) s.emit(SEAT_JOIN_EVENT, { showtimeId });
+  onConnectionChange?.(s.connected);
   // Rejoin after a reconnect; the caller re-reads the full map separately (FR-022).
   s.on("connect", join);
+  s.on("disconnect", disconnected);
+  s.on("connect_error", disconnected);
 
+  let stopped = false;
   return () => {
+    if (stopped) return;
+    stopped = true;
     s.off(SEAT_UPDATE_EVENT, handler);
     s.off("connect", join);
-    s.emit(SEAT_LEAVE_EVENT, { showtimeId });
+    s.off("disconnect", disconnected);
+    s.off("connect_error", disconnected);
+    // A monitor and an editor can watch the same room. Closing one must not silence the other.
+    if (socket !== s) return;
+    const remaining = (roomWatchers.get(showtimeId) ?? 1) - 1;
+    if (remaining > 0) roomWatchers.set(showtimeId, remaining);
+    else {
+      roomWatchers.delete(showtimeId);
+      s.emit(SEAT_LEAVE_EVENT, { showtimeId });
+    }
   };
 }
 
@@ -50,4 +73,5 @@ export function watchShowtime(
 export function disconnectSeatSocket(): void {
   socket?.disconnect();
   socket = null;
+  roomWatchers.clear();
 }

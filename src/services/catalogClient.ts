@@ -61,7 +61,7 @@ async function get<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function authed<T>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
+async function authed<T>(path: string, opts: { method?: string; body?: unknown; signal?: AbortSignal } = {}): Promise<T> {
   // Refresh once on a 401 (same reason as holdsClient): an organizer or admin panel left open past
   // the access token's lifetime must not report itself as signed out.
   const res = await withAuthRetry((token) => {
@@ -72,6 +72,7 @@ async function authed<T>(path: string, opts: { method?: string; body?: unknown }
       method: opts.method ?? "GET",
       headers,
       credentials: "include",
+      signal: opts.signal,
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     });
   });
@@ -544,8 +545,8 @@ export const layoutApi = {
   // Showtime map — the only inventory-aware calls (FR-027..FR-029, FR-033..FR-035).
   /** The owner's read. Not `catalogClient.getSeatMap`, which is gated on public visibility and so
    *  returns nothing for the draft events an organizer is most often arranging. */
-  showtimeMap: (showtimeId: number) =>
-    authed<ShowtimeMap>(`/organizer/showtimes/${showtimeId}/seat-map`),
+  showtimeMap: (showtimeId: number, signal?: AbortSignal) =>
+    authed<ShowtimeMap>(`/organizer/showtimes/${showtimeId}/seat-map`, { signal }),
   reapplyPreview: (showtimeId: number) =>
     authed<ApplyPreview>(`/organizer/showtimes/${showtimeId}/seat-map/reapply`, {
       method: "POST",

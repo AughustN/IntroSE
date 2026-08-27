@@ -18,7 +18,6 @@ import { sectionOfCategory } from "../../services/eventSections";
 import Select from "../Select";
 import AiListingPanel from "./AiListingPanel";
 import { CancelEventModal } from "./CancelEventModal";
-import CheckInPanel from "./CheckInPanel";
 import EventPreviewOverlay from "./EventPreviewOverlay";
 import EventMediaEditor from "./EventMediaEditor";
 import EventFlowRail from "./EventFlowRail";
@@ -28,6 +27,9 @@ import OrganizerConcessionsTab from "./OrganizerConcessionsTab";
 import ShowtimeList from "./ShowtimeList";
 import { Refusal } from "./states";
 import { VN_PROVINCES } from "../../vnProvinces";
+import { useMutationConfirmation } from "./useMutationConfirmation";
+import { REVIEW_WARNING } from "./mutationConfirmation";
+import { useUnsavedChanges } from "../../hooks/useUnsavedChanges";
 
 const input =
   "h-10 min-w-0 w-full border-2 border-beige-kem/60 bg-surface-2 px-3 text-sm text-beige-kem outline-none focus:border-burgundy";
@@ -70,6 +72,7 @@ export default function EventEditor({
 
   /** An approved, on-sale event is the only one a save can pull out of the public catalog. */
   const isLive = event.moderation === "approved" && event.status === "on_sale";
+  const { confirmMutation, dialog: mutationDialog } = useMutationConfirmation(isLive);
 
   /*
    * Whether this event lands in the cinema band, asked of the same function the band asks.
@@ -138,14 +141,7 @@ export default function EventEditor({
     }
   };
 
-  /**
-   * Cancel, and settle every ticket sold.
-   *
-   * The dialog is closed on FAILURE as well as success. `CancelEventModal` latches its own
-   * `isSubmitting` and has no path back out of it, so leaving it open after a refusal would strand
-   * the organizer on a permanently disabled "Đang xử lý hủy…" button. Closing hands the refusal to
-   * `Refusal`, which is where every other server no in this screen already appears.
-   */
+  /** The modal owns failures, retaining the reason and enabling a retry. */
   const cancel = async (reason: string) => {
     setBusy(true);
     setRefusal(null);
@@ -161,9 +157,6 @@ export default function EventEditor({
           : "Đã hủy sự kiện. Không có vé nào cần hoàn.",
       );
       onRefresh();
-    } catch (e) {
-      setCancelOpen(false);
-      setRefusal((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -179,18 +172,13 @@ export default function EventEditor({
     return fields;
   };
 
-  const save = async () => {
+  const save = async (confirmReview = true): Promise<boolean> => {
     const fields = changedFields();
-    if (fields.length === 0) return;
+    if (fields.length === 0) return true;
+    if (busy) return false;
 
     // FR-042: tell the organizer BEFORE the event leaves the catalog, not after they notice.
-    if (isLive && isMaterialEdit(fields)) {
-      const ok = window.confirm(
-        "Lưu thay đổi này sẽ đưa sự kiện về trạng thái chờ duyệt lại và tạm ẩn khỏi trang công khai " +
-          "cho đến khi quản trị viên duyệt lại.\n\nVé đã bán và vé đang giữ không bị ảnh hưởng.\n\nTiếp tục?",
-      );
-      if (!ok) return;
-    }
+    if (confirmReview && !(await confirmMutation(fields))) return false;
 
     setBusy(true);
     setRefusal(null);
@@ -210,9 +198,11 @@ export default function EventEditor({
           : "Đã lưu thay đổi.",
       );
       onRefresh();
+      return true;
     } catch (e) {
       // The organizer's typing is deliberately NOT cleared on a refusal (FR-041).
       setRefusal((e as Error).message);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -297,8 +287,9 @@ export default function EventEditor({
       venueDraft.city !== boundVenue.city ||
       venueDraft.rawAddress !== boundVenue.rawAddress);
 
-  const saveVenue = async () => {
-    if (!boundVenue || !venueDirty || venueBusy) return;
+  const saveVenue = async (): Promise<boolean> => {
+    if (!boundVenue || !venueDirty) return true;
+    if (venueBusy) return false;
     setVenueBusy(true);
     setVenueNotice(null);
     setVenueRefusal(null);
@@ -310,13 +301,23 @@ export default function EventEditor({
       });
       setVenueNotice("Đã lưu địa điểm.");
       onRefresh();
+      return true;
     } catch (e) {
       // Its OWN refusal surface: a venue error must not appear inside the event-info card above.
       setVenueRefusal((e as Error).message);
+      return false;
     } finally {
       setVenueBusy(false);
     }
   };
+
+  const { requestLeave, dialog: leaveDialog } = useUnsavedChanges({
+    dirty: !cancelled && (changedFields().length > 0 || venueDirty),
+    busy: busy || venueBusy,
+    // The exit dialog already explains the review consequence; do not stack another dialog.
+    save: async () => (await save(false)) && (await saveVenue()),
+    warning: isLive && isMaterialEdit(changedFields()) ? REVIEW_WARNING : undefined,
+  });
 
   const steps = flowSteps(event, rows);
 
@@ -345,11 +346,19 @@ export default function EventEditor({
     else showtimesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  if (cancelled) return <div className="space-y-4">
-    <button type="button" onClick={onBack} className={ghost}>← Quay lại sự kiện</button>
-    <h2 className="font-display text-2xl">{event.title}</h2>
-    <p className="text-ink-soft">Sự kiện đã kết thúc hoặc đã hủy. Dữ liệu được giữ để đối soát, không thể chỉnh sửa hay đăng bán lại.</p>
-  </div>;
+  if (cancelled)
+    return (
+      <div className="space-y-4">
+        <button type="button" onClick={onBack} className={ghost}>
+          ← Quay lại sự kiện
+        </button>
+        <h2 className="font-display text-2xl">{event.title}</h2>
+        <p className="text-ink-soft">
+          Sự kiện đã kết thúc hoặc đã hủy. Dữ liệu được giữ để đối soát, không thể chỉnh sửa hay
+          đăng bán lại.
+        </p>
+      </div>
+    );
 
   return (
     <div className="min-w-0 space-y-5">
@@ -358,11 +367,11 @@ export default function EventEditor({
             rather than a boxed button, since this is navigation, not an action taken on the page. */}
         <button
           type="button"
-          onClick={onBack}
+          onClick={() => requestLeave(onBack)}
           className="inline-flex min-h-10 items-center gap-2 px-2 text-sm font-bold text-ink-soft transition-colors hover:text-beige-kem focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-burgundy focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
         >
           <ArrowLeft aria-hidden className="h-3.5 w-3.5" />
-          Danh sách sự kiện
+          Quay lại sự kiện
         </button>
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
           {event.eventType === "seated" && (
@@ -381,7 +390,11 @@ export default function EventEditor({
                 Ngừng bán
               </button>
             ) : (
-              <button onClick={submitForReview} disabled={busy || ["flagged", "removed"].includes(event.moderation)} className={btn}>
+              <button
+                onClick={submitForReview}
+                disabled={busy || ["flagged", "removed"].includes(event.moderation)}
+                className={btn}
+              >
                 Gửi duyệt
               </button>
             ))}
@@ -400,15 +413,6 @@ export default function EventEditor({
       {/* The glance, above the work: one line saying what still blocks this event and the button
           that fixes it. The rail beside the content below remains the detailed reading. */}
       <FlowProgressStrip steps={steps} onAction={runAction} />
-
-      {/*
-        Its own row, not another chip in the bar above: collapsed it is one button, but open it is a
-        camera, a running log and a card, and a flex item cannot hold that.
-
-        Shown only while the event is selling. A draft has no tickets to admit and a cancelled one
-        has none still good — a scanner there is a door onto an empty room.
-      */}
-      {onSale && <CheckInPanel eventTitle={event.title} onCheckedIn={onRefresh} />}
 
       {/*
         Rail beside the work, not above it: the steps stay legible while the organizer edits, which is
@@ -537,7 +541,7 @@ export default function EventEditor({
             )}
 
             <button
-              onClick={save}
+              onClick={() => void save()}
               disabled={cancelled || busy || changedFields().length === 0}
               className={`${btn} mt-4`}
             >
@@ -659,7 +663,13 @@ export default function EventEditor({
               eventId={event.id}
               venues={venues}
               preferredVenueId={event.venueId ?? undefined}
-              onChanged={() => {
+              isLive={isLive}
+              onChanged={(returnedToReview) => {
+                setNotice(
+                  returnedToReview
+                    ? "Đã lưu. Sự kiện đang chờ duyệt lại và tạm ẩn khỏi trang công khai."
+                    : "Đã cập nhật suất chiếu / hạng vé.",
+                );
                 onRefresh();
                 // The rail reads showtimes, tiers and the chart binding — all of which this list edits.
                 loadRows();
@@ -685,10 +695,12 @@ export default function EventEditor({
           eventTitle={event.title}
           soldTicketsCount={soldTickets}
           totalRefundAmountVnd={refundEstimate}
-          onConfirm={(reason) => void cancel(reason)}
+          onConfirm={cancel}
           onClose={() => setCancelOpen(false)}
         />
       )}
+      {mutationDialog}
+      {leaveDialog}
     </div>
   );
 }

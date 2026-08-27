@@ -191,9 +191,12 @@ const closeButton =
 const statusButton =
   "flex h-8 items-center gap-1.5 whitespace-nowrap border border-beige-kem/35 px-2 font-mono text-xs font-bold text-beige-kem/80 transition hover:border-beige-kem hover:text-beige-kem";
 
-/** Compact semantic badge used for lifecycle, save, and validation status in the editor header. */
+/**
+ * Lifecycle and save state are information, not controls. Keep them as coloured text so the editor
+ * header reserves boxes for actions the organizer can actually press.
+ */
 const headerStatus =
-  "inline-flex min-h-6 items-center border px-2.5 py-0.5 font-mono text-[10px] font-bold leading-none";
+  "inline-flex min-h-6 items-center font-mono text-[10px] font-bold leading-none";
 
 const ALIGN_EDGES: readonly BlockAlignEdge[] = [
   "left",
@@ -1881,7 +1884,11 @@ export default function ChartEditor({
       next,
       // All-or-nothing: a table whose seats are sold refuses (FR-051/FR-052), and the sequential
       // loop this replaces would already have deleted the ones before it.
-      () => layoutApi.deleteTables(layout.id, tables.map((t) => t.tableId)),
+      () =>
+        layoutApi.deleteTables(
+          layout.id,
+          tables.map((t) => t.tableId),
+        ),
       tables.length > 1 ? "Đã xoá các bàn." : `Đã xoá ${tables[0].title}.`,
     );
   };
@@ -2565,13 +2572,9 @@ export default function ChartEditor({
           {draft.categories.length} hạng ghế
         </span>
         {layout.status === "ready" ? (
-          <span className={`${headerStatus} border-la-co/60 bg-la-co/20 text-beige-kem`}>
-            Đã phát hành
-          </span>
+          <span className={`${headerStatus} text-la-co-ink`}>Đã phát hành</span>
         ) : (
-          <span className={`${headerStatus} border-beige-kem/25 bg-beige-kem/10 text-beige-kem/85`}>
-            Bản nháp
-          </span>
+          <span className={`${headerStatus} text-beige-kem/70`}>Bản nháp</span>
         )}
         {/*
           The save state (§29), as one badge that always says the true thing.
@@ -2584,12 +2587,12 @@ export default function ChartEditor({
           aria-live="polite"
           className={`${headerStatus} ${
             busy
-              ? "border-beige-kem/25 bg-surface-2 text-beige-kem/75"
+              ? "text-beige-kem/75"
               : !online
-                ? "border-cam-dat/70 bg-cam-dat/25 text-cam-dat-ink"
+                ? "text-cam-dat-ink"
                 : dirty
-                  ? "border-cam-dat/70 bg-cam-dat/25 text-cam-dat-ink"
-                  : "border-la-co/60 bg-la-co/20 text-beige-kem"
+                  ? "text-cam-dat-ink"
+                  : "text-la-co-ink"
           }`}
           title={
             !online
@@ -2614,18 +2617,12 @@ export default function ChartEditor({
                   : "Đã lưu"}
         </span>
         {blocking.length > 0 ? (
-          <span className={`${headerStatus} border-burgundy/60 bg-bubblegum text-on-tint`}>
-            {blocking.length} vấn đề
-          </span>
+          <span className={`${headerStatus} text-burgundy-ink`}>{blocking.length} vấn đề</span>
         ) : (
-          <span className={`${headerStatus} border-la-co/60 bg-la-co/20 text-beige-kem`}>
-            Hợp lệ
-          </span>
+          <span className={`${headerStatus} text-la-co-ink`}>Hợp lệ</span>
         )}
         {warningCount > 0 && (
-          <span className={`${headerStatus} border-cam-dat/70 bg-cam-dat/25 text-cam-dat-ink`}>
-            {warningCount} lưu ý
-          </span>
+          <span className={`${headerStatus} text-cam-dat-ink`}>{warningCount} lưu ý</span>
         )}
 
         {/*

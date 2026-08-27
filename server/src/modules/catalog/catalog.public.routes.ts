@@ -7,19 +7,13 @@ import { listCategories } from '../admin/admin.repo.js';
 import { getEventDetail, getSeatMap, getShowtimes, listEvents, listFeaturedEvents, searchEventsSemantic } from './catalog.repo.js';
 import { reportEvent } from './report.service.js';
 import { generateTimingTicket } from '../../services/timingTicket.js';
-import { createSlidingRateLimiter } from '../../middleware/rateLimit.js';
+import { catalogRateLimit } from './catalog.throttle.js';
 
 // Public catalog reads — no auth. Every query composes the live visibility predicate (R-1).
 export const catalogPublicRouter = Router();
 
-const catalogRateLimit = createSlidingRateLimiter('catalog:ip', {
-  windowMs: 60 * 100000, // Test, remember to return 1000 for production
-  max: 60000, // Test, remember to return 60 for production
-  errorMessage: 'Quá nhiều yêu cầu tải danh mục. Vui lòng thử lại sau giây lát.',
-  headers: true,
-});
-
-catalogPublicRouter.use(catalogRateLimit);
+// This router is mounted at /api before organizer/payment routes. A router-wide limiter would
+// count requests it never handles, and would charge them again when the next public router runs.
 
 const asyncH =
   (fn: (req: Request, res: Response) => Promise<void>) => (req: Request, res: Response, next: NextFunction) =>
@@ -42,14 +36,15 @@ const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim
  * 287 events' worth — were unreachable to anyone creating an event, and a category an Admin added
  * through the console appeared to save and was then invisible everywhere.
  */
-catalogPublicRouter.get('/categories', asyncH(async (_req, res) => { res.json(await listCategories()); }));
+catalogPublicRouter.get('/categories', catalogRateLimit, asyncH(async (_req, res) => { res.json(await listCategories()); }));
 
 // GET /api/events/featured
-catalogPublicRouter.get('/events/featured', asyncH(async (_req, res) => { res.json(await listFeaturedEvents()); }));
+catalogPublicRouter.get('/events/featured', catalogRateLimit, asyncH(async (_req, res) => { res.json(await listFeaturedEvents()); }));
 
 // GET /api/events/search/semantic — vector embedding + lexical RRF search
 catalogPublicRouter.get(
   '/events/search/semantic',
+  catalogRateLimit,
   asyncH(async (req, res) => {
     const q = str(req.query.q);
     if (!q) {
@@ -66,6 +61,7 @@ catalogPublicRouter.get(
 // GET /api/events (US1)
 catalogPublicRouter.get(
   '/events',
+  catalogRateLimit,
   asyncH(async (req, res) => {
     const q = req.query;
     const result = await listEvents({
@@ -87,6 +83,7 @@ catalogPublicRouter.get(
 // GET /api/events/:slug (US2) — 404 also for drafts/pending/removed (never leaked, FR-009/SC-004)
 catalogPublicRouter.get(
   '/events/:slug',
+  catalogRateLimit,
   asyncH(async (req, res) => {
     const detail = await getEventDetail(req.params.slug);
     if (!detail) throw err.notFound('not_found', 'Không tìm thấy sự kiện.');
@@ -98,6 +95,7 @@ catalogPublicRouter.get(
 // GET /api/events/:id/showtimes (US2/US3)
 catalogPublicRouter.get(
   '/events/:id/showtimes',
+  catalogRateLimit,
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) throw err.notFound('not_found');
@@ -109,6 +107,7 @@ catalogPublicRouter.get(
 // GET /api/showtimes/:id/seat-map (US3) — read-only; selecting requires login (later feature)
 catalogPublicRouter.get(
   '/showtimes/:id/seat-map',
+  catalogRateLimit,
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) throw err.notFound('not_found');
@@ -163,6 +162,7 @@ catalogPublicRouter.get(
  */
 catalogPublicRouter.get(
   '/showtimes/:id/seat-map/geometry',
+  catalogRateLimit,
   asyncH(async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) throw err.notFound('not_found');
@@ -193,6 +193,7 @@ catalogPublicRouter.get(
 const reportBody = z.object({ reason: z.string().trim().min(1).max(2000) }).strict();
 catalogPublicRouter.post(
   '/events/:id/report',
+  catalogRateLimit,
   requireAuth,
   validate(reportBody),
   asyncH(async (req, res) => {

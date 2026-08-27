@@ -1,6 +1,6 @@
 import { type NextFunction, type Request, type Response, Router } from "express";
 import { pool } from "../../db/pool.js";
-import { createSlidingRateLimiter } from "../../middleware/rateLimit.js";
+import { catalogRateLimit } from "../catalog/catalog.throttle.js";
 import { listPublicByEvent } from "./concessions.repo.js";
 
 /**
@@ -13,15 +13,6 @@ import { listPublicByEvent } from "./concessions.repo.js";
  */
 export const concessionsPublicRouter = Router();
 
-const concessionsRateLimit = createSlidingRateLimiter("catalog:ip", {
-  windowMs: 60 * 1000,
-  max: 60,
-  errorMessage: "Quá nhiều yêu cầu tải danh mục. Vui lòng thử lại sau giây lát.",
-  headers: true,
-});
-
-concessionsPublicRouter.use(concessionsRateLimit);
-
 const asyncH =
   (fn: (req: Request, res: Response) => Promise<void>) =>
   (req: Request, res: Response, next: NextFunction) =>
@@ -30,6 +21,7 @@ const asyncH =
 // GET /api/catalog/events/:eventId/concessions
 concessionsPublicRouter.get(
   "/catalog/events/:eventId/concessions",
+  catalogRateLimit,
   asyncH(async (req, res) => {
     const eventId = Number(req.params.eventId);
     // A malformed id is not a refusal worth remembering: an event id that is not a number can
