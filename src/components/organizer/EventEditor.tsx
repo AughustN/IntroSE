@@ -564,20 +564,16 @@ export default function EventEditor({
                     Sự kiện này chưa gán địa điểm. Chọn một địa điểm của bạn — mọi suất chiếu hiện
                     có sẽ chuyển theo.
                   </p>
-                  <select
-                    value={bindChoice}
-                    onChange={(e) => setBindChoice(Number(e.target.value) || "")}
-                    className={input}
-                  >
-                    <option value="" className="bg-surface-2">
-                      Chọn địa điểm
-                    </option>
-                    {venues.map((v) => (
-                      <option key={v.id} value={v.id} className="bg-surface-2">
-                        {v.name} · {v.city}
-                      </option>
-                    ))}
-                  </select>
+                  <Select
+                    value={bindChoice === "" ? "" : String(bindChoice)}
+                    options={venues.map((v) => ({
+                      value: String(v.id),
+                      label: `${v.name} · ${v.city}`,
+                    }))}
+                    placeholder="Chọn địa điểm"
+                    onChange={(val) => setBindChoice(Number(val) || "")}
+                    triggerClassName={input}
+                  />
                   <button
                     onClick={() => void bindVenue()}
                     disabled={!bindChoice || venueBusy}
@@ -608,17 +604,15 @@ export default function EventEditor({
                   <div className="mt-3 grid gap-3 sm:grid-cols-[12rem_minmax(0,1fr)]">
                     <label className="block">
                       <span className={label}>Thành phố</span>
-                      <select
+                      <Select
                         value={venueDraft.city}
-                        onChange={(e) => setVenueDraft((v) => ({ ...v, city: e.target.value }))}
-                        className={input}
-                      >
-                        {VN_PROVINCES.map((p) => (
-                          <option key={p} value={p} className="bg-surface-2">
-                            {p === "TP.HCM" ? "TP. Hồ Chí Minh" : p}
-                          </option>
-                        ))}
-                      </select>
+                        options={VN_PROVINCES.map((p) => ({
+                          value: p,
+                          label: p === "TP.HCM" ? "TP. Hồ Chí Minh" : p,
+                        }))}
+                        onChange={(val) => setVenueDraft((v) => ({ ...v, city: val }))}
+                        triggerClassName={input}
+                      />
                     </label>
                     <label className="block">
                       <span className={label}>Địa chỉ chi tiết</span>

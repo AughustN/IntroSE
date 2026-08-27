@@ -13,7 +13,12 @@ import AccountPage from "./components/account/AccountPage";
 import SeatMapLibrary from "./components/seatmap/SeatMapLibrary";
 import ResetPassword from "./components/ResetPassword";
 import type { Me } from "@/shared/auth/types";
-import { UNKNOWN_CITY, type EventCard, type EventDetail as CatalogEventDetail, type Showtime } from "@/shared/catalog/types";
+import {
+  UNKNOWN_CITY,
+  type EventCard,
+  type EventDetail as CatalogEventDetail,
+  type Showtime,
+} from "@/shared/catalog/types";
 import { authClient } from "./services/authClient";
 import { catalogClient } from "./services/catalogClient";
 import { aiClient } from "./services/aiClient";
@@ -392,7 +397,9 @@ export default function App() {
   const [waitingRoomShowtimeId, setWaitingRoomShowtimeId] = useState<number | null>(null);
   const [queueTokens, setQueueTokens] = useState<Record<number, string>>({});
   const [turnstileTokens, setTurnstileTokens] = useState<Record<number, string>>({});
-  const pendingHoldActionRef = useRef<((qToken: string, cToken?: string) => Promise<void>) | null>(null);
+  const pendingHoldActionRef = useRef<((qToken: string, cToken?: string) => Promise<void>) | null>(
+    null,
+  );
 
   /*
    * Every way the drop gate can turn a buyer away, and the one answer to all of them: queue again.
@@ -415,7 +422,10 @@ export default function App() {
     "captcha_failed",
   ];
 
-  const reQueue = (showtimeId: number, action: (qToken: string, cToken?: string) => Promise<void>) => {
+  const reQueue = (
+    showtimeId: number,
+    action: (qToken: string, cToken?: string) => Promise<void>,
+  ) => {
     setQueueTokens((prev) => {
       const next = { ...prev };
       delete next[showtimeId];
@@ -1001,9 +1011,12 @@ export default function App() {
        * and a ticket list of unknown ownership is exactly the thing this change exists to stop
        * showing. Losing a cache costs one fetch; guessing wrong costs somebody's privacy.
        */
-      [BOOKINGS_CACHE_KEY, WISHLIST_CACHE_KEY, ...LEGACY_BOOKINGS_CACHE_KEYS, LEGACY_WISHLIST_CACHE_KEY].forEach(
-        (key) => localStorage.removeItem(key),
-      );
+      [
+        BOOKINGS_CACHE_KEY,
+        WISHLIST_CACHE_KEY,
+        ...LEGACY_BOOKINGS_CACHE_KEYS,
+        LEGACY_WISHLIST_CACHE_KEY,
+      ].forEach((key) => localStorage.removeItem(key));
 
       const cachedBookings = bookingsKey ? localStorage.getItem(bookingsKey) : null;
       const cachedWishlist = wishlistKey ? localStorage.getItem(wishlistKey) : null;
@@ -1451,7 +1464,16 @@ export default function App() {
 
       return matchesSearch && matchesCategory && matchesDate && matchesCity && matchesAvailability;
     });
-  }, [events, activeCategories, activeCities, activeDate, availabilities, searchQuery, semanticSlugs, semanticEvents]);
+  }, [
+    events,
+    activeCategories,
+    activeCities,
+    activeDate,
+    availabilities,
+    searchQuery,
+    semanticSlugs,
+    semanticEvents,
+  ]);
 
   /**
    * How far the price slider reaches: the dearest ticket still on the table.
@@ -1792,13 +1814,17 @@ export default function App() {
         try {
           const active = await holdsClient.active(showtimeId);
           if (active) {
+            // Standing zones are held as GA quantities even on a seated event — the reservation's
+            // own lines say which half it is, not the event's type.
+            const gaOnly =
+              active.items.length > 0 && active.items.every((i) => i.showtimeSeatId === null);
             setHold(
               sessionFromReservation(active, {
                 eventId: selectedMovie.id,
                 eventTitle: selectedMovie.title,
                 selectedDate: date,
                 selectedTime: time,
-                mode: "seated",
+                mode: gaOnly ? "ga" : "seated",
               }),
             );
           }
@@ -1929,13 +1955,32 @@ export default function App() {
     };
     const mine = hold?.seats.some((s) => s.showtimeSeatId === seat.showtimeSeatId) ?? false;
 
+    // A reservation is seats OR standing, never both (feature 003). Picking a seat while holding
+    // standing tickets is asking to replace them, so it confirms first — the same shape as the
+    // switch-showtime confirmation above the map's own logic.
+    let base: HoldSession | null = hold;
+    if (!mine && base && base.mode === "ga" && base.seats.length > 0) {
+      const switching = await askConfirm({
+        title: "Đổi sang chọn ghế?",
+        message:
+          "Bạn đang giữ vé đứng cho suất này. Chọn ghế sẽ hủy số vé đứng đang giữ — một đơn " +
+          "không gồm cả ghế lẫn vé đứng.",
+        confirmLabel: "Hủy vé đứng và chọn ghế",
+        cancelLabel: "Giữ vé đứng",
+        tone: "danger",
+      });
+      if (!switching) return;
+      await releaseHold(base);
+      base = null;
+    }
+
     const executeToggle = async (qToken?: string, cToken?: string) => {
       setHoldBusy(true);
       try {
         const activeQToken = qToken || queueTokens[bookingShowtimeId];
         const activeCToken = cToken || turnstileTokens[bookingShowtimeId];
-        if (mine && hold) {
-          const updated = await holdsClient.release(hold.reservationId, [seat.showtimeSeatId!]);
+        if (mine && base) {
+          const updated = await holdsClient.release(base.reservationId, [seat.showtimeSeatId!]);
           if (updated.items.length === 0) {
             setHold(null);
             setQueueTokens((prev) => {
@@ -1952,8 +1997,12 @@ export default function App() {
             setHold(sessionFromReservation(updated, context));
           }
         } else {
-          const updated = hold
-            ? await holdsClient.add(hold.reservationId, { seatIds: [seat.showtimeSeatId!], queueToken: activeQToken, turnstileToken: activeCToken })
+          const updated = base
+            ? await holdsClient.add(base.reservationId, {
+                seatIds: [seat.showtimeSeatId!],
+                queueToken: activeQToken,
+                turnstileToken: activeCToken,
+              })
             : await holdsClient.hold({
                 showtimeId: bookingShowtimeId,
                 seatIds: [seat.showtimeSeatId!],
@@ -1977,7 +2026,7 @@ export default function App() {
       }
     };
 
-    if (selectedMovie.isHighDemand && !mine && !hold && !queueTokens[bookingShowtimeId]) {
+    if (selectedMovie.isHighDemand && !mine && !base && !queueTokens[bookingShowtimeId]) {
       pendingHoldActionRef.current = executeToggle;
       setWaitingRoomShowtimeId(bookingShowtimeId);
       return;
@@ -2008,10 +2057,28 @@ export default function App() {
       selectedTime: bookingTime,
       mode: "seated" as const,
     };
+
+    // Same either-or as picking one seat: the whole run replaces a standing hold, after asking.
+    let base: HoldSession | null = hold;
+    if (base && base.mode === "ga" && base.seats.length > 0) {
+      const switching = await askConfirm({
+        title: "Đổi sang chọn ghế?",
+        message:
+          "Bạn đang giữ vé đứng cho suất này. Chọn ghế sẽ hủy số vé đứng đang giữ — một đơn " +
+          "không gồm cả ghế lẫn vé đứng.",
+        confirmLabel: "Hủy vé đứng và chọn ghế",
+        cancelLabel: "Giữ vé đứng",
+        tone: "danger",
+      });
+      if (!switching) return;
+      await releaseHold(base);
+      base = null;
+    }
+
     setHoldBusy(true);
     try {
-      const updated = hold
-        ? await holdsClient.add(hold.reservationId, { seatIds })
+      const updated = base
+        ? await holdsClient.add(base.reservationId, { seatIds })
         : await holdsClient.hold({ showtimeId: bookingShowtimeId, seatIds });
       setHold(sessionFromReservation(updated, context));
     } catch (e) {
@@ -2064,6 +2131,30 @@ export default function App() {
         await releaseHold(current);
       }
 
+      // The same either-or from the standing side: a press that ADDS quantity while seats are held
+      // is asking to replace them, so it confirms first. Decrements never replace anything — they
+      // only give standing tickets back — so they pass without a word.
+      const seatedCurrent = holdRef.current;
+      if (
+        delta > 0 &&
+        seatedCurrent &&
+        seatedCurrent.showtimeId === showtimeId &&
+        seatedCurrent.mode === "seated" &&
+        seatedCurrent.seats.length > 0
+      ) {
+        const switching = await askConfirm({
+          title: "Đổi sang vé đứng?",
+          message:
+            "Bạn đang giữ ghế cho suất này. Thêm vé đứng sẽ hủy số ghế đang giữ — một đơn " +
+            "không gồm cả ghế lẫn vé đứng.",
+          confirmLabel: "Hủy ghế và mua vé đứng",
+          cancelLabel: "Giữ ghế",
+          tone: "danger",
+        });
+        if (!switching) return;
+        await releaseHold(seatedCurrent);
+      }
+
       const live = holdRef.current;
       if (delta < 0 && !live) return;
 
@@ -2104,8 +2195,19 @@ export default function App() {
             }
           } else {
             const updated = live
-              ? await holdsClient.add(live.reservationId, { ticketTierId: tierId, quantity: delta, queueToken: activeQToken, turnstileToken: activeCToken })
-              : await holdsClient.hold({ showtimeId, ticketTierId: tierId, quantity: delta, queueToken: activeQToken, turnstileToken: activeCToken });
+              ? await holdsClient.add(live.reservationId, {
+                  ticketTierId: tierId,
+                  quantity: delta,
+                  queueToken: activeQToken,
+                  turnstileToken: activeCToken,
+                })
+              : await holdsClient.hold({
+                  showtimeId,
+                  ticketTierId: tierId,
+                  quantity: delta,
+                  queueToken: activeQToken,
+                  turnstileToken: activeCToken,
+                });
             setHold(updated.status === "active" ? sessionFromReservation(updated, context) : null);
           }
 
@@ -2186,7 +2288,7 @@ export default function App() {
               })),
               voucher: order.voucher,
             }
-        : {}),
+          : {}),
       };
 
       saveBookingToHistory(newBooking);
@@ -2452,411 +2554,430 @@ export default function App() {
             <p className="px-6 py-24 text-center font-meta text-body text-ink-soft">Đang tải…</p>
           }
         >
-        {activeScreen === "home" && (
-          <>
+          {activeScreen === "home" && (
+            <>
+              <HeroVideo
+                movie={landingHero}
+                onBookNow={() => void handleStartBookingInput(landingHero)}
+                // Undefined when the hero must not rotate, which is also what makes the video loop.
+                onTrailerEnded={heroRotates ? advanceHero : undefined}
+              />
+              {/*
+               * The curated ten on the moving band, then one band per kind of event.
+               *
+               * The landing page used to be a filter strip over one long grid, which made the first
+               * thing on it a form: the reader had to say what they wanted before the page would show
+               * them anything worth wanting. Named bands answer in the other direction, and the filter
+               * work moves to `/events` — the screen a reader who already knows goes to.
+               */}
+              <EventTicker
+                events={tickerEvents}
+                onSelect={(movie) => void handleStartBookingInput(movie)}
+                onViewAll={() => void leaveFlow(() => goTo("browse"))}
+              />
+
+              {landingSections.map((section) => (
+                <CategoryRow
+                  key={section.id}
+                  title={section.title}
+                  eyebrow={section.eyebrow}
+                  events={section.events}
+                  emptyNote={section.emptyNote}
+                  // Cinema gets the reel treatment: rails, a centred head, portrait posters. Keyed on
+                  // the band, not on a category code — `sectionOfCategory` already decided which of
+                  // the catalogue's admin-created categories count as film.
+                  film={section.id === "movie"}
+                  tabs={section.tabs}
+                  // No link out of an empty band: `/events` filtered to nothing is a blank page with
+                  // no way to tell it from a broken one.
+                  onViewMore={
+                    section.codes.length > 0 ? () => openCategorySection(section.codes) : undefined
+                  }
+                  // The mark says "this is the one playing above", so it follows `landingHero` — which
+                  // is not always `heroMovie` now that a shortlist or a paid slot can decide it.
+                  selectedEvent={landingHero}
+                  onSelectEvent={handleSelectEventForTrailer}
+                  onBookNow={(movie) => void handleStartBookingInput(movie)}
+                  wishlistedIds={wishlistedIds}
+                  onToggleWishlist={handleToggleWishlist}
+                />
+              ))}
+            </>
+          )}
+
+          {/*
+           * The catalog page opens on the same trailer the landing page does, in its plain variant:
+           * one big picture in a fixed band, no television around it and no scroll choreography. It
+           * is what the reference puts at the top of a collection — a full-bleed image carrying the
+           * section's title — and it means `/events` no longer starts cold on a row of filters.
+           */}
+          {activeScreen === "browse" && (
             <HeroVideo
-              movie={landingHero}
-              onBookNow={() => void handleStartBookingInput(landingHero)}
-              // Undefined when the hero must not rotate, which is also what makes the video loop.
-              onTrailerEnded={heroRotates ? advanceHero : undefined}
+              variant="plain"
+              movie={heroMovie}
+              onBookNow={() => void handleStartBookingInput(heroMovie)}
             />
-            {/*
-             * The curated ten on the moving band, then one band per kind of event.
-             *
-             * The landing page used to be a filter strip over one long grid, which made the first
-             * thing on it a form: the reader had to say what they wanted before the page would show
-             * them anything worth wanting. Named bands answer in the other direction, and the filter
-             * work moves to `/events` — the screen a reader who already knows goes to.
-             */}
-            <EventTicker
-              events={tickerEvents}
-              onSelect={(movie) => void handleStartBookingInput(movie)}
-              onViewAll={() => void leaveFlow(() => goTo("browse"))}
+          )}
+
+          {/*
+           * The filtered catalog, and the only screen that carries a filter at all.
+           *
+           * The landing page used to run the same grid under a horizontal filter strip. It no longer
+           * does — it is a stack of curated bands — so the rail beside this grid is the whole filter
+           * surface of the app, and `EventFilters` has one shape in use rather than two.
+           */}
+          {activeScreen === "browse" && (
+            <EventGrid
+              events={filteredEvents}
+              variant="catalog"
+              // Pages of 24 — two full rows of four beside the rail, eight without it.
+              pageSize={24}
+              selectedEvent={heroMovie}
+              onSelectEvent={handleSelectEventForTrailer}
+              onBookNow={(movie) => void handleStartBookingInput(movie)}
+              wishlistedIds={wishlistedIds}
+              onToggleWishlist={handleToggleWishlist}
+              // The rail is handed to the grid rather than placed beside it, so the two share one
+              // measure instead of two that have to be kept equal by hand.
+              sidebar={
+                <EventFilters
+                  resultCount={filteredEvents.length}
+                  activeCategories={activeCategories}
+                  onCategoryChange={(value) =>
+                    void goCatalogAfterFilter(() => setActiveCategories(toggleFilterValue(value)))
+                  }
+                  activeDate={activeDate}
+                  dateOptions={dateOptions}
+                  categoryOptions={categoryOptions}
+                  cityOptions={cityOptions}
+                  onDateChange={(value) => void goCatalogAfterFilter(() => setActiveDate(value))}
+                  activeCities={activeCities}
+                  onCityChange={(value) =>
+                    void goCatalogAfterFilter(() => setActiveCities(toggleFilterValue(value)))
+                  }
+                  maxPrice={maxPrice}
+                  priceCeiling={priceCeiling}
+                  onMaxPriceChange={(value) => void goCatalogAfterFilter(() => setMaxPrice(value))}
+                  availabilities={availabilities}
+                  onAvailabilityChange={(value) =>
+                    void goCatalogAfterFilter(() => setAvailabilities(toggleFilterValue(value)))
+                  }
+                  /*
+                   * The search box is deliberately not cleared here. It lives in the nav, above this
+                   * rail and outside it, and wiping a query the reader can still see typed up there
+                   * from a control down here reads as a bug rather than as a reset.
+                   */
+                  onResetFilters={() =>
+                    void goCatalogAfterFilter(() => {
+                      setActiveCategories([]);
+                      setActiveDate(null);
+                      setActiveCities([]);
+                      setAvailabilities([]);
+                      setMaxPrice(null);
+                    })
+                  }
+                />
+              }
             />
+          )}
 
-            {landingSections.map((section) => (
-              <CategoryRow
-                key={section.id}
-                title={section.title}
-                eyebrow={section.eyebrow}
-                events={section.events}
-                emptyNote={section.emptyNote}
-                // Cinema gets the reel treatment: rails, a centred head, portrait posters. Keyed on
-                // the band, not on a category code — `sectionOfCategory` already decided which of
-                // the catalogue's admin-created categories count as film.
-                film={section.id === "movie"}
-                tabs={section.tabs}
-                // No link out of an empty band: `/events` filtered to nothing is a blank page with
-                // no way to tell it from a broken one.
-                onViewMore={
-                  section.codes.length > 0 ? () => openCategorySection(section.codes) : undefined
-                }
-                // The mark says "this is the one playing above", so it follows `landingHero` — which
-                // is not always `heroMovie` now that a shortlist or a paid slot can decide it.
-                selectedEvent={landingHero}
-                onSelectEvent={handleSelectEventForTrailer}
-                onBookNow={(movie) => void handleStartBookingInput(movie)}
-                wishlistedIds={wishlistedIds}
-                onToggleWishlist={handleToggleWishlist}
-              />
-            ))}
-          </>
-        )}
+          {activeScreen === "detail" && (
+            <EventDetail
+              event={selectedMovie}
+              showtimes={showtimes}
+              isSignedIn={isSignedIn}
+              relatedEvents={relatedEvents}
+              wishlistedIds={wishlistedIds}
+              onBack={goHome}
+              /* A place in a queue belongs to an account, so joining asks a guest to sign in first. */
+              onRequireSignIn={runSignedIn}
+              onNotice={(tone, message) => pushToast(tone === "ok" ? "success" : "error", message)}
+              onOpenReviews={() => goTo("reviews", { eventSlug: selectedMovie.id })}
+              onToggleWishlist={handleToggleWishlist}
+              onBookRelated={(movie) => void handleStartBookingInput(movie)}
+              onProceedToSeatSelection={handleProceedToSeats}
+              onProceedToCheckout={handleProceedToCheckout}
+              // General admission holds as it steps, so this screen owns a live reservation and needs
+              // the clock and the busy flag that used to belong only to the seat map.
+              heldQuantities={
+                hold?.mode === "ga" && hold.eventId === selectedMovie.id
+                  ? (hold.quantities ?? {})
+                  : {}
+              }
+              onAdjustQuantity={handleAdjustGaQuantity}
+              holdBusy={holdBusy}
+              holdRemainingMs={hold?.mode === "ga" ? holdRemainingMs : 0}
+            />
+          )}
 
-        {/*
-         * The catalog page opens on the same trailer the landing page does, in its plain variant:
-         * one big picture in a fixed band, no television around it and no scroll choreography. It
-         * is what the reference puts at the top of a collection — a full-bleed image carrying the
-         * section's title — and it means `/events` no longer starts cold on a row of filters.
-         */}
-        {activeScreen === "browse" && (
-          <HeroVideo
-            variant="plain"
-            movie={heroMovie}
-            onBookNow={() => void handleStartBookingInput(heroMovie)}
-          />
-        )}
-
-        {/*
-         * The filtered catalog, and the only screen that carries a filter at all.
-         *
-         * The landing page used to run the same grid under a horizontal filter strip. It no longer
-         * does — it is a stack of curated bands — so the rail beside this grid is the whole filter
-         * surface of the app, and `EventFilters` has one shape in use rather than two.
-         */}
-        {activeScreen === "browse" && (
-          <EventGrid
-            events={filteredEvents}
-            variant="catalog"
-            // Pages of 24 — two full rows of four beside the rail, eight without it.
-            pageSize={24}
-            selectedEvent={heroMovie}
-            onSelectEvent={handleSelectEventForTrailer}
-            onBookNow={(movie) => void handleStartBookingInput(movie)}
-            wishlistedIds={wishlistedIds}
-            onToggleWishlist={handleToggleWishlist}
-            // The rail is handed to the grid rather than placed beside it, so the two share one
-            // measure instead of two that have to be kept equal by hand.
-            sidebar={
-              <EventFilters
-                resultCount={filteredEvents.length}
-                activeCategories={activeCategories}
-                onCategoryChange={(value) =>
-                  void goCatalogAfterFilter(() => setActiveCategories(toggleFilterValue(value)))
-                }
-                activeDate={activeDate}
-                dateOptions={dateOptions}
-                categoryOptions={categoryOptions}
-                cityOptions={cityOptions}
-                onDateChange={(value) => void goCatalogAfterFilter(() => setActiveDate(value))}
-                activeCities={activeCities}
-                onCityChange={(value) =>
-                  void goCatalogAfterFilter(() => setActiveCities(toggleFilterValue(value)))
-                }
-                maxPrice={maxPrice}
-                priceCeiling={priceCeiling}
-                onMaxPriceChange={(value) => void goCatalogAfterFilter(() => setMaxPrice(value))}
-                availabilities={availabilities}
-                onAvailabilityChange={(value) =>
-                  void goCatalogAfterFilter(() => setAvailabilities(toggleFilterValue(value)))
-                }
-                /*
-                 * The search box is deliberately not cleared here. It lives in the nav, above this
-                 * rail and outside it, and wiping a query the reader can still see typed up there
-                 * from a control down here reads as a bug rather than as a reset.
-                 */
-                onResetFilters={() =>
-                  void goCatalogAfterFilter(() => {
-                    setActiveCategories([]);
-                    setActiveDate(null);
-                    setActiveCities([]);
-                    setAvailabilities([]);
-                    setMaxPrice(null);
-                  })
-                }
-              />
-            }
-          />
-        )}
-
-        {activeScreen === "detail" && (
-          <EventDetail
-            event={selectedMovie}
-            showtimes={showtimes}
-            isSignedIn={isSignedIn}
-            relatedEvents={relatedEvents}
-            wishlistedIds={wishlistedIds}
-            onBack={goHome}
-            /* A place in a queue belongs to an account, so joining asks a guest to sign in first. */
-            onRequireSignIn={runSignedIn}
-            onNotice={(tone, message) => pushToast(tone === "ok" ? "success" : "error", message)}
-            onOpenReviews={() => goTo("reviews", { eventSlug: selectedMovie.id })}
-            onToggleWishlist={handleToggleWishlist}
-            onBookRelated={(movie) => void handleStartBookingInput(movie)}
-            onProceedToSeatSelection={handleProceedToSeats}
-            onProceedToCheckout={handleProceedToCheckout}
-            // General admission holds as it steps, so this screen owns a live reservation and needs
-            // the clock and the busy flag that used to belong only to the seat map.
-            heldQuantities={
-              hold?.mode === "ga" && hold.eventId === selectedMovie.id
-                ? (hold.quantities ?? {})
-                : {}
-            }
-            onAdjustQuantity={handleAdjustGaQuantity}
-            holdBusy={holdBusy}
-            holdRemainingMs={hold?.mode === "ga" ? holdRemainingMs : 0}
-          />
-        )}
-
-        {/*
+          {/*
           The comments in full, on their own route.
 
           `eventId` is the catalogue's numeric id, which a deep link does not carry: on F5 the slug
           is resolved by the effect above and this waits rather than asking the API about `null`.
           The dev-only sample data has no server row either, and sits in the same branch.
         */}
-        {activeScreen === "reviews" &&
-          (selectedMovie.eventId !== null ? (
-            <ReviewsPage
-              event={selectedMovie}
-              eventId={selectedMovie.eventId}
-              isSignedIn={isSignedIn}
-              relatedEvents={relatedEvents}
-              /* Home, like every other page-level back on the site — the event itself is one row
+          {activeScreen === "reviews" &&
+            (selectedMovie.eventId !== null ? (
+              <ReviewsPage
+                event={selectedMovie}
+                eventId={selectedMovie.eventId}
+                isSignedIn={isSignedIn}
+                relatedEvents={relatedEvents}
+                /* Home, like every other page-level back on the site — the event itself is one row
                  down the page, in the aside built for it. */
+                onBack={goHome}
+                onOpenEvent={(movie) => void handleStartBookingInput(movie)}
+              />
+            ) : (
+              <div className="mx-auto w-full max-w-6xl px-5 py-16 sm:px-8">
+                <p className="font-meta text-body text-ink-soft">Đang tải bình luận…</p>
+              </div>
+            ))}
+
+          {activeScreen === "seats" && (
+            <SeatLayout
+              event={selectedMovie}
+              showtimeId={bookingShowtimeId}
+              selectedDate={bookingDate}
+              selectedTime={bookingTime}
+              heldSeats={hold?.showtimeId === bookingShowtimeId ? bookingSeats : []}
+              remainingMs={holdRemainingMs}
+              busy={holdBusy}
+              onToggleSeat={(seat) => void handleToggleSeat(seat)}
+              onHoldBestSeats={(seats) => void handleHoldBestSeats(seats)}
+              // Standing zones reuse the GA quantity path: the handler never looks at the event's
+              // type, the server decides per tier whether a quantity is a legal pick here.
+              zoneQuantities={
+                hold?.mode === "ga" && hold.showtimeId === bookingShowtimeId
+                  ? (hold.quantities ?? {})
+                  : {}
+              }
+              onAdjustZoneQuantity={(tier, delta) =>
+                handleAdjustGaQuantity(tier, delta, bookingShowtimeId, bookingDate, bookingTime)
+              }
+              onRemoveZoneTicket={(ticketTierId) =>
+                handleAdjustGaQuantity(
+                  { id: String(ticketTierId), label: "" },
+                  -1,
+                  bookingShowtimeId,
+                  bookingDate,
+                  bookingTime,
+                )
+              }
+              // Backward is a cancel, here and everywhere else in the flow.
+              onBack={() => void cancelBookingFlow()}
+              onGoToStep={() => void cancelBookingFlow()}
+              onProceedToCheckout={handleProceedToCheckout}
+            />
+          )}
+
+          {activeScreen === "checkout" && (
+            <CheckoutForm
+              event={selectedMovie}
+              selectedDate={bookingDate}
+              selectedTime={bookingTime}
+              selectedSeats={bookingSeats}
+              totalPrice={bookingTotalPrice}
+              remainingMs={holdRemainingMs}
+              // Named for what it does. It used to say "Quay lại chọn ghế" and keep the hold; it now
+              // releases the order, and a back link that quietly destroys the purchase while promising
+              // to return to the seat map is the wrong label.
+              backLabel="Hủy đơn và quay lại"
+              onBack={() => void cancelBookingFlow()}
+              onGoToStep={() => void cancelBookingFlow()}
+              reservationId={hold?.reservationId ?? null}
+              shortfall={shortfall}
+              buyer={{ name: userName, email: userEmail ?? "", phone: toLocalPhone(userPhone) }}
+              onConfirmBooking={handleConfirmPurchase}
+            />
+          )}
+
+          {activeScreen === "ticket" && finalBooking && (
+            <TicketTicket booking={finalBooking} onHomeClick={goHome} />
+          )}
+
+          {visibleScreen === "history" && (
+            <BookingHistory
+              bookings={bookingsHistory}
               onBack={goHome}
-              onOpenEvent={(movie) => void handleStartBookingInput(movie)}
+              onSelectBooking={(booking) => {
+                setFinalBooking(normalizeBooking(booking));
+                goTo("ticket", { bookingId: booking.id });
+              }}
+              onCancelTicket={handleCancelTicket}
             />
-          ) : (
-            <div className="mx-auto w-full max-w-6xl px-5 py-16 sm:px-8">
-              <p className="font-meta text-body text-ink-soft">Đang tải bình luận…</p>
-            </div>
-          ))}
+          )}
 
-        {activeScreen === "seats" && (
-          <SeatLayout
-            event={selectedMovie}
-            showtimeId={bookingShowtimeId}
-            selectedDate={bookingDate}
-            selectedTime={bookingTime}
-            heldSeats={hold?.showtimeId === bookingShowtimeId ? bookingSeats : []}
-            remainingMs={holdRemainingMs}
-            busy={holdBusy}
-            onToggleSeat={(seat) => void handleToggleSeat(seat)}
-            onHoldBestSeats={(seats) => void handleHoldBestSeats(seats)}
-            // Backward is a cancel, here and everywhere else in the flow.
-            onBack={() => void cancelBookingFlow()}
-            onGoToStep={() => void cancelBookingFlow()}
-            onProceedToCheckout={handleProceedToCheckout}
-          />
-        )}
-
-        {activeScreen === "checkout" && (
-          <CheckoutForm
-            event={selectedMovie}
-            selectedDate={bookingDate}
-            selectedTime={bookingTime}
-            selectedSeats={bookingSeats}
-            totalPrice={bookingTotalPrice}
-            remainingMs={holdRemainingMs}
-            // Named for what it does. It used to say "Quay lại chọn ghế" and keep the hold; it now
-            // releases the order, and a back link that quietly destroys the purchase while promising
-            // to return to the seat map is the wrong label.
-            backLabel="Hủy đơn và quay lại"
-            onBack={() => void cancelBookingFlow()}
-            onGoToStep={() => void cancelBookingFlow()}
-            reservationId={hold?.reservationId ?? null}
-            shortfall={shortfall}
-            buyer={{ name: userName, email: userEmail ?? "", phone: toLocalPhone(userPhone) }}
-            onConfirmBooking={handleConfirmPurchase}
-          />
-        )}
-
-        {activeScreen === "ticket" && finalBooking && (
-          <TicketTicket booking={finalBooking} onHomeClick={goHome} />
-        )}
-
-        {visibleScreen === "history" && (
-          <BookingHistory
-            bookings={bookingsHistory}
-            onBack={goHome}
-            onSelectBooking={(booking) => {
-              setFinalBooking(normalizeBooking(booking));
-              goTo("ticket", { bookingId: booking.id });
-            }}
-            onCancelTicket={handleCancelTicket}
-          />
-        )}
-
-        {/*
-         * The bookmarks, as a page.
-         *
-         * The same catalog grid over a different list, rather than a bespoke layout: a saved event
-         * is an event, and the reader who saved it wants to compare, open and un-save it exactly as
-         * they would on `/events`. Un-saving here removes the card, because the list *is* the set of
-         * hearts — there is nothing else for the control to mean on this screen.
-         *
-         * Guarded like the wallet: the bookmarks belong to an account, so a stranger gets the
-         * sign-in prompt instead of an empty page that looks like "you have saved nothing".
-         */}
-        {activeScreen === "saved" &&
-          (!authReady ? (
-            <p className="mx-auto max-w-4xl px-4 py-16 font-meta text-body text-ink-soft sm:px-6 lg:px-8">
-              Đang kiểm tra phiên đăng nhập…
-            </p>
-          ) : isSignedIn ? (
-            <EventGrid
-              events={savedEvents}
-              variant="catalog"
-              pageSize={24}
-              eyebrow="Của bạn"
-              title="Sự kiện đã lưu"
-              emptyTitle="Chưa có sự kiện nào được lưu"
-              emptyHint="Bấm trái tim trên ảnh sự kiện để lưu lại và xem sau."
-              selectedEvent={heroMovie}
-              onSelectEvent={handleSelectEventForTrailer}
-              onBookNow={(movie) => void handleStartBookingInput(movie)}
-              wishlistedIds={wishlistedIds}
-              onToggleWishlist={handleToggleWishlist}
-            />
-          ) : (
-            <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6 lg:px-8">
-              <h2 className="font-display text-title-m font-black text-beige-kem">
-                Sự kiện đã lưu
-              </h2>
-              <p className="mt-3 text-body leading-6 text-beige-kem/70">
-                Sự kiện đã lưu gắn với tài khoản của bạn, nên xem được trên mọi thiết bị. Đăng nhập
-                để mở danh sách.
+          {/*
+           * The bookmarks, as a page.
+           *
+           * The same catalog grid over a different list, rather than a bespoke layout: a saved event
+           * is an event, and the reader who saved it wants to compare, open and un-save it exactly as
+           * they would on `/events`. Un-saving here removes the card, because the list *is* the set of
+           * hearts — there is nothing else for the control to mean on this screen.
+           *
+           * Guarded like the wallet: the bookmarks belong to an account, so a stranger gets the
+           * sign-in prompt instead of an empty page that looks like "you have saved nothing".
+           */}
+          {activeScreen === "saved" &&
+            (!authReady ? (
+              <p className="mx-auto max-w-4xl px-4 py-16 font-meta text-body text-ink-soft sm:px-6 lg:px-8">
+                Đang kiểm tra phiên đăng nhập…
               </p>
-              <div className="mt-6 flex flex-wrap items-center gap-6">
-                <button
-                  onClick={() => runSignedIn(() => goTo("saved"))}
-                  className="label-eyebrow inline-flex items-center gap-2 text-beige-kem transition hover:text-burgundy-ink"
-                >
-                  Đăng nhập
-                  <span aria-hidden="true">&gt;</span>
-                </button>
-                <button
-                  onClick={goHome}
-                  className="label-eyebrow text-ink-soft transition hover:text-beige-kem"
-                >
-                  Quay về trang chủ
-                </button>
+            ) : isSignedIn ? (
+              <EventGrid
+                events={savedEvents}
+                variant="catalog"
+                pageSize={24}
+                eyebrow="Của bạn"
+                title="Sự kiện đã lưu"
+                emptyTitle="Chưa có sự kiện nào được lưu"
+                emptyHint="Bấm trái tim trên ảnh sự kiện để lưu lại và xem sau."
+                selectedEvent={heroMovie}
+                onSelectEvent={handleSelectEventForTrailer}
+                onBookNow={(movie) => void handleStartBookingInput(movie)}
+                wishlistedIds={wishlistedIds}
+                onToggleWishlist={handleToggleWishlist}
+              />
+            ) : (
+              <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6 lg:px-8">
+                <h2 className="font-display text-title-m font-black text-beige-kem">
+                  Sự kiện đã lưu
+                </h2>
+                <p className="mt-3 text-body leading-6 text-beige-kem/70">
+                  Sự kiện đã lưu gắn với tài khoản của bạn, nên xem được trên mọi thiết bị. Đăng
+                  nhập để mở danh sách.
+                </p>
+                <div className="mt-6 flex flex-wrap items-center gap-6">
+                  <button
+                    onClick={() => runSignedIn(() => goTo("saved"))}
+                    className="label-eyebrow inline-flex items-center gap-2 text-beige-kem transition hover:text-burgundy-ink"
+                  >
+                    Đăng nhập
+                    <span aria-hidden="true">&gt;</span>
+                  </button>
+                  <button
+                    onClick={goHome}
+                    className="label-eyebrow text-ink-soft transition hover:text-beige-kem"
+                  >
+                    Quay về trang chủ
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
 
-        {visibleScreen === "admin" && <AdminConsole onBack={goHome} />}
+          {visibleScreen === "admin" && <AdminConsole onBack={goHome} />}
 
-        {/*
-         * The mailbox, guarded like the wallet: its messages belong to an account, so a stranger
-         * would get a 401 dressed up as a broken page instead of a locked one.
-         */}
-        {activeScreen === "notifications" &&
-          (!authReady ? (
-            <p className="mx-auto max-w-4xl px-4 py-16 font-meta text-body text-ink-soft sm:px-6 lg:px-8">
-              Đang kiểm tra phiên đăng nhập…
-            </p>
-          ) : isSignedIn ? (
-            <NotificationsPage
-              items={notifications}
-              loading={notificationsLoading}
-              error={notificationsError}
-              onBack={goHome}
-              onOpen={openNotification}
-              onMarkAllRead={markAllNotificationsRead}
-            />
-          ) : (
-            <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6 lg:px-8">
-              <h2 className="font-display text-title-m font-black text-beige-kem">Thông báo</h2>
-              <p className="mt-3 text-body leading-6 text-beige-kem/70">
-                Thông báo gắn với tài khoản của bạn. Đăng nhập để xem xác nhận mua vé, nhắc lịch và
-                tin báo có vé lại từ danh sách chờ.
+          {/*
+           * The mailbox, guarded like the wallet: its messages belong to an account, so a stranger
+           * would get a 401 dressed up as a broken page instead of a locked one.
+           */}
+          {activeScreen === "notifications" &&
+            (!authReady ? (
+              <p className="mx-auto max-w-4xl px-4 py-16 font-meta text-body text-ink-soft sm:px-6 lg:px-8">
+                Đang kiểm tra phiên đăng nhập…
               </p>
-              <div className="mt-6 flex flex-wrap items-center gap-6">
-                <button
-                  onClick={() => runSignedIn(() => goTo("notifications"))}
-                  className="label-eyebrow inline-flex items-center gap-2 text-beige-kem transition hover:text-burgundy-ink"
-                >
-                  Đăng nhập
-                  <span aria-hidden="true">&gt;</span>
-                </button>
-                <button
-                  onClick={goHome}
-                  className="label-eyebrow text-ink-soft transition hover:text-beige-kem"
-                >
-                  Quay về trang chủ
-                </button>
+            ) : isSignedIn ? (
+              <NotificationsPage
+                items={notifications}
+                loading={notificationsLoading}
+                error={notificationsError}
+                onBack={goHome}
+                onOpen={openNotification}
+                onMarkAllRead={markAllNotificationsRead}
+              />
+            ) : (
+              <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6 lg:px-8">
+                <h2 className="font-display text-title-m font-black text-beige-kem">Thông báo</h2>
+                <p className="mt-3 text-body leading-6 text-beige-kem/70">
+                  Thông báo gắn với tài khoản của bạn. Đăng nhập để xem xác nhận mua vé, nhắc lịch
+                  và tin báo có vé lại từ danh sách chờ.
+                </p>
+                <div className="mt-6 flex flex-wrap items-center gap-6">
+                  <button
+                    onClick={() => runSignedIn(() => goTo("notifications"))}
+                    className="label-eyebrow inline-flex items-center gap-2 text-beige-kem transition hover:text-burgundy-ink"
+                  >
+                    Đăng nhập
+                    <span aria-hidden="true">&gt;</span>
+                  </button>
+                  <button
+                    onClick={goHome}
+                    className="label-eyebrow text-ink-soft transition hover:text-beige-kem"
+                  >
+                    Quay về trang chủ
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
 
-        {/*
-         * The wallet is the one screen with nothing to show a stranger. Without this guard its own
-         * fetch 401s and the panel reports "Không tải được ví." over a retry button that can never
-         * succeed — a dead end that reads as a broken page rather than as a locked one.
-         */}
-        {activeScreen === "wallet" &&
-          (!authReady ? (
-            <p className="mx-auto max-w-4xl px-4 py-16 font-meta text-body text-ink-soft sm:px-6 lg:px-8">
-              Đang kiểm tra phiên đăng nhập…
-            </p>
-          ) : isSignedIn ? (
-            <WalletPanel onBack={goHome} />
-          ) : (
-            <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6 lg:px-8">
-              <h2 className="font-display text-title-m font-black text-beige-kem">Ví TixHub</h2>
-              <p className="mt-3 text-body leading-6 text-beige-kem/70">
-                Ví gắn với tài khoản của bạn. Đăng nhập để xem số dư và lịch sử giao dịch.
+          {/*
+           * The wallet is the one screen with nothing to show a stranger. Without this guard its own
+           * fetch 401s and the panel reports "Không tải được ví." over a retry button that can never
+           * succeed — a dead end that reads as a broken page rather than as a locked one.
+           */}
+          {activeScreen === "wallet" &&
+            (!authReady ? (
+              <p className="mx-auto max-w-4xl px-4 py-16 font-meta text-body text-ink-soft sm:px-6 lg:px-8">
+                Đang kiểm tra phiên đăng nhập…
               </p>
-              <div className="mt-6 flex flex-wrap items-center gap-6">
-                <button
-                  onClick={() => runSignedIn(() => goTo("wallet"))}
-                  className="label-eyebrow inline-flex items-center gap-2 text-beige-kem transition hover:text-burgundy-ink"
-                >
-                  Đăng nhập
-                  <span aria-hidden="true">&gt;</span>
-                </button>
-                <button
-                  onClick={goHome}
-                  className="label-eyebrow text-ink-soft transition hover:text-beige-kem"
-                >
-                  Quay về trang chủ
-                </button>
+            ) : isSignedIn ? (
+              <WalletPanel onBack={goHome} />
+            ) : (
+              <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6 lg:px-8">
+                <h2 className="font-display text-title-m font-black text-beige-kem">Ví TixHub</h2>
+                <p className="mt-3 text-body leading-6 text-beige-kem/70">
+                  Ví gắn với tài khoản của bạn. Đăng nhập để xem số dư và lịch sử giao dịch.
+                </p>
+                <div className="mt-6 flex flex-wrap items-center gap-6">
+                  <button
+                    onClick={() => runSignedIn(() => goTo("wallet"))}
+                    className="label-eyebrow inline-flex items-center gap-2 text-beige-kem transition hover:text-burgundy-ink"
+                  >
+                    Đăng nhập
+                    <span aria-hidden="true">&gt;</span>
+                  </button>
+                  <button
+                    onClick={goHome}
+                    className="label-eyebrow text-ink-soft transition hover:text-beige-kem"
+                  >
+                    Quay về trang chủ
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
-        {(visibleScreen === "organizer" || visibleScreen === "organizer-events") && (
-          <OrganizerEventsPage openEventId={organizerEventId} />
-        )}
-        {visibleScreen === "seatmaps" &&
-          (seatmapLayoutId !== null ? (
-            <ChartEditor
-              layoutId={seatmapLayoutId}
-              // Back to the library, not out of the section — the editor is a level, not a modal.
-              onClose={() => navigate(screenToPath("seatmaps"))}
-            />
-          ) : (
-            <SeatMapLibrary
-              onOpen={(id) => navigate(screenToPath("seatmaps", { organizerLayoutId: id }))}
-              onClose={() => goTo("organizer")}
-            />
-          ))}
-        {/* `/moderation` remains an alias for the current server-backed admin console. */}
-        {visibleScreen === "moderation" && <AdminConsole onBack={goHome} />}
+            ))}
+          {(visibleScreen === "organizer" || visibleScreen === "organizer-events") && (
+            <OrganizerEventsPage openEventId={organizerEventId} />
+          )}
+          {visibleScreen === "seatmaps" &&
+            (seatmapLayoutId !== null ? (
+              <ChartEditor
+                layoutId={seatmapLayoutId}
+                // Back to the library, not out of the section — the editor is a level, not a modal.
+                onClose={() => navigate(screenToPath("seatmaps"))}
+              />
+            ) : (
+              <SeatMapLibrary
+                onOpen={(id) => navigate(screenToPath("seatmaps", { organizerLayoutId: id }))}
+                onClose={() => goTo("organizer")}
+              />
+            ))}
+          {/* `/moderation` remains an alias for the current server-backed admin console. */}
+          {visibleScreen === "moderation" && <AdminConsole onBack={goHome} />}
 
-        {activeScreen === "about-us" && (
-          <LegalPage title="Về chúng tôi" content={aboutUsMd} onBack={goHome} />
-        )}
-        {activeScreen === "terms-of-service" && (
-          <LegalPage title="Điều khoản sử dụng" content={termsOfServiceMd} onBack={goHome} />
-        )}
-        {activeScreen === "website-terms" && (
-          <LegalPage title="Điều khoản website" content={websiteTermsMd} onBack={goHome} />
-        )}
-        {activeScreen === "refund-policy" && (
-          <LegalPage title="Chính sách hoàn vé" content={refundPolicyMd} onBack={goHome} />
-        )}
+          {activeScreen === "about-us" && (
+            <LegalPage title="Về chúng tôi" content={aboutUsMd} onBack={goHome} />
+          )}
+          {activeScreen === "terms-of-service" && (
+            <LegalPage title="Điều khoản sử dụng" content={termsOfServiceMd} onBack={goHome} />
+          )}
+          {activeScreen === "website-terms" && (
+            <LegalPage title="Điều khoản website" content={websiteTermsMd} onBack={goHome} />
+          )}
+          {activeScreen === "refund-policy" && (
+            <LegalPage title="Chính sách hoàn vé" content={refundPolicyMd} onBack={goHome} />
+          )}
         </Suspense>
       </main>
 

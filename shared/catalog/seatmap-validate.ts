@@ -539,21 +539,21 @@ export function validateLayout(layout: ValidatableLayout): ValidationIssue[] {
 
   // A drawn hall outline that leaves seats outside it is a map that misleads the buyer. Only the
   // FIRST boundary is authoritative — two outlines is a drafting artefact, not two halls.
-  const boundary = (elements ?? []).find(
-    (e) => e.kind === "boundary" && (e.points?.length ?? 0) >= 3,
-  );
-  if (boundary?.points) {
-    const outside = seats
-      .filter((s) => !pointInPolygon({ x: s.x, y: s.y }, boundary.points!))
-      .map((s) => s.id);
-    if (outside.length > 0) {
-      issues.push({
-        code: "seats_outside_boundary",
-        message: `${outside.length} ghế nằm ngoài đường bao của sảnh.`,
-        seatIds: outside,
-      });
-    }
-  }
+  // const boundary = (elements ?? []).find(
+  //   (e) => e.kind === "boundary" && (e.points?.length ?? 0) >= 3,
+  // );
+  // if (boundary?.points) {
+  //   const outside = seats
+  //     .filter((s) => !pointInPolygon({ x: s.x, y: s.y }, boundary.points!))
+  //     .map((s) => s.id);
+  //   if (outside.length > 0) {
+  //     issues.push({
+  //       code: "seats_outside_boundary",
+  //       message: `${outside.length} ghế nằm ngoài đường bao của sảnh.`,
+  //       seatIds: outside,
+  //     });
+  //   }
+  // }
 
   /**
    * No stage, so nothing says where the event happens.

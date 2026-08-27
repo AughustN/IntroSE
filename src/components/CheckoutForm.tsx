@@ -7,10 +7,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { loadCheckoutDetails, saveCheckoutDetails } from "../services/checkoutDetails";
 import { CheckoutPayload, MovieEvent, Seat } from "../types";
 import { walletClient, type WalletLimits } from "../services/walletClient";
-import {
-  concessionsClient,
-  ConcessionError,
-} from "../services/concessionsClient";
+import { concessionsClient, ConcessionError } from "../services/concessionsClient";
 import type { PublicConcession, ReservationConcessionLine } from "../../shared/types/fnb";
 import TopUpSheet from "./wallet/TopUpSheet";
 import ConcessionMenu from "./ConcessionMenu";
@@ -251,12 +248,17 @@ export default function CheckoutForm({
    * tickets they are.
    */
   const summaryLines: SummaryLine[] = [
-    ...selectedSeats.map((seat, index) => ({
-      key: String(seat.showtimeSeatId ?? `${seat.id}-${index}`),
-      label: isSeated ? `Ghế ${seat.id}` : seat.id,
-      detail: isSeated && seat.row ? `Hàng ${seat.row}` : undefined,
-      amount: seat.price,
-    })),
+    ...selectedSeats.map((seat, index) => {
+      // A standing-capacity line rides a seated showtime but has no seat behind it, so it reads as
+      // the ticket it is — tier label first, never "Ghế …" (FR-080/0027).
+      const isSeatLine = seat.showtimeSeatId !== undefined;
+      return {
+        key: String(seat.showtimeSeatId ?? `${seat.id}-${index}`),
+        label: isSeated && isSeatLine ? `Ghế ${seat.id}` : seat.id,
+        detail: isSeated && isSeatLine && seat.row ? `Hàng ${seat.row}` : undefined,
+        amount: seat.price,
+      };
+    }),
     ...cartLines.map((line) => ({
       key: `concession-${line.concessionItemId}`,
       label: `${line.label} ×${line.quantity}`,

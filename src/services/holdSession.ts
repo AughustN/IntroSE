@@ -22,7 +22,8 @@ export function loadHoldSession(): HoldSession | null {
     if (!raw) return null;
 
     const parsed = JSON.parse(raw) as HoldSession;
-    if (!parsed?.expiresAt || !Array.isArray(parsed.seats) || parsed.seats.length === 0) return null;
+    if (!parsed?.expiresAt || !Array.isArray(parsed.seats) || parsed.seats.length === 0)
+      return null;
     // A hold that lapsed while the tab was away is already gone — never restore an expired one.
     if (parsed.expiresAt <= Date.now()) {
       sessionStorage.removeItem(HOLD_SESSION_KEY);
@@ -81,6 +82,7 @@ export function seatsFromReservation(reservation: Reservation): Seat[] {
           price: item.unitPriceAmount,
           isBooked: false,
           showtimeSeatId: item.showtimeSeatId,
+          ticketTierId: item.ticketTierId,
         },
       ];
     }
@@ -91,6 +93,7 @@ export function seatsFromReservation(reservation: Reservation): Seat[] {
       type: "single" as const,
       price: item.unitPriceAmount,
       isBooked: false,
+      ticketTierId: item.ticketTierId,
     }));
   });
 }

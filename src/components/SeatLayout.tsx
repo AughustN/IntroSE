@@ -4,7 +4,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { SeatMap, SeatMapSeat, SeatStatus } from "@/shared/catalog/types";
+import type { SeatMap, SeatMapSeat, SeatStatus, Tier } from "@/shared/catalog/types";
 import { MovieEvent, Seat } from "../types";
 import { catalogClient } from "../services/catalogClient";
 import { watchShowtime } from "../services/seatSocket";
@@ -44,6 +44,14 @@ interface SeatLayoutProps {
    * hold call for the whole run is what keeps the offer atomic; see `handleHoldBestSeats` in App.
    */
   onHoldBestSeats: (seats: Seat[]) => void;
+  /**
+   * Standing capacity zones (0027), sold by headcount next to a seated map. The parent owns the
+   * hold: a press is a round trip, exactly like the GA steppers on the event page.
+   */
+  zoneQuantities: Record<string, number>;
+  onAdjustZoneQuantity: (tier: { id: string; label: string }, delta: number) => void;
+  /** Drop ONE standing ticket from the summary — the parent releases one quantity of that tier. */
+  onRemoveZoneTicket: (ticketTierId: number) => void;
   onBack: () => void;
   /** A finished step on the bar. Pressing one cancels the order, like the back link. */
   onGoToStep?: (step: BookingStep) => void;
@@ -60,11 +68,20 @@ export default function SeatLayout({
   busy,
   onToggleSeat,
   onHoldBestSeats,
+  zoneQuantities,
+  onAdjustZoneQuantity,
+  onRemoveZoneTicket,
   onBack,
   onGoToStep,
   onProceedToCheckout,
 }: SeatLayoutProps) {
   const [seats, setSeats] = useState<SeatMapSeat[]>([]);
+  /**
+   * Standing capacity zones (0027) on a seated chart — tiers sold by headcount, no seat rows.
+   * Empty on a chart with no zone and on every general-admission event (which this screen never
+   * serves anyway). The stock number follows the same live `tier` broadcast the GA page uses.
+   */
+  const [zoneTiers, setZoneTiers] = useState<Tier[]>([]);
   const [mapMeta, setMapMeta] = useState<
     Pick<
       SeatMap,
@@ -252,6 +269,7 @@ export default function SeatLayout({
     try {
       const map: SeatMap = await catalogClient.getSeatMap(showtimeId);
       setSeats(map.seats ?? []);
+      setZoneTiers(map.zoneTiers ?? []);
       // The static half of the map — coordinate space, decoration, background. It changes only when
       // the organizer edits the map, never on a hold, so it is kept apart from the seat statuses
       // that `seat:update` refreshes (feature 005, FR-041).
@@ -286,6 +304,16 @@ export default function SeatLayout({
   useEffect(() => {
     if (showtimeId === null) return;
     const stop = watchShowtime(showtimeId, (update) => {
+      // Zone stock moves through the GA half of the channel — a quantity hold broadcasts `tier`,
+      // and the standing stepper here follows it the same way the GA page's "Còn N vé" does.
+      if (update.tier) {
+        const t = update.tier;
+        setZoneTiers((current) =>
+          current.map((zone) =>
+            zone.id === t.ticketTierId ? { ...zone, remaining: t.remaining } : zone,
+          ),
+        );
+      }
       if (!update.seats?.length) return;
       setSeats((current) =>
         current.map((seat) => {
@@ -335,6 +363,11 @@ export default function SeatLayout({
    * the default; the exact cap lives on the server, and it enforces it anyway.
    */
   const BEST_SEAT_CAP = 8;
+  /**
+   * Same ceiling as the GA page's steppers (`MAX_PER_TIER` there): the server's own cap
+   * (`max_tickets_per_buyer`) is the authority and refuses anything past it anyway.
+   */
+  const MAX_ZONE_PER_TIER = 10;
   /** What the buyer asked the picker for; a stepper the buyer controls (FR-072). */
   const [bestCount, setBestCount] = useState(2);
   const [bestNotice, setBestNotice] = useState<string | null>(null);
@@ -433,6 +466,9 @@ export default function SeatLayout({
 
   const selectedSeatsList = heldSeats;
   const totalPrice = selectedSeatsList.reduce((sum, seat) => sum + seat.price, 0);
+  /** Held map seats versus held standing tickets — the two halves a zone order can never mix. */
+  const seatsHeldCount = heldSeats.filter((s) => s.showtimeSeatId !== undefined).length;
+  const zoneHeldCount = heldSeats.length - seatsHeldCount;
   const tierPrices = [...new Set(seats.map((s) => s.price))].sort((a, b) => a - b);
 
   /**
@@ -487,13 +523,29 @@ export default function SeatLayout({
     return `${where} — ${label[seat.status]} (${price})`;
   };
 
-  const summaryLines: SummaryLine[] = selectedSeatsList.map((seat) => ({
-    key: String(seat.showtimeSeatId ?? seat.id),
-    label: `Ghế ${seat.id}`,
-    detail: seat.row ? `Hàng ${seat.row}` : undefined,
-    amount: seat.price,
-    onRemove: busy ? undefined : () => onToggleSeat(seat),
-  }));
+  const summaryLines: SummaryLine[] = selectedSeatsList.map((seat) => {
+    // A line without a seat row is a standing-zone ticket — it names its tier, not a seat, and it
+    // goes back to the tier's stock rather than to the map.
+    if (seat.showtimeSeatId === undefined) {
+      return {
+        key: `zone-${seat.ticketTierId ?? seat.id}`,
+        label: seat.row,
+        detail: `Vé đứng số ${seat.number}`,
+        amount: seat.price,
+        onRemove:
+          busy || seat.ticketTierId === undefined
+            ? undefined
+            : () => onRemoveZoneTicket(seat.ticketTierId!),
+      };
+    }
+    return {
+      key: String(seat.showtimeSeatId ?? seat.id),
+      label: `Ghế ${seat.id}`,
+      detail: seat.row ? `Hàng ${seat.row}` : undefined,
+      amount: seat.price,
+      onRemove: busy ? undefined : () => onToggleSeat(seat),
+    };
+  });
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
@@ -523,7 +575,7 @@ export default function SeatLayout({
             lines={summaryLines}
             total={totalPrice}
             holdMs={remainingMs}
-            emptyLabel="Chưa chọn ghế nào"
+            emptyLabel={zoneTiers.length > 0 ? "Chưa chọn chỗ nào" : "Chưa chọn ghế nào"}
             ctaLabel="Tiếp tục thanh toán"
             onCta={onProceedToCheckout}
             ctaDisabled={selectedSeatsList.length === 0 || remainingMs <= 0 || busy}
@@ -548,7 +600,9 @@ export default function SeatLayout({
               </p>
             ) : seats.length === 0 ? (
               <p className="py-12 text-center font-meta text-meta text-ink-soft">
-                Suất diễn này chưa có sơ đồ ghế.
+                {zoneTiers.length > 0
+                  ? "Suất này không có ghế — chọn vé đứng ở bên dưới."
+                  : "Suất diễn này chưa có sơ đồ ghế."}
               </p>
             ) : (
               <>
@@ -765,6 +819,85 @@ export default function SeatLayout({
             )}
           </div>
         </BookingSection>
+
+        {/*
+          Standing capacity zones (0027) beside a seated chart: bought by headcount, not by seat —
+          a zone tier has no seat rows, so there is nothing on the map to click. One order is seats
+          OR standing, never both (feature 003's invariant), and App enforces the switch with a
+          confirmation before releasing whichever side the buyer already holds.
+        */}
+        {zoneTiers.length > 0 && (
+          <BookingSection
+            step=""
+            title="Vé đứng"
+            hint="Chọn số lượng vé đứng — không cần chọn vị trí trên sơ đồ."
+          >
+            <ul className="border-t border-beige-kem/25">
+              {zoneTiers.map((tier) => {
+                const quantity = zoneQuantities[String(tier.id)] ?? 0;
+                const soldOut = tier.remaining !== null && tier.remaining <= 0;
+                return (
+                  <li
+                    key={tier.id}
+                    className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-beige-kem/25 py-4"
+                  >
+                    <div className="min-w-[12rem] flex-1">
+                      <span className="font-display text-title-s font-black uppercase tracking-[0.03em] text-beige-kem">
+                        {tier.label}
+                      </span>
+                      <p className="mt-1.5 font-meta text-meta text-ink-soft">
+                        {tier.remaining === null
+                          ? "Còn vé"
+                          : soldOut
+                            ? "Hết vé"
+                            : `Còn ${tier.remaining} vé`}
+                      </p>
+                    </div>
+                    <span className="shrink-0 font-display text-title-m font-black text-beige-kem">
+                      {formatVnd(tier.price)}
+                    </span>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onAdjustZoneQuantity({ id: String(tier.id), label: tier.label }, -1)
+                        }
+                        disabled={busy || quantity === 0}
+                        aria-label={`Bớt vé ${tier.label}`}
+                        className="grid h-11 w-11 place-items-center border-2 border-beige-kem/50 font-display text-title-s font-black leading-none text-beige-kem transition hover:border-beige-kem hover:bg-bubblegum/20 disabled:cursor-not-allowed disabled:opacity-30"
+                      >
+                        −
+                      </button>
+                      <span className="w-8 text-center font-display text-title-s font-black tabular-nums text-beige-kem">
+                        {quantity}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onAdjustZoneQuantity({ id: String(tier.id), label: tier.label }, 1)
+                        }
+                        disabled={busy || soldOut || quantity >= MAX_ZONE_PER_TIER}
+                        aria-label={`Thêm vé ${tier.label}`}
+                        className="grid h-11 w-11 place-items-center border-2 border-beige-kem/50 font-display text-title-s font-black leading-none text-beige-kem transition hover:border-beige-kem hover:bg-bubblegum/20 disabled:cursor-not-allowed disabled:opacity-30"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+            {/* The either-or, said out loud: whichever side is held first, the other asks before
+                replacing it. Stating it here means the confirmation is expected, not a surprise. */}
+            {(seatsHeldCount > 0 || zoneHeldCount > 0) && (
+              <p className="mt-3 font-meta text-meta leading-5 text-ink-soft">
+                {seatsHeldCount > 0
+                  ? `Bạn đang giữ ${seatsHeldCount} ghế. Thêm vé đứng sẽ hỏi hủy số ghế này — một đơn không gồm cả hai.`
+                  : `Bạn đang giữ ${zoneHeldCount} vé đứng. Bấm chọn ghế trên sơ đồ sẽ hỏi hủy vé đứng trước.`}
+              </p>
+            )}
+          </BookingSection>
+        )}
       </BookingLayout>
     </div>
   );

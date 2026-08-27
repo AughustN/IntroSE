@@ -996,9 +996,9 @@ export default function SeatMapLibrary({
           long, then the filters in order of how often they narrow something: venue is the strongest
           domain filter, because geometry belongs to a physical place.
 
-          Status is offered only on the active tab — see `shown`. Every control is a plain form
-          element rather than a custom menu: they are already keyboard- and screen-reader-complete,
-          and none of them is doing anything a `select` cannot.
+          Status is offered only on the active tab — see `shown`. Each filter is the shared
+          dropdown, not a native `<select>`: a native one's option list is drawn by the operating
+          system, so it opened as a grey platform menu over the library's hairline, mono-set surface.
         */}
         <div className="flex flex-wrap items-center gap-2">
           <label className="relative min-w-56 flex-1">
@@ -1012,70 +1012,51 @@ export default function SeatMapLibrary({
           </label>
 
           {venueOptions.length > 1 && (
-            <label className="font-meta text-meta">
-              <span className="sr-only">Lọc theo địa điểm</span>
-              <select
+            <div className="w-44">
+              <Select
                 value={venueFilter}
-                onChange={(e) => setVenueFilter(e.target.value)}
-                className="h-10 border border-beige-kem/35 bg-transparent px-2 text-beige-kem outline-none focus:border-beige-kem"
-              >
-                <option value="" className="bg-xanh-pho">
-                  Mọi địa điểm
-                </option>
-                {venueOptions.map(([id, name]) => (
-                  <option key={id} value={String(id)} className="bg-xanh-pho">
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
+                options={[
+                  { value: "", label: "Mọi địa điểm" },
+                  ...venueOptions.map(([id, name]) => ({ value: String(id), label: name })),
+                ]}
+                onChange={(value) => setVenueFilter(value)}
+                placeholder="Lọc theo địa điểm"
+                triggerClassName="h-10 w-full border border-beige-kem/35 bg-transparent px-2 font-meta text-meta"
+              />
+            </div>
           )}
 
           {filter === "active" && (
-            <label className="font-meta text-meta">
-              <span className="sr-only">Lọc theo trạng thái</span>
-              <select
+            <div className="w-56">
+              <Select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-                className="h-10 border border-beige-kem/35 bg-transparent px-2 text-beige-kem outline-none focus:border-beige-kem"
-              >
-                <option value="all" className="bg-xanh-pho">
-                  Mọi trạng thái
-                </option>
-                <option value="published" className="bg-xanh-pho">
-                  Đang phát hành
-                </option>
-                <option value="published-dirty" className="bg-xanh-pho">
-                  Có sửa đổi chưa phát hành
-                </option>
-                <option value="draft" className="bg-xanh-pho">
-                  Bản nháp
-                </option>
-              </select>
-            </label>
+                options={[
+                  { value: "all", label: "Mọi trạng thái" },
+                  { value: "published", label: "Đang phát hành" },
+                  { value: "published-dirty", label: "Có sửa đổi chưa phát hành" },
+                  { value: "draft", label: "Bản nháp" },
+                ]}
+                onChange={(value) => setStatusFilter(value as StatusFilter)}
+                placeholder="Lọc theo trạng thái"
+                triggerClassName="h-10 w-full border border-beige-kem/35 bg-transparent px-2 font-meta text-meta"
+              />
+            </div>
           )}
 
-          <label className="font-meta text-meta">
-            <span className="sr-only">Sắp xếp</span>
-            <select
+          <div className="w-40">
+            <Select
               value={sort}
-              onChange={(e) => setSort(e.target.value as Sort)}
-              className="h-10 border border-beige-kem/35 bg-transparent px-2 text-beige-kem outline-none focus:border-beige-kem"
-            >
-              <option value="recent" className="bg-xanh-pho">
-                Mới cập nhật
-              </option>
-              <option value="name" className="bg-xanh-pho">
-                Tên A→Z
-              </option>
-              <option value="capacity" className="bg-xanh-pho">
-                Sức chứa
-              </option>
-              <option value="usage" className="bg-xanh-pho">
-                Dùng nhiều nhất
-              </option>
-            </select>
-          </label>
+              options={[
+                { value: "recent", label: "Mới cập nhật" },
+                { value: "name", label: "Tên A→Z" },
+                { value: "capacity", label: "Sức chứa" },
+                { value: "usage", label: "Dùng nhiều nhất" },
+              ]}
+              onChange={(value) => setSort(value as Sort)}
+              placeholder="Sắp xếp"
+              triggerClassName="h-10 w-full border border-beige-kem/35 bg-transparent px-2 font-meta text-meta"
+            />
+          </div>
 
           {/* The create action ENDS the toolbar, which is where the research this page follows puts
               it: search and filters narrow what is here, and the last control makes something new.
@@ -1731,18 +1712,16 @@ export default function SeatMapLibrary({
                           <span className="mb-1 block font-meta text-eyebrow text-beige-kem/70">
                             Quy mô
                           </span>
-                          <select
+                          <Select
                             value={starterSize || st.sizes[0].id}
-                            onChange={(e) => setStarterSize(e.target.value)}
+                            options={st.sizes.map((z) => ({
+                              value: z.id,
+                              label: `${z.label} · ${z.seatCount.toLocaleString("vi-VN")} ghế`,
+                            }))}
+                            onChange={setStarterSize}
                             disabled={creating}
-                            className="h-10 w-full border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow text-beige-kem outline-none focus:border-burgundy"
-                          >
-                            {st.sizes.map((z) => (
-                              <option key={z.id} value={z.id} className="bg-xanh-pho">
-                                {z.label} · {z.seatCount.toLocaleString("vi-VN")} ghế
-                              </option>
-                            ))}
-                          </select>
+                            triggerClassName="h-10 w-full border-2 border-beige-kem bg-surface-2 px-3 text-eyebrow"
+                          />
                         </label>
                         <label className="mt-3 block">
                           <span className="mb-1 block font-meta text-eyebrow text-beige-kem/70">

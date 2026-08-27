@@ -111,6 +111,8 @@ export interface Seat {
   isBooked: boolean;
   /** The real `showtime_seats` row this stands for — what the hold API locks. Absent for GA lines. */
   showtimeSeatId?: number;
+  /** The ticket class this line belongs to — what a standing/GA line releases when dropped. */
+  ticketTierId?: number;
 }
 
 /**

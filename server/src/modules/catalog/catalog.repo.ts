@@ -1,10 +1,23 @@
-import type { EventCard, EventDetail, SeatMap, SeatMapElement, SeatMapTable, Showtime, Tier } from '@shared/catalog/types.js';
-import { LAYOUT_SPACE, SEAT_DIAMETER } from '../../config.js';
-import type { Db } from '../../db/pool.js';
-import { pool } from '../../db/pool.js';
-import { buildTierLegend } from '@shared/catalog/tier-palette.js';
-import { SHOWTIME_HAS_AVAILABILITY, UPCOMING_SHOWTIME, VISIBLE_JOIN, VISIBLE_WHERE } from './visibility.js';
-import { candidates } from '../ai/ai.repo.js';
+import type {
+  EventCard,
+  EventDetail,
+  SeatMap,
+  SeatMapElement,
+  SeatMapTable,
+  Showtime,
+  Tier,
+} from "@shared/catalog/types.js";
+import { LAYOUT_SPACE, SEAT_DIAMETER } from "../../config.js";
+import type { Db } from "../../db/pool.js";
+import { pool } from "../../db/pool.js";
+import { buildTierLegend } from "@shared/catalog/tier-palette.js";
+import {
+  SHOWTIME_HAS_AVAILABILITY,
+  UPCOMING_SHOWTIME,
+  VISIBLE_JOIN,
+  VISIBLE_WHERE,
+} from "./visibility.js";
+import { candidates } from "../ai/ai.repo.js";
 
 // Correlated subqueries reused in the list projection (event alias `e`).
 const EARLIEST = `(SELECT min(s.starts_at) FROM showtimes s WHERE ${UPCOMING_SHOWTIME})`;
@@ -28,7 +41,7 @@ type Row = {
   city: string | null;
   has_upcoming: boolean;
   has_available: boolean;
-  release_phase: 'now_showing' | 'upcoming';
+  release_phase: "now_showing" | "upcoming";
 };
 
 const toCard = (r: Row): EventCard => ({
@@ -54,7 +67,7 @@ export interface EventFilters {
   date?: string;
   minPrice?: number;
   maxPrice?: number;
-  availability?: 'available' | 'all';
+  availability?: "available" | "all";
   page?: number;
   pageSize?: number;
 }
@@ -75,26 +88,37 @@ const pageSizeOf = (requested: number | undefined): number =>
     : Math.min(MAX_PAGE_SIZE, Math.max(1, Math.trunc(requested)));
 
 /** Public catalog list (US1). Only visible events; sold-out shown & sorted last. */
-export async function listEvents(f: EventFilters, db: Db = pool): Promise<{ events: EventCard[]; total: number; page: number }> {
+export async function listEvents(
+  f: EventFilters,
+  db: Db = pool,
+): Promise<{ events: EventCard[]; total: number; page: number }> {
   const where: string[] = [VISIBLE_WHERE];
   const params: unknown[] = [];
   const p = (v: unknown) => `$${params.push(v)}`;
 
   if (f.category) where.push(`ec.code = ${p(f.category)}`);
-  if (f.city) where.push(`EXISTS (SELECT 1 FROM showtimes s JOIN venues v ON v.id = s.venue_id WHERE s.event_id = e.id AND v.city ILIKE ${p(f.city)})`);
-  if (f.date) where.push(`EXISTS (SELECT 1 FROM showtimes s WHERE s.event_id = e.id AND s.starts_at::date = ${p(f.date)}::date)`);
+  if (f.city)
+    where.push(
+      `EXISTS (SELECT 1 FROM showtimes s JOIN venues v ON v.id = s.venue_id WHERE s.event_id = e.id AND v.city ILIKE ${p(f.city)})`,
+    );
+  if (f.date)
+    where.push(
+      `EXISTS (SELECT 1 FROM showtimes s WHERE s.event_id = e.id AND s.starts_at::date = ${p(f.date)}::date)`,
+    );
   if (f.minPrice !== undefined) where.push(`${START_PRICE} >= ${p(f.minPrice)}`);
   if (f.maxPrice !== undefined) where.push(`${START_PRICE} <= ${p(f.maxPrice)}`);
-  if (f.availability === 'available') where.push(HAS_AVAILABLE);
+  if (f.availability === "available") where.push(HAS_AVAILABLE);
 
-  let rank = '1';
+  let rank = "1";
   if (f.q) {
     const like = p(`%${f.q}%`);
-    where.push(`(e.title ILIKE ${like} OR array_to_string(e.lineup, ' ') ILIKE ${like} OR e.description ILIKE ${like})`);
+    where.push(
+      `(e.title ILIKE ${like} OR array_to_string(e.lineup, ' ') ILIKE ${like} OR e.description ILIKE ${like})`,
+    );
     rank = `CASE WHEN e.title ILIKE ${like} THEN 3 WHEN array_to_string(e.lineup, ' ') ILIKE ${like} THEN 2 ELSE 1 END`;
   }
 
-  const whereSql = where.join(' AND ');
+  const whereSql = where.join(" AND ");
   const page = Math.max(1, f.page ?? 1);
   const size = pageSizeOf(f.pageSize);
   const offset = (page - 1) * size;
@@ -154,20 +178,22 @@ export async function getEventDetail(
   db: Db = pool,
   opts: { asOwner?: boolean } = {},
 ): Promise<EventDetail | null> {
-  const res = await db.query<Row & {
-    description: string;
-    age_restriction: string;
-    lineup: string[];
-    genre: string[];
-    trailer_url: string | null;
-    refund_policy: string | null;
-    event_type: 'general_admission' | 'seated';
-    seo_title: string | null;
-    seo_description: string | null;
-    category_id: number;
-    venue_guide: string | null;
-    is_high_demand: boolean;
-  }>(
+  const res = await db.query<
+    Row & {
+      description: string;
+      age_restriction: string;
+      lineup: string[];
+      genre: string[];
+      trailer_url: string | null;
+      refund_policy: string | null;
+      event_type: "general_admission" | "seated";
+      seo_title: string | null;
+      seo_description: string | null;
+      category_id: number;
+      venue_guide: string | null;
+      is_high_demand: boolean;
+    }
+  >(
     `SELECT e.id, e.slug, e.title, e.image_url, ec.code AS category, ec.label_vi AS category_label,
             e.release_phase, e.description, e.age_restriction,
             e.lineup, e.genre, e.trailer_url, e.refund_policy, e.event_type, e.seo_title, e.seo_description,
@@ -176,7 +202,7 @@ export async function getEventDetail(
             ${HAS_UPCOMING} AS has_upcoming, ${HAS_AVAILABLE} AS has_available,
             (SELECT v.guide FROM showtimes s JOIN venues v ON v.id = s.venue_id WHERE s.event_id = e.id ORDER BY s.starts_at LIMIT 1) AS venue_guide
        FROM events e ${VISIBLE_JOIN} JOIN event_categories ec ON ec.id = e.category_id
-      WHERE e.slug = $1 AND ${opts.asOwner ? 'TRUE' : VISIBLE_WHERE}`,
+      WHERE e.slug = $1 AND ${opts.asOwner ? "TRUE" : VISIBLE_WHERE}`,
     [slug],
   );
   const r = res.rows[0];
@@ -189,7 +215,12 @@ export async function getEventDetail(
       WHERE s.event_id = $1 AND tt.archived_at IS NULL GROUP BY tt.label ORDER BY min(tt.price_amount)`,
     [r.id],
   );
-  const tiers: Tier[] = tiersRes.rows.map((t, i) => ({ id: i, label: t.label, price: Number(t.price), remaining: null }));
+  const tiers: Tier[] = tiersRes.rows.map((t, i) => ({
+    id: i,
+    label: t.label,
+    price: Number(t.price),
+    remaining: null,
+  }));
 
   const relatedRes = await db.query<Row>(
     `SELECT e.id, e.slug, e.title, e.image_url, e.trailer_url, ec.code AS category, ec.label_vi AS category_label, e.release_phase,
@@ -228,7 +259,11 @@ export async function getEventDetail(
     venueGuide: r.venue_guide,
     tiers,
     related: relatedRes.rows.map(toCard),
-    seo: { title: r.seo_title ?? r.title, description: r.seo_description ?? r.description, imageUrl: r.image_url },
+    seo: {
+      title: r.seo_title ?? r.title,
+      description: r.seo_description ?? r.description,
+      imageUrl: r.image_url,
+    },
     isHighDemand: Boolean(r.is_high_demand),
   };
 }
@@ -273,9 +308,10 @@ export async function getShowtimes(eventId: number, db: Db = pool): Promise<Show
     venue: {
       name: r.name,
       city: r.city,
-      chain: r.chain_id === null ? null : { id: r.chain_id, code: r.chain_code!, name: r.chain_name! },
+      chain:
+        r.chain_id === null ? null : { id: r.chain_id, code: r.chain_code!, name: r.chain_name! },
     },
-    availability: r.has_available ? 'available' : 'sold_out',
+    availability: r.has_available ? "available" : "sold_out",
   }));
 }
 
@@ -288,7 +324,7 @@ interface SeatMapSnapshot {
   /** Per-section seat shape and size, keyed by section name (FR-064). Absent before the amendment. */
   sectionStyles?: {
     name: string;
-    seatShape: 'circle' | 'square';
+    seatShape: "circle" | "square";
     seatSizeMultiplier: number;
     /** The level this section is on (0044), by name. Absent on snapshots written before floors. */
     floor?: string | null;
@@ -302,7 +338,7 @@ interface SeatMapSnapshot {
   planOpacity: number;
   planVisibleToBuyers: boolean;
   /** Absent on snapshots written before 0037; the buyer's picker falls back to `balanced`. */
-  orphanRule?: 'balanced' | 'strict';
+  orphanRule?: "balanced" | "strict";
   focalPoint?: { x: number; y: number } | null;
 }
 
@@ -324,7 +360,7 @@ interface SeatMapSnapshot {
  * Re-applying a layout rewrites the snapshot in the current shape and retires the fallback for that
  * showtime. This exists so a stale row is a cosmetic debt, never a blank map.
  */
-function readSnapshotElements(raw: SeatMapSnapshot['elements'] | undefined): SeatMapElement[] {
+function readSnapshotElements(raw: SeatMapSnapshot["elements"] | undefined): SeatMapElement[] {
   return (raw ?? [])
     .map((e) => {
       const legacy = e as Partial<SeatMapElement> & { pos_x?: number; pos_y?: number };
@@ -335,7 +371,10 @@ function readSnapshotElements(raw: SeatMapSnapshot['elements'] | undefined): Sea
 
 /** Read-only seat map (seated) or tier availability (GA) for a showtime (US3). Null if not visible. */
 export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<SeatMap | null> {
-  const evRes = await db.query<{ event_type: 'general_admission' | 'seated'; is_high_demand: boolean }>(
+  const evRes = await db.query<{
+    event_type: "general_admission" | "seated";
+    is_high_demand: boolean;
+  }>(
     `SELECT e.event_type, COALESCE(e.is_high_demand, false) AS is_high_demand FROM showtimes s JOIN events e ON e.id = s.event_id ${VISIBLE_JOIN}
       WHERE s.id = $1 AND ${VISIBLE_WHERE}`,
     [showtimeId],
@@ -343,7 +382,7 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
   const ev = evRes.rows[0];
   if (!ev) return null;
 
-  if (ev.event_type === 'seated') {
+  if (ev.event_type === "seated") {
     // Geometry comes off `showtime_seats` — the showtime's own SNAPSHOT of the layout, on the row this
     // query already reads, so coordinates cost no extra join (feature 005, research R-2).
     // Ordered section → row → number: that ordering is the buyer map's tab order and is part of the
@@ -354,7 +393,7 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
       seat_number: number;
       label: string;
       price: string;
-      status: 'available' | 'held' | 'sold' | 'blocked';
+      status: "available" | "held" | "sold" | "blocked";
       pos_x: number | null;
       pos_y: number | null;
       rotation: number;
@@ -363,7 +402,7 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
       tier_id: number;
       is_accessible: boolean;
       table_id: number | null;
-      table_booking_mode: 'per_seat' | 'whole_table' | null;
+      table_booking_mode: "per_seat" | "whole_table" | null;
     }>(
       `SELECT ss.id, ss.row_label, ss.seat_number, tt.label, tt.price_amount::text AS price, ss.status,
               ss.pos_x, ss.pos_y, ss.rotation, ss.section_name AS section,
@@ -386,8 +425,17 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
     // no ticket-tier column exists for it — feature 006 owns that table — so the map re-colours itself
     // whenever a price changes, and the two buyer renderers cannot disagree about a value that is not
     // persisted anywhere.
-    const tiers = await db.query<{ id: number; label: string; price: string; color: string | null }>(
-      `SELECT tt.id, tt.label, tt.price_amount::text AS price, c.color
+    const tiers = await db.query<{
+      id: number;
+      label: string;
+      price: string;
+      color: string | null;
+      total_quantity: number | null;
+      remaining: string | null;
+    }>(
+      `SELECT tt.id, tt.label, tt.price_amount::text AS price, c.color, tt.total_quantity,
+              CASE WHEN tt.total_quantity IS NULL THEN NULL
+                   ELSE (tt.total_quantity - tt.sold_quantity - tt.reserved_quantity)::text END AS remaining
          FROM ticket_tiers tt
          LEFT JOIN layout_categories c ON c.id = tt.category_id
         WHERE tt.showtime_id = $1 AND tt.archived_at IS NULL`,
@@ -402,8 +450,19 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
     );
 
     return {
-      eventType: 'seated',
+      eventType: "seated",
       tierLegend,
+      // Standing capacity zones (0027): a seated chart's zones sell by headcount through the GA
+      // quantity path, so the buyer's screen needs the same three numbers GA buyers get — the tier,
+      // its price, and what is left. Empty on charts that have no zone.
+      zoneTiers: tiers.rows
+        .filter((t) => t.total_quantity !== null)
+        .map((t) => ({
+          id: t.id,
+          label: t.label,
+          price: Number(t.price),
+          remaining: t.remaining === null ? null : Number(t.remaining),
+        })),
       // Snapshotted tables, so a seat labelled "Bàn 5 - Ghế 3" is drawn at the table it names (FR-082).
       tables: s?.tables ?? [],
       space: { width: LAYOUT_SPACE, height: LAYOUT_SPACE, seatDiameter: SEAT_DIAMETER },
@@ -429,7 +488,7 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
         floor: r.section ? (styleOf.get(r.section)?.floor ?? null) : null,
       })),
       elements: readSnapshotElements(s?.elements),
-      orphanRule: s?.orphanRule ?? 'balanced',
+      orphanRule: s?.orphanRule ?? "balanced",
       // Null when the chart never named one — `focalPoint()` then infers it exactly as before.
       focalPoint: s?.focalPoint ?? null,
       // Empty on every map generated before floors, which is what makes the strip absent there.
@@ -450,7 +509,12 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
     };
   }
 
-  const tiers = await db.query<{ id: number; label: string; price: string; remaining: string | null }>(
+  const tiers = await db.query<{
+    id: number;
+    label: string;
+    price: string;
+    remaining: string | null;
+  }>(
     `SELECT id, label, price_amount::text AS price,
             CASE WHEN total_quantity IS NULL THEN NULL
                  ELSE (total_quantity - sold_quantity - reserved_quantity)::text END AS remaining
@@ -458,7 +522,7 @@ export async function getSeatMap(showtimeId: number, db: Db = pool): Promise<Sea
     [showtimeId],
   );
   return {
-    eventType: 'general_admission',
+    eventType: "general_admission",
     isHighDemand: Boolean(ev.is_high_demand),
     tiers: tiers.rows.map((t) => ({
       id: t.id,
@@ -501,4 +565,3 @@ export async function searchEventsSemantic(
   const cardMap = new Map(rows.map((r) => [r.id, toCard(r)]));
   return ids.map((id) => cardMap.get(id)).filter((c): c is EventCard => Boolean(c));
 }
-

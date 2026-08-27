@@ -1,9 +1,9 @@
 // One typed contract for the event catalog, shared by server and web (Principle VI).
 // Derived from src/specs/002-event-catalog/contracts/catalog.openapi.yaml. Money = whole VND đồng.
 
-export type EventType = 'general_admission' | 'seated';
-export type SeatStatus = 'available' | 'held' | 'sold' | 'blocked';
-export type ShowtimeAvailability = 'available' | 'sold_out' | 'unavailable';
+export type EventType = "general_admission" | "seated";
+export type SeatStatus = "available" | "held" | "sold" | "blocked";
+export type ShowtimeAvailability = "available" | "sold_out" | "unavailable";
 
 export interface EventCard {
   id: number;
@@ -46,14 +46,14 @@ export interface EventCard {
    * without moving films between the tabs on its own. Present on every card and meaningless outside
    * the `movie` category, where nothing reads it.
    */
-  releasePhase: 'now_showing' | 'upcoming';
+  releasePhase: "now_showing" | "upcoming";
 }
 
 export interface Tier {
   id: number;
   label: string;
   price: number; // VND integer
-  remaining: number | null; // GA remaining = capacity − sold − reserved; null = seated/unlimited
+  remaining: number | null; // capacity − sold − reserved (GA and standing-zone tiers); null = seat-backed tier
 }
 
 /**
@@ -64,7 +64,7 @@ export interface Tier {
  * about a venue whose address is "Online" or "DreamS". Shared because both sides key off it — the
  * server writes it, and the browser's city filter sorts it last instead of treating it as a place.
  */
-export const UNKNOWN_CITY = 'Chưa xác định';
+export const UNKNOWN_CITY = "Chưa xác định";
 
 /**
  * The cinema chain ("cụm rạp") a venue is operated by, or null.
@@ -147,7 +147,7 @@ export interface SeatMapSeat {
    * section COLOUR does not, because on the buyer's map colour means price and nothing else.
    * Absent on pre-amendment snapshots, where the renderers fall back to 005's circle at 1×.
    */
-  shape?: 'circle' | 'square';
+  shape?: "circle" | "square";
   /** Multiplier on the space's nominal seat diameter. 1 = 005's baseline. */
   sizeMultiplier?: number;
   /** Usable by a wheelchair user — drawn with its own glyph and announced to assistive tech. */
@@ -155,7 +155,7 @@ export interface SeatMapSeat {
   /** The table this seat sits at, when it sits at one. Frozen at generation. */
   tableId?: number | null;
   /** When `whole_table`, selecting this seat selects every seat of `tableId`. */
-  tableBookingMode?: 'per_seat' | 'whole_table' | null;
+  tableBookingMode?: "per_seat" | "whole_table" | null;
 }
 
 /**
@@ -169,23 +169,23 @@ export interface SeatMapSeat {
  */
 export interface SeatMapElement {
   kind:
-    | 'stage'
-    | 'aisle'
-    | 'door'
-    | 'bar'
-    | 'label'
-    | 'area'
+    | "stage"
+    | "aisle"
+    | "door"
+    | "bar"
+    | "label"
+    | "area"
     // Hall outline and dividers, drawn from `points` (FR-057, FR-058).
-    | 'boundary'
-    | 'divider'
+    | "boundary"
+    | "divider"
     // Facility icons (FR-061).
-    | 'exit'
-    | 'restroom'
-    | 'food_drink'
-    | 'smoking'
-    | 'first_aid'
-    | 'lift_stairs'
-    | 'wheelchair';
+    | "exit"
+    | "restroom"
+    | "food_drink"
+    | "smoking"
+    | "first_aid"
+    | "lift_stairs"
+    | "wheelchair";
   x: number;
   y: number;
   width: number;
@@ -235,6 +235,13 @@ export interface SeatMap {
   eventType: EventType;
   seats?: SeatMapSeat[]; // seated — ordered section → row → number (the tab-order guarantee)
   tiers?: Tier[]; // general admission
+  /**
+   * Standing capacity zones (0027) on a SEATED chart: tiers backed by a drawn `area`'s capacity and
+   * sold by headcount instead of seat-by-seat. Same shape as the GA `tiers`; the buyer holds them
+   * through the general-admission quantity path, which `holds.service` opens to seated showtimes
+   * exactly for these (total_quantity set, no seat rows behind the tier).
+   */
+  zoneTiers?: Tier[];
   // Seated only (feature 005).
   space?: SeatMapSpace;
   elements?: SeatMapElement[];
@@ -258,7 +265,7 @@ export interface SeatMap {
    * Snapshotted with the rest of the map, so the rule a buyer meets is the one the chart carried when
    * it was applied. Absent on older snapshots, where the picker's own default (`balanced`) stands.
    */
-  orphanRule?: 'balanced' | 'strict';
+  orphanRule?: "balanced" | "strict";
   /** The chart's explicit focal point, snapshotted at apply time (0043). Absent means "infer it". */
   focalPoint?: { x: number; y: number } | null;
   /**
@@ -281,7 +288,7 @@ export interface SeatMapTierLegendEntry {
 /** A snapshotted table. Decoration on the buyer map: drawn, never interactive (FR-082). */
 export interface SeatMapTable {
   name: string;
-  shape: 'round' | 'rect';
+  shape: "round" | "rect";
   x: number;
   y: number;
   width: number;
@@ -290,7 +297,7 @@ export interface SeatMapTable {
 }
 
 /** How a table sells. `whole_table` groups its seats into one pick on the buyer's map. */
-export type TableBookingMode = 'per_seat' | 'whole_table';
+export type TableBookingMode = "per_seat" | "whole_table";
 
 export interface EventListResponse {
   events: EventCard[];
@@ -336,7 +343,7 @@ export interface TierMutationResult extends MutationModeration {
 /** Removal is delete-or-archive, decided by the server on live inventory (FR-006, FR-007). */
 export interface TierRemovalResult extends MutationModeration {
   tier: ManagedTier | null; // null when the tier was deleted outright
-  outcome: 'deleted' | 'archived';
+  outcome: "deleted" | "archived";
 }
 
 export interface ManagedTierList {
@@ -351,7 +358,7 @@ export interface ShowtimeMutationResult extends MutationModeration {
   venueId: number;
 }
 
-export type ModerationStatus = 'pending_review' | 'approved' | 'flagged' | 'removed';
+export type ModerationStatus = "pending_review" | "approved" | "flagged" | "removed";
 
 export interface EventMutationResult extends MutationModeration {
   id: number;
@@ -372,7 +379,7 @@ export interface ListingSuggestion {
   priceBasis: number | null;
 }
 
-export type ListingUnavailableReason = 'timeout' | 'error' | 'quota_exhausted';
+export type ListingUnavailableReason = "timeout" | "error" | "quota_exhausted";
 
 /**
  * Degradation is a SUCCESSFUL response with `available: false`, never an error status, so the
