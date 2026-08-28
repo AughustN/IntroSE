@@ -154,11 +154,11 @@ async function organizerAction(
     // Reversing one means a new decision on a fresh record, which keeps the review history honest.
     const allowed =
       fromStatus !== undefined
-        ? current.status === fromStatus && (next === "approved" || next === "rejected" || next === "suspended")
+        ? current.status === fromStatus && next === "approved"
         : next === "suspended"
           ? current.status === "approved"
           : next === "approved"
-            ? current.status === "pending" || current.status === "suspended"
+            ? current.status === "pending"
             : current.status === "pending";
     if (!allowed) throw err.conflict("moderation_conflict", "Trạng thái đã thay đổi.");
     const result = await updateOrganizer(id, next, reason, actorUserId, db);

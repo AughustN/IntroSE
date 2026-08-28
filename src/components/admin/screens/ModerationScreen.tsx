@@ -21,29 +21,33 @@ import {
   Td,
   Th,
 } from "../adminUi";
-import Select from "../../Select";
 import { useAsync } from "../useAsync";
 import { EventPreviewScreen } from "./EventPreview";
 
-const EVENT_STATUS: Record<string, { label: string; tone: "good" | "warn" | "bad" | "neutral" }> = {
-  draft: { label: "Bản nháp", tone: "neutral" },
-  on_sale: { label: "Đang mở bán", tone: "good" },
-  finished: { label: "Đã kết thúc", tone: "neutral" },
-  cancelled: { label: "Đã hủy", tone: "bad" },
-};
-
 /**
- * The filter's options, and the table's labels, from one place.
+ * What the queue says about a row, in the same words the list screen next door uses (Principle VI).
  *
- * The status offered here is the EVENT's own state, not its moderation state: every row in this
- * inbox is `pending_review` by definition, so a moderation filter would have exactly one value to
- * choose. What actually varies — and what the reader wants to sort out first — is whether the thing
- * waiting for a decision is a draft or already scheduled to sell.
+ * This column shows the MODERATION state, not `events.status`. It used to show the latter, and the
+ * premise behind that — "what varies is whether the thing waiting is a draft or already scheduled
+ * to sell" — was never true of this screen: `eventQueue` selects
+ * `moderation_status = 'pending_review' AND status = 'on_sale'` (admin.repo.ts:182), so `draft`,
+ * `finished` and `cancelled` can never reach it. Every row therefore read "Đang mở bán", which is a
+ * claim the event has not earned: an event waiting on this queue is NOT publicly on sale, because
+ * `visibility.ts` requires `moderation_status = 'approved'` before the catalog will show it. The
+ * column stated the opposite of the fact the reader is here to act on.
+ *
+ * `approved`, `flagged` and `removed` are listed for completeness — the payload type allows them and
+ * the list screen renders them — but only `pending_review` can appear here.
  */
-const STATUS_OPTIONS = [
-  { value: "", label: "Tất cả" },
-  ...Object.entries(EVENT_STATUS).map(([value, { label }]) => ({ value, label })),
-];
+const MODERATION_STATUS: Record<
+  string,
+  { label: string; tone: "good" | "warn" | "bad" | "neutral" }
+> = {
+  pending_review: { label: "Chờ duyệt", tone: "warn" },
+  approved: { label: "Đã duyệt", tone: "good" },
+  flagged: { label: "Đã gắn cờ", tone: "warn" },
+  removed: { label: "Đã gỡ", tone: "bad" },
+};
 
 /** The same page size the report queue uses, so the console pages at one rhythm. */
 const PAGE = 25;
@@ -62,7 +66,12 @@ export default function ModerationScreen() {
   const [failure, setFailure] = useState<string | null>(null);
   // Typed, then applied — the queue does not narrow under the reader's hands mid-word. Filtering is
   // local because `queue()` already answers with the whole inbox in one call.
-  const [draft, setDraft] = useState({ q: "", status: "" });
+  //
+  // Search only. The status dropdown that sat beside it filtered `events.status`, which the server
+  // has already pinned to `on_sale` for every row here, so three of its four options could only ever
+  // return nothing; and with the column now showing moderation state — one value, by definition —
+  // there is nothing left for it to narrow.
+  const [draft, setDraft] = useState({ q: "" });
   const [applied, setApplied] = useState(draft);
   const [page, setPage] = useState(0);
   /** Which event is open as a full page, if any. Null means the queue itself. */
@@ -98,7 +107,6 @@ export default function ModerationScreen() {
   const waiting = (data?.events ?? []).filter((event) => event.moderation === "pending_review");
   const needle = applied.q.trim().toLowerCase();
   const queue = waiting.filter((event) => {
-    if (applied.status && event.status !== applied.status) return false;
     if (!needle) return true;
     return (
       event.title.toLowerCase().includes(needle) ||
@@ -149,15 +157,6 @@ export default function ModerationScreen() {
             className={`${FIELD} w-full`}
           />
         </label>
-        <div className="w-56">
-          <Select
-            label="Trạng thái"
-            value={draft.status}
-            options={STATUS_OPTIONS}
-            onChange={(value) => setDraft({ ...draft, status: value })}
-            triggerClassName={`${FIELD} justify-between`}
-          />
-        </div>
         <button type="submit" className={ACTION_PRIMARY} disabled={loading}>
           {loading ? "Đang tìm…" : "Tìm"}
         </button>
@@ -182,7 +181,7 @@ export default function ModerationScreen() {
               <tr>
                 <Th>Sự kiện</Th>
                 <Th>Ban tổ chức</Th>
-                <Th>Trạng thái sự kiện</Th>
+                <Th>Trạng thái kiểm duyệt</Th>
                 <Th>Ghi chú</Th>
                 <Th>Quyết định</Th>
               </tr>
@@ -205,8 +204,8 @@ export default function ModerationScreen() {
                   </Td>
                   <Td>{event.organizer}</Td>
                   <Td nowrap>
-                    <Pill tone={EVENT_STATUS[event.status]?.tone ?? "neutral"}>
-                      {EVENT_STATUS[event.status]?.label ?? event.status}
+                    <Pill tone={MODERATION_STATUS[event.moderation]?.tone ?? "neutral"}>
+                      {MODERATION_STATUS[event.moderation]?.label ?? event.moderation}
                     </Pill>
                   </Td>
                   <Td>{event.reviewNote ?? "—"}</Td>

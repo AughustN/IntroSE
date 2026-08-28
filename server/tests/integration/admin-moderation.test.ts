@@ -330,6 +330,12 @@ describe("T024 [US2] organizer suspension hides owned events immediately", () =>
       .send({ reason: "x" })
       .expect(403);
 
+    // Restoring a suspension is only allowed through its dedicated endpoint.
+    await request(app)
+      .post(`/api/admin/organizers/${org.organizerId}/approve`)
+      .set(admin.h)
+      .expect(409);
+
     expect((await organizerStatus(org.organizerId)).status).toBe("suspended");
   });
 });

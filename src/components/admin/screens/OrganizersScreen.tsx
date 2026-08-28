@@ -280,7 +280,30 @@ export default function OrganizersScreen() {
                   <Td nowrap>{organizer.appliedAt.slice(0, 10)}</Td>
                   <Td nowrap>
                     <div className="flex flex-wrap gap-2">
-                      {organizer.status === "suspended" ? (
+                      {organizer.status === "pending" && (
+                        <>
+                          <button
+                            className={ACTION_ROW_PRIMARY}
+                            disabled={busy}
+                            onClick={() =>
+                              void run(
+                                () => adminClient.approveOrganizer(organizer.id),
+                                `Đã duyệt “${organizer.displayName}”.`,
+                              )
+                            }
+                          >
+                            Duyệt
+                          </button>
+                          <button
+                            className={ACTION_ROW_GHOST}
+                            disabled={busy}
+                            onClick={() => setPending({ id: organizer.id, action: "reject" })}
+                          >
+                            Từ chối
+                          </button>
+                        </>
+                      )}
+                      {organizer.status === "suspended" && (
                         <button
                           className={ACTION_ROW_PRIMARY}
                           disabled={busy}
@@ -292,28 +315,6 @@ export default function OrganizersScreen() {
                           }
                         >
                           Mở lại
-                        </button>
-                      ) : (
-                        <button
-                          className={ACTION_ROW_PRIMARY}
-                          disabled={busy}
-                          onClick={() =>
-                            void run(
-                              () => adminClient.approveOrganizer(organizer.id),
-                              `Đã duyệt “${organizer.displayName}”.`,
-                            )
-                          }
-                        >
-                          Duyệt
-                        </button>
-                      )}
-                      {organizer.status !== "suspended" && (
-                        <button
-                          className={ACTION_ROW_GHOST}
-                          disabled={busy}
-                          onClick={() => setPending({ id: organizer.id, action: "reject" })}
-                        >
-                          Từ chối
                         </button>
                       )}
                       {organizer.status === "approved" && (
