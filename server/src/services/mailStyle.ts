@@ -22,11 +22,23 @@
  *    to find the answer in.
  */
 
+/*
+ * 4. THE QUOTES INSIDE A STACK MUST NOT BE THE QUOTES AROUND THE ATTRIBUTE.
+ *
+ * These stacks are interpolated into `style="…"` attributes. Written with double quotes —
+ * `"Segoe UI",Roboto,…` — the attribute ENDS at the quote before `Segoe`, and every declaration
+ * after `font-family:` in that attribute falls outside it and is parsed as stray tag attributes.
+ * That silently dropped colours, sizes and weights across roughly thirty style attributes in both
+ * templates: the mail rendered in the client default from the font-family onwards, which is the
+ * opposite of what the stacks were added to achieve. CSS accepts single quotes for family names, so
+ * they are what these use.
+ */
+
 /** Segoe UI on Windows, San Francisco on Apple, Roboto on Android — all with Vietnamese. */
-export const MAIL_SANS = `"Segoe UI",Roboto,-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif`;
+export const MAIL_SANS = `'Segoe UI',Roboto,-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif`;
 
 /** Consolas on Windows, Menlo on Apple, DejaVu on Linux. Courier New is the last resort, not the first. */
-export const MAIL_MONO = `Consolas,Menlo,"DejaVu Sans Mono","Liberation Mono","Courier New",monospace`;
+export const MAIL_MONO = `Consolas,Menlo,'DejaVu Sans Mono','Liberation Mono','Courier New',monospace`;
 
 /**
  * A body fragment, wrapped in a document that declares its own encoding and language.
@@ -44,3 +56,34 @@ export function mailDocument(inner: string): string {
 <body style="margin:0;padding:0;font-family:${MAIL_SANS}">${inner}</body>
 </html>`;
 }
+
+/*
+ * The ticket's palette, kept here so mail and app cannot drift apart again.
+ *
+ * These are `src/index.css`'s redesigned tokens, read by ROLE rather than by their pre-redesign
+ * names (that file says the same): `xanh-pho` is the surface, `beige-kem` is the ink, `burgundy` is
+ * the tomato accent. The mail had been left on the palette from BEFORE that swap — deep green paper,
+ * cream card, plum band — so every message TixHub sent looked like a different product from the one
+ * the reader had just bought from.
+ *
+ * A mail cannot read a CSS variable, so the values are literals. Changing a token in `index.css`
+ * means changing it here too; there is no build step that could keep them in sync, and a stale
+ * literal is a visible drift rather than a silent one.
+ */
+
+/** The page behind the ticket — `--color-xanh-pho`. */
+export const MAIL_PAPER = "#fdf6ea";
+/** The ticket itself — `--color-surface-2`. */
+export const MAIL_CARD = "#fffcf5";
+/** Headlines and values — `--color-beige-kem`, the foreground. */
+export const MAIL_INK = "#8a0c24";
+/** Labels and captions — `--color-ink-soft`. */
+export const MAIL_INK_SOFT = "#b4566a";
+/** The head band and the button fill — `--color-burgundy`. White sits on top of it. */
+export const MAIL_ACCENT = "#d93025";
+/** The same hue tuned for TYPE on paper — `--color-burgundy-ink`. */
+export const MAIL_ACCENT_INK = "#d12a20";
+/** Hairlines and rules: ink at low strength, pre-blended because a mail client may drop rgba(). */
+export const MAIL_RULE = "#e6d9c8";
+/** The quiet zone a scanner looks for. Never a brand colour — a QR needs real white. */
+export const MAIL_QR_TILE = "#ffffff";

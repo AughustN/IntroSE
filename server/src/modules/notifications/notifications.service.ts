@@ -4,7 +4,19 @@ import { Resend } from "resend";
 // cannot disagree about what kinds exist (constitution VI).
 import type { NotificationType } from "@shared/notifications/types.js";
 import { config } from "../../config.js";
-import { MAIL_MONO, MAIL_SANS, mailDocument } from "../../services/mailStyle.js";
+import {
+  MAIL_ACCENT,
+  MAIL_ACCENT_INK,
+  MAIL_CARD,
+  MAIL_INK,
+  MAIL_INK_SOFT,
+  MAIL_MONO,
+  MAIL_PAPER,
+  MAIL_QR_TILE,
+  MAIL_RULE,
+  MAIL_SANS,
+  mailDocument,
+} from "../../services/mailStyle.js";
 import { pool, type Db, withTransaction } from "../../db/pool.js";
 // The catalog's definition of "this showtime still has something to sell". Imported rather than
 // restated so the page that says "Hết vé" and the gate that opens the queue cannot disagree.
@@ -715,19 +727,55 @@ async function sendMail(
     })),
   );
   const additionalTickets = tickets.slice(1);
+  /*
+   * The ticket, as the app draws it.
+   *
+   * `TicketTicket.tsx` is the reference: cream paper, maroon ink, a tomato head band with a WHITE
+   * dashed tear line under it, and the QR on its own white tile. This template had drifted from all
+   * four — and had reproduced, in mail, two defects the app had already fixed on screen:
+   *
+   *   - the tear line was `4px dashed #12312f` laid along the bottom of a plum band: dark on dark,
+   *     so the one line that makes the thing read as a TICKET was invisible. The app's own comment
+   *     records the identical bug ("red on red and simply did not exist") and its fix — draw it in
+   *     white — which is what this now does;
+   *   - the QR sat in a dark padded box. A scanner needs a light quiet zone around the code; a brand
+   *     colour in that margin is not decoration, it is the thing that makes a phone hesitate at the
+   *     gate. It sits on real white here, with the tile bigger than the code.
+   *
+   * Layout is tables because Outlook renders through Word. Three consequences, all load-bearing:
+   * `max-width` is ignored (hence the MSO conditional that pins 640px for Outlook only, while every
+   * other client gets the fluid table), `float` is ignored (hence the two-cell row for the total —
+   * it used to be `float:right` and landed under the label in Outlook), and `font-family` does not
+   * cross a table boundary (hence every text-bearing `<td>` naming its own face, as `mailStyle`
+   * explains).
+   */
+
+  /** One label/value pair, set the way the app's `<dl>` sets it. */
+  const field = (label: string, value: string) =>
+    `<div style="font-family:${MAIL_MONO};font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${MAIL_INK_SOFT}">${escapeHtml(label)}</div>
+     <div style="margin-top:5px;font-family:${MAIL_SANS};font-size:15px;font-weight:600;line-height:21px;color:${MAIL_INK}">${escapeHtml(value)}</div>`;
+
+  /** The QR on the quiet zone it needs, captioned. */
+  const qrTile = (cid: string, alt: string, size: number) =>
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
+       <tr><td style="padding:10px;background:${MAIL_QR_TILE};border:1px solid ${MAIL_RULE};border-radius:6px">
+         <img src="cid:${cid}" width="${size}" height="${size}" alt="${escapeHtml(alt)}" style="display:block;width:${size}px;height:${size}px;border:0" />
+       </td></tr>
+     </table>`;
+
   const details = additionalTickets.length
     ? additionalTickets
         .map(
           (ticket, index) => `<tr>
-              <td style="padding:16px 0;border-bottom:1px solid #e6e3dc;vertical-align:top;font-family:${MAIL_SANS}">
-                <table role="presentation" cellspacing="0" cellpadding="0" style="border-collapse:collapse"><tr>
-                  <td style="padding-right:16px;vertical-align:top">
-                    <img src="cid:tixhub-ticket-qr-${index + 2}" width="112" height="112" alt="QR vé ${index + 2}" style="display:block;width:112px;height:112px;border:1px solid #e6e3dc;border-radius:6px;background:#ffffff" />
+              <td style="padding:14px 0;border-top:1px solid ${MAIL_RULE};vertical-align:top;font-family:${MAIL_SANS}">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tr>
+                  <td width="104" style="padding-right:16px;vertical-align:top">
+                    ${qrTile(`tixhub-ticket-qr-${index + 2}`, `QR vé ${index + 2}`, 82)}
                   </td>
                   <td style="vertical-align:top;font-family:${MAIL_SANS}">
-                    <div style="font-size:14px;font-weight:700;color:#1c3d3a">${escapeHtml(ticket.tier)}${ticket.seat ? ` · Ghế ${escapeHtml(ticket.seat)}` : ""}</div>
-                    <div style="margin-top:8px;font-family:${MAIL_MONO};font-size:13px;color:#7a2f35;word-break:break-all">${escapeHtml(ticket.code)}</div>
-                    <div style="margin-top:8px;font-size:12px;color:#6b7280">Quét QR này khi check-in.</div>
+                    <div style="font-family:${MAIL_SANS};font-size:15px;font-weight:700;color:${MAIL_INK}">${escapeHtml(ticket.tier)}${ticket.seat ? ` &middot; Ghế ${escapeHtml(ticket.seat)}` : ""}</div>
+                    <div style="margin-top:7px;font-family:${MAIL_MONO};font-size:13px;font-weight:700;color:${MAIL_ACCENT_INK};word-break:break-all">${escapeHtml(ticket.code)}</div>
+                    <div style="margin-top:6px;font-family:${MAIL_SANS};font-size:12px;line-height:18px;color:${MAIL_INK_SOFT}">Quét mã này tại cổng.</div>
                   </td>
                 </tr></table>
               </td>
@@ -735,6 +783,7 @@ async function sendMail(
         )
         .join("")
     : "";
+
   const eventTime = ticketPayload.startsAt ? formatVietnamTime(ticketPayload.startsAt) : "";
   const primaryTicketCode = tickets[0]?.code ?? "";
   const formattedTotal =
@@ -748,53 +797,118 @@ async function sendMail(
    * has to move with the destination — "MỞ VÉ" over a link to a page selling them is a lie.
    */
   const actionUrl = ticketUrl || (ticketPayload.eventUrl ?? "");
-  const actionLabel = ticketUrl ? "MỞ VÉ TRÊN TIXHUB" : "XEM SỰ KIỆN & MUA VÉ";
+  const actionLabel = ticketUrl ? "Mở vé trên TixHub" : "Xem sự kiện & mua vé";
   // Ticket chrome — the pass header, the code in the corner — belongs only on a mail that carries a
   // ticket. Worn by a waitlist announcement it reads as a ticket the reader does not have.
   const isTicketMail = tickets.length > 0;
-  const context = ticketPayload.eventTitle
-    ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">
+
+  /** Time and audience side by side, venue across both — the app's two-column `<dl>`. */
+  const factRows = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:20px;border-collapse:collapse">
+       <tr>
+         <td width="50%" style="padding:0 12px 16px 0;vertical-align:top;font-family:${MAIL_SANS}">${field("Thời gian", eventTime ? `${eventTime} (UTC+7)` : "Chưa xác định")}</td>
+         ${ticketPayload.customerName ? `<td width="50%" style="padding:0 0 16px;vertical-align:top;font-family:${MAIL_SANS}">${field("Khán giả", ticketPayload.customerName)}</td>` : `<td width="50%"></td>`}
+       </tr>
+       <tr>
+         <td colspan="2" style="padding:0;vertical-align:top;font-family:${MAIL_SANS}">${field("Địa điểm", ticketPayload.venue ?? "Chưa xác định")}</td>
+       </tr>
+     </table>`;
+
+  /* The money, ruled off — and as a two-cell row, because Word ignores `float`. */
+  const totalRow = formattedTotal
+    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:22px;border-top:1px solid ${MAIL_RULE};border-collapse:collapse">
          <tr>
-           <td style="padding:0 18px 0 0;vertical-align:top;font-family:${MAIL_SANS}">
-             <div style="display:inline-block;padding:4px 8px;border:2px solid #e0e2ca;border-radius:4px;background:#d97690;color:#ffffff;font-family:${MAIL_MONO};font-size:11px;font-weight:700">${isTicketMail ? "TIXHUB PASS" : "SUẤT DIỄN"}</div>
-             <div style="margin-top:10px;font-size:27px;font-weight:800;line-height:33px;color:#7a2f35">${escapeHtml(ticketPayload.eventTitle)}</div>
-             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:18px;border-collapse:collapse;font-family:${MAIL_MONO};font-size:12px">
-               <tr>
-                 <td style="padding:0 12px 12px 0;color:#6b7280;font-family:${MAIL_MONO}">THỜI GIAN<br><strong style="display:inline-block;margin-top:4px;color:#12312f">${eventTime ? `${escapeHtml(eventTime)} (UTC+7)` : "Chưa xác định"}</strong></td>
-                 ${ticketPayload.customerName ? `<td style="padding:0 0 12px;color:#6b7280;font-family:${MAIL_MONO}">KHÁN GIẢ<br><strong style="display:inline-block;margin-top:4px;color:#12312f">${escapeHtml(ticketPayload.customerName)}</strong></td>` : ""}
-               </tr>
-               <tr><td colspan="2" style="color:#6b7280;font-family:${MAIL_MONO}">ĐỊA ĐIỂM<br><strong style="display:inline-block;margin-top:4px;color:#12312f;line-height:18px">${escapeHtml(ticketPayload.venue ?? "Chưa xác định")}</strong></td></tr>
-             </table>
-             ${formattedTotal ? `<div style="margin-top:16px;padding-top:12px;border-top:1px solid #b9b8aa;font-family:${MAIL_MONO};font-size:13px;color:#6b7280">TỔNG THANH TOÁN <strong style="float:right;font-size:17px;color:#7a2f35">${formattedTotal}</strong></div>` : ""}
-           </td>
-           ${primaryTicketCode ? `<td width="132" style="vertical-align:middle;text-align:center;font-family:${MAIL_SANS}"><div style="padding:10px;background:#12312f;border-radius:8px"><img src="cid:tixhub-ticket-qr-1" width="112" height="112" alt="QR vé" style="display:block;width:112px;height:112px;background:#e0e2ca" /></div><div style="margin-top:8px;font-family:${MAIL_MONO};font-size:11px;font-weight:700;color:#7a2f35">VÉ VÀO CỬA QR</div></td>` : ""}
+           <td style="padding:14px 0 0;vertical-align:baseline;font-family:${MAIL_MONO};font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${MAIL_INK_SOFT}">Tổng thanh toán</td>
+           <td align="right" style="padding:14px 0 0;vertical-align:baseline;font-family:${MAIL_SANS};font-size:22px;font-weight:800;line-height:24px;color:${MAIL_ACCENT_INK}">${formattedTotal}</td>
          </tr>
        </table>`
     : "";
-  const refund = ticketPayload.refundPolicy
-    ? `<div style="margin-top:20px;padding:14px 16px;border-left:3px solid #ba8248;background:#fff8ed;font-size:13px;line-height:20px;color:#4b5563"><strong style="color:#7a2f35">Chính sách hoàn vé</strong><br>${escapeHtml(ticketPayload.refundPolicy)}</div>`
+
+  const context = ticketPayload.eventTitle
+    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:4px;border-collapse:collapse">
+         <tr>
+           <td style="padding:0 20px 0 0;vertical-align:top;font-family:${MAIL_SANS}">
+             <span style="display:inline-block;padding:4px 9px;border:1px solid ${MAIL_RULE};border-radius:3px;font-family:${MAIL_MONO};font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:${MAIL_INK_SOFT}">${isTicketMail ? "TixHub Pass" : "Suất diễn"}</span>
+             <div style="margin-top:12px;font-family:${MAIL_SANS};font-size:26px;font-weight:800;line-height:32px;letter-spacing:-.01em;color:${MAIL_INK}">${escapeHtml(ticketPayload.eventTitle)}</div>
+             ${factRows}
+             ${totalRow}
+           </td>
+           ${
+             primaryTicketCode
+               ? `<td width="150" style="width:150px;vertical-align:top;text-align:center;font-family:${MAIL_SANS}">
+                    ${qrTile("tixhub-ticket-qr-1", "Mã QR vé vào cửa", 118)}
+                    <div style="margin-top:10px;font-family:${MAIL_MONO};font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:${MAIL_INK_SOFT}">Vé vào cửa</div>
+                  </td>`
+               : ""
+           }
+         </tr>
+       </table>`
     : "";
+
+  const refund = ticketPayload.refundPolicy
+    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:24px;border-collapse:collapse">
+         <tr><td style="padding:14px 16px;border-left:3px solid ${MAIL_ACCENT};background:${MAIL_PAPER};font-family:${MAIL_SANS};font-size:13px;line-height:20px;color:${MAIL_INK}">
+           <strong style="display:block;margin-bottom:4px;font-family:${MAIL_SANS};color:${MAIL_ACCENT_INK}">Chính sách hoàn vé</strong>${escapeHtml(ticketPayload.refundPolicy)}
+         </td></tr>
+       </table>`
+    : "";
+
   const plainTickets = tickets
     .map((ticket) => `${ticket.tier}${ticket.seat ? ` - ${ticket.seat}` : ""}: ${ticket.code}`)
     .join("\n");
-  const html = mailDocument(`<div style="margin:0;padding:32px 16px;background:#12312f;font-family:${MAIL_SANS};color:#12312f">
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;margin:0 auto;border:4px solid #12312f;border-radius:14px;overflow:hidden;background:#e0e2ca;box-shadow:0 8px 22px rgba(0,0,0,.18)">
-      <tr><td style="padding:22px 28px;background:#7a2f35;border-bottom:4px dashed #12312f;color:#ffffff;font-family:${MAIL_SANS}">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse"><tr>
-          <td style="font-family:${MAIL_SANS}"><div style="font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#e0e2ca">${isTicketMail ? "Vé điện tử TixHub" : "Thông báo từ TixHub"}</div><div style="margin-top:8px;font-size:27px;font-weight:900;line-height:30px">TIXHUB <span style="display:inline-block;margin-left:6px;padding:3px 6px;border-radius:3px;background:#e0e2ca;color:#7a2f35;font-family:${MAIL_MONO};font-size:11px;vertical-align:middle">${isTicketMail ? "QR PASS" : "CÓ VÉ LẠI"}</span></div></td>
-          ${isTicketMail ? `<td style="text-align:right;font-family:${MAIL_MONO};font-size:11px;color:#e0e2ca">MÃ VÉ<br><strong style="display:inline-block;max-width:180px;margin-top:5px;color:#ffffff;font-size:12px;line-height:16px;word-break:break-all">${escapeHtml(primaryTicketCode)}</strong></td>` : ""}
+
+  const html =
+    mailDocument(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0;padding:0;background:${MAIL_PAPER}">
+  <tr><td align="center" style="padding:32px 16px;background:${MAIL_PAPER};font-family:${MAIL_SANS}">
+    <!--[if mso]><table role="presentation" width="640" align="center" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:640px;border-collapse:separate;border:1px solid ${MAIL_RULE};border-radius:10px;overflow:hidden;background:${MAIL_CARD}">
+
+      <tr><td style="padding:20px 28px;background:${MAIL_ACCENT};border-bottom:2px dashed ${MAIL_QR_TILE};font-family:${MAIL_SANS}">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tr>
+          <td style="vertical-align:top;font-family:${MAIL_SANS}">
+            <div style="font-family:${MAIL_MONO};font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#ffd9d4">${isTicketMail ? "Vé điện tử" : "Thông báo"}</div>
+            <div style="margin-top:6px;font-family:${MAIL_SANS};font-size:25px;font-weight:800;line-height:28px;letter-spacing:.02em;color:#ffffff">TIXHUB<span style="display:inline-block;margin-left:8px;padding:3px 7px;border-radius:3px;background:#ffffff;font-family:${MAIL_MONO};font-size:10px;font-weight:700;letter-spacing:.08em;vertical-align:middle;color:${MAIL_ACCENT_INK}">${isTicketMail ? "QR PASS" : "CÓ VÉ LẠI"}</span></div>
+          </td>
+          ${
+            isTicketMail
+              ? `<td align="right" style="vertical-align:top;text-align:right;font-family:${MAIL_MONO}">
+                   <div style="font-family:${MAIL_MONO};font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#ffd9d4">Mã vé</div>
+                   <div style="max-width:190px;margin-top:6px;font-family:${MAIL_MONO};font-size:12px;font-weight:700;line-height:17px;color:#ffffff;word-break:break-all">${escapeHtml(primaryTicketCode)}</div>
+                 </td>`
+              : ""
+          }
         </tr></table>
       </td></tr>
-      <tr><td style="padding:28px;background:#e0e2ca;font-family:${MAIL_SANS}">
-        <p style="margin:0 0 22px;font-size:14px;line-height:22px;color:#12312f">${escapeHtml(body)}</p>
+
+      <tr><td style="padding:26px 28px 30px;background:${MAIL_CARD};font-family:${MAIL_SANS}">
+        <p style="margin:0 0 22px;font-family:${MAIL_SANS};font-size:15px;line-height:23px;color:${MAIL_INK}">${escapeHtml(body)}</p>
         ${context}
-        ${details ? `<div style="margin-top:24px;font-size:15px;font-weight:800;color:#7a2f35">VÉ VÀO CỬA QR</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:4px;border-collapse:collapse">${details}</table>` : ""}
-        ${actionUrl ? `<div style="margin-top:26px;text-align:center"><a href="${escapeHtml(actionUrl)}" style="display:inline-block;padding:13px 22px;border:2px solid #12312f;border-radius:6px;background:#12312f;color:#e0e2ca;font-family:${MAIL_SANS};font-size:14px;font-weight:700;text-decoration:none">${actionLabel}</a></div>` : ""}
+        ${
+          details
+            ? `<div style="margin-top:26px;font-family:${MAIL_MONO};font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${MAIL_INK_SOFT}">Các vé còn lại</div>
+               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:8px;border-collapse:collapse">${details}</table>`
+            : ""
+        }
+        ${
+          actionUrl
+            ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:28px;border-collapse:collapse">
+                 <tr><td align="center" style="font-family:${MAIL_SANS}">
+                   <a href="${escapeHtml(actionUrl)}" style="display:inline-block;padding:14px 30px;border-radius:6px;background:${MAIL_ACCENT};font-family:${MAIL_SANS};font-size:15px;font-weight:700;line-height:18px;color:#ffffff;text-decoration:none">${actionLabel}</a>
+                 </td></tr>
+               </table>`
+            : ""
+        }
         ${refund}
-        <div style="margin-top:28px;padding-top:18px;border-top:2px dashed rgba(18,49,47,.35);font-size:13px;line-height:20px;color:#49615c">Cần hỗ trợ? Liên hệ <a href="mailto:support@tixhub.fit" style="color:#7a2f35;font-weight:700">support@tixhub.fit</a>.</div>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:28px;border-top:1px solid ${MAIL_RULE};border-collapse:collapse">
+          <tr><td style="padding:16px 0 0;font-family:${MAIL_SANS};font-size:13px;line-height:20px;color:${MAIL_INK_SOFT}">
+            Cần hỗ trợ? Liên hệ <a href="mailto:support@tixhub.fit" style="font-family:${MAIL_SANS};font-weight:700;color:${MAIL_ACCENT_INK};text-decoration:none">support@tixhub.fit</a>.
+          </td></tr>
+        </table>
       </td></tr>
+
     </table>
-  </div>`);
+    <!--[if mso]></td></tr></table><![endif]-->
+  </td></tr>
+</table>`);
   const { error } = await resend.emails.send({
     from: config.mailFrom,
     to,
